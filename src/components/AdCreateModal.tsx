@@ -1,21 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Loader2, Trash2, Upload, X } from 'lucide-react';
+import { Check, ChevronDown, Loader2, RotateCcw, Trash2, Upload, X } from 'lucide-react';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { formatKoreanWon } from '../utils/formatters';
 import {
   AD_OBJECTIVES,
-  AdBoost,
   AdCta,
   AdObjective,
   DEFAULT_AD_OBJECTIVE,
-  MOCK_AD_PAGES,
   ctaLabel,
   ctasForObjective,
   findObjective,
 } from '../utils/adBoosts';
 import { MetaAdAccount } from '../utils/adAccounts';
 import { formatFileSize, makeCreativeThumbnail } from '../utils/creativeThumbnail';
+import {
+  MetaAdRecord,
+  createMetaAd,
+  notifyMetaAdsChanged,
+  runRemainingSteps,
+  uploadAdImage,
+  uploadAdVideo,
+} from '../utils/metaAdsApi';
+import { useMetaPages } from '../hooks/useMetaPages';
 import { AdDeliveryFields, inputCls, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
+import MetaAdProgress from './MetaAdProgress';
+import MetaPagePicker from './MetaPagePicker';
+import StartPausedToggle from './StartPausedToggle';
 
 /**
  * 직접 소재 업로드 창 — 브랜드가 만든 소재로 광고를 만드는 설정.
@@ -34,9 +44,11 @@ import { AdDeliveryFields, inputCls, labelCls, selectCls, useAdDelivery } from '
  * 현황에서 어떤 지표를 봐야 하는지도 목적이 정한다. 기본값은 전환 — 부스팅과 같은
  * 이유로, 소재에 돈을 붙이는 이유가 대개 판매다.
  *
- * 파일은 아직 올라가지 않는다(광고 집행 권한 심사 전이라 소재를 보낼 데가 없다).
- * 고른 파일에서 미리보기만 만들어 광고 현황 카드에 쓰고, 집행 요청은 부스팅과 똑같이
- * '집행 요청' 상태로 목록에 올린다.
+ * '집행하기' 를 누르면 실제로 메타에 광고가 만들어진다(ads_management):
+ *   1) 파일을 광고 계정에 올린다 — 이미지는 adimages, 영상은 advideos 분할 업로드.
+ *   2) 캠페인 → 광고 세트 → 소재 → 광고를 한 단계씩 만든다(api-meta-ads-ads).
+ * 단계마다 메타가 돌려준 ID 를 창에 바로 적는다. 광고 페이지는 연동한 메타 계정이 관리하는
+ * 실제 페이지 목록(GET /me/accounts)에서 고른다.
  */
 
 interface AdCreateModalProps {
@@ -47,14 +59,18 @@ interface AdCreateModalProps {
    * 계정을 고르는 드롭다운은 바로 위 화면에 이미 있어서 여기서 또 묻지 않는다.
    */
   account?: MetaAdAccount | null;
-  /** 집행 요청이 만들어졌을 때. 광고 현황 목록에 올리는 일은 부모가 한다. */
-  onSubmitted: (boost: AdBoost) => void;
+  /** 광고를 만들 비즈니스 계정(서버가 이 계정에 저장된 메타 토큰을 쓴다). */
+  username: string;
+  /** 메타에 광고 기록이 만들어졌을 때(중간 실패 포함). 부모가 목록을 다시 읽는다. */
+  onSubmitted?: (record: MetaAdRecord) => void;
 }
+
+type UploadState = { state: 'idle' | 'running' | 'done' | 'error'; label: string; detail?: string };
 
 /** 소재로 받는 파일. 메타가 광고 소재로 받는 형식만 둔다. */
 const ACCEPT = 'image/*,video/*';
 
-const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, onSubmitted }) => {
+const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, username, onSubmitted }) => {
   const [objective, setObjective] = useState<AdObjective>(DEFAULT_AD_OBJECTIVE);
   const [file, setFile] = useState<File | null>(null);
   /** 창이 열려 있는 동안의 미리보기(blob URL). 저장하는 값과는 다르다. */
@@ -67,14 +83,25 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
   /** 브랜드가 CTA 를 직접 골랐는지. 고른 뒤에는 목적을 바꿔도 그 문구를 지킨다. */
   const [ctaPicked, setCtaPicked] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
-  const [pageId, setPageId] = useState<string>(MOCK_AD_PAGES[0].id);
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  /** PAUSED 로 만들면 광고가 만들어져도 노출·과금이 시작되지 않는다(검증용). */
+  const [startPaused, setStartPaused] = useState(false);
+  /** 집행 진행 화면. 한 번 누르면 폼 대신 단계 목록을 보여 준다. */
+  const [phase, setPhase] = useState<'form' | 'running' | 'finished'>('form');
+  const [upload, setUpload] = useState<UploadState>({ state: 'idle', label: 'Meta 광고 계정에 소재 올리기' });
+  const [record, setRecord] = useState<MetaAdRecord | null>(null);
+  const [runError, setRunError] = useState('');
+  const [runNote, setRunNote] = useState('');
+  /** 이미 올린 소재. 다시 시도할 때 같은 파일을 또 올리지 않는다. */
+  const uploadedRef = useRef<{ file: File; imageHash: string; videoId?: string } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const delivery = useAdDelivery();
+  const pagesState = useMetaPages(username, open && !!account);
+  const page = pagesState.page;
 
   useCloseOnBack(open, onClose);
 
@@ -83,7 +110,6 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
 
   const objectiveNotice = findObjective(objective)?.notice;
   const ctaOptions = ctasForObjective(objective);
-  const page = MOCK_AD_PAGES.find((p) => p.id === pageId) || MOCK_AD_PAGES[0];
   const isVideo = !!file?.type.startsWith('video/');
 
   /**
@@ -133,7 +159,66 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
     }
   };
 
+  /** 파일을 광고 계정에 올린다. 영상은 대표 이미지도 한 장 올린다(메타가 요구한다). */
+  const uploadCreative = async (target: MetaAdAccount, source: File) => {
+    if (uploadedRef.current?.file === source) return uploadedRef.current;
+    setUpload({ state: 'running', label: 'Meta 광고 계정에 소재 올리기' });
+    if (source.type.startsWith('video/')) {
+      const video = await uploadAdVideo(username, target.id, source, (ratio) =>
+        setUpload({ state: 'running', label: 'Meta 광고 계정에 영상 올리기', detail: `${Math.round(ratio * 100)}%` }),
+      );
+      if (!video.ok) throw new Error(video.error);
+      const frame = await makeCreativeThumbnail(source, previewUrl, 1080);
+      if (!frame) throw new Error('영상에서 대표 이미지를 뜨지 못했습니다. 다른 형식(mp4)으로 올려 주세요.');
+      const image = await uploadAdImage(username, target.id, frame);
+      if (!image.ok) throw new Error(image.error);
+      uploadedRef.current = { file: source, imageHash: image.hash, videoId: video.videoId };
+    } else {
+      const image = await uploadAdImage(username, target.id, source);
+      if (!image.ok) throw new Error(image.error);
+      uploadedRef.current = { file: source, imageHash: image.hash };
+    }
+    setUpload({
+      state: 'done',
+      label: 'Meta 광고 계정에 소재 올리기',
+      detail: uploadedRef.current.videoId
+        ? `영상 ID ${uploadedRef.current.videoId}`
+        : `이미지 해시 ${uploadedRef.current.imageHash}`,
+    });
+    return uploadedRef.current;
+  };
+
+  /** 기록이 만들어진 뒤 남은 단계를 진행한다. 다시 시도도 여기로 온다. */
+  const runSteps = async (from: MetaAdRecord) => {
+    setRunError('');
+    setSubmitting(true);
+    setPhase('running');
+    const result = await runRemainingSteps(username, from, (next, note) => {
+      setRecord(next);
+      setRunNote(note || '');
+    });
+    setRecord(result.record);
+    setRunNote('');
+    setSubmitting(false);
+    notifyMetaAdsChanged();
+    onSubmitted?.(result.record);
+    if (result.error) {
+      setRunError(result.error);
+      return;
+    }
+    setPhase('finished');
+    setDone(true);
+  };
+
   const submit = async () => {
+    if (!account) {
+      setError('광고를 만들 Meta 광고 계정을 먼저 골라 주세요.');
+      return;
+    }
+    if (!page) {
+      setError('광고를 내보낼 페이스북 페이지를 골라 주세요.');
+      return;
+    }
     if (!file) {
       setError('광고로 쓸 영상 또는 이미지를 올려 주세요.');
       return;
@@ -153,32 +238,54 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
       return;
     }
     setError('');
+    setRunError('');
     setSubmitting(true);
+    setPhase('running');
 
-    // 부스팅과 같다 — 연동 전이라 실제 집행은 없고, 버튼을 누른 뒤의 흐름만 확인한다.
-    await new Promise((r) => setTimeout(r, 700));
+    let media: { imageHash: string; videoId?: string };
+    try {
+      media = await uploadCreative(account, file);
+    } catch (e) {
+      setUpload({ state: 'error', label: 'Meta 광고 계정에 소재 올리기', detail: (e as Error)?.message });
+      setRunError((e as Error)?.message || '소재를 올리지 못했습니다.');
+      setSubmitting(false);
+      return;
+    }
 
-    onSubmitted({
-      id: `ad_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      requestedAt: new Date().toISOString(),
+    const created = await createMetaAd(username, {
       source: 'own',
+      adAccountId: account.id,
+      pageId: page.id,
+      initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
       objective,
-      creativeName: file.name,
-      creativeKind: isVideo ? 'video' : 'image',
-      thumbnailUrl,
       headline: headline.trim(),
       bodyText: bodyText.trim(),
       cta,
       linkUrl: link,
-      pageId,
-      // 계정이 없으면 비워 둔다. 광고 현황이 계정 없는 요청을 어느 계정에서든
-      // 보여 주므로, 연동 전이라는 이유로 집행 요청을 막지는 않는다.
-      adAccountId: account?.id,
+      imageHash: media.imageHash,
+      videoId: media.videoId,
+      creativeKind: isVideo ? 'video' : 'image',
+      thumbnailUrl,
       ...delivery.payload(),
     });
+    if (!created.ok) {
+      if (created.record) {
+        setRecord(created.record);
+        notifyMetaAdsChanged();
+        onSubmitted?.(created.record);
+      }
+      setRunError(created.error);
+      setSubmitting(false);
+      return;
+    }
+    setRecord(created.record);
+    await runSteps(created.record);
+  };
 
-    setSubmitting(false);
-    setDone(true);
+  /** 실패한 단계부터 다시. 기록이 아직 없으면(업로드·캠페인 전) 처음부터 다시 누른다. */
+  const retry = () => {
+    if (record) void runSteps(record);
+    else void submit();
   };
 
   if (!open) return null;
@@ -203,36 +310,88 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
           </button>
         </div>
 
-        {done ? (
-          <div className="p-6 md:p-8 text-center overflow-y-auto">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto">
-              <Check className="w-6 h-6 text-emerald-600" strokeWidth={3} />
-            </div>
-            <p className="text-sm font-black text-slate-900 mt-3">집행 요청이 접수되었습니다</p>
-            <p className="text-[12px] text-slate-500 font-bold mt-1.5 leading-relaxed">
-              {headline.trim()} · {findObjective(objective)?.label}
-              <br />
-              예산 {formatKoreanWon(delivery.budgetKrw)} · {delivery.startDate} ~ {delivery.endDate}
-              <br />
-              {page.name} · {ctaLabel(cta)}
-              {account && (
-                <>
+        {phase !== 'form' ? (
+          <div className="p-5 md:p-6 overflow-y-auto space-y-4">
+            {done ? (
+              <div className="text-center">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto">
+                  <Check className="w-6 h-6 text-emerald-600" strokeWidth={3} />
+                </div>
+                <p className="text-sm font-black text-slate-900 mt-3">Meta에 광고가 만들어졌습니다</p>
+                <p className="text-[12px] text-slate-500 font-bold mt-1.5 leading-relaxed">
+                  {headline.trim()} · {findObjective(objective)?.label}
                   <br />
-                  {account.name} · {account.id}
-                </>
+                  예산 {formatKoreanWon(delivery.budgetKrw)} · {delivery.startDate} ~ {delivery.endDate}
+                  <br />
+                  {page?.name} · {ctaLabel(cta)}
+                  {account && (
+                    <>
+                      <br />
+                      {account.name} · {account.id}
+                    </>
+                  )}
+                </p>
+                <p className="text-[11px] text-blue-600 font-bold mt-3 leading-relaxed">
+                  {startPaused
+                    ? '일시중지 상태로 만들어 노출·과금은 시작되지 않습니다. 광고 현황에서 재개할 수 있습니다.'
+                    : 'Meta 광고 검토가 끝나면 노출이 시작됩니다. 검토 상태는 광고 현황에 Meta가 알려 주는 그대로 표시됩니다.'}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-black text-slate-900">
+                  {runError ? '광고를 만드는 중 멈췄습니다' : 'Meta에 광고를 만드는 중'}
+                </p>
+                <p className="text-[11px] text-slate-400 font-bold mt-0.5">
+                  창을 닫아도 만들어진 단계는 남습니다. 광고 현황에서 이어서 만들 수 있습니다.
+                </p>
+              </div>
+            )}
+
+            <MetaAdProgress
+              upload={upload}
+              record={record}
+              running={submitting}
+              error={runError}
+              note={runNote}
+            />
+
+            {runError && !submitting && (
+              <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2.5">
+                <p className="text-[11px] font-black text-rose-700">Meta 응답</p>
+                <p className="text-[11px] text-rose-600 font-medium mt-0.5 leading-relaxed break-words">{runError}</p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {runError && !submitting && (
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="flex-1 py-3 rounded-xl bg-blue-600 text-white text-[12px] font-black hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  {record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
+                </button>
               )}
-            </p>
-            <p className="text-[11px] text-amber-600 font-bold mt-3 leading-relaxed">
-              메타 광고 집행 권한 심사 전이라 실제 노출은 아직 시작되지 않습니다. 광고 현황에
-              '요청' 상태로 올라가고, 심사가 끝나면 이 요청이 그대로 집행됩니다.
-            </p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-5 w-full py-3 rounded-xl bg-slate-900 text-white text-[12px] font-black hover:bg-slate-800 transition-colors"
-            >
-              광고 현황으로 돌아가기
-            </button>
+              {runError && !submitting && !record && (
+                <button
+                  type="button"
+                  onClick={() => { setPhase('form'); setRunError(''); }}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 text-[12px] font-black hover:bg-slate-50 transition-colors"
+                >
+                  설정 고치기
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className="flex-1 py-3 rounded-xl bg-slate-900 text-white text-[12px] font-black hover:bg-slate-800 disabled:opacity-50 transition-colors"
+              >
+                광고 현황으로 돌아가기
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -270,7 +429,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
                 </div>
               )}
 
-              {/* 소재. 실제 업로드는 없고 미리보기까지만 한다. */}
+              {/* 소재. 집행하기를 누르면 이 파일이 광고 계정에 올라간다. */}
               <div>
                 <p className={labelCls}>광고 소재</p>
                 {file ? (
@@ -348,8 +507,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
                   onChange={(e) => takeFile(e.target.files?.[0] || null)}
                 />
                 <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
-                  지금은 미리보기까지만 만들어 둡니다. 광고 집행 권한 심사가 끝나면 이 파일이 소재로
-                  올라가고, 심사 전까지는 파일이 브랜드 기기 밖으로 나가지 않습니다.
+                  집행하기를 누르면 이 파일이 선택한 Meta 광고 계정에 소재로 올라갑니다.
                 </p>
               </div>
 
@@ -420,44 +578,38 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
               </div>
 
               <div>
-                <label className={labelCls} htmlFor="create-page">광고 페이지</label>
-                <div className="relative mt-1.5">
-                  <select
-                    id="create-page"
-                    value={pageId}
-                    onChange={(e) => setPageId(e.target.value)}
-                    className={selectCls}
-                  >
-                    {MOCK_AD_PAGES.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name} · @{p.handle}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <p className={labelCls}>광고 페이지</p>
+                {account && (
+                  <MetaPagePicker
+                    pages={pagesState.pages}
+                    selectedId={page?.id}
+                    onSelect={pagesState.selectPage}
+                    loading={pagesState.loading}
+                    error={pagesState.error}
+                    onRetry={pagesState.refresh}
+                  />
+                )}
                 <p className="text-[10px] text-slate-400 font-bold mt-1">
-                  이 페이지 이름으로 광고가 보입니다
+                  연동한 Meta 계정이 관리하는 페이스북 페이지입니다. 이 페이지 이름으로 광고가 보입니다
                   {account ? ` · ${account.name} 계정으로 집행` : ''}
                 </p>
               </div>
 
-              {/*
-                계정이 없으면(연동 전) 어느 계정으로 나갈지가 아직 정해지지 않는다.
-                집행 요청 자체는 막지 않고, 정해지는 시점만 적어 둔다 — 부스팅 창과 같다.
-              */}
               {!account && (
                 <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
                   <p className="text-[11px] font-black text-amber-800">
                     Meta 광고 계정이 아직 정해지지 않았습니다
                   </p>
                   <p className="text-[10px] text-amber-700 font-medium mt-0.5 leading-relaxed">
-                    광고 현황에서 Meta 계정을 연동하고 광고 계정을 고르면, 지금 요청한 집행이 그 계정으로
-                    들어갑니다. 요청은 그때까지 이 목록에 그대로 남습니다.
+                    광고 현황에서 Meta 계정을 연동하고 광고 계정을 고르면 이 창에서 바로 집행할 수 있습니다.
                   </p>
                 </div>
               )}
 
               {/* 여기서부터는 부스팅 창과 같은 항목·같은 검증이다. */}
               <AdDeliveryFields delivery={delivery} idPrefix="create" />
+
+              <StartPausedToggle checked={startPaused} onChange={setStartPaused} />
             </div>
 
             <div className="border-t border-slate-100 px-5 py-4 bg-white">
@@ -465,14 +617,16 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, o
               <button
                 type="button"
                 onClick={submit}
-                disabled={submitting}
+                disabled={submitting || !account || !page}
                 className="w-full py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                {submitting ? '집행 요청 중' : '집행하기'}
+                {submitting ? '집행 중' : '집행하기'}
               </button>
               <p className="text-[10px] text-slate-400 font-medium mt-2 text-center leading-relaxed">
-                메타 광고 집행 권한 심사 전이라 실제 노출은 시작되지 않습니다.
+                {startPaused
+                  ? 'Meta에 캠페인·광고 세트·소재·광고를 일시중지 상태로 만듭니다(과금 없음).'
+                  : 'Meta에 캠페인·광고 세트·소재·광고가 바로 만들어지고, Meta 검토 후 노출·과금이 시작됩니다.'}
               </p>
             </div>
           </>

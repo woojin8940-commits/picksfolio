@@ -3,10 +3,10 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
 import {
   GRAPH_VERSION,
-  META_ADS_SCOPES,
   metaAdsAppId,
   metaAdsConfigId,
   metaAdsRedirectUri,
+  metaAdsScopes,
 } from "./_shared/meta-ads.mts";
 
 /**
@@ -89,7 +89,7 @@ export default async (req: Request, _context: Context) => {
     params.set("config_id", configId);
     params.set("override_default_response_type", "true");
   } else {
-    params.set("scope", META_ADS_SCOPES.join(","));
+    params.set("scope", metaAdsScopes().join(","));
     // 지난번에 권한을 껐던 사람에게도 그 권한을 다시 물어본다. 없으면 한 번 거부한
     // 권한은 동의 화면에 아예 뜨지 않아, 다시 연동해도 같은 진단 결과가 나온다.
     params.set("auth_type", "rerequest");
@@ -99,7 +99,7 @@ export default async (req: Request, _context: Context) => {
     url: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params.toString()}`,
     // 화면이 "무엇을 물어보는 중인지" 안내할 때 쓴다. 설정 ID 방식이면 권한 묶음이
     // 메타 쪽 설정에 있어 여기서 알 수 없으므로 비워 보낸다.
-    scopes: configId ? [] : META_ADS_SCOPES,
+    scopes: configId ? [] : metaAdsScopes(),
     redirectUri,
   });
 };

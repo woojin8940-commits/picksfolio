@@ -303,7 +303,8 @@ function notifyAuthLost(): void {
  * 메타 광고 계정 연동 진단 결과 — 콜백(`meta-ads-oauth-callback`)이 남긴 그대로다.
  *
  * 화면이 쓰는 값이 여기 다 들어 있다: 연동한 메타 계정, 접근 가능한 광고 계정 목록,
- * 그리고 동의 화면에서 실제로 승인·거부된 권한. 토큰은 저장하지 않으므로 없다.
+ * 그리고 동의 화면에서 실제로 승인·거부된 권한. 토큰은 서버에 암호화해 두고 응답에는
+ * 싣지 않는다(저장 여부만 tokenStored 로 온다).
  */
 export interface MetaAdsProbePayload {
   ok: boolean;
@@ -328,6 +329,8 @@ export interface MetaAdsDiagnosisPayload {
     businessName: string;
     currency: string;
     accountStatus?: number;
+    /** 광고 계정이 매달린 비즈니스 ID. 파트너십 광고 코드 조회에 쓴다. */
+    businessId?: string;
   }[];
   businesses: { id: string; name: string }[];
   probes: {
@@ -336,8 +339,11 @@ export interface MetaAdsDiagnosisPayload {
     adaccounts: MetaAdsProbePayload;
     businesses: MetaAdsProbePayload;
     campaigns: MetaAdsProbePayload;
+    pages?: MetaAdsProbePayload;
   };
-  tokenStored: false;
+  /** 광고 집행용 토큰을 서버에 (암호화해) 저장했는지. 없으면 다시 연동해야 한다. */
+  tokenStored: boolean;
+  tokenExpiresAt?: string;
 }
 
 export interface AuthHeaderOptions {
@@ -4013,8 +4019,8 @@ export const apiService = {
    * 메타 광고 계정 연동 상태(진단 결과) 조회.
    *
    * 화면이 "연동됨"을 스스로 적지 않고 여기서 읽는다 — 연동 여부와 광고 계정 목록,
-   * 권한 승인 상태는 모두 콜백이 메타에 실제로 물어본 결과다. 토큰은 저장하지
-   * 않으므로 이 응답에도 없다.
+   * 권한 승인 상태는 모두 콜백이 메타에 실제로 물어본 결과다. 토큰은 서버에만 있고
+   * 이 응답에는 없다.
    */
   async metaAdsConnection(username: string): Promise<{
     connection: MetaAdsDiagnosisPayload | null;
@@ -4053,9 +4059,9 @@ export const apiService = {
   },
 
   /**
-   * 메타 광고 계정 연동 해제 — 남겨 둔 진단 결과를 지운다.
+   * 메타 광고 계정 연동 해제 — 남겨 둔 진단 결과와 저장한 토큰을 지운다.
    *
-   * 저장한 토큰이 없으므로 지울 것은 진단 결과뿐이다. 메타 쪽에 남은 앱 권한까지
+   * 메타 쪽에 남은 앱 권한까지
    * 회수하려면 페이스북 계정 설정에서 앱을 삭제해야 한다(화면에 그렇게 적어 둔다).
    */
   async metaAdsDisconnect(username: string): Promise<boolean> {
