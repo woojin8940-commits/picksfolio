@@ -4120,9 +4120,13 @@ export const apiService = {
     replies?: string[];
     ruleId?: string;
     test?: boolean;
+    /** 이번 일괄 발송에서 이미 실패한 댓글 ID. 다음 요청에서 다시 시도하지 않는다. */
+    excludeCommentIds?: string[];
   }): Promise<{
     success: boolean;
     connected?: boolean;
+    /** 이번 요청에서 실패한 댓글 ID(화면에 표시하지 않는다). */
+    failedCommentIds?: string[];
     count?: number;
     partialCount?: number;
     alreadyCount?: number;

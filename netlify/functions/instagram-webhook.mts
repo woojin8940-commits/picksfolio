@@ -1152,13 +1152,17 @@ export async function processWebhookPayload(
                 outcome.errorKind = replyResult.errorKind;
               }
               console.warn("[ig-webhook] public reply failed:", replyResult.error);
-              await appendLog(username, {
-                kind: "reply",
-                status: "failed",
-                recipientId: fromId,
-                ruleId: automation.id,
-                error: replyResult.error,
-              });
+              // 발송 간격 조절(throttled)은 실패가 아니다 — 대기열이 곧 다시 보낸다.
+              // 기록을 남기면 대기할 때마다 활동 기록에 실패가 쌓인다.
+              if (replyResult.errorKind !== "throttled") {
+                await appendLog(username, {
+                  kind: "reply",
+                  status: "failed",
+                  recipientId: fromId,
+                  ruleId: automation.id,
+                  error: replyResult.error,
+                });
+              }
               if (outcome.retryable || outcome.uncertain) continue;
             }
           }
@@ -1347,17 +1351,19 @@ export async function processWebhookPayload(
               outcome.error = result?.error;
               outcome.errorKind = kind;
             }
-            await appendLog(username, {
-              kind: "dm",
-              status: "failed",
-              recipientId: fromId,
-              ruleId: automation.id,
-              ruleName: automation.name,
-              ruleUpdatedAt: automation.updatedAt,
-              contentHash,
-              error: describeDmError(kind, result?.error),
-              errorKind: kind,
-            });
+            if (kind !== "throttled") {
+              await appendLog(username, {
+                kind: "dm",
+                status: "failed",
+                recipientId: fromId,
+                ruleId: automation.id,
+                ruleName: automation.name,
+                ruleUpdatedAt: automation.updatedAt,
+                contentHash,
+                error: describeDmError(kind, result?.error),
+                errorKind: kind,
+              });
+            }
           }
         } catch (e: any) {
           if (!sendAttempted) {

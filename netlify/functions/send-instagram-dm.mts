@@ -113,6 +113,12 @@ interface SendBody {
   replies?: string[];
   ruleId?: string;
   test?: boolean;
+  /**
+   * 이번 일괄 발송에서 이미 시도했다가 실패한 댓글 ID. 화면이 한 번의 클릭으로
+   * 요청을 이어 보내므로, 같은 대상이 매 요청마다 다시 시도되며 뒤의 대상을
+   * 막지 않도록 제외한다.
+   */
+  excludeCommentIds?: string[];
 }
 
 interface CommenterItem {
@@ -139,14 +145,16 @@ function parseCommentTime(raw: unknown): number | null {
 type Outcome =
   | { kind: "sent"; partial: boolean; followUpSkipped?: boolean }
   | { kind: "already"; reason: string }
-  | { kind: "failed"; error: string; errorKind: DmErrorKind };
+  | { kind: "failed"; error: string; errorKind: DmErrorKind }
+  /** 계정별 발송 간격 조절로 이번 요청에서는 차례가 오지 않았다. 실패가 아니다. */
+  | { kind: "deferred" };
 
 /**
  * 대상 한 명의 댓글에 남긴 공개 답글 결과.
  * - skipped: 답글 문구가 없어 답글 단계를 돌리지 않았다.
  * - duplicate: 이 댓글에는 이미 답글이 달려 있다(자동 발송이 달았거나, 버튼을 다시 눌렀거나).
  */
-type ReplyOutcome = "sent" | "duplicate" | "skipped" | "failed";
+type ReplyOutcome = "sent" | "duplicate" | "skipped" | "failed" | "deferred";
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "send-instagram-dm");
@@ -585,6 +593,8 @@ const handleSend = async (req: Request) => {
 
   const targetCommenters = Array.from(commentersMap.values());
   let rateLimited = false;
+  /** 인스타그램이 아니라 우리 쪽 발송 간격 조절 때문에 멈췄는지. 안내 문구가 다르다. */
+  let throttledOnly = true;
 
   if (targetCommenters.length === 0) {
     const cursorPersisted = await persistScanPosition();
@@ -611,11 +621,19 @@ const handleSend = async (req: Request) => {
 
   const preSkipped: CommenterItem[] = [];
   const pendingTargets: CommenterItem[] = [];
+  const excluded = new Set(
+    (Array.isArray(body.excludeCommentIds) ? body.excludeCommentIds : [])
+      .slice(0, 5000)
+      .map((id) => String(id)),
+  );
+  const candidates = targetCommenters.filter((c) => !excluded.has(c.commentId));
+  /** 이번 요청에서 실패한 댓글 ID. 화면이 다음 요청에서 제외하도록 돌려준다. */
+  const failedCommentIds: string[] = [];
   const prefilterDeadline = Date.now() + PREFILTER_BUDGET_MS;
-  for (let offset = 0; offset < targetCommenters.length; offset += PREFILTER_BATCH) {
-    const slice = targetCommenters.slice(offset, offset + PREFILTER_BATCH);
+  for (let offset = 0; offset < candidates.length; offset += PREFILTER_BATCH) {
+    const slice = candidates.slice(offset, offset + PREFILTER_BATCH);
     if (Date.now() >= prefilterDeadline) {
-      pendingTargets.push(...targetCommenters.slice(offset));
+      pendingTargets.push(...candidates.slice(offset));
       break;
     }
     const handled = await Promise.all(
@@ -668,7 +686,16 @@ const handleSend = async (req: Request) => {
       return "sent";
     }
 
-    if (result.errorKind === "rate_limit" || result.errorKind === "throttled") rateLimited = true;
+    if (result.errorKind === "throttled") {
+      // 발송 간격 조절로 차례가 오지 않았다 — 실패 기록을 남기지 않고 다음 요청으로 넘긴다.
+      rateLimited = true;
+      await release(username, publicReplyKey(c.commentId), true);
+      return "deferred";
+    }
+    if (result.errorKind === "rate_limit") {
+      rateLimited = true;
+      throttledOnly = false;
+    }
     if (!result.uncertain) await release(username, publicReplyKey(c.commentId), true);
     await appendLog(username, {
       kind: "reply",
@@ -772,7 +799,14 @@ const handleSend = async (req: Request) => {
 
       // 아무것도 못 보냈으므로 내용 기록을 지운다 — 나중에 다시 시도할 수 있어야 한다.
       if (lastKind !== "uncertain") await release(username, contentKey, true);
-      if (lastKind === "rate_limit" || lastKind === "throttled") rateLimited = true;
+      if (lastKind === "throttled") {
+        rateLimited = true;
+        return { kind: "deferred" };
+      }
+      if (lastKind === "rate_limit") {
+        rateLimited = true;
+        throttledOnly = false;
+      }
 
       // 우리가 이미 DM 을 보낸 댓글이고, 지금 막힌 이유가 인스타그램의 1회
       // 제한·24시간 창이라면 이건 새로운 실패가 아니다.
@@ -830,16 +864,19 @@ const handleSend = async (req: Request) => {
         replied = "failed";
       }
       replyOutcomes.push(replied);
+      if (replied === "failed") failedCommentIds.push(target.commentId);
       if (replied === "sent" || replied === "failed") lastActed = true;
       if (rateLimited) {
-        processed += 1;
+        if (replied !== "deferred") processed += 1;
         return;
       }
       // DM 본문 없이 답글만 보내는 설정이면 DM 단계는 건너뛴다.
       if (messages.length > 0) {
         if (replied === "sent") await wait(SEND_SPACING_MS);
         const sendOutcome = await sendToCommenter(target);
+        if (sendOutcome.kind === "deferred") return;
         outcomes.push(sendOutcome);
+        if (sendOutcome.kind === "failed" && replied !== "failed") failedCommentIds.push(target.commentId);
         if (sendOutcome.kind !== "already") lastActed = true;
       }
       processed += 1;
@@ -937,7 +974,9 @@ const handleSend = async (req: Request) => {
   }
   if (remaining > 0) {
     parts.push(
-      rateLimited
+      rateLimited && throttledOnly
+        ? `남은 ${remaining}명은 계정별 발송 간격을 지키기 위해 아직 보내지 않았습니다. 잠시 후 발송 버튼을 다시 누르면 이어서 발송합니다.`
+        : rateLimited
         ? `남은 ${remaining}명은 인스타그램 발송 한도 때문에 보내지 못했습니다. 한도가 풀린 뒤 발송 버튼을 다시 눌러 주세요.`
         : `남은 ${remaining}명은 시간 제한으로 아직 보내지 못했습니다. 발송 버튼을 다시 누르면 이어서 발송합니다.`,
     );
@@ -964,6 +1003,7 @@ const handleSend = async (req: Request) => {
     replyAlreadyCount,
     remaining,
     total: targetCommenters.length,
+    failedCommentIds,
     incomplete: commentCollectionIncomplete || !cursorPersisted,
     message: parts.join(" "),
   });

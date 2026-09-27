@@ -18,6 +18,11 @@ interface ManualDmModalProps {
   media?: InstagramMedia[];
 }
 
+/** 한 명도 나가지 않은 요청이 연달아 이만큼 이어지면 일괄 발송을 끝낸다(한도 대기 등). */
+const MAX_SEND_STALLS = 8;
+/** 한 번의 클릭으로 이어 보내는 최대 시간. */
+const MAX_SEND_DURATION_MS = 30 * 60 * 1000;
+
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 /**
@@ -92,7 +97,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
    */
   const [replies, setReplies] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
-  const [sentSoFar, setSentSoFar] = useState(0);
   const [result, setResult] = useState<{ tone: ResultTone; message: string } | null>(null);
 
   /** 자동화에 설정된 답글 문구(꺼져 있으면 없는 것으로 본다). */
@@ -229,7 +233,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     }
 
     setSending(true);
-    setSentSoFar(0);
     setResult(null);
 
     const validButtons = buttons.filter((b) => b.label.trim());
@@ -250,116 +253,54 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         test: true,
       };
 
-      let res = await apiService.sendInstagramDm(payload);
-      for (let round = 0; round < 60; round += 1) {
-        const shouldStop =
-          res.connected === false ||
-          res.indeterminate ||
-          (res.failCount || 0) > 0 ||
-          (res.replyFailCount || 0) > 0 ||
-          (res.remaining || 0) <= 0;
-        if (shouldStop) break;
-        setSentSoFar((res.count || 0) + (res.replyCount || 0));
-        const next = await apiService.sendInstagramDm(payload);
-        const movedOn = (next.count || 0) + (next.replyCount || 0) > 0;
-        res = {
-          ...next,
-          count: (res.count || 0) + (next.count || 0),
-          replyCount: (res.replyCount || 0) + (next.replyCount || 0),
-          partialCount: (res.partialCount || 0) + (next.partialCount || 0),
-        };
-        if (!movedOn) break;
+      /**
+       * 한 번의 클릭으로 모든 대상에게 보낸다.
+       *
+       * 서버는 함수 실행 시간 한도 때문에 한 요청에서 몇 명씩만 보내고 남은 수를
+       * 돌려준다. 남은 대상이 없어질 때까지 요청을 이어 보낸다. 실패한 대상은 다음
+       * 요청에서 빼서 같은 대상이 뒤의 대상을 막지 않게 한다. 발송 간격 조절로
+       * 한 명도 나가지 않은 요청은 잠시 기다렸다가 다시 보낸다.
+       */
+      const excluded = new Set<string>();
+      const send = () => apiService.sendInstagramDm({ ...payload, excludeCommentIds: [...excluded] });
+      const startedAt = Date.now();
+      let res = await send();
+      let stalls = 0;
+      while (
+        res.connected !== false &&
+        !(res.error && !res.message) &&
+        ((res.remaining || 0) > 0 || res.incomplete || res.indeterminate) &&
+        stalls < MAX_SEND_STALLS &&
+        Date.now() - startedAt < MAX_SEND_DURATION_MS
+      ) {
+        (res.failedCommentIds || []).forEach((id) => excluded.add(id));
+        if (stalls > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(2_000 * stalls, 10_000)));
+        const before = res.remaining || 0;
+        const next = await send();
+        const progressed =
+          (next.count || 0) + (next.replyCount || 0) + (next.failCount || 0) > 0 ||
+          (next.remaining || 0) < before;
+        stalls = progressed ? 0 : stalls + 1;
+        res = next;
       }
 
-      // DM 과 댓글 답글은 함께 나간다. 둘 중 하나라도 나갔으면 발송된 것이다.
-      const sentCount = (res.count || 0) + (res.replyCount || 0);
-      const failedCount = (res.failCount || 0) + (res.replyFailCount || 0);
-      const alreadyHandledCount = (res.alreadyCount || 0) + (res.replyAlreadyCount || 0);
-      // 서버는 건수·건너뜀·실패 이유를 사람이 읽을 문장으로 만들어 보내 준다.
-      // 잘 나간 발송에서는 이 문장을 쓰지 않는다 — "몇 명 중 몇 명에게 보냈다",
-      //  "중복이라 건너뛰었다" 같은 집계 안내는 보내는 사람이 조치할 것이 없는데도
-      // 발송이 반쯤 잘못된 것처럼 읽힌다. 그래서 성공은 '완료' 한 줄로만 알린다.
-      // 실패·미발송처럼 조치가 필요한 결과에서만 서버 문장을 그대로 보여준다.
-      // (플랜 미충족처럼 요청 자체가 거절된 경우는 error 에 이유가 담긴다.)
-      const detail = res.message?.trim() || res.error?.trim();
-      const doneMessage = t('dm.sendDone', '완료', 'Done');
-
+      // 발송 결과는 '완료'로만 알린다 — 몇 건이 나갔는지, 실패했는지는 보여주지
+      // 않는다. 연동이 안 됐거나 플랜이 막혀 발송 자체를 시작할 수 없는 경우만
+      // 이유를 보여준다.
       if (res.connected === false) {
         outcome = {
           tone: 'error',
-          message: detail || t(
+          message: res.message?.trim() || t(
             'dm.notConnected',
             '인스타그램 계정이 연동되지 않아 발송하지 못했습니다.',
             'The Instagram account is not connected, so nothing was sent.',
           ),
           done: false,
         };
-      } else if (res.indeterminate) {
-        outcome = {
-          tone: 'warn',
-          message: detail || t(
-            'dm.sendIndeterminate',
-            '발송 결과를 확인하지 못했습니다. 인스타그램 DM 함을 확인한 뒤 다시 시도해 주세요.',
-            'The send result could not be confirmed. Check your Instagram inbox before retrying.',
-          ),
-          done: false,
-        };
-      } else if (res.incomplete) {
-        outcome = {
-          tone: sentCount > 0 ? 'warn' : 'error',
-          message: detail || t(
-            'dm.commentLoadIncomplete',
-            '일부 댓글을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
-            'Some comments could not be checked. Please try again in a moment.',
-          ),
-          done: false,
-        };
-      } else if (failedCount > 0) {
-        // 일부가 실패했다. 이유는 사용자가 고칠 수 있는 것(문구·대상·연동)이므로 남긴다.
-        outcome = {
-          tone: sentCount > 0 ? 'warn' : 'error',
-          message: detail || t(
-            'dm.sendPartialFailed',
-            '일부 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-            'Some messages failed to send. Please try again in a moment.',
-          ),
-          done: false,
-        };
-      } else if ((res.remaining || 0) > 0) {
-        outcome = {
-          tone: 'warn',
-          message: detail || t(
-            'dm.sendRemaining',
-            '아직 보내지 못한 대상이 있습니다. 발송 버튼을 다시 눌러 이어서 보내주세요.',
-            'Some recipients are still pending. Press Send again to continue.',
-          ),
-          done: false,
-        };
-      } else if (sentCount === 0 && alreadyHandledCount > 0) {
-        outcome = {
-          tone: 'warn',
-          message: detail || t(
-            'dm.sendAlreadyHandled',
-            '선택한 댓글에는 이미 DM이 발송되어 중복 발송하지 않았습니다.',
-            'A DM was already sent for the selected comments, so no duplicate was sent.',
-          ),
-          done: false,
-        };
-      } else if (sentCount > 0 || res.success) {
-        // 나간 건이 있거나, 못 나간 이유가 "이미 받은 사람"·"다음 차례"뿐이다.
-        // 둘 다 발송이 끝난 것이니 '완료' 한 줄만 보여주고 창을 닫는다.
-        outcome = { tone: 'success', message: doneMessage, done: true };
+      } else if (res.error && !res.message) {
+        outcome = { tone: 'error', message: res.error, done: false };
       } else {
-        // 한 건도 나가지 않고, 서버도 실패로 보았다. 이유를 그대로 보여준다.
-        outcome = {
-          tone: 'error',
-          message: detail || t(
-            'dm.sendNothingSent',
-            '발송된 DM이 없습니다. 인스타그램 정책상 최근 7일 안에 댓글을 남긴 사람에게만 비공개 답장을 보낼 수 있어요.',
-            'No DMs were sent. Instagram only allows private replies to people who commented within the last 7 days.',
-          ),
-          done: false,
-        };
+        outcome = { tone: 'success', message: t('dm.sendDone', '완료', 'Done'), done: true };
       }
     } catch (e) {
       console.error('[ManualDmModal] 발송 요청 실패:', e);
@@ -698,7 +639,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
                 <Loader2 size={14} className="animate-spin" />
                 <span>
                   {t('dm.sending', '발송 중...', 'Sending...')}
-                  {sentSoFar > 0 ? ` ${sentSoFar}` : ''}
                 </span>
               </>
             ) : (
