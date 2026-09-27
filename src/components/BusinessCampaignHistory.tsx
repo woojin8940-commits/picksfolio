@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { authHeaders } from '../services/apiService';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
-import { AdBoost, addAdBoost } from '../utils/adBoosts';
+import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import AdBoostModal from './AdBoostModal';
+import CampaignAdResults from './CampaignAdResults';
+import MetaPageEngagementPanel from './MetaPageEngagement';
 
 /**
  * 캠페인 이력 — 지난 캠페인에서 올라간 게시물의 성과.
@@ -21,6 +23,10 @@ import AdBoostModal from './AdBoostModal';
  * 정렬·필터를 화면에서 하는 이유는 한 계정의 캠페인이 수백 건이 되지 않기 때문이다.
  * 서버가 한 번에 다 보내고 화면에서 추리는 편이, 필터를 누를 때마다 기다리는 것보다
  * 이력을 훑는 동작에 맞는다.
+ *
+ * 광고를 연동했으면 위쪽에 두 칸이 더 붙는다 — 이력에서 부스팅한 광고의 메타 상태·지표
+ * (CampaignAdResults)와 고른 페이스북 페이지의 게시물 반응(MetaPageEngagementPanel,
+ * pages_read_engagement). 둘 다 메타 API 에서 방금 읽은 값이다.
  */
 
 interface BusinessCampaignHistoryProps {
@@ -197,6 +203,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const [openId, setOpenId] = useState<string | null>(null);
   /** 부스팅 창을 연 게시물. 창이 캠페인 제목·인플루언서·썸네일을 그대로 받아 쓴다. */
   const [boostTarget, setBoostTarget] = useState<{ campaign: HistoryCampaign; post: HistoryPost } | null>(null);
+  // 광고 현황에서 연동한 메타 계정·광고 계정. 연동 전이면 아래 광고·페이지 칸을 그리지 않는다.
+  const { connected: adsConnected, account: adAccount } = useMetaAdConnection(cleanUsername);
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -351,6 +359,13 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           메타는 최근 게시물만 돌려주므로 오래된 캠페인의 게시물도 집계에서 빠질 수 있습니다.
         </p>
       </div>
+
+      {adsConnected && (
+        <div className="mt-5 space-y-3">
+          <CampaignAdResults username={cleanUsername} accountId={adAccount?.id || ''} onViewAdStatus={onViewAdStatus} />
+          <MetaPageEngagementPanel username={cleanUsername} enabled={adsConnected} title="브랜드 페이지 게시물 반응" />
+        </div>
+      )}
 
       {/* 상태 · 정렬. 이력을 훑는 동작이라 한 줄에 둔다. */}
       <div className="mt-6 flex flex-wrap items-center gap-1.5">
@@ -637,7 +652,6 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           partnershipCode={boostTarget.post.partnershipCode}
           // 게시물 썸네일이 아직 안 맞춰졌으면 캠페인 썸네일로 대신한다.
           thumbnailUrl={boostTarget.post.metrics?.thumbnailUrl || boostTarget.campaign.thumbnailUrl}
-          onSubmitted={(boost: AdBoost) => addAdBoost(cleanUsername, boost)}
           onViewAdStatus={onViewAdStatus}
         />
       )}

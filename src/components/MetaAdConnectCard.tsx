@@ -185,16 +185,16 @@ const MetaAdConnectCard: React.FC<MetaAdConnectCardProps> = ({
   onBack,
 }) => (
   <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 md:p-7">
-    {/* 연동 버튼보다 먼저 읽혀야 하는 문장이다 — 연동해도 광고 데이터는 아직 오지 않는다. */}
-    <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-2xl px-3.5 py-3">
-      <ShieldCheck className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+    {/* 연동 버튼보다 먼저 읽혀야 하는 문장이다 — 연동하면 무엇이 실제로 일어나는지. */}
+    <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-2xl px-3.5 py-3">
+      <ShieldCheck className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
       <div className="min-w-0">
-        <p className="text-[12px] font-black text-amber-800">
-          이 권한들은 심사가 끝나야 실제로 활성화됩니다
+        <p className="text-[12px] font-black text-blue-800">
+          연동하면 Meta Marketing API로 실제 광고를 만들고 조회합니다
         </p>
-        <p className="text-[11px] text-amber-700 font-medium mt-1 leading-relaxed">
-          지금 연동하면 인스타그램 인사이트만 실제로 동작하고, 광고 지표 조회·집행은 메타 앱 심사가
-          끝난 뒤부터 열립니다. 그때까지 광고 화면의 숫자는 예시 데이터입니다.
+        <p className="text-[11px] text-blue-700 font-medium mt-1 leading-relaxed">
+          집행하기를 누르면 선택한 광고 계정에 캠페인 · 광고 세트 · 소재 · 광고가 만들어지고, 광고 상태와
+          지표는 Meta에서 바로 읽어 옵니다. 관리하는 페이스북 페이지 목록과 게시물 반응도 함께 불러옵니다.
         </p>
       </div>
     </div>

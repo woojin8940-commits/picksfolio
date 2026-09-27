@@ -1,21 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Plus, Settings2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Settings2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
+import { ctaLabel, findObjective, placementSummary, targetSummary } from '../utils/adBoosts';
 import {
-  AdBoost,
-  addAdBoost,
-  ctaLabel,
-  findAdPage,
-  findObjective,
-  placementSummary,
-  readAdBoosts,
-  subscribeAdBoosts,
-  targetSummary,
-} from '../utils/adBoosts';
+  MetaAdWithLive,
+  STEP_LABELS,
+  adsManagerUrl,
+  fetchMetaAds,
+  needsReconnect,
+  notifyMetaAdsChanged,
+  runRemainingSteps,
+  setMetaAdStatus,
+  subscribeMetaAds,
+} from '../utils/metaAdsApi';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import MetaAdConnectCard from './MetaAdConnectCard';
 import AdCreateModal from './AdCreateModal';
-import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
+import MetaPageEngagementPanel from './MetaPageEngagement';
 
 /**
  * 광고 현황 — 픽스폴리오 안에서 돌리고 있는 콘텐츠 광고.
@@ -26,9 +27,10 @@ import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
  * 성과를 보러 또 그쪽으로 들어가야 한다. 이력은 픽스폴리오에 있고 광고는 메타에 있어서
  * 둘을 사람이 손으로 잇는다.
  *
- * 이 화면은 그 광고 쪽을 이력 바로 아래로 가져오는 자리다. 메타 광고 API
- * (ads_management · ads_read · business_management) 심사가 끝나면 여기 숫자가
- * 실제 인사이트로 채워지고, 이력에서 고른 콘텐츠를 이 화면에서 바로 집행하게 된다.
+ * 이 화면은 그 광고 쪽을 이력 바로 아래로 가져오는 자리다. 목록은 픽스폴리오에서
+ * 메타 Marketing API 로 만든 광고(api-meta-ads-ads 가 저장한 캠페인·광고 ID)이고, 상태와
+ * 지표는 열 때마다 메타에서 새로 읽는다(effective_status · insights). 상태를 우리 쪽에
+ * 복사해 두면 메타에서 반려된 광고가 이 화면에서는 계속 '검토 중' 으로 남는다.
  *
  * 지표는 메타 광고 관리자가 쓰는 것과 같은 이름·같은 계산식으로 둔다. 브랜드가 이미
  * 광고 관리자에서 보던 숫자와 이름이 다르면 같은 값을 두 번 확인하게 되고, 그러면
@@ -39,10 +41,8 @@ import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
  * 다만 한 카드에 지표를 다 펼치면 무슨 광고인지가 숫자에 묻힌다. 광고를 훑을 때 실제로
  * 보는 노출·클릭·CTR·CPC 만 기본으로 두고, 나머지는 '지표 더보기'로 접어 둔다.
  *
- * 연동 전이라 아직 계정에 붙일 데이터가 없다. 그래서 지금은 예시 데이터로 레이아웃만
- * 세워 두고, 화면 어디에서도 이 숫자를 실제 성과처럼 보이지 않게 한다 — 상단에
- * 연동 준비 중임을 적고, 카드마다 '예시' 표시를 남긴다. 절반만 진짜인 화면이
- * 제일 위험하기 때문이다.
+ * 예시 데이터는 없다. 연동 전이거나 광고가 없으면 빈 화면과 그 이유를 보여 준다 —
+ * 절반만 진짜인 화면이 제일 위험하기 때문이다.
  *
  * 그 위에 연동이라는 관문을 하나 둔다. 광고 지표는 메타 광고 계정 단위로만 존재하므로,
  * 계정이 정해지지 않은 상태에서 요약과 목록을 그리면 "누구의 광고인지 모르는 숫자"가
@@ -52,9 +52,12 @@ import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
  *
  * 광고가 이력에서만 출발하지는 않는다. 자체 촬영물이나 인플루언서 콘텐츠가 아직 없는
  * 신제품처럼, 돌릴 소재가 캠페인 밖에 있는 경우가 있다. 그래서 상단에 '새 광고 만들기'
- * 를 두고 직접 소재 업로드 창(AdCreateModal)을 연다. 그 요청도 부스팅과 같은 자리에
- * 저장되어 이 목록에 '집행 요청' 으로 올라오고, 카드에서 '자체 소재' 배지와 광고 목적으로
- * 구분된다 — 목록을 둘로 나누면 브랜드는 돌고 있는 광고를 두 화면에서 세야 한다.
+ * 를 두고 직접 소재 업로드 창(AdCreateModal)을 연다. 그 광고도 부스팅과 같은 목록에
+ * 올라오고, 카드에서 '자체 소재' 배지와 광고 목적으로 구분된다 — 목록을 둘로 나누면
+ * 브랜드는 돌고 있는 광고를 두 화면에서 세야 한다.
+ *
+ * 아래에는 고른 페이스북 페이지의 게시물 참여(반응·댓글·공유)를 같이 둔다
+ * (pages_read_engagement). 광고가 페이지 반응을 얼마나 움직였는지를 같은 화면에서 본다.
  */
 
 interface BusinessAdStatusProps {
@@ -63,14 +66,12 @@ interface BusinessAdStatusProps {
 }
 
 /**
- * 'requested' 는 픽스폴리오 안에서 집행을 요청한 광고다(이력에서의 부스팅,
- * 광고 현황에서의 직접 소재 업로드).
+ * 메타의 effective_status 를 화면 상태로 옮긴 값(서버의 displayStatus 와 같다).
  *
- * 검수 중('review')과 구분해서 둔다. 검수는 메타가 소재를 보고 있는 상태이고,
- * 요청은 아직 메타로 넘어가지도 않은 상태다 — 집행 권한 심사가 끝나야 넘어간다.
- * 둘을 같은 배지로 묶으면 브랜드는 요청한 광고가 이미 메타에 들어갔다고 읽는다.
+ * 'draft' 는 메타에 광고까지 다 만들지 못한 기록이다(중간 단계에서 멈춘 것). 카드에서
+ * '이어서 만들기' 로 멈춘 단계부터 다시 한다.
  */
-type AdStatus = 'requested' | 'active' | 'review' | 'paused' | 'ended';
+type AdStatus = 'draft' | 'review' | 'active' | 'paused' | 'rejected' | 'issue' | 'ended';
 
 type AdItem = {
   id: string;
@@ -115,95 +116,26 @@ type AdItem = {
    * 이 광고가 들어 있는 메타 광고 계정(act_… ).
    *
    * 실제 연동에서도 광고는 계정 하나에만 속하므로, 계정을 바꾸면 목록이 바뀌어야 한다.
-   * 비어 있는 광고(연동 전에 만들어 둔 집행 요청)는 어느 계정에서든 보이게 한다.
+   * 서버가 계정별로 걸러서 돌려준다(?account=).
    */
   adAccountId?: string;
+  /** 서버 기록 원본. 이어서 만들기·일시중지·재개에 쓴다. */
+  source: MetaAdWithLive;
+  /** 메타 effective_status 원문. 광고 관리자와 같은 말로 카드에 같이 적는다. */
+  effectiveStatus: string;
+  /** 반려 사유·게재 문제(메타 문장 그대로). */
+  notes: string[];
 };
 
 const STATUS_LABEL: Record<AdStatus, { label: string; cls: string }> = {
-  requested: { label: '집행 요청', cls: 'bg-blue-50 text-blue-600' },
-  active: { label: '진행 중', cls: 'bg-emerald-50 text-emerald-600' },
-  review: { label: '검수 중', cls: 'bg-amber-50 text-amber-600' },
+  draft: { label: '만드는 중 멈춤', cls: 'bg-rose-50 text-rose-600' },
+  review: { label: 'Meta 검토 중', cls: 'bg-amber-50 text-amber-600' },
+  active: { label: '게재 중', cls: 'bg-emerald-50 text-emerald-600' },
   paused: { label: '일시중지', cls: 'bg-slate-100 text-slate-500' },
+  rejected: { label: '반려됨', cls: 'bg-rose-50 text-rose-600' },
+  issue: { label: '게재 문제', cls: 'bg-orange-50 text-orange-600' },
   ended: { label: '종료', cls: 'bg-slate-100 text-slate-500' },
 };
-
-/**
- * 연동 전 레이아웃 확인용 예시 데이터. 실제 지표는 메타 광고 API 심사 후 붙는다.
- *
- * 계정을 나눠 둔다 — 연동한 계정이 여러 개일 때 계정을 바꾸면 목록이 실제로 바뀌는지가
- * 이 화면에서 확인해야 하는 동작이다. '신규 테스트 계정' 에는 일부러 광고를 두지 않았다.
- */
-const MOCK_ADS: AdItem[] = [
-  {
-    id: 'mock-1',
-    adAccountId: MOCK_AD_ACCOUNTS[0].id,
-    campaignTitle: '여름 신상 원피스 릴스',
-    creatorHandle: 'soyeon.daily',
-    partnershipCode: 'PF-2K9D4A',
-    status: 'active',
-    startDate: '2026-09-02',
-    endDate: '2026-09-21',
-    impressions: 184320,
-    clicks: 3128,
-    reach: 71240,
-    conversions: 121,
-    conversionValueKrw: 3963000,
-    budgetKrw: 1500000,
-    spendKrw: 1043000,
-  },
-  {
-    id: 'mock-2',
-    adAccountId: MOCK_AD_ACCOUNTS[0].id,
-    campaignTitle: '수분 크림 사용 후기',
-    creatorHandle: 'minji_beauty',
-    partnershipCode: 'PF-7Q1XB2',
-    status: 'active',
-    startDate: '2026-09-08',
-    endDate: '2026-09-30',
-    impressions: 96540,
-    clicks: 2211,
-    reach: 48760,
-    conversions: 74,
-    conversionValueKrw: 1088000,
-    budgetKrw: 800000,
-    spendKrw: 312000,
-  },
-  {
-    id: 'mock-3',
-    adAccountId: MOCK_AD_ACCOUNTS[1].id,
-    campaignTitle: '홈카페 머신 언박싱',
-    creatorHandle: 'jun.home',
-    partnershipCode: 'PF-5MB8ZZ',
-    status: 'review',
-    startDate: '2026-09-16',
-    endDate: '2026-10-05',
-    impressions: 0,
-    clicks: 0,
-    reach: 0,
-    conversions: 0,
-    conversionValueKrw: 0,
-    budgetKrw: 600000,
-    spendKrw: 0,
-  },
-  {
-    id: 'mock-4',
-    adAccountId: MOCK_AD_ACCOUNTS[1].id,
-    campaignTitle: '러닝화 첫 착용 리뷰',
-    creatorHandle: 'run_with_hyun',
-    partnershipCode: 'PF-3TC6VK',
-    status: 'ended',
-    startDate: '2026-08-05',
-    endDate: '2026-08-26',
-    impressions: 241870,
-    clicks: 5402,
-    reach: 88930,
-    conversions: 61,
-    conversionValueKrw: 5429000,
-    budgetKrw: 1200000,
-    spendKrw: 1200000,
-  },
-];
 
 /**
  * 메타 광고 관리자와 같은 계산식으로 파생 지표를 만든다.
@@ -294,13 +226,23 @@ const MoreToggle: React.FC<{ open: boolean; onClick: () => void; openLabel: stri
   </button>
 );
 
-const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
+interface AdCardProps {
+  ad: AdItem;
+  /** 이 카드에서 요청이 진행 중인지(버튼을 잠근다). */
+  busy: boolean;
+  onToggle: (ad: AdItem, next: 'ACTIVE' | 'PAUSED') => void;
+  onContinue: (ad: AdItem) => void;
+}
+
+const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue }) => {
   // 카드마다 따로 접는다 — 한 광고를 자세히 보는 중에 다른 카드가 같이 펴질 이유가 없다.
   const [open, setOpen] = useState(false);
   const badge = STATUS_LABEL[ad.status];
   const m = deriveMetrics(ad);
   const waiting = ad.status === 'review';
-  const requested = ad.status === 'requested';
+  const record = ad.source;
+  const canPause = !!record.adId && (ad.status === 'active' || ad.status === 'review' || ad.status === 'issue');
+  const canResume = !!record.adId && ad.status === 'paused';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5">
@@ -335,6 +277,12 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
               </span>
             )}
           </div>
+          {/* 메타 원문 상태와 ID — 광고 관리자에서 같은 광고를 찾을 수 있게. */}
+          <p className="text-[10px] text-slate-400 font-medium mt-0.5 break-all">
+            Meta 상태 {ad.effectiveStatus || '—'}
+            {record.campaignId ? ` · 캠페인 ID ${record.campaignId}` : ''}
+            {record.adId ? ` · 광고 ID ${record.adId}` : ''}
+          </p>
           <p className="text-[11px] text-slate-400 font-bold mt-0.5">
             {ad.creatorHandle ? `@${ad.creatorHandle}` : ad.pageName || '자체 소재'}
             {` · ${ad.startDate} ~ ${ad.endDate}`}
@@ -445,82 +393,153 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
 
       {waiting && (
         <p className="text-[10px] text-amber-600 font-black mt-2">
-          검수가 끝나면 노출이 시작되고 지표가 쌓입니다.
+          Meta가 광고를 검토하고 있습니다. 검토가 끝나면 노출이 시작되고 지표가 쌓입니다.
         </p>
       )}
 
-      {requested && (
-        <p className="text-[10px] text-blue-600 font-black mt-2 leading-relaxed">
-          {ad.own
-            ? '직접 올린 소재로 집행을 요청한 광고입니다. 메타 광고 집행 권한 심사가 끝나면 이 조건 그대로 집행되고, 그때부터 지표가 쌓입니다.'
-            : '캠페인 이력에서 집행을 요청한 광고입니다. 메타 광고 집행 권한 심사가 끝나면 이 조건 그대로 집행되고, 그때부터 지표가 쌓입니다.'}
-        </p>
+      {ad.status === 'draft' && (
+        <div className="mt-2 rounded-xl bg-rose-50 border border-rose-100 px-3 py-2">
+          <p className="text-[10px] text-rose-700 font-black">
+            {(() => {
+              const next = STEP_LABELS.find((s) => s.step === record.step);
+              return next ? `'${next.label}' 단계에서 멈췄습니다.` : '광고를 다 만들지 못했습니다.';
+            })()}
+          </p>
+          {record.error && (
+            <p className="text-[10px] text-rose-600 font-medium mt-0.5 leading-relaxed break-words">{record.error}</p>
+          )}
+        </div>
       )}
+
+      {ad.notes.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {ad.notes.map((note) => (
+            <p key={note} className="text-[10px] text-orange-600 font-bold leading-relaxed break-words">
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {ad.status === 'draft' && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onContinue(ad)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[11px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            멈춘 단계부터 이어서 만들기
+          </button>
+        )}
+        {canPause && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onToggle(ad, 'PAUSED')}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-600 hover:bg-slate-50 disabled:opacity-60 transition-colors"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />}
+            일시중지
+          </button>
+        )}
+        {canResume && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onToggle(ad, 'ACTIVE')}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-black hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            재개
+          </button>
+        )}
+        {record.campaignId && (
+          <a
+            href={adsManagerUrl(record)}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-black text-blue-600 hover:bg-blue-50 transition-colors"
+          >
+            광고 관리자에서 보기
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
+      </div>
     </div>
   );
 };
 
 /**
- * 집행 요청을 광고 카드가 그대로 읽을 수 있는 모양으로 바꾼다.
+ * 서버 기록 + 메타 실시간 값을 광고 카드가 읽는 모양으로 바꾼다.
  *
  * 부스팅과 자체 소재 광고가 같은 목록에 들어온다. 다른 것은 위쪽 세 줄뿐이다 —
  * 제목이 캠페인 이름인지 광고 제목인지, 그 아래가 인플루언서인지 페이지인지,
  * 근거가 파트너십 코드인지 CTA·연결 URL 인지.
  */
-const boostToAd = (boost: AdBoost): AdItem => {
-  const own = boost.source === 'own';
-  const page = findAdPage(boost.pageId);
+const recordToAd = (ad: MetaAdWithLive): AdItem => {
+  const own = ad.source === 'own';
+  const live = ad.meta;
+  const status: AdStatus = ad.step !== 'done' ? 'draft' : live.displayStatus;
   return {
-    id: boost.id,
-    campaignTitle: (own ? boost.headline : boost.campaignTitle) || '제목 없음',
-    creatorHandle: own ? undefined : boost.creatorHandle,
-    partnershipCode: own ? undefined : boost.partnershipCode,
+    id: ad.id,
+    campaignTitle: (own ? ad.headline : ad.campaignTitle) || ad.name || '제목 없음',
+    creatorHandle: own ? undefined : ad.creatorHandle,
+    partnershipCode: own ? undefined : ad.partnershipCode,
     own,
-    objectiveLabel: findObjective(boost.objective)?.label,
-    pageName: page?.name,
-    ctaLine: own
-      ? [ctaLabel(boost.cta), boost.linkUrl].filter(Boolean).join(' · ') || undefined
-      : undefined,
-    status: 'requested',
-    startDate: boost.startDate,
-    endDate: boost.endDate,
-    // 집행 전이라 지표가 없다. 0 으로 두면 카드가 전부 '—' 로 비워 그린다.
-    impressions: 0,
-    clicks: 0,
-    reach: 0,
-    conversions: 0,
-    conversionValueKrw: 0,
-    budgetKrw: boost.budgetKrw,
-    spendKrw: 0,
-    thumbnailUrl: boost.thumbnailUrl,
-    targetLine: targetSummary(boost),
-    placementLine: placementSummary(boost),
-    adAccountId: boost.adAccountId,
+    objectiveLabel: own ? findObjective(ad.objective)?.label : undefined,
+    pageName: ad.pageName,
+    ctaLine: own ? [ctaLabel(ad.cta), ad.linkUrl].filter(Boolean).join(' · ') || undefined : undefined,
+    status,
+    startDate: ad.startDate,
+    endDate: ad.endDate,
+    impressions: live.impressions || 0,
+    clicks: live.clicks || 0,
+    reach: live.reach || 0,
+    conversions: live.conversions || 0,
+    conversionValueKrw: live.conversionValue || 0,
+    budgetKrw: ad.budgetKrw,
+    spendKrw: Math.round(live.spend || 0),
+    thumbnailUrl: ad.thumbnailUrl,
+    targetLine: targetSummary(ad),
+    placementLine: placementSummary(ad),
+    adAccountId: ad.adAccountId,
+    source: ad,
+    effectiveStatus: live.effectiveStatus,
+    notes: [...(live.reviewFeedback || []), ...(live.issues || []), ...(ad.warnings || [])],
   };
 };
 
 /**
- * 연동 여부와 상관없이 늘 같은 자리에 두는 안내.
+ * 목록 위 안내 — 이 숫자가 어디서 왔는지.
  *
- * 연동을 붙였다고 심사가 끝난 것은 아니다. 연동 후에 이 문구가 사라지면 화면의 숫자가
- * 그 순간부터 실제 성과로 읽히는데, 광고 권한 심사 전까지는 여전히 예시다. 그래서
- * 연동 안내 화면에도, 연동 후 목록 화면에도 같은 문구를 남긴다.
+ * 조회 시각과 출처를 같이 적는다. 메타 광고 관리자의 숫자와 몇 분 차이가 날 수 있는데
+ * (메타 인사이트 자체가 지연된다), 언제 읽은 값인지 적어 두면 차이를 설명할 수 있다.
  */
-const ReviewNotice: React.FC = () => (
-  <div className="mt-5 bg-blue-50 border border-blue-100 rounded-2xl p-4">
-    <p className="text-[12px] font-black text-blue-800">메타 광고 연동 준비 중입니다</p>
-    <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
-      인플루언서가 게시물에 파트너십 코드를 올려 두면, 브랜드는 캠페인 이력에서 그 콘텐츠의 인사이트를
-      자세히 보고 성과가 좋은 소재를 골라 픽스폴리오 안에서 바로 광고를 집행할 수 있게 됩니다.
-      지표는 메타 광고 관리자와 같은 이름·같은 계산식(CTR · CPC · CPM · 도달 · 빈도 · 전환 · ROAS)으로
-      맞춰 두었고, 광고 지표 조회·집행 권한(ads_read · ads_management · business_management) 심사가
-      끝나면 아래 숫자는 실제 광고 인사이트로 바뀝니다. 지금 보이는 값은 화면 확인용 예시입니다.
-    </p>
-    <p className="text-[11px] text-blue-600 font-medium mt-2 leading-relaxed">
-      캠페인 이력에서 '메타 광고로 부스팅'으로 요청한 광고와, 위쪽 '새 광고 만들기'로 직접 올린
-      소재를 집행 요청한 광고는 모두 '집행 요청' 상태로 이 목록 맨 위에 올라옵니다. 심사가 끝나면
-      요청한 예산 · 기간 · 타겟 그대로 집행됩니다.
-    </p>
+const LiveNotice: React.FC<{ fetchedAt: string; loading: boolean; onRefresh: () => void }> = ({
+  fetchedAt,
+  loading,
+  onRefresh,
+}) => (
+  <div className="mt-5 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-start justify-between gap-3">
+    <div>
+      <p className="text-[12px] font-black text-emerald-800">Meta Marketing API 실시간 데이터</p>
+      <p className="text-[11px] text-emerald-700 font-medium mt-1 leading-relaxed">
+        광고 상태(effective_status)와 지표(노출 · 클릭 · 도달 · 지출 · 전환)는 Meta 광고 계정에서 바로
+        읽은 값입니다. 지표는 메타 광고 관리자와 같은 이름·같은 계산식으로 보여 줍니다
+        {fetchedAt ? ` · ${new Date(fetchedAt).toLocaleString()} 조회` : ''}.
+      </p>
+    </div>
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={loading}
+      aria-label="새로고침"
+      className="w-8 h-8 rounded-full hover:bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0 disabled:opacity-50"
+    >
+      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+    </button>
   </div>
 );
 
@@ -558,8 +577,15 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   // 필터는 이력 화면과 같은 방식으로 둔다 — 건수가 적어 화면에서 추리는 편이 빠르다.
   const [filter, setFilter] = useState<'' | 'running' | 'ended'>('');
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [boosts, setBoosts] = useState<AdBoost[]>(() => readAdBoosts(cleanUsername));
-  // 직접 올린 소재로 광고를 만드는 창. 집행 요청은 부스팅과 같은 자리에 저장된다.
+  const [metaAds, setMetaAds] = useState<MetaAdWithLive[]>([]);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const [adsError, setAdsError] = useState('');
+  const [adsNeedReconnect, setAdsNeedReconnect] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState('');
+  /** 카드 버튼(일시중지·재개·이어서 만들기)을 누른 광고. 그 카드만 잠근다. */
+  const [busyId, setBusyId] = useState('');
+  const [actionError, setActionError] = useState('');
+  // 직접 올린 소재로 광고를 만드는 창.
   const [createOpen, setCreateOpen] = useState(false);
 
   const {
@@ -616,48 +642,65 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   // 다시 연동하러 들어올 수 있어야 하므로 연동 상태와는 따로 둔다.
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // 이력 화면에서 집행을 요청하면 이 목록이 바로 다시 읽는다. 브랜드는 집행 직후
-  // 이 화면으로 넘어오므로, 새로고침해야 보이는 목록은 "집행이 안 됐다"로 읽힌다.
+  /**
+   * 고른 광고 계정의 광고를 서버에서 읽는다(기록 + 메타 실시간 상태·지표).
+   *
+   * 이력 화면이나 집행 창에서 광고를 만들면 notifyMetaAdsChanged 로 알려 와서 바로
+   * 다시 읽는다. 브랜드는 집행 직후 이 화면으로 넘어오므로, 새로고침해야 보이는 목록은
+   * "집행이 안 됐다"로 읽힌다.
+   */
+  const accountId = account?.id || '';
+  const loadAds = useCallback(async () => {
+    if (!connected || !accountId) {
+      setMetaAds([]);
+      return;
+    }
+    setAdsLoading(true);
+    const res = await fetchMetaAds(cleanUsername, accountId);
+    if (res.ok) {
+      setMetaAds(res.ads);
+      setFetchedAt(res.fetchedAt);
+      setAdsError(res.errors?.length ? res.errors.join(' / ') : '');
+      setAdsNeedReconnect(false);
+    } else {
+      setAdsError(res.error);
+      setAdsNeedReconnect(needsReconnect(res));
+    }
+    setAdsLoading(false);
+  }, [cleanUsername, connected, accountId]);
+
   useEffect(() => {
-    setBoosts(readAdBoosts(cleanUsername));
-    return subscribeAdBoosts(() => setBoosts(readAdBoosts(cleanUsername)));
-  }, [cleanUsername]);
+    void loadAds();
+    return subscribeMetaAds(() => void loadAds());
+  }, [loadAds]);
 
-  /**
-   * 요청한 광고가 예시 데이터 위로 온다 — 방금 만든 것이 목록 맨 위에 있어야 한다.
-   *
-   * 예시 광고는 가상 계정(MOCK_AD_ACCOUNTS)에 매달려 있다. 연동해서 실제 광고 계정이
-   * 생기면 그 계정들에 순서대로 얹는다 — 그대로 두면 계정 필터에 아무것도 걸리지 않아
-   * 목록이 빈 화면이 되고, 브랜드는 연동을 하자마자 광고가 사라졌다고 읽는다.
-   */
-  const allAds = useMemo(() => {
-    const examples = MOCK_ADS.map((ad) => {
-      const slot = MOCK_AD_ACCOUNTS.findIndex((a) => a.id === ad.adAccountId);
-      if (slot < 0 || accounts.length === 0) return ad;
-      return { ...ad, adAccountId: accounts[slot % accounts.length].id };
-    });
-    return [...boosts.map(boostToAd), ...examples];
-  }, [boosts, accounts]);
+  const toggleAd = async (ad: AdItem, next: 'ACTIVE' | 'PAUSED') => {
+    setBusyId(ad.id);
+    setActionError('');
+    const res = await setMetaAdStatus(cleanUsername, ad.id, next);
+    if (!res.ok) setActionError(res.error);
+    setBusyId('');
+    await loadAds();
+  };
 
-  /**
-   * 고른 광고 계정의 광고만 남긴다. 광고는 계정 하나에만 속하므로, 계정을 바꾸면
-   * 목록과 요약이 같이 바뀌어야 한다 — 실제 연동에서도 같은 규칙이다.
-   *
-   * 계정이 적혀 있지 않은 항목(연동 전에 만들어 둔 집행 요청)은 어느 계정에서든
-   * 보이게 둔다. 계정이 없다는 이유로 숨기면 브랜드는 요청이 사라졌다고 읽는다.
-   */
-  const accountAds = useMemo(
-    () => allAds.filter((ad) => !ad.adAccountId || ad.adAccountId === account?.id),
-    [allAds, account],
-  );
+  const continueAd = async (ad: AdItem) => {
+    setBusyId(ad.id);
+    setActionError('');
+    const result = await runRemainingSteps(cleanUsername, ad.source, () => {});
+    if (result.error) setActionError(result.error);
+    setBusyId('');
+    notifyMetaAdsChanged();
+  };
+
+  const accountAds = useMemo(() => metaAds.map(recordToAd), [metaAds]);
 
   const visible = useMemo(
     () =>
       accountAds.filter((ad) => {
         if (filter === 'running') {
-          return ad.status === 'active' || ad.status === 'review' || ad.status === 'requested';
+          return ad.status === 'active' || ad.status === 'review' || ad.status === 'issue' || ad.status === 'draft';
         }
-        if (filter === 'ended') return ad.status === 'ended' || ad.status === 'paused';
+        if (filter === 'ended') return ad.status === 'ended' || ad.status === 'paused' || ad.status === 'rejected';
         return true;
       }),
     [accountAds, filter],
@@ -694,8 +737,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const avgFrequency = totals.reach > 0 ? totals.impressions / totals.reach : 0;
   const avgRoas = totals.spend > 0 ? totals.conversionValue / totals.spend : 0;
   const spendPct = totals.budget > 0 ? Math.round((totals.spend / totals.budget) * 100) : 0;
-  // 요청 상태는 아직 돌고 있는 광고가 아니다. 건수에 같이 들어가므로 몇 건인지 적는다.
-  const requestedCount = visible.filter((ad) => ad.status === 'requested').length;
+  // 검토 중인 광고는 아직 노출이 없다. 건수에 같이 들어가므로 몇 건인지 적는다.
+  const reviewCount = visible.filter((ad) => ad.status === 'review').length;
 
   /**
    * 연동 안내로 화면을 바꾸는 조건.
@@ -712,10 +755,12 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl md:text-3xl font-black text-slate-900">광고 현황</h2>
-            {/* 연동 여부와 무관하게 남긴다 — 심사 전이라는 사실은 계속 보여야 한다. */}
-            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[10px] font-black">
-              예시 데이터
-            </span>
+            {/* 숫자가 어디서 오는지. 연동하고 계정을 골랐을 때만 붙는다. */}
+            {connected && account && (
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black">
+                Meta 실시간
+              </span>
+            )}
           </div>
           <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
             캠페인 이력에서 고른 콘텐츠와 직접 올린 소재로 돌린 광고 현황을 확인합니다
@@ -793,7 +838,6 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             onSelectAccount={selectAccount}
             onBack={settingsOpen ? () => setSettingsOpen(false) : undefined}
           />
-          <ReviewNotice />
         </>
       ) : (
         <>
@@ -818,7 +862,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
               <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
             <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
-              {account.businessName} · 이 계정의 광고만 아래에 표시되고, 부스팅 집행도 이 계정으로 들어갑니다.
+              {account.businessName} · {account.currency} · 이 계정의 광고만 아래에 표시되고, 집행도 이 계정으로 들어갑니다.
             </p>
           </div>
 
@@ -828,9 +872,9 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
               value={formatNumberWithCommas(totals.ads)}
               unit="건"
               hint={
-                requestedCount > 0
-                  ? `집행 요청 ${requestedCount}건 포함 · 이력에서 고른 콘텐츠를 그대로 소재로 씁니다`
-                  : '캠페인 이력에서 고른 콘텐츠를 그대로 광고 소재로 씁니다'
+                reviewCount > 0
+                  ? `Meta 검토 중 ${reviewCount}건 포함 · 픽스폴리오에서 만든 광고입니다`
+                  : '픽스폴리오에서 Meta Marketing API로 만든 광고입니다'
               }
             />
             <Kpi
@@ -895,8 +939,32 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             </div>
           )}
 
-          {/* 이 화면의 숫자가 실제 성과가 아니라는 사실을 숫자 바로 아래에 적는다. */}
-          <ReviewNotice />
+          {/* 숫자가 어디서, 언제 읽은 값인지 숫자 바로 아래에 적는다. */}
+          <LiveNotice fetchedAt={fetchedAt} loading={adsLoading} onRefresh={() => void loadAds()} />
+
+          {adsError && (
+            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+              <p className="text-[12px] font-black text-rose-700">Meta에서 광고를 불러오지 못했습니다</p>
+              <p className="text-[11px] text-rose-600 font-medium mt-1 leading-relaxed break-words">{adsError}</p>
+              {adsNeedReconnect && (
+                <button
+                  type="button"
+                  onClick={() => void connect()}
+                  disabled={connecting}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-black hover:bg-rose-700 disabled:opacity-60"
+                >
+                  Meta 계정 다시 연동하기
+                </button>
+              )}
+            </div>
+          )}
+
+          {actionError && (
+            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+              <p className="text-[12px] font-black text-rose-700">Meta 응답</p>
+              <p className="text-[11px] text-rose-600 font-medium mt-1 leading-relaxed break-words">{actionError}</p>
+            </div>
+          )}
 
           <div className="mt-6 flex flex-wrap items-center gap-1.5">
             {([['', '전체'], ['running', '진행 중'], ['ended', '종료·중지']] as ['' | 'running' | 'ended', string][]).map(
@@ -916,7 +984,12 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             )}
           </div>
 
-          {visible.length === 0 ? (
+          {adsLoading && metaAds.length === 0 ? (
+            <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 flex items-center justify-center gap-2 text-sm text-slate-400 font-bold">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Meta에서 광고 상태를 불러오는 중
+            </div>
+          ) : visible.length === 0 ? (
             <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 text-center">
               {accountAds.length === 0 ? (
                 <>
@@ -936,24 +1009,34 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
           ) : (
             <div className="mt-4 space-y-3">
               {visible.map((ad) => (
-                <AdCard key={ad.id} ad={ad} />
+                <AdCard
+                  key={ad.id}
+                  ad={ad}
+                  busy={busyId === ad.id}
+                  onToggle={(target, next) => void toggleAd(target, next)}
+                  onContinue={(target) => void continueAd(target)}
+                />
               ))}
             </div>
           )}
+
+          {/* 고른 페이지의 게시물 반응(pages_read_engagement). */}
+          <div className="mt-6">
+            <MetaPageEngagementPanel username={cleanUsername} enabled={connected} />
+          </div>
         </>
       )}
 
       {/*
-        집행 요청은 부스팅과 똑같이 addAdBoost 로 남긴다 — 같은 목록, 같은 '집행 요청'
-        상태로 올라가야 브랜드가 두 흐름의 결과를 한 화면에서 센다.
+        만든 광고는 서버에 기록되고 notifyMetaAdsChanged 로 이 목록이 다시 읽는다.
+        닫을 때 지워 둔다 — 다시 열었을 때 지난번 입력이나 성공 화면이 남으면 안 된다.
       */}
-      {/* 닫을 때 지워 둔다 — 다시 열었을 때 지난번 입력이나 성공 화면이 남으면 안 된다. */}
       {createOpen && (
         <AdCreateModal
           open
           onClose={() => setCreateOpen(false)}
           account={account}
-          onSubmitted={(boost: AdBoost) => addAdBoost(cleanUsername, boost)}
+          username={cleanUsername}
         />
       )}
     </div>

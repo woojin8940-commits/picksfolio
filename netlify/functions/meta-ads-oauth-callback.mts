@@ -3,14 +3,15 @@ import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mt
 import {
   appSecretProof,
   GRAPH_VERSION,
-  META_ADS_SCOPES,
   MetaAdsAccount,
   MetaAdsDiagnosis,
   MetaAdsProbe,
   metaAdsAppId,
   metaAdsAppSecret,
   metaAdsRedirectUri,
+  metaAdsScopes,
   writeMetaAdsDiagnosis,
+  writeMetaAdsToken,
 } from "./_shared/meta-ads.mts";
 
 /**
@@ -22,12 +23,13 @@ import {
  *   3) 그 토큰으로 네 가지를 물어본다 — 누구인지(/me), 무엇에 동의했는지
  *      (/me/permissions), 광고 계정(/me/adaccounts), 비즈니스(/me/businesses),
  *      그리고 첫 광고 계정의 캠페인(act_{id}/campaigns).
- *   4) 결과만 보관함에 남기고 **토큰은 버린다**.
+ *   4) 관리하는 페이스북 페이지(/me/accounts) — 광고 페이지 선택 목록의 출처.
+ *   5) 토큰을 장기 토큰(60일)으로 바꿔 암호화해 저장하고, 진단 결과를 남긴다.
  *
- * 토큰을 저장하지 않는 이유는 지금 연동의 목적이 집행이 아니라 진단이기 때문이다.
- * 광고 권한은 심사 전이라 이 토큰으로 할 수 있는 일이 "무엇이 보이는지 확인" 뿐인데,
- * 그 확인은 이 요청 안에서 끝난다. 쓰지 않는 광고 집행 권한을 60일 들고 있는 것은
- * 관리할 이유 없는 위험만 남긴다. 화면이 보는 값은 4)의 진단 결과다.
+ * 토큰을 저장하는 이유: '집행하기' 가 메타에 캠페인·광고 세트·소재·광고를 실제로 만들고,
+ * 광고 현황이 상태·지표를, 광고 페이지 선택이 페이지 목록을 메타에서 읽어야 한다. 모두
+ * 연동 뒤의 다른 요청에서 일어나는 일이라 토큰이 남아 있어야 한다. 토큰은 서버에만
+ * 암호화해 두고 어떤 응답에도 싣지 않는다(meta-ads.mts 의 writeMetaAdsToken).
  *
  * 캠페인 조회를 굳이 한 번 해 보는 이유: 권한이 granted 로 찍혀 있어도 심사 전
  * 개발 모드에서는 자기 앱 관리자의 계정만 읽히고 그 밖에는 코드 200(권한 부족)으로
@@ -111,7 +113,7 @@ export default async (req: Request, _context: Context) => {
   const redirectUri = metaAdsRedirectUri(origin);
 
   try {
-    // 1) code → 액세스 토큰. 이 토큰은 아래 진단에만 쓰고 저장하지 않는다.
+    // 1) code → 액세스 토큰. 아래에서 장기 토큰으로 바꿔 암호화해 저장한다.
     const tokenParams = new URLSearchParams({
       client_id: appId,
       client_secret: appSecret,
@@ -127,7 +129,27 @@ export default async (req: Request, _context: Context) => {
       console.error("[meta-ads] token exchange failed:", tokenData?.error?.message || tokenRes.status);
       return fail("token_exchange_failed");
     }
-    const token: string = tokenData.access_token;
+    let token: string = tokenData.access_token;
+    let expiresIn = Number(tokenData.expires_in) || 0;
+
+    // 단기 토큰(1~2시간)을 장기 토큰(60일)으로 바꾼다. 실패하면 단기 토큰을 그대로
+    // 쓴다 — 연동 직후의 집행·조회는 되고, 만료되면 화면이 다시 연동을 안내한다.
+    const longParams = new URLSearchParams({
+      grant_type: "fb_exchange_token",
+      client_id: appId,
+      client_secret: appSecret,
+      fb_exchange_token: token,
+    });
+    const longRes = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?${longParams.toString()}`,
+    );
+    const longData = (await longRes.json().catch(() => ({}))) as any;
+    if (longRes.ok && longData?.access_token) {
+      token = String(longData.access_token);
+      expiresIn = Number(longData.expires_in) || 60 * 24 * 60 * 60;
+    } else {
+      console.warn("[meta-ads] long-lived exchange failed:", longData?.error?.message || longRes.status);
+    }
     const proof = appSecretProof(token, appSecret);
 
     // 2) 누구로 로그인했는지. 화면이 '연동된 계정' 으로 적어 주는 이름이다.
@@ -162,6 +184,7 @@ export default async (req: Request, _context: Context) => {
       businessName: String(row?.business?.name || "비즈니스 미연결"),
       currency: String(row?.currency || ""),
       accountStatus: Number(row?.account_status) || undefined,
+      businessId: row?.business?.id ? String(row.business.id) : undefined,
     }));
     if (adAccounts.probe.ok) adAccounts.probe.count = accounts.length;
 
@@ -195,12 +218,25 @@ export default async (req: Request, _context: Context) => {
       }
     }
 
+    // 7) 관리하는 페이스북 페이지(pages_show_list). 목록 자체는 화면이 열릴 때마다
+    //    다시 읽고, 여기서는 권한이 실제로 데이터를 내주는지만 확인해 둔다.
+    const pagesRes = await graph("me/accounts", token, proof, { fields: "id,name", limit: "100" });
+    if (pagesRes.probe.ok) {
+      pagesRes.probe.count = Array.isArray(pagesRes.data?.data) ? pagesRes.data.data.length : 0;
+    }
+
+    const tokenExpiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined;
+    const tokenStored = await writeMetaAdsToken(username, token, {
+      expiresAt: tokenExpiresAt,
+      metaUserId: String(me.data?.id || ""),
+    });
+
     const diagnosis: MetaAdsDiagnosis = {
       connected: true,
       connectedAt: new Date().toISOString(),
       metaUserId: String(me.data?.id || ""),
       metaUserName: String(me.data?.name || ""),
-      scopesRequested: META_ADS_SCOPES,
+      scopesRequested: metaAdsScopes(),
       granted,
       declined,
       accounts,
@@ -211,13 +247,14 @@ export default async (req: Request, _context: Context) => {
         adaccounts: adAccounts.probe,
         businesses: businessRes.probe,
         campaigns,
+        pages: pagesRes.probe,
       },
-      tokenStored: false,
+      tokenStored,
+      tokenExpiresAt: tokenStored ? tokenExpiresAt : undefined,
     };
 
     const saved = await writeMetaAdsDiagnosis(username, diagnosis);
-    // 토큰은 여기서 버려진다 — 어디에도 쓰지 않았고 저장하지 않는다.
-    if (!saved) return fail("diagnosis_store_failed");
+    if (!saved || !tokenStored) return fail("diagnosis_store_failed");
 
     return redirectBack({ meta_ads_connected: "1" });
   } catch (e: any) {

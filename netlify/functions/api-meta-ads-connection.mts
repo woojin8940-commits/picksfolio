@@ -2,9 +2,9 @@ import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import {
   clearMetaAdsDiagnosis,
-  META_ADS_SCOPES,
   metaAdsAppId,
   metaAdsConfigId,
+  metaAdsScopes,
   readMetaAdsDiagnosis,
 } from "./_shared/meta-ads.mts";
 
@@ -40,7 +40,7 @@ export default async (req: Request, context: Context) => {
     return Response.json({
       connection: diagnosis,
       // 연동 전 화면이 "무엇을 물어볼 것인지" 안내할 때 쓴다.
-      scopes: metaAdsConfigId() ? [] : META_ADS_SCOPES,
+      scopes: metaAdsConfigId() ? [] : metaAdsScopes(),
       // 앱 설정이 비어 있으면 버튼을 눌러도 동의 화면까지 못 간다. 그 사실을 누르기
       // 전에 화면에 적을 수 있게 알려준다(앱 ID 값 자체는 보내지 않는다).
       appConfigured: !!metaAdsAppId(),
@@ -52,8 +52,8 @@ export default async (req: Request, context: Context) => {
     if (String(body?.action || "") !== "disconnect") {
       return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
     }
-    // 저장한 토큰이 없으므로 지울 것은 진단 결과뿐이다. 메타 쪽 권한을 회수하려면
-    // 페이스북 계정 설정에서 앱을 삭제해야 한다 — 화면 안내에 그렇게 적어 둔다.
+    // 진단 결과와 저장한 토큰을 함께 지운다. 메타 쪽 앱 권한까지 회수하려면 페이스북
+    // 계정 설정에서 앱을 삭제해야 한다 — 화면 안내에 그렇게 적어 둔다.
     await clearMetaAdsDiagnosis(username);
     return Response.json({ ok: true });
   }

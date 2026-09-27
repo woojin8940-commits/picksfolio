@@ -6,20 +6,13 @@
  * 코드를 손으로 옮겨 메타 광고 관리자에서 따로 만들어야 한다. 부스팅은 그 동작을
  * 이력 화면 안으로 가져온다.
  *
- * 메타 광고 집행 권한(ads_management) 심사가 끝나기 전이라 실제로 광고를 만들 수는
- * 없다. 그래서 집행 요청을 이 화면 안에만 남겨 두고, 광고 현황 목록이 그것을 '요청'
- * 상태의 새 항목으로 같이 보여 준다 — 브랜드가 집행 흐름 전체를 먼저 확인할 수 있게
- * 하되, 어디에서도 실제로 노출이 시작된 것처럼 보이지 않게 한다.
+ * 이 파일은 집행 조건(노출 위치 · 연령 · 지역 · 광고 목적 · CTA)의 선택지와, 그것을
+ * 한 줄로 적는 함수만 둔다. 실제 집행은 api-meta-ads-ads 가 메타 Marketing API 로
+ * 캠페인 · 광고 세트 · 소재 · 광고를 만들고 그 ID 를 서버에 기록한다(utils/metaAdsApi).
+ * 페이지 목록도 메타에서 읽는다(GET /me/accounts, useMetaPages).
  *
- * 여기에는 브랜드가 직접 올린 소재로 만든 광고(광고 현황의 '새 광고 만들기')도 같이
- * 담긴다. 둘은 소재가 어디서 왔는지만 다르고 — 이력의 게시물이냐, 브랜드가 올린
- * 파일이냐 — 집행 조건(예산·기간·타겟·노출 위치)과 저장 위치, 요청 상태는 같다.
- * 그래서 목록을 나누지 않고 source 로 구분한다: 광고 현황이 한 목록으로 보여야
- * 브랜드가 "지금 돌고 있는 광고"를 한 화면에서 센다.
- *
- * 저장은 브라우저에만 한다. 이 값은 아직 계정의 데이터가 아니라 화면 확인용 임시
- * 기록이고, 연동이 붙으면 이 자리가 메타 광고 API 응답으로 바뀐다. 서버에 테이블을
- * 먼저 만들어 두면 심사 후 실제 광고 객체와 두 갈래로 갈라진다.
+ * 예전에는 심사 전이라 집행 요청을 브라우저(localStorage)에만 남겼다. 그 임시 기록은
+ * 더 이상 읽지 않는다 — 메타에 없는 광고가 목록에 섞이면 안 되기 때문이다.
  */
 
 /** 노출 위치 — 메타가 쓰는 배치 이름을 그대로 둔다. */
@@ -133,129 +126,15 @@ export const ctasForObjective = (objective: AdObjective) => {
 export const ctaLabel = (value: AdCta | undefined): string =>
   AD_CTAS.find((c) => c.value === value)?.label || '';
 
-/**
- * 광고를 내보내는 페이지 — 광고가 누구 이름으로 보이는지.
- *
- * 한 브랜드가 페이지를 여럿 들고 있는 경우(본 브랜드/서브 라인/팝업 계정)가 있어서,
- * 어느 페이지 이름으로 나가는지는 브랜드가 골라야 한다. 지금은 화면 확인용 예시이고,
- * 실제 연동에서는 GET /me/accounts 응답으로 바뀐다(광고 계정과 같은 자리).
- */
-export const MOCK_AD_PAGES = [
-  { id: 'page_88213001', name: '픽스폴리오 공식', handle: 'picksfolio.official' },
-  { id: 'page_88213002', name: '픽스폴리오 뷰티', handle: 'picksfolio.beauty' },
-  { id: 'page_88213003', name: '픽스폴리오 리빙', handle: 'picksfolio.living' },
-] as const;
-
-export const findAdPage = (pageId: string | undefined) =>
-  MOCK_AD_PAGES.find((p) => p.id === pageId) || null;
-
-export type AdBoost = {
-  id: string;
-  /** 집행 요청 시각(ISO). 광고 현황에서 최신순으로 올린다. */
-  requestedAt: string;
-  /**
-   * 소재가 어디서 왔는지. 'partnership' 은 이력에서 고른 게시물(부스팅),
-   * 'own' 은 브랜드가 직접 올린 파일이다.
-   *
-   * 없으면 부스팅으로 읽는다 — 이 값이 생기기 전에 저장된 요청이 전부 부스팅이다.
-   */
-  source?: 'partnership' | 'own';
-  /**
-   * 아래 다섯 개는 부스팅에만 있다. 직접 올린 소재에는 캠페인도, 인플루언서도,
-   * 파트너십 코드도 없다 — 그래서 있는 쪽만 채운다.
-   */
-  campaignId?: string;
-  campaignTitle?: string;
-  collabId?: string;
-  creatorHandle?: string;
-  partnershipCode?: string;
-  /**
-   * 광고 소재 썸네일. 부스팅은 이력에서 고른 게시물 썸네일, 직접 올린 소재는 업로드한
-   * 파일에서 만든 작은 미리보기다. 없으면 광고 현황이 빈 자리로 그린다.
-   */
-  thumbnailUrl: string;
-  /**
-   * 아래는 직접 올린 소재에만 있다. 광고 목적과 소재·문구·연결 URL·페이지 —
-   * 부스팅에서는 게시물이 이미 정해 두는 값들이다.
-   */
-  objective?: AdObjective;
-  /** 업로드한 파일 이름·종류. 실제 업로드는 아직 하지 않고 이 기록만 남긴다. */
-  creativeName?: string;
-  creativeKind?: 'image' | 'video';
-  headline?: string;
-  bodyText?: string;
-  cta?: AdCta;
-  /** CTA 버튼을 눌렀을 때 가는 주소. 직접 올린 소재에서는 필수다. */
-  linkUrl?: string;
-  /** 광고가 어느 페이지 이름으로 나가는지(MOCK_AD_PAGES 의 id). */
-  pageId?: string;
-  /**
-   * 집행할 광고 계정(act_… ). 연동한 계정 중 부스팅 창에서 고른 것이다.
-   *
-   * 광고는 계정 단위로 만들어지므로 요청에 계정이 남아 있어야 심사 후 그대로 집행할
-   * 수 있다. 연동 전에 만든 옛 요청에는 없을 수 있어 optional 로 둔다 — 그 요청은
-   * 광고 현황에서 어느 계정에서든 보이게 한다.
-   */
-  adAccountId?: string;
-  budgetKrw: number;
-  startDate: string;
-  endDate: string;
-  ageBands: string[];
-  regions: string[];
-  /** 'auto' 는 메타가 위치를 알아서 고르는 자동 노출. */
-  placementMode: 'auto' | 'manual';
-  placements: AdPlacement[];
-};
-
-const keyFor = (username: string) => `picks_ad_boosts_${username}`;
-
-/** 같은 탭 안의 다른 화면(이력 → 광고 현황)에 바뀐 것을 알린다. */
-const CHANGED_EVENT = 'picks:ad-boosts-changed';
-
-export const readAdBoosts = (username: string): AdBoost[] => {
-  try {
-    const raw = localStorage.getItem(keyFor(username));
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    // 최신 요청이 목록 맨 위로 온다.
-    return [...parsed].sort((a, b) => String(b?.requestedAt || '').localeCompare(String(a?.requestedAt || '')));
-  } catch {
-    return [];
-  }
-};
-
-export const addAdBoost = (username: string, boost: AdBoost): void => {
-  try {
-    const next = [boost, ...readAdBoosts(username)].slice(0, 50);
-    localStorage.setItem(keyFor(username), JSON.stringify(next));
-  } catch {
-    // 저장에 실패해도 집행 요청 자체는 성공으로 보여 준다 — 이 값은 화면 확인용이라
-    // 저장 실패를 브랜드가 할 일로 바꿔 줄 방법이 없다.
-  }
-  try {
-    window.dispatchEvent(new Event(CHANGED_EVENT));
-  } catch {}
-};
-
-/** 광고 현황이 목록을 다시 읽도록 구독한다. 다른 탭에서 집행한 건도 받는다. */
-export const subscribeAdBoosts = (onChange: () => void): (() => void) => {
-  window.addEventListener(CHANGED_EVENT, onChange);
-  window.addEventListener('storage', onChange);
-  return () => {
-    window.removeEventListener(CHANGED_EVENT, onChange);
-    window.removeEventListener('storage', onChange);
-  };
-};
-
 /** 타겟을 한 줄로 적는다. 비어 있으면 메타 기본값(전체)이라고 쓴다. */
-export const targetSummary = (boost: Pick<AdBoost, 'ageBands' | 'regions'>): string => {
+export const targetSummary = (boost: { ageBands: string[]; regions: string[] }): string => {
   const age = boost.ageBands.length ? boost.ageBands.join('·') : '연령 전체';
   const region = boost.regions.length ? boost.regions.join('·') : '전국';
   return `${age} · ${region}`;
 };
 
 /** 노출 위치를 한 줄로 적는다. */
-export const placementSummary = (boost: Pick<AdBoost, 'placementMode' | 'placements'>): string => {
+export const placementSummary = (boost: { placementMode: 'auto' | 'manual'; placements: readonly string[] }): string => {
   if (boost.placementMode === 'auto') return '자동 노출';
   const labels = boost.placements
     .map((p) => AD_PLACEMENTS.find((x) => x.value === p)?.label)

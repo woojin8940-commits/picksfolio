@@ -18,8 +18,8 @@ import type { MetaAdsDiagnosisPayload } from '../services/apiService';
  * 있으면 mock 시절의 문제가 그대로 돌아온다. 브라우저에 남는 것은 "이 브라우저에서
  * 어느 광고 계정을 보고 있는지" 하나뿐이고, 그 값도 서버가 돌려준 목록으로 검증한다.
  *
- * 토큰은 어디에도 저장하지 않는다. 광고 권한 심사 전이라 지금 연동의 목적은 진단까지고,
- * 콜백이 그 요청 안에서만 토큰을 쓰고 버린다.
+ * 토큰은 서버(Netlify Blobs)에 암호화해 두고 광고 집행·페이지 조회 함수만 꺼내 쓴다.
+ * 브라우저에는 오지 않는다.
  */
 
 /** 심사·승인 상태. 'approved' 만 실제로 데이터를 받을 수 있다. */
@@ -56,6 +56,18 @@ export const META_PERMISSIONS: MetaPermission[] = [
     status: 'pending',
     purpose: '광고 계정·비즈니스 자산 접근',
   },
+  {
+    label: '페이지 목록',
+    scope: 'pages_show_list',
+    status: 'pending',
+    purpose: '광고를 내보낼 페이스북 페이지 선택',
+  },
+  {
+    label: '페이지 참여 조회',
+    scope: 'pages_read_engagement',
+    status: 'pending',
+    purpose: '페이지 게시물 반응·댓글·공유 수 조회',
+  },
 ];
 
 export type MetaAdAccount = {
@@ -68,20 +80,6 @@ export type MetaAdAccount = {
   /** 메타의 account_status(1 = 활성). 정지된 계정을 화면에서 구분할 수 있게 둔다. */
   accountStatus?: number;
 };
-
-/**
- * 광고 현황의 예시 광고가 매달려 있는 가상 계정.
- *
- * 광고 지표 권한 심사 전이라 목록의 숫자는 아직 예시다(그 사실은 화면에 적어 둔다).
- * 예시 광고도 계정을 나눠 두어야 "계정을 바꾸면 목록이 바뀐다"를 확인할 수 있어서
- * 남긴다. 연동해서 실제 계정이 생기면 광고 현황이 예시 광고를 그 계정들에 순서대로
- * 얹는다 — 이제 이 목록이 '연동된 계정' 으로 쓰이는 곳은 없다.
- */
-export const MOCK_AD_ACCOUNTS: MetaAdAccount[] = [
-  { id: 'act_1029384756', name: '픽스폴리오 메인 광고 계정', businessName: '픽스폴리오 비즈니스', currency: 'KRW' },
-  { id: 'act_5647382910', name: '브랜드 서브 계정', businessName: '픽스폴리오 비즈니스', currency: 'KRW' },
-  { id: 'act_8812930457', name: '신규 테스트 계정', businessName: '픽스폴리오 비즈니스', currency: 'KRW' },
-];
 
 export type MetaAdConnection = {
   connected: boolean;
@@ -204,7 +202,7 @@ export const startMetaAdConnect = async (
 /**
  * 연동 해제 — 서버에 남은 진단 결과와 이 브라우저의 계정 선택을 지운다.
  *
- * 저장한 토큰이 없으므로 회수할 것이 없다. 메타 쪽 앱 권한까지 끊으려면 페이스북
+ * 서버에 저장한 토큰도 같이 지워진다. 메타 쪽 앱 권한까지 끊으려면 페이스북
  * 계정 설정에서 앱을 삭제해야 한다 — 화면에 그렇게 적어 둔다.
  */
 export const disconnectMetaAccount = async (username: string): Promise<MetaAdConnection> => {

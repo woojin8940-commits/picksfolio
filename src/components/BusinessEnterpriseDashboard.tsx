@@ -24,8 +24,8 @@ const MembershipPlan = lazyWithRetry(() => import('./MembershipPlan'));
 const BusinessTimeline = lazyWithRetry(() => import('./BusinessTimeline'));
 const CampaignCollabManagement = lazyWithRetry(() => import('./CampaignCollabManagement'));
 const BusinessCampaignHistory = lazyWithRetry(() => import('./BusinessCampaignHistory'));
-// 광고 현황 — 이력에서 고른 콘텐츠를 광고로 돌린 결과를 보는 화면. 메타 광고 API 연동
-// 전이라 아직 예시 데이터로 레이아웃만 서 있다.
+// 광고 현황 — 이력에서 고른 콘텐츠를 광고로 돌린 결과를 보는 화면. 목록·상태·지표는
+// 메타 Marketing API 에서 읽는다.
 const BusinessAdStatus = lazyWithRetry(() => import('./BusinessAdStatus'));
 // 브랜드용 인사이트(우리 계정을 태그한 인플루언서 콘텐츠). 인플루언서용 인사이트와는
 // 다른 화면이며, 이 대시보드에서만 열린다.
