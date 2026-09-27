@@ -158,6 +158,20 @@ export async function alreadyRecorded(username: string, key: string): Promise<bo
   }
 }
 
+export async function confirmSent(username: string, key: string): Promise<void> {
+  const s = store();
+  const path = `${prefixFor(username)}${key}`;
+  const snapshot = await s.getWithMetadata(path, { type: "json", consistency: "strong" });
+  if (!snapshot?.etag) throw new Error("DM send claim missing");
+  const result = await s.set(path, JSON.stringify({ ...(snapshot.data as object), confirmed: true }), { onlyIfMatch: snapshot.etag });
+  if (result.modified === false) throw new Error("DM send claim changed");
+}
+
+export async function confirmedSent(username: string, key: string): Promise<boolean> {
+  const record = await store().get(`${prefixFor(username)}${key}`, { type: "json" }) as { confirmed?: boolean } | null;
+  return record?.confirmed === true;
+}
+
 /** 선점을 되돌린다. 결국 아무것도 못 보낸 경우에 호출해 다음 시도를 막지 않는다. */
 export async function release(username: string, key: string, strict = false): Promise<void> {
   if (!username || !key) return;

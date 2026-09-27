@@ -26,6 +26,9 @@
  * (instagram.com)의 DM 화면에서는 표시되지 않는다.
  */
 
+import { finishDmSend, reserveDmSend, retryAfterMs } from "./dm-send-budget.mts";
+import { checkWorkerLease } from "./dm-worker.mts";
+
 export interface DmButton {
   label: string;
   url: string;
@@ -345,6 +348,7 @@ export type DmErrorKind =
   | "outside_window"
   | "permission"
   | "rate_limit"
+  | "throttled"
   | "uncertain"
   | "other";
 
@@ -388,6 +392,8 @@ export function describeDmError(kind: DmErrorKind, raw?: string): string {
       return "인스타그램 연동 권한이 만료됐거나 부족합니다. DM 자동화 화면에서 계정을 다시 연동해 주세요.";
     case "rate_limit":
       return "인스타그램 발송 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.";
+    case "throttled":
+      return "발송 순서를 기다리고 있습니다. 잠시 후 이어서 진행해 주세요.";
     case "uncertain":
       return "발송 결과를 확인하지 못했습니다. 인스타그램 DM 함을 확인해 주세요.";
     default:
@@ -396,6 +402,7 @@ export function describeDmError(kind: DmErrorKind, raw?: string): string {
 }
 
 export interface SendDmResult {
+  retryAfterMs?: number;
   /** 모든 메시지가 전송된 경우에만 true. */
   ok: boolean;
   /** 마지막으로 성공한 메시지 ID. */
@@ -420,6 +427,7 @@ export interface SendDmResult {
 
 /** 한 통 발송 결과(내부용). */
 interface SendOneResult {
+  retryAfterMs?: number;
   ok: boolean;
   messageId?: string;
   error?: string;
@@ -427,12 +435,29 @@ interface SendOneResult {
 }
 
 async function postOneMessage(args: {
+  igId: string;
   url: string;
   accessToken: string;
   recipient: Record<string, string>;
   message: Record<string, unknown>;
 }): Promise<SendOneResult> {
   const { url, accessToken, recipient, message } = args;
+  let reservation: Awaited<ReturnType<typeof reserveDmSend>>;
+  try {
+    reservation = await reserveDmSend(args.igId, recipient.comment_id ? "private_reply" : "direct");
+  } catch {
+    return { ok: false, error: "발송 대기열에 연결하지 못했습니다.", errorKind: "throttled", retryAfterMs: 60_000 };
+  }
+  if (!reservation.allowed) return { ok: false, errorKind: "throttled", retryAfterMs: reservation.retryAfterMs };
+  const finish = async (result: SendOneResult) => {
+    await finishDmSend(args.igId, reservation.token!, result);
+    return result;
+  };
+  try {
+    await checkWorkerLease();
+  } catch {
+    return finish({ ok: false, errorKind: "throttled", retryAfterMs: 60_000 });
+  }
   let res: Response;
   let result: any;
   try {
@@ -449,25 +474,27 @@ async function postOneMessage(args: {
   } catch (e: any) {
     // 네트워크 오류를 예외로 던지면 일괄 발송 루프가 중간에 통째로 죽어, 이미
     // 보낸 건수까지 함께 사라진다(화면에는 전체 실패로 보인다). 결과로 돌려준다.
-    return {
+    return finish({
       ok: false,
       error: e?.message || "인스타그램 서버 연결에 실패했습니다.",
       errorKind: "uncertain",
-    };
+    });
   }
 
   // Graph API 는 드물게 HTTP 200 으로 오류 본문을 돌려준다. 본문의 error 를
   // 확인하지 않으면 도착하지 않은 메시지를 "발송 성공"으로 기록한다.
   if (!res.ok || result?.error) {
     const graphError = result?.error;
-    return {
+    return finish({
       ok: false,
       error: graphError?.message || `Graph API 오류 (HTTP ${res.status})`,
       errorKind: classifyGraphError(graphError, res.status),
-    };
+      retryAfterMs: retryAfterMs(res),
+    });
   }
 
-  return { ok: true, messageId: result?.message_id };
+  if (!result?.message_id) return finish({ ok: false, errorKind: "uncertain", error: "발송 응답에 메시지 ID가 없습니다." });
+  return finish({ ok: true, messageId: result.message_id });
 }
 
 /**
@@ -501,7 +528,7 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
 
   for (let i = 0; i < messages.length; i += 1) {
     const to = i === 0 ? recipient : followUpRecipient || recipient;
-    let attempt = await postOneMessage({ url, accessToken, recipient: to, message: messages[i] });
+    let attempt = await postOneMessage({ igId, url, accessToken, recipient: to, message: messages[i] });
 
     /**
      * 첫 통이 "형식" 문제로 거부된 경우에만 대체 메시지를 쓴다.
@@ -510,11 +537,9 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
      * 이미 도착했을 수 있는 메시지를 한 번 더 보낼 위험만 남는다.
      */
     if (!attempt.ok && i === 0 && fallback && attempt.errorKind === "other") {
-      const retried = await postOneMessage({ url, accessToken, recipient: to, message: fallback });
-      if (retried.ok) {
-        usedFallback = true;
-        attempt = retried;
-      }
+      const retried = await postOneMessage({ igId, url, accessToken, recipient: to, message: fallback });
+      usedFallback = retried.ok;
+      attempt = retried;
     }
 
     if (attempt.ok) {
@@ -545,6 +570,7 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
       usedFallback,
       error: attempt.error,
       errorKind: attempt.errorKind || "other",
+      retryAfterMs: attempt.retryAfterMs,
     };
   }
 
@@ -563,13 +589,30 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
  * 달린다" 같은 차이가 생긴다.
  */
 export async function postCommentReply(args: {
+  igId: string;
   host: string;
   graphVersion: string;
   commentId: string;
   accessToken: string;
   message: string;
-}): Promise<{ ok: boolean; replyId?: string; error?: string; uncertain?: boolean; errorKind?: DmErrorKind }> {
+}): Promise<{ ok: boolean; replyId?: string; error?: string; uncertain?: boolean; errorKind?: DmErrorKind; retryAfterMs?: number }> {
   const { host, graphVersion, commentId, accessToken, message } = args;
+  let reservation: Awaited<ReturnType<typeof reserveDmSend>>;
+  try {
+    reservation = await reserveDmSend(args.igId, "public_reply");
+  } catch {
+    return { ok: false, errorKind: "throttled", retryAfterMs: 60_000 };
+  }
+  if (!reservation.allowed) return { ok: false, errorKind: "throttled", retryAfterMs: reservation.retryAfterMs };
+  const finish = async <T extends { ok: boolean; errorKind?: DmErrorKind; retryAfterMs?: number }>(result: T): Promise<T> => {
+    await finishDmSend(args.igId, reservation.token!, result);
+    return result;
+  };
+  try {
+    await checkWorkerLease();
+  } catch {
+    return finish({ ok: false, errorKind: "throttled" as const, retryAfterMs: 60_000 });
+  }
   try {
     const res = await fetch(
       `https://${host}/${graphVersion}/${encodeURIComponent(commentId)}/replies`,
@@ -586,15 +629,17 @@ export async function postCommentReply(args: {
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || data?.error) {
       const errorKind = classifyGraphError(data?.error, res.status);
-      return {
+      return finish({
         ok: false,
         error: data?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
         uncertain: errorKind === "uncertain",
         errorKind,
-      };
+        retryAfterMs: retryAfterMs(res),
+      });
     }
-    return { ok: true, replyId: data?.id };
+    if (!data?.id) return finish({ ok: false, uncertain: true, errorKind: "uncertain" as const, error: "답글 응답에 ID가 없습니다." });
+    return finish({ ok: true, replyId: data.id });
   } catch (e: any) {
-    return { ok: false, error: e?.message || "답글 전송 중 오류", uncertain: true, errorKind: "uncertain" };
+    return finish({ ok: false, error: e?.message || "답글 전송 중 오류", uncertain: true, errorKind: "uncertain" as const });
   }
 }

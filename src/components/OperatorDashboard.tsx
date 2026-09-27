@@ -16,6 +16,7 @@ import AdminRevenueCards from './admin/AdminRevenueCards';
 import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import AdminInfluencerDatabase from './admin/AdminInfluencerDatabase';
 import AdminManagerAccounts from './admin/AdminManagerAccounts';
+import AdminDmQueue from './admin/AdminDmQueue';
 import { isTestProposal } from '../utils/testData';
 
 /**
@@ -43,6 +44,7 @@ type OperatorTab =
   | 'directory'
   | 'users'
   | 'managers'
+  | 'dmqueue'
   | 'settlement';
 
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
@@ -292,6 +294,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       tabs: [
         { key: 'users', label: '회원 관리' },
         { key: 'managers', label: '담당자 계정' },
+        { key: 'dmqueue', label: 'DM 발송' },
         { key: 'settlement', label: '정산·매출' },
       ],
     },
@@ -453,6 +456,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         </div>
 
         {/* 전체 현황 */}
+        {activeTab === 'dmqueue' && adminToken && <AdminDmQueue token={adminToken} />}
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <AdminOperatorOverview
