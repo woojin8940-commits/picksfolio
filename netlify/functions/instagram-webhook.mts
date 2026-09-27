@@ -15,6 +15,8 @@ import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
   claimIfNew,
+  confirmSent,
+  confirmedSent,
   commentDmKey,
   contentHashOf,
   dmContentKey,
@@ -27,9 +29,9 @@ import {
 } from "./_shared/dm-send-registry.mts";
 import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { createScheduledJob } from "./_shared/dm-schedule-store.mts";
-import { enqueueCommentEvents } from "./_shared/dm-jobs.mts";
+import { backupCommentEvents, enqueueCommentEvents } from "./_shared/dm-jobs.mts";
 import type { QueuedComment } from "./_shared/dm-jobs.mts";
-import { fetchContactProfile, noteDmContact } from "./_shared/dm-contacts.mts";
+import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
 
 /**
@@ -425,7 +427,7 @@ async function sendTriggerDm(
     return;
   }
 
-  if (!(await claimIfNew(username, claimKey))) {
+  if (!(await claimIfNew(username, claimKey, true))) {
     console.warn("[ig-webhook] duplicate messaging event — trigger DM skipped", claimKey);
     return;
   }
@@ -463,8 +465,31 @@ async function sendTriggerDm(
       return;
     }
 
-    await release(username, claimKey);
     const kind = result.errorKind || "other";
+    if (kind === "rate_limit" || kind === "throttled") {
+      try {
+        await createScheduledJob({
+          id: `trigger_${claimKey}`,
+          username,
+          igAccountId: igId,
+          recipientId,
+          sendAt: new Date(Date.now() + (result.retryAfterMs || 60_000)).toISOString(),
+          message: args.message || "",
+          buttons: args.buttons || [],
+          source: "trigger",
+          createdAt: new Date().toISOString(),
+          status: "pending",
+          ruleId,
+          ruleName,
+        });
+        await appendLog(username, { kind: "dm", status: "scheduled", trigger, recipientId, ruleId, ruleName });
+      } catch (e) {
+        await release(username, claimKey, true);
+        throw e;
+      }
+      return;
+    }
+    if (kind !== "uncertain") await release(username, claimKey, true);
     await appendLog(username, {
       kind: "dm",
       status: "failed",
@@ -476,7 +501,6 @@ async function sendTriggerDm(
       errorKind: kind,
     });
   } catch (e: any) {
-    await release(username, claimKey);
     await appendLog(username, {
       kind: "dm",
       status: "failed",
@@ -727,14 +751,12 @@ export default async (req: Request, _context: Context) => {
     try {
       await enqueueCommentEvents(commentEvents);
     } catch (e) {
-      console.error("[ig-webhook] comment queue failed, processing inline:", e);
-      await processWebhookPayload({
-        entry: (commentEvents as QueuedComment[]).map((event) => ({
-          id: event.igAccountId,
-          time: event.entryTime,
-          changes: [event.change],
-        })),
-      }).catch((err) => console.error("[ig-webhook] inline comment processing failed:", err));
+      console.error("[ig-webhook] comment queue failed:", (e as Error)?.message);
+      try {
+        await backupCommentEvents(commentEvents as QueuedComment[]);
+      } catch {
+        return new Response("Queue unavailable", { status: 503 });
+      }
     }
   }
 
@@ -754,6 +776,10 @@ export default async (req: Request, _context: Context) => {
 
 export interface WebhookProcessResult {
   retryable: boolean;
+  retryAfterMs?: number;
+  sent?: number;
+  failed?: number;
+  partial?: boolean;
   uncertain?: boolean;
   sideEffectAttempted?: boolean;
   error?: string;
@@ -1002,7 +1028,7 @@ export async function processWebhookPayload(
             await createScheduledJob({
               id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
               username,
-              igAccountId,
+              igAccountId: igId,
               recipientId: fromId,
               recipientName: String(value?.from?.username || "") || undefined,
               sendAt,
@@ -1015,6 +1041,7 @@ export async function processWebhookPayload(
               publicReply: reply ? { commentId: parentId || commentId, message: reply } : undefined,
               sendDm,
               source: "comment",
+              backfill: Boolean(onlyAutomationId),
               ruleId: automation.id,
               ruleName: automation.name,
               createdAt: new Date().toISOString(),
@@ -1076,6 +1103,12 @@ export async function processWebhookPayload(
               ruleId: automation.id,
             });
           } else if (!(await claimIfNew(username, publicReplyKey(commentId), true))) {
+            if (!(await confirmedSent(username, publicReplyKey(commentId)))) {
+              outcome.uncertain = true;
+              outcome.error = "이 댓글 답글의 이전 발송 결과를 확인해야 합니다.";
+              outcome.errorKind = "uncertain";
+              continue;
+            }
             // 같은 댓글 이벤트가 재전송된 경우다. 다시 달면 답글이 두 개 붙는다.
             console.warn("[ig-webhook] duplicate comment event — public reply skipped");
           } else {
@@ -1083,6 +1116,7 @@ export async function processWebhookPayload(
             outcome.sideEffectAttempted = true;
             repliedNow = true;
             const replyResult = await postCommentReply({
+              igId,
               host: graphHost(settings),
               graphVersion: GRAPH_VERSION,
               commentId: parentId || commentId,
@@ -1090,6 +1124,8 @@ export async function processWebhookPayload(
               message: reply,
             });
             if (replyResult.ok) {
+              await confirmSent(username, publicReplyKey(commentId));
+              outcome.sent = (outcome.sent || 0) + 1;
               await appendLog(username, {
                 kind: "reply",
                 status: "sent",
@@ -1101,14 +1137,19 @@ export async function processWebhookPayload(
               // 실패한 답글은 선점을 되돌린다. Meta 가 이벤트를 다시 보내면
               // 그때 한 번 더 시도할 수 있어야 한다.
               if (!replyResult.uncertain) await release(username, publicReplyKey(commentId), true);
-              if (replyResult.errorKind === "rate_limit") {
+              if (replyResult.errorKind === "rate_limit" || replyResult.errorKind === "throttled") {
                 outcome.retryable = true;
                 outcome.error = replyResult.error;
-                outcome.errorKind = "rate_limit";
+                outcome.errorKind = replyResult.errorKind;
+                outcome.retryAfterMs = replyResult.retryAfterMs;
               } else if (replyResult.uncertain) {
                 outcome.uncertain = true;
                 outcome.error = replyResult.error;
                 outcome.errorKind = "uncertain";
+              } else {
+                outcome.failed = (outcome.failed || 0) + 1;
+                outcome.error = replyResult.error;
+                outcome.errorKind = replyResult.errorKind;
               }
               console.warn("[ig-webhook] public reply failed:", replyResult.error);
               await appendLog(username, {
@@ -1118,6 +1159,7 @@ export async function processWebhookPayload(
                 ruleId: automation.id,
                 error: replyResult.error,
               });
+              if (outcome.retryable || outcome.uncertain) continue;
             }
           }
         }
@@ -1137,6 +1179,9 @@ export async function processWebhookPayload(
          * 알 수 없으니 활동 기록에 남긴다.
          */
         if (plan.messages.length === 0) {
+          outcome.failed = (outcome.failed || 0) + 1;
+          outcome.error = "보낼 수 있는 메시지가 없습니다.";
+          outcome.errorKind = "invalid_payload";
           await appendLog(username, {
             kind: "dm",
             status: "failed",
@@ -1196,6 +1241,12 @@ export async function processWebhookPayload(
         let sendAttempted = false;
         try {
           const replyAvailable = await claimIfNew(username, replyKey, true);
+          if (!replyAvailable) {
+            outcome.uncertain = true;
+            outcome.error = "이 댓글의 이전 발송 결과를 확인해야 합니다.";
+            outcome.errorKind = "uncertain";
+            continue;
+          }
           let result = null;
           if (replyAvailable) {
             sendAttempted = true;
@@ -1232,7 +1283,8 @@ export async function processWebhookPayload(
            */
           const retryViaIgsid =
             Boolean(fromId) &&
-            (!result || (!result.ok && !result.partial && result.errorKind === "already_sent"));
+            Boolean(result && !result.ok && !result.partial && result.errorKind === "already_sent") &&
+            withinDmWindow(await getDmContact(username, fromId));
 
           if (retryViaIgsid) {
             // 이 경로는 대화창이 열려 있어야 성공한다. 열려 있다면 여러 통을 보낼 수
@@ -1252,6 +1304,8 @@ export async function processWebhookPayload(
           }
 
           if (result && (result.ok || result.partial)) {
+            outcome.sent = (outcome.sent || 0) + result.sent;
+            outcome.partial = Boolean(outcome.partial || result.partial || result.followUpError);
             // partial 은 본문이 이미 도착한 상태다. 실패로 기록하면 화면의 활동
             // 기록에서 도착한 DM 이 실패로 보인다.
             await appendLog(username, {
@@ -1283,9 +1337,14 @@ export async function processWebhookPayload(
               outcome.error = result?.error || "발송 결과를 확인하지 못했습니다.";
               outcome.errorKind = kind;
             }
-            if (kind === "rate_limit") {
+            if (kind === "rate_limit" || kind === "throttled") {
               outcome.retryable = true;
               outcome.error = result?.error || "인스타그램 발송 한도";
+              outcome.errorKind = kind;
+              outcome.retryAfterMs = result?.retryAfterMs;
+            } else if (kind !== "uncertain") {
+              outcome.failed = (outcome.failed || 0) + 1;
+              outcome.error = result?.error;
               outcome.errorKind = kind;
             }
             await appendLog(username, {

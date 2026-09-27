@@ -38,6 +38,8 @@ const HISTORY_KEEP = 50;
 const STALE_CLAIM_MS = 10 * 60 * 1000;
 
 export interface DmScheduledJob {
+  partial?: boolean;
+  backfill?: boolean;
   id: string;
   /** 발신 계정(우리 서비스 사용자명). */
   username: string;
@@ -64,7 +66,7 @@ export interface DmScheduledJob {
    *  `comment` — 게시물 자동화가 "예약 발송"으로 설정돼 있어, 댓글이 달린 순간
    *              대기열에 들어온 예약. 발송 방식이 다르다(아래 commentId 참고).
    */
-  source?: "manual" | "comment";
+  source?: "manual" | "comment" | "trigger";
   /**
    * 발송 형식. 캐러셀로 설정한 게시물 자동화도 예약할 수 있어야 하므로, 텍스트
    * 한 가지로 고정하지 않는다. 값이 없으면 텍스트로 본다(예전 예약 호환).
@@ -162,19 +164,42 @@ export async function listScheduledJobs(username: string): Promise<DmScheduledJo
 
 /** 아직 보내지 않은 예약 하나를 취소(삭제)한다. 이미 나간 건은 취소할 수 없다. */
 export async function cancelScheduledJob(username: string, id: string): Promise<boolean> {
+  let canceled = false;
   try {
-    if (await cancelStoredScheduledJob(username, id)) return true;
+    canceled = await cancelStoredScheduledJob(username, id);
   } catch (e) {
     console.warn("[dm-schedule] queue cancel failed:", (e as Error)?.message);
   }
   const s = store();
   const { blobs } = await s.list({ prefix: pendingPrefix(username) });
   const target = blobs.find((b) => parseKey(b.key)?.id === id);
-  if (!target) return false;
+  if (!target) return canceled;
   await s.delete(target.key);
   // 선점 표시도 같이 지운다. 남겨 두면 취소된 예약의 흔적이 계속 쌓인다.
   await s.delete(`claim/${target.key}`).catch(() => {});
   return true;
+}
+
+export async function transferDueScheduledJobs(deadline: number): Promise<void> {
+  for (const { key, job } of await listDueJobs(new Date(), 20)) {
+    if (Date.now() >= deadline) break;
+    if (!(await claimJob(key))) continue;
+    try {
+      const settings = await getStore({ name: "dm-automation", consistency: "strong" }).get(`dm_${job.username}`, { type: "json" }) as any;
+      const account = String(job.igAccountId || settings?.igUserId || settings?.igAccountId || "");
+      if (!account) {
+        await finishJob(key, { ...job, status: "failed", error: "인스타그램 계정 연결 정보를 찾지 못했습니다." });
+        continue;
+      }
+      const rule = job.source === "comment" ? settings?.automations?.find((entry: any) => entry.id === job.ruleId) : null;
+      const latestTime = rule?.sendMode === "scheduled" ? Date.parse(rule.scheduledAt || "") : NaN;
+      const sendAt = !job.attempts && Number.isFinite(latestTime) ? new Date(Math.max(latestTime, Date.now())).toISOString() : job.sendAt;
+      await enqueueScheduledJob(job.username, job.id, account, sendAt, { ...job, igAccountId: account, sendAt });
+      await store().delete(key);
+    } finally {
+      await releaseJobClaim(key);
+    }
+  }
 }
 
 /**

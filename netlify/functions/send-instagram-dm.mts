@@ -22,6 +22,7 @@ import {
 import {
   alreadyRecorded,
   claimIfNew,
+  confirmSent,
   contentHashOf,
   dmContentKey,
   noteSentText,
@@ -30,6 +31,7 @@ import {
   release,
 } from "./_shared/dm-send-registry.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { withDmSendDeadline } from "./_shared/dm-send-budget.mts";
 
 /**
  * 인스타그램 발송(수동).
@@ -150,7 +152,7 @@ async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "send-instagram-dm");
 }
 
-export default async (req: Request) => {
+const handleSend = async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -645,6 +647,7 @@ export default async (req: Request) => {
 
     const text = replies[Math.floor(Math.random() * replies.length)];
     const result = await postCommentReply({
+      igId: senderIgId,
       host: graphHost,
       graphVersion: GRAPH_VERSION,
       commentId: c.commentId,
@@ -653,6 +656,7 @@ export default async (req: Request) => {
     });
 
     if (result.ok) {
+      await confirmSent(username, publicReplyKey(c.commentId));
       await appendLog(username, {
         kind: "reply",
         status: "sent",
@@ -664,7 +668,7 @@ export default async (req: Request) => {
       return "sent";
     }
 
-    if (result.errorKind === "rate_limit") rateLimited = true;
+    if (result.errorKind === "rate_limit" || result.errorKind === "throttled") rateLimited = true;
     if (!result.uncertain) await release(username, publicReplyKey(c.commentId), true);
     await appendLog(username, {
       kind: "reply",
@@ -699,6 +703,7 @@ export default async (req: Request) => {
 
       // 비공개 답장은 댓글 1건당 1회. 우리가 이미 썼다면 시도 자체를 하지 않는다.
       const replyAvailable = await claimIfNew(username, replyKey, true);
+      if (!replyAvailable) return { kind: "already", reason: "이 댓글의 이전 발송 기록이 있어 중복 발송을 건너뛰었습니다." };
       let lastError = "";
       let lastKind: DmErrorKind = "other";
       /**
@@ -767,7 +772,7 @@ export default async (req: Request) => {
 
       // 아무것도 못 보냈으므로 내용 기록을 지운다 — 나중에 다시 시도할 수 있어야 한다.
       if (lastKind !== "uncertain") await release(username, contentKey, true);
-      if (lastKind === "rate_limit") rateLimited = true;
+      if (lastKind === "rate_limit" || lastKind === "throttled") rateLimited = true;
 
       // 우리가 이미 DM 을 보낸 댓글이고, 지금 막힌 이유가 인스타그램의 1회
       // 제한·24시간 창이라면 이건 새로운 실패가 아니다.
@@ -963,6 +968,8 @@ export default async (req: Request) => {
     message: parts.join(" "),
   });
 };
+
+export default (req: Request) => withDmSendDeadline(() => handleSend(req));
 
 export const config: Config = {
   path: "/api/send-instagram-dm",
