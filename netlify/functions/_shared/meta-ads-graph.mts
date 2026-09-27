@@ -208,6 +208,23 @@ export async function saveAdRecord(username: string, record: MetaAdRecord): Prom
   await store().setJSON(recordsKey(username), next);
 }
 
+/** 기록을 목록에서 뺀다(삭제했거나 메타에서 지워진 광고). */
+export async function removeAdRecords(username: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const drop = new Set(ids);
+  const list = await readAdRecords(username);
+  const next = list.filter((r) => !drop.has(r.id));
+  if (next.length === list.length) return;
+  await store().setJSON(recordsKey(username), next);
+}
+
+/**
+ * 메타에 그 객체가 더는 없다는 오류인지(광고 관리자에서 지웠거나 오래돼 사라진 것).
+ * 권한 오류(10/200)와 섞이면 멀쩡한 광고 기록을 지우게 되므로 '없음' 만 골라낸다.
+ */
+export const isMissingObject = (res: GraphResult): boolean =>
+  !res.ok && res.errorCode === 100 && (res.errorSubcode === 33 || /does not exist|do not exist/i.test(res.error || ""));
+
 /* ------------------------------------------------------------------------------------------ */
 /* 집행 조건 → 메타 파라미터                                                                   */
 /* ------------------------------------------------------------------------------------------ */

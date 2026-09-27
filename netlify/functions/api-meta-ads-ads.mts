@@ -13,7 +13,9 @@ import {
   metaCta,
   placementParams,
   purchaseMetrics,
+  isMissingObject,
   readAdRecords,
+  removeAdRecords,
   resolveGeo,
   saveAdRecord,
   scheduleTimes,
@@ -29,6 +31,8 @@ import {
  *        { action: 'create', draft }      기록을 만들고 첫 단계(캠페인)를 실행한다.
  *        { action: 'continue', id }       다음 단계(광고 세트 → 소재 → 광고)를 실행한다.
  *        { action: 'status', id, status } ACTIVE / PAUSED 로 바꾼다.
+ *        { action: 'resume', id, draft }  멈춘 광고를 고친 설정으로 다시 만든다.
+ *        { action: 'delete', id, removeFromMeta } 기록을 지운다(메타 캠페인도 같이 지울 수 있다).
  *
  * 한 요청에 네 객체를 다 만들지 않는다. 단계마다 메타 호출이 1~3번이라 한 번에 하면
  * 함수 시간 제한에 걸릴 수 있고, 중간에 실패했을 때 어디까지 만들어졌는지 화면이 알 수
@@ -305,20 +309,75 @@ const LIVE_FIELDS =
   "campaign{id,effective_status}," +
   "insights.date_preset(maximum){impressions,clicks,reach,spend,actions,action_values}";
 
-async function liveStatus(token: string, proof: string, records: MetaAdRecord[]) {
-  const ids = records.map((r) => r.adId).filter(Boolean) as string[];
-  const live: Record<string, any> = {};
+const DRAFT_FIELDS = "id,effective_status";
+
+/**
+ * 여러 ID 를 한 번에 읽는다. 그중 하나라도 메타에서 지워졌으면 묶음 전체가 '없음' 으로
+ * 실패하므로, 그때만 하나씩 다시 읽어 지워진 것을 골라낸다.
+ */
+async function readMany(token: string, proof: string, ids: string[], fields: string) {
+  const rows: Record<string, any> = {};
+  const missing: string[] = [];
   const errors: string[] = [];
   for (let i = 0; i < ids.length; i += 50) {
     const batch = ids.slice(i, i + 50);
-    const res = await graphGet("", token, { ids: batch.join(","), fields: LIVE_FIELDS }, proof);
-    if (res.ok) Object.assign(live, res.data || {});
-    else errors.push(res.error || "광고 상태를 불러오지 못했습니다.");
+    const res = await graphGet("", token, { ids: batch.join(","), fields }, proof);
+    if (res.ok) {
+      Object.assign(rows, res.data || {});
+      continue;
+    }
+    if (!isMissingObject(res)) {
+      errors.push(res.error || "광고 상태를 불러오지 못했습니다.");
+      continue;
+    }
+    for (const id of batch) {
+      const one = await graphGet(id, token, { fields }, proof);
+      if (one.ok) rows[id] = one.data;
+      else if (isMissingObject(one)) missing.push(id);
+      else errors.push(one.error || "광고 상태를 불러오지 못했습니다.");
+    }
+  }
+  return { rows, missing, errors };
+}
+
+/**
+ * 기록마다 메타의 지금 상태를 붙인다.
+ *
+ * 광고 관리자에서 지운 광고는 여기서 기록도 지운다 — 메타에는 없는데 이 화면에만 남아
+ * 있으면 브랜드는 지운 광고를 또 찾게 된다. 광고가 DELETED 이거나, 캠페인이 DELETED
+ * 이거나(캠페인을 지우면 아래 광고가 같이 지워진다), 조회 자체가 '없는 객체' 로 돌아오면
+ * 지워진 것으로 본다. 광고까지 못 만든 기록은 만들어 둔 캠페인으로 같은 판단을 한다.
+ */
+async function liveStatus(token: string, proof: string, records: MetaAdRecord[]) {
+  const adIds = records.map((r) => r.adId).filter(Boolean) as string[];
+  const draftCampaignIds = records.filter((r) => !r.adId && r.campaignId).map((r) => r.campaignId!) as string[];
+  const ads = await readMany(token, proof, adIds, LIVE_FIELDS);
+  const drafts = await readMany(token, proof, draftCampaignIds, DRAFT_FIELDS);
+  const errors = [...ads.errors, ...drafts.errors];
+  const live = ads.rows;
+
+  const deleted = new Set<string>();
+  for (const r of records) {
+    if (r.adId) {
+      const row = live[r.adId];
+      if (
+        ads.missing.includes(r.adId) ||
+        row?.effective_status === "DELETED" ||
+        row?.campaign?.effective_status === "DELETED"
+      ) {
+        deleted.add(r.id);
+      }
+    } else if (r.campaignId) {
+      if (drafts.missing.includes(r.campaignId) || drafts.rows[r.campaignId]?.effective_status === "DELETED") {
+        deleted.add(r.id);
+      }
+    }
   }
 
   return {
     errors,
-    ads: records.map((r) => {
+    deleted: [...deleted],
+    ads: records.filter((r) => !deleted.has(r.id)).map((r) => {
       const row = r.adId ? live[r.adId] : null;
       if (!row) {
         return {
@@ -358,66 +417,18 @@ async function liveStatus(token: string, proof: string, records: MetaAdRecord[])
 }
 
 /* ---------------------------------------------------------------------------------------- */
+/* 기록 만들기 · 지우기                                                                      */
+/* ---------------------------------------------------------------------------------------- */
 
-export default async (req: Request, context: Context) => {
-  const username = String(context.params?.username || "")
-    .replace(/^biz\//, "")
-    .toLowerCase()
-    .trim();
-  if (!username) return Response.json({ error: "username은 필수입니다." }, { status: 400 });
+type LinkedAccount = { id: string; currency?: string; businessId?: string };
 
-  const auth = await requireAccountOwner(req, username);
-  if (!auth.ok) return auth.response;
-
-  const stored = await readMetaAdsToken(username);
-  if (!stored.ok) return tokenErrorResponse(stored.reason);
-  const { token, proof } = stored;
-
-  const diagnosis = await readMetaAdsDiagnosis(username);
-  const accounts = diagnosis?.accounts || [];
-
-  if (req.method === "GET") {
-    const account = new URL(req.url).searchParams.get("account") || "";
-    const records = (await readAdRecords(username)).filter((r) => !account || r.adAccountId === account);
-    const { ads, errors } = await liveStatus(token, proof, records);
-    return Response.json({ ads, errors, fetchedAt: new Date().toISOString(), source: "meta_graph_api" });
-  }
-
-  if (req.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
-
-  const body = (await req.json().catch(() => ({}))) as any;
-  const action = String(body?.action || "");
-
-  if (action === "continue" || action === "status") {
-    const record = (await readAdRecords(username)).find((r) => r.id === String(body?.id || ""));
-    if (!record) return Response.json({ error: "광고 기록을 찾지 못했습니다." }, { status: 404 });
-    const account = accounts.find((a) => a.id === record.adAccountId);
-
-    if (action === "continue") {
-      if (record.step === "done") return Response.json({ record });
-      return advance(username, token, proof, record, account?.businessId || "");
-    }
-
-    const status = String(body?.status || "");
-    if (status !== "ACTIVE" && status !== "PAUSED") {
-      return Response.json({ error: "status는 ACTIVE 또는 PAUSED여야 합니다." }, { status: 400 });
-    }
-    // 다시 켤 때는 셋 다 켠다 — 일시중지로 만든 광고는 캠페인·세트·광고가 모두 꺼져 있다.
-    // 끌 때는 캠페인만 꺼도 되지만, 광고 관리자에서 보이는 상태를 맞추려고 같은 순서로 끈다.
-    for (const id of [record.campaignId, record.adSetId, record.adId]) {
-      if (!id) continue;
-      const res = await graphPost(id, token, { status }, proof);
-      if (!res.ok) return graphErrorResponse(res, "광고 상태를 바꾸지 못했습니다.");
-    }
-    return Response.json({ ok: true });
-  }
-
-  if (action !== "create") return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
-
-  const draft = (body?.draft || {}) as Draft;
-  const account = accounts.find((a) => a.id === draft.adAccountId);
-  if (!account) return Response.json({ error: "연동된 광고 계정을 골라 주세요." }, { status: 400 });
-
+/** 화면이 보낸 설정을 검증해 새 기록으로 만든다. 문제가 있으면 오류 응답을 돌려준다. */
+async function buildRecord(
+  draft: Draft,
+  account: LinkedAccount,
+  token: string,
+  proof: string,
+): Promise<MetaAdRecord | Response> {
   const source = draft.source === "partnership" ? "partnership" : "own";
   const objective =
     source === "partnership"
@@ -492,6 +503,127 @@ export default async (req: Request, context: Context) => {
     placements: Array.isArray(draft.placements) ? draft.placements.map(String).slice(0, 10) : [],
   };
 
+  return record;
+}
+
+/** 메타 캠페인을 지운다. 이미 없으면 지운 것으로 본다. 실패하면 오류 응답을 돌려준다. */
+async function deleteCampaign(token: string, proof: string, campaignId: string): Promise<Response | null> {
+  const res = await graphPost(campaignId, token, { status: "DELETED" }, proof);
+  if (res.ok || isMissingObject(res)) return null;
+  return graphErrorResponse(res, "Meta에서 캠페인을 지우지 못했습니다.");
+}
+
+/* ---------------------------------------------------------------------------------------- */
+
+export default async (req: Request, context: Context) => {
+  const username = String(context.params?.username || "")
+    .replace(/^biz\//, "")
+    .toLowerCase()
+    .trim();
+  if (!username) return Response.json({ error: "username은 필수입니다." }, { status: 400 });
+
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
+
+  const stored = await readMetaAdsToken(username);
+  if (!stored.ok) return tokenErrorResponse(stored.reason);
+  const { token, proof } = stored;
+
+  const diagnosis = await readMetaAdsDiagnosis(username);
+  const accounts = diagnosis?.accounts || [];
+
+  if (req.method === "GET") {
+    const account = new URL(req.url).searchParams.get("account") || "";
+    const records = (await readAdRecords(username)).filter((r) => !account || r.adAccountId === account);
+    const { ads, errors, deleted } = await liveStatus(token, proof, records);
+    await removeAdRecords(username, deleted);
+    return Response.json({ ads, errors, fetchedAt: new Date().toISOString(), source: "meta_graph_api" });
+  }
+
+  if (req.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+
+  const body = (await req.json().catch(() => ({}))) as any;
+  const action = String(body?.action || "");
+
+  if (action === "continue" || action === "status" || action === "resume" || action === "delete") {
+    const record = (await readAdRecords(username)).find((r) => r.id === String(body?.id || ""));
+    if (!record) return Response.json({ error: "광고 기록을 찾지 못했습니다." }, { status: 404 });
+    const account = accounts.find((a) => a.id === record.adAccountId);
+
+    if (action === "continue") {
+      if (record.step === "done") return Response.json({ record });
+      return advance(username, token, proof, record, account?.businessId || "");
+    }
+
+    if (action === "delete") {
+      // 캠페인을 지우면 그 아래 광고 세트·광고도 메타가 같이 지운다. 이미 메타에서 지워진
+      // 캠페인이면 그대로 기록만 지운다.
+      if (body?.removeFromMeta !== false && record.campaignId) {
+        const res = await deleteCampaign(token, proof, record.campaignId);
+        if (res) return res;
+      }
+      await removeAdRecords(username, [record.id]);
+      return Response.json({ ok: true });
+    }
+
+    if (action === "resume") {
+      if (record.step === "done") return Response.json({ error: "이미 다 만들어진 광고입니다." }, { status: 400 });
+      if (!account) return Response.json({ error: "이 광고의 광고 계정이 연동되어 있지 않습니다." }, { status: 400 });
+      // 소재의 출처(이력의 어느 게시물인지)는 기록에 있는 값을 그대로 잇는다. 고칠 수 있는
+      // 것은 창에 보이는 설정(문구·페이지·예산·기간·타겟·노출 위치)뿐이다.
+      const draft: Draft = {
+        campaignTitle: record.campaignTitle,
+        collabId: record.collabId,
+        campaignRef: record.campaignRef,
+        creatorHandle: record.creatorHandle,
+        partnershipCode: record.partnershipCode,
+        thumbnailUrl: record.thumbnailUrl,
+        ...((body?.draft || {}) as Draft),
+        source: record.source,
+        adAccountId: record.adAccountId,
+      };
+      // 직접 올린 소재는 광고 계정에 이미 올라가 있다. 파일을 바꾸지 않았으면 그대로 쓴다.
+      if (record.source === "own" && !draft.imageHash) {
+        draft.imageHash = record.imageHash;
+        draft.videoId = record.videoId;
+        draft.creativeKind = record.creativeKind;
+      }
+      const built = await buildRecord(draft, account, token, proof);
+      if (built instanceof Response) return built;
+      // 멈춘 기록에 이미 만들어 둔 캠페인·세트는 옛 설정으로 만든 것이다. 고친 설정이
+      // 빠짐없이 들어가도록 지우고 캠페인부터 다시 만든다 — 남겨 두면 광고 계정에 빈
+      // 캠페인이 쌓인다.
+      if (record.campaignId) {
+        const res = await deleteCampaign(token, proof, record.campaignId);
+        if (res) return res;
+      }
+      built.id = record.id;
+      built.createdAt = record.createdAt;
+      return advance(username, token, proof, built, account.businessId || "");
+    }
+
+    const status = String(body?.status || "");
+    if (status !== "ACTIVE" && status !== "PAUSED") {
+      return Response.json({ error: "status는 ACTIVE 또는 PAUSED여야 합니다." }, { status: 400 });
+    }
+    // 다시 켤 때는 셋 다 켠다 — 일시중지로 만든 광고는 캠페인·세트·광고가 모두 꺼져 있다.
+    // 끌 때는 캠페인만 꺼도 되지만, 광고 관리자에서 보이는 상태를 맞추려고 같은 순서로 끈다.
+    for (const id of [record.campaignId, record.adSetId, record.adId]) {
+      if (!id) continue;
+      const res = await graphPost(id, token, { status }, proof);
+      if (!res.ok) return graphErrorResponse(res, "광고 상태를 바꾸지 못했습니다.");
+    }
+    return Response.json({ ok: true });
+  }
+
+  if (action !== "create") return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
+
+  const draft = (body?.draft || {}) as Draft;
+  const account = accounts.find((a) => a.id === draft.adAccountId);
+  if (!account) return Response.json({ error: "연동된 광고 계정을 골라 주세요." }, { status: 400 });
+
+  const record = await buildRecord(draft, account, token, proof);
+  if (record instanceof Response) return record;
   return advance(username, token, proof, record, account.businessId || "");
 };
 

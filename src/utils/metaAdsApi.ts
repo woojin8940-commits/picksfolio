@@ -377,6 +377,24 @@ export const continueMetaAd = (username: string, id: string) =>
     body: JSON.stringify({ action: 'continue', id }),
   }) as Promise<StepResult>;
 
+/**
+ * 멈춘 광고를 고친 설정으로 다시 만든다. 서버가 기록에 남은 캠페인을 지우고 캠페인부터
+ * 다시 만들어 첫 단계 결과를 돌려준다 — 남은 단계는 runRemainingSteps 로 잇는다.
+ * 직접 올린 소재는 파일을 바꾸지 않았으면 imageHash 를 비워 보낸다(기록의 소재를 쓴다).
+ */
+export const resumeMetaAd = (username: string, id: string, draft: Partial<MetaAdDraft>) =>
+  call<{ record: MetaAdRecord }>(username, adsPath(username), {
+    method: 'POST',
+    body: JSON.stringify({ action: 'resume', id, draft }),
+  }) as Promise<StepResult>;
+
+/** 광고 기록을 지운다. removeFromMeta 면 메타 캠페인(아래 세트·광고 포함)도 지운다. */
+export const deleteMetaAd = (username: string, id: string, removeFromMeta: boolean) =>
+  call<{ ok: boolean }>(username, adsPath(username), {
+    method: 'POST',
+    body: JSON.stringify({ action: 'delete', id, removeFromMeta }),
+  });
+
 export const setMetaAdStatus = (username: string, id: string, status: 'ACTIVE' | 'PAUSED') =>
   call<{ ok: boolean }>(username, adsPath(username), {
     method: 'POST',

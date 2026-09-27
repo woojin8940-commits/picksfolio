@@ -4,11 +4,12 @@ import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import { useMetaPages } from '../hooks/useMetaPages';
 import { formatKoreanWon } from '../utils/formatters';
-import { MetaAdRecord, createMetaAd, notifyMetaAdsChanged, runRemainingSteps } from '../utils/metaAdsApi';
+import { MetaAdRecord, createMetaAd, notifyMetaAdsChanged, resumeMetaAd, runRemainingSteps } from '../utils/metaAdsApi';
 import { AdDeliveryFields, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
 import MetaAdProgress from './MetaAdProgress';
 import MetaPagePicker from './MetaPagePicker';
 import StartPausedToggle from './StartPausedToggle';
+import ResumeNotice from './MetaAdResumeNotice';
 
 /**
  * 콘텐츠 부스팅 창 — 이력에서 고른 게시물을 광고로 돌리는 설정.
@@ -52,6 +53,11 @@ interface AdBoostModalProps {
   onSubmitted?: (record: MetaAdRecord) => void;
   /** 성공 화면에서 광고 현황으로 넘어갈 수 있으면 넘겨준다. */
   onViewAdStatus?: () => void;
+  /**
+   * 중간 단계에서 멈춘 부스팅 광고(광고 현황의 '이어서 만들기'). 넘기면 그 광고의 설정을
+   * 채운 채로 열리고, 고친 설정으로 다시 만든다. 광고 계정은 그 광고의 계정으로 고정한다.
+   */
+  resume?: MetaAdRecord | null;
 }
 
 const AdBoostModal: React.FC<AdBoostModalProps> = ({
@@ -66,15 +72,23 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   thumbnailUrl,
   onSubmitted,
   onViewAdStatus,
+  resume: resumeProp,
 }) => {
   // 예산 · 기간 · 타겟 · 노출 위치는 '새 광고 만들기' 창과 같은 값·같은 검증을 쓴다.
   const delivery = useAdDelivery();
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
-  const [startPaused, setStartPaused] = useState(false);
+  const [startPaused, setStartPaused] = useState(resumeProp?.initialStatus === 'PAUSED');
   const [phase, setPhase] = useState<'form' | 'running'>('form');
   const [record, setRecord] = useState<MetaAdRecord | null>(null);
+  /**
+   * 이어서 만드는 광고. 광고 현황에서 넘긴 멈춘 광고이거나, 이 창에서 만들다 멈춘 뒤
+   * '설정 고치기' 를 누른 기록이다. 어느 쪽이든 고친 설정으로 다시 만든다(같은 값으로
+   * 다시 시도만 하면 같은 자리에서 또 멈춘다).
+   */
+  const [fixing, setFixing] = useState(false);
+  const resume = resumeProp || (fixing && record && record.step !== 'done' ? record : null);
   const [runError, setRunError] = useState('');
 
   // 광고 현황에서 연동·선택한 계정을 그대로 읽는다. 이 창에서 따로 연동하지는 않는다 —
@@ -91,17 +105,27 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   useEffect(() => {
     if (!open) return;
     setAdAccountId((prev) => {
+      if (resume) return resume.adAccountId;
       if (prev && accounts.some((a) => a.id === prev)) return prev;
       return currentAccount?.id || accounts[0]?.id || '';
     });
-  }, [open, accounts, currentAccount]);
+  }, [open, accounts, currentAccount, resume]);
 
   useCloseOnBack(open, onClose);
 
   /** 이 요청이 들어갈 계정. 성공 화면에서 어느 계정으로 갔는지 같이 적는다. */
   const selectedAccount = accounts.find((a) => a.id === adAccountId) || null;
   const pagesState = useMetaPages(businessUsername, open && connected);
-  const page = pagesState.page;
+  // 이어서 만들 때는 그 광고가 쓰던 페이지가 기본이고, 여기서 고른 값은 이 창에만 둔다.
+  const [resumePageId, setResumePageId] = useState(resumeProp?.pageId || '');
+  const page = (resume && pagesState.pages.find((p) => p.id === resumePageId)) || pagesState.page;
+  const selectPage = resume ? setResumePageId : pagesState.selectPage;
+
+  // 멈춘 광고의 예산·기간·타겟·노출 위치를 한 번 채운다.
+  useEffect(() => {
+    if (resume) delivery.fill(resume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume?.id]);
 
   const runSteps = async (from: MetaAdRecord) => {
     setRunError('');
@@ -134,19 +158,25 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     setSubmitting(true);
     setPhase('running');
 
-    const created = await createMetaAd(businessUsername, {
-      source: 'partnership',
-      adAccountId: selectedAccount.id,
-      pageId: page.id,
-      initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
-      campaignTitle,
-      campaignRef: campaignId,
-      collabId,
-      creatorHandle,
-      partnershipCode,
-      thumbnailUrl: /^https:\/\//.test(thumbnailUrl) ? thumbnailUrl : '',
-      ...delivery.payload(),
-    });
+    const created = resume
+      ? await resumeMetaAd(businessUsername, resume.id, {
+          pageId: page.id,
+          initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
+          ...delivery.payload(),
+        })
+      : await createMetaAd(businessUsername, {
+          source: 'partnership',
+          adAccountId: selectedAccount.id,
+          pageId: page.id,
+          initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
+          campaignTitle,
+          campaignRef: campaignId,
+          collabId,
+          creatorHandle,
+          partnershipCode,
+          thumbnailUrl: /^https:\/\//.test(thumbnailUrl) ? thumbnailUrl : '',
+          ...delivery.payload(),
+        });
     if (!created.ok) {
       if (created.record) {
         setRecord(created.record);
@@ -172,9 +202,9 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
       <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] modal-maxh-90 flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <div>
-            <p className="text-sm font-black text-slate-900">메타 광고로 부스팅</p>
+            <p className="text-sm font-black text-slate-900">{resume ? '멈춘 광고 이어서 만들기' : '메타 광고로 부스팅'}</p>
             <p className="text-[11px] text-slate-400 font-bold mt-0.5">
-              이력에서 고른 게시물을 그대로 광고 소재로 씁니다
+              {resume ? '설정을 확인하고 고친 뒤 다시 만듭니다' : '이력에서 고른 게시물을 그대로 광고 소재로 씁니다'}
             </p>
           </div>
           <button
@@ -243,10 +273,10 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   {record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
                 </button>
               )}
-              {runError && !submitting && !record && (
+              {runError && !submitting && (
                 <button
                   type="button"
-                  onClick={() => { setPhase('form'); setRunError(''); }}
+                  onClick={() => { setPhase('form'); setRunError(''); if (record) setFixing(true); }}
                   className="w-full py-3 rounded-xl border border-slate-200 text-slate-600 text-[12px] font-black hover:bg-slate-50 transition-colors"
                 >
                   설정 고치기
@@ -274,6 +304,8 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
         ) : (
           <>
             <div className="overflow-y-auto px-5 py-4 space-y-5">
+              {resume && <ResumeNotice record={resume} />}
+
               {/* 무엇을, 누구 이름으로 돌리는지. 고르는 항목이 아니라 확인용이다. */}
               <div className="flex items-center gap-3 bg-slate-50 rounded-2xl p-3">
                 {thumbnailUrl ? (
@@ -319,7 +351,8 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                         id="boost-ad-account"
                         value={adAccountId}
                         onChange={(e) => setAdAccountId(e.target.value)}
-                        className={selectCls}
+                        disabled={!!resume}
+                        className={`${selectCls} disabled:bg-slate-50 disabled:text-slate-500`}
                       >
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>
@@ -353,7 +386,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   <MetaPagePicker
                     pages={pagesState.pages}
                     selectedId={page?.id}
-                    onSelect={pagesState.selectPage}
+                    onSelect={selectPage}
                     loading={pagesState.loading}
                     error={pagesState.error}
                     onRetry={pagesState.refresh}
@@ -378,10 +411,12 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 className="w-full py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                {submitting ? '집행 중' : '집행하기'}
+                {submitting ? '집행 중' : resume ? '이 설정으로 이어서 만들기' : '집행하기'}
               </button>
               <p className="text-[10px] text-slate-400 font-medium mt-2 text-center leading-relaxed">
-                {startPaused
+                {resume
+                  ? '멈출 때까지 만들어 둔 캠페인은 지우고, 이 설정으로 캠페인부터 다시 만듭니다.'
+                  : startPaused
                   ? 'Meta에 캠페인·광고 세트·소재·광고를 일시중지 상태로 만듭니다(과금 없음).'
                   : 'Meta에 캠페인·광고 세트·소재·광고가 바로 만들어지고, Meta 검토 후 노출·과금이 시작됩니다.'}
               </p>

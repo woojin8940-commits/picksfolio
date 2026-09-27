@@ -106,7 +106,31 @@ export const useAdDelivery = () => {
     placements: placementMode === 'manual' ? placements : [],
   });
 
+  /**
+   * 멈춘 광고를 이어서 만들 때, 그 광고에 저장된 조건으로 채운다. 지난 시작일이 이미
+   * 지났으면 오늘로 당긴다 — 메타는 과거 시작 시각으로 광고 세트를 만들지 않는다.
+   */
+  const fill = (v: {
+    budgetKrw: number;
+    startDate: string;
+    endDate: string;
+    ageBands: string[];
+    regions: string[];
+    placementMode: 'auto' | 'manual';
+    placements: string[];
+  }) => {
+    const today = todayInSeoul();
+    setBudget(v.budgetKrw > 0 ? formatNumberWithCommas(String(v.budgetKrw)) : '');
+    setStartDate(v.startDate && v.startDate >= today ? v.startDate : today);
+    setEndDate(v.endDate && v.endDate >= today ? v.endDate : dateAfter(14));
+    setAgeBands(v.ageBands || []);
+    setRegions(v.regions || []);
+    setPlacementMode(v.placementMode === 'manual' ? 'manual' : 'auto');
+    setPlacements((v.placements || []) as AdPlacement[]);
+  };
+
   return {
+    fill,
     budget, setBudget,
     startDate, setStartDate,
     endDate, setEndDate,
