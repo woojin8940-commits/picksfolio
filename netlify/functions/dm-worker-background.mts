@@ -18,7 +18,12 @@ export default async (req: Request) => {
   let heartbeat: Promise<void> | undefined;
   const timer = setInterval(() => {
     if (heartbeat) return;
-    heartbeat = renewWorker(context, false).catch(() => { context.lost = true; }).finally(() => { heartbeat = undefined; });
+    // 실제로 선점을 잃었으면 renewWorker 가 context.lost 를 세운다. 일시적인 연결
+    // 오류까지 선점 상실로 보면 한 번의 지연으로 작업자가 통째로 멈춘다 — 선점은
+    // 90초라 다음 갱신에서 회복되고, 발송 직전에는 매번 선점을 다시 확인한다.
+    heartbeat = renewWorker(context, false)
+      .catch((e) => console.warn("[dm-worker] heartbeat failed:", (e as Error)?.message))
+      .finally(() => { heartbeat = undefined; });
   }, 20_000);
   const deadline = Date.now() + 12 * 60_000;
   let failed = false;

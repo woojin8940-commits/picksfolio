@@ -99,6 +99,17 @@ async function blockReason(job: DmScheduledJob, settings: DmSettings | null): Pr
 
 const SEND_SPACING_MS = 400;
 
+/**
+ * 연결된 사용자를 찾지 못한 댓글 이벤트를 다시 확인하는 횟수.
+ *
+ * 연동 직후에는 역인덱스가 아직 비어 있을 수 있어 몇 번은 다시 본다. 주인을 못
+ * 찾은 결과는 10분 동안 캐시되므로(dm-webhook-index) 그 뒤에 한 번 더 확인되도록
+ * 1·2·4·8분 간격으로 5회까지만 본다. 그 이후는 연동이 해제된 계정의 이벤트로
+ * 보고 조용히 종료한다 — 6시간 동안 12번 재시도하며 운영 화면의 "확인할 작업"을
+ * 채우던 문제가 있었다.
+ */
+const ACCOUNT_LOOKUP_ATTEMPTS = 5;
+
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function retryDelay(attempts: number): number {
@@ -457,6 +468,8 @@ async function processQueuedComment(job: DmJob): Promise<boolean> {
     });
     if (result.uncertain) {
       await completeDmJob(job, "uncertain", result.error, result.errorKind);
+    } else if (result.retryable && result.errorKind === "account_lookup" && job.attempts >= ACCOUNT_LOOKUP_ATTEMPTS) {
+      await completeDmJob(job, "canceled", result.error, result.errorKind, undefined, "unlinked");
     } else if (result.retryable) {
       const commentAt = Number(payload.entryTime) > 0
         ? Number(payload.entryTime) * 1000

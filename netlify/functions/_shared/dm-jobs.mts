@@ -166,7 +166,7 @@ async function updateClaimedJob(
 
 export async function completeDmJob(
   job: DmJob,
-  status: "sent" | "failed" | "uncertain",
+  status: "sent" | "failed" | "uncertain" | "canceled",
   error?: string,
   errorKind?: string,
   messageId?: string,
