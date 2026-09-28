@@ -452,8 +452,14 @@ async function buildRecord(
   if (invalid) return Response.json({ error: invalid }, { status: 400 });
 
   // 페이지는 이 사람이 실제로 접근할 수 있는지 메타에 물어보고, 이름과 연결된 인스타그램
-  // 계정을 함께 받는다(화면이 보낸 이름은 쓰지 않는다).
-  const page = await graphGet(pageId, token, { fields: "id,name,instagram_business_account{id}" }, proof);
+  // 계정을 함께 받는다(화면이 보낸 이름은 쓰지 않는다). 로케일을 두지 않으면 한글 페이지
+  // 이름이 영문 표기로 돌아오므로 비즈니스 스위트와 같은 이름을 받게 ko_KR 로 묻는다.
+  const page = await graphGet(
+    pageId,
+    token,
+    { fields: "id,name,instagram_business_account{id}", locale: "ko_KR" },
+    proof,
+  );
   if (!page.ok) return graphErrorResponse(page, "이 페이지에 접근할 수 없습니다.", 400);
 
   const thumbnail = String(draft.thumbnailUrl || "");

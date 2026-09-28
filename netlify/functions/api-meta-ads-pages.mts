@@ -4,6 +4,12 @@ import { readMetaAdsToken, tokenErrorResponse } from "./_shared/meta-ads.mts";
 import { graphErrorResponse, graphGet } from "./_shared/meta-ads-graph.mts";
 
 /**
+ * 서버에서 부르는 그래프 API 는 기본 로케일이 영어라, 한글 이름 페이지(예: 픽스폴리오)를
+ * 메타가 영문 표기로 바꿔 돌려준다. 비즈니스 스위트에 보이는 이름 그대로 받도록 고정한다.
+ */
+const PAGE_LOCALE = "ko_KR";
+
+/**
  * 연동한 Meta 계정이 관리하는 페이스북 페이지와, 그 페이지 게시물의 반응.
  *
  *   GET /api/meta-ads/pages/:username
@@ -39,6 +45,7 @@ export default async (req: Request, context: Context) => {
       {
         fields: "id,name,category,link,fan_count,followers_count,picture{url},instagram_business_account{id,username},tasks",
         limit: 100,
+        locale: PAGE_LOCALE,
       },
       proof,
     );
@@ -74,7 +81,10 @@ export default async (req: Request, context: Context) => {
   }
 
   const [pageRes, postsRes] = await Promise.all([
-    graphGet(pageId, pageToken, { fields: "id,name,link,fan_count,followers_count,picture{url}" }),
+    graphGet(pageId, pageToken, {
+      fields: "id,name,link,fan_count,followers_count,picture{url}",
+      locale: PAGE_LOCALE,
+    }),
     graphGet(`${pageId}/posts`, pageToken, {
       fields:
         "id,message,created_time,permalink_url,full_picture," +
