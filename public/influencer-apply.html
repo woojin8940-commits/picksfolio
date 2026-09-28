@@ -144,17 +144,38 @@
                 btn.disabled = true;
                 btn.textContent = '제출 중...';
 
-                // /influencer-apply 는 SPA catch-all 보다 먼저 이 정적 파일로 연결되지만,
-                // 폼 처리는 정적 파일 경로로 직접 보내야 확실하게 Netlify Forms 에 도달한다.
+                var data = new FormData(form);
+                var payload = {
+                    name: data.get('name'),
+                    phone: data.get('phone'),
+                    instagram: data.get('instagram'),
+                    privacy_consent: data.get('privacy_consent'),
+                    'bot-field': data.get('bot-field')
+                };
+
+                // 지원서는 DB 에 저장해 운영 콘솔 "인플루언서 지원자" 탭에서 본다.
+                // Netlify Forms 로도 한 벌 보내 두면 제출 알림 이메일을 받을 수 있다 —
+                // 알림은 부가 기능이라 그쪽 실패는 지원 결과에 반영하지 않는다.
                 fetch('/influencer-apply.html', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams(new FormData(form)).toString()
+                    body: new URLSearchParams(data).toString()
+                }).catch(function () {});
+
+                fetch('/api/influencer-applications', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 }).then(function (res) {
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    if (!res.ok) {
+                        return res.json().catch(function () { return {}; }).then(function (j) {
+                            throw new Error(j && j.error || '');
+                        });
+                    }
                     form.style.display = 'none';
                     done.style.display = 'block';
-                }).catch(function () {
+                }).catch(function (e) {
+                    err.textContent = (e && e.message) || '제출에 실패했습니다. 잠시 후 다시 시도해주세요.';
                     err.style.display = 'block';
                     btn.disabled = false;
                     btn.textContent = '지원하기';

@@ -17,6 +17,7 @@ import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import AdminInfluencerDatabase from './admin/AdminInfluencerDatabase';
 import AdminManagerAccounts from './admin/AdminManagerAccounts';
 import AdminDmQueue from './admin/AdminDmQueue';
+import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import { isTestProposal } from '../utils/testData';
 
 /**
@@ -27,7 +28,7 @@ import { isTestProposal } from '../utils/testData';
  *
  *   현황     — 전체 현황 (하루를 여기서 시작한다)
  *   캠페인   — 승인 → 리스트업 → 캠페인 관리 (돈이 흐르는 순서 그대로)
- *   인플루언서 — 인플루언서 DB, 브랜드 매칭 지원자
+ *   인플루언서 — 인플루언서 DB, 브랜드 매칭 지원자, 인플루언서 지원자(광고 모집)
  *   운영     — 회원 관리, 담당자 계정, 정산·매출
  *
  * 준비중이거나 다른 탭과 겹치던 화면(라이브 운영·라이브 승인·제안 워크플로·
@@ -42,6 +43,7 @@ type OperatorTab =
   | 'collabs'
   | 'influencerdb'
   | 'directory'
+  | 'applicants'
   | 'users'
   | 'managers'
   | 'dmqueue'
@@ -287,6 +289,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       tabs: [
         { key: 'influencerdb', label: '인플루언서 DB' },
         { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
+        { key: 'applicants', label: '인플루언서 지원자' },
       ],
     },
     {
@@ -760,6 +763,21 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                   body="브랜드 매칭 받기에 지원한 인플루언서를 지원자가 직접 고른 분야별로, 그리고 팔로워 구간별로 확인합니다. 팔로워 많은 순과 인사이트(조회율·반응률·릴스 동향) 좋은 순으로 정렬을 바꿔 볼 수 있고, 연결된 Instagram Meta 계정에서 팔로워·팔로잉과 최근 릴스 성과를 갱신해 검토할 수 있습니다."
                 />
                 <AdminCollabDirectory token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />
+        )}
+
+        {/* 인플루언서 지원자 (광고 모집 설문) */}
+        {activeTab === 'applicants' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="인플루언서 지원자 · 광고 모집 설문"
+                  body="광고로 연결되는 지원 페이지(/influencer-apply)에 남겨진 성함 · 연락처 · 인스타그램 프로필입니다. 직접 연락한 뒤 상태를 '연락함' 또는 '완료'로 바꾸고 통화 메모를 남겨 두면, 아직 연락하지 못한 지원자만 추려 볼 수 있습니다."
+                />
+                <AdminInfluencerApplications token={adminToken} />
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />

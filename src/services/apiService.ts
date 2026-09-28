@@ -2892,6 +2892,43 @@ export const apiService = {
   },
 
   /** 담당자 목록(운영자). */
+  // 광고로 모집한 인플루언서 지원서(/influencer-apply). 운영자 전용.
+  async getInfluencerApplications(token?: string): Promise<{ applications?: any[]; error?: string }> {
+    try {
+      const res = await fetch('/api/influencer-applications', {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { applications: [], error: json?.error || '지원자 목록을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get influencer applications:', e);
+      return { applications: [], error: '네트워크 오류' };
+    }
+  },
+
+  async updateInfluencerApplication(
+    id: number,
+    patch: { status?: string; memo?: string },
+    token?: string,
+  ): Promise<{ application?: any; error?: string }> {
+    try {
+      const res = await fetch('/api/influencer-applications', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ id, ...patch }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '지원서를 저장하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to update influencer application:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getManagers(token?: string): Promise<{ managers?: any[]; error?: string }> {
     try {
       const res = await fetch('/api/managers', {
