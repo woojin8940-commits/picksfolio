@@ -1931,8 +1931,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               </section>
 
               {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 기본 버튼 / 커스텀 버튼.
-                  기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버)은 주소만 넣으면 나온다.
-                  로고·디자인은 플랫폼이 정해 두고, 이름은 바꿀 수 있다 —
+                  기본 버튼(카카오톡 · 유튜브 · 네이버 · 쓰레드 · 틱톡 · 메일)은 주소만 넣으면
+                  로고 아이콘으로 나온다. 로고·디자인은 플랫폼이 정해 두고, 이름은 바꿀 수 있다 —
                   utils/pageButtons.ts 와 components/PlatformLogo.tsx 주석 참고. */}
               <section className="space-y-3 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -2014,24 +2014,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       </button>
                     </div>
                     <input
-                      type="text"
                       value={socials[def.key] || ''}
+                      type={def.key === 'mail' ? 'email' : 'text'}
                       onChange={(e) => setSocials({ ...socials, [def.key]: e.target.value })}
                       className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
                       placeholder={def.placeholder}
                     />
                     <p className="text-[10px] font-bold text-slate-400">
-                      위쪽 이름을 눌러 고칠 수 있어요 — 예: {def.key === 'kakao' ? '공동구매 오픈챗' : `${def.label} 채널`}
+                      개인페이지에는 로고만 보여요. 위쪽 이름은 로고에 마우스를 올렸을 때 나타나요.
                     </p>
-                    <ButtonColorRow
-                      name={socials[buttonLabelKey(def.key)] || def.label}
-                      bg={socials[buttonBgKey(def.key)]}
-                      text={socials[buttonTextKey(def.key)]}
-                      bgFallback={themeIsLight ? '#FFFFFF' : '#2A2A38'}
-                      textFallback={themeIsLight ? '#1E1E2E' : '#FFFFFF'}
-                      onBg={(hex) => setSocials({ ...socials, [buttonBgKey(def.key)]: hex || '' })}
-                      onText={(hex) => setSocials({ ...socials, [buttonTextKey(def.key)]: hex || '' })}
-                    />
                   </div>
                 ))}
 

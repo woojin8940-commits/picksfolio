@@ -93,7 +93,8 @@ const optionalHttpUrl = (raw: unknown): string | null => {
   const value = String(raw ?? "").trim();
   if (!value) return "";
   try {
-    const parsed = new URL(value);
+    // 선택 항목이라 `coupang.com/...` 처럼 https:// 없이 적어도 받아 준다.
+    const parsed = new URL(/^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`);
     return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
   } catch {
     return null;
