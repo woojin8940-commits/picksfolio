@@ -344,8 +344,8 @@ async function readMany(token: string, proof: string, ids: string[], fields: str
  * 기록마다 메타의 지금 상태를 붙인다.
  *
  * 광고 관리자에서 지운 광고는 여기서 기록도 지운다 — 메타에는 없는데 이 화면에만 남아
- * 있으면 브랜드는 지운 광고를 또 찾게 된다. 광고가 DELETED 이거나, 캠페인이 DELETED
- * 이거나(캠페인을 지우면 아래 광고가 같이 지워진다), 조회 자체가 '없는 객체' 로 돌아오면
+ * 있으면 브랜드는 지운 광고를 또 찾게 된다. 광고가 DELETED 이거나, 광고 세트·캠페인이
+ * DELETED 이거나(위를 지우면 아래 광고가 같이 지워진다), 조회 자체가 '없는 객체' 로 돌아오면
  * 지워진 것으로 본다. 광고까지 못 만든 기록은 만들어 둔 캠페인으로 같은 판단을 한다.
  */
 async function liveStatus(token: string, proof: string, records: MetaAdRecord[]) {
@@ -363,6 +363,8 @@ async function liveStatus(token: string, proof: string, records: MetaAdRecord[])
       if (
         ads.missing.includes(r.adId) ||
         row?.effective_status === "DELETED" ||
+        row?.configured_status === "DELETED" ||
+        row?.adset?.effective_status === "DELETED" ||
         row?.campaign?.effective_status === "DELETED"
       ) {
         deleted.add(r.id);

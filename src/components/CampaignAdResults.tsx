@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { formatNumberWithCommas } from '../utils/formatters';
 import {
@@ -59,6 +60,10 @@ const CampaignAdResults: React.FC<CampaignAdResultsProps> = ({ username, account
     void load();
     return subscribeMetaAds(() => void load());
   }, [load]);
+
+  // 광고 관리자에서 지운 광고가 여기서도 빠지도록, 창으로 돌아오면(그리고 1분마다) 다시 읽는다.
+  // 첫 조회는 위에서 하므로 폴링은 한 주기 뒤에 시작한다.
+  useVisiblePolling(() => load(), 60_000, !!accountId, accountId, 60_000);
 
   if (!accountId) return null;
 

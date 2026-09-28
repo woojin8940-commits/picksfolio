@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Settings2, Trash2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { ctaLabel, findObjective, placementSummary, targetSummary } from '../utils/adBoosts';
@@ -692,6 +693,10 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
     void loadAds();
     return subscribeMetaAds(() => void loadAds());
   }, [loadAds]);
+
+  // 광고 관리자에서 지운 광고가 여기서도 빠지도록, 창으로 돌아오면(그리고 1분마다) 다시 읽는다.
+  // 첫 조회는 위에서 하므로 폴링은 한 주기 뒤에 시작한다.
+  useVisiblePolling(() => loadAds(), 60_000, connected && !!accountId, accountId, 60_000);
 
   const toggleAd = async (ad: AdItem, next: 'ACTIVE' | 'PAUSED') => {
     setBusyId(ad.id);

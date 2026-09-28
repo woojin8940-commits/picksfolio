@@ -120,12 +120,16 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   const delivery = useAdDelivery();
   const pagesState = useMetaPages(username, open && !!account);
   /**
-   * 이어서 만들 때는 그 광고가 쓰던 페이지를 기본으로 둔다. 여기서 고른 값은 이 창에만
-   * 둔다 — 광고 현황·이력이 같이 보는 '고른 페이지' 를 멈춘 광고 하나 때문에 바꾸지 않는다.
+   * 광고 페이지는 이 창에서 직접 고른다. 페이지 게시물 참여·광고 현황에서 고른 페이지를
+   * 끌어오지 않는다 — 창을 열 때마다 비어 있고(이어서 만들 때만 그 광고가 쓰던 페이지),
+   * 여기서 고른 값도 이 창에만 둔다.
    */
-  const [resumePageId, setResumePageId] = useState(resumeProp?.pageId || '');
-  const page = (resume && pagesState.pages.find((p) => p.id === resumePageId)) || pagesState.page;
-  const selectPage = resume ? setResumePageId : pagesState.selectPage;
+  const [pageId, setPageId] = useState(resumeProp?.pageId || '');
+  useEffect(() => {
+    if (open) setPageId(resumeProp?.pageId || '');
+  }, [open, resumeProp?.pageId]);
+  const page = pagesState.pages.find((p) => p.id === pageId && (p.canAdvertise || p.id === resumeProp?.pageId)) || null;
+  const selectPage = setPageId;
 
   // 멈춘 광고의 예산·기간·타겟·노출 위치를 한 번 채운다.
   useEffect(() => {

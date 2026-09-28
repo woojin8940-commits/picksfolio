@@ -116,10 +116,17 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   /** 이 요청이 들어갈 계정. 성공 화면에서 어느 계정으로 갔는지 같이 적는다. */
   const selectedAccount = accounts.find((a) => a.id === adAccountId) || null;
   const pagesState = useMetaPages(businessUsername, open && connected);
-  // 이어서 만들 때는 그 광고가 쓰던 페이지가 기본이고, 여기서 고른 값은 이 창에만 둔다.
-  const [resumePageId, setResumePageId] = useState(resumeProp?.pageId || '');
-  const page = (resume && pagesState.pages.find((p) => p.id === resumePageId)) || pagesState.page;
-  const selectPage = resume ? setResumePageId : pagesState.selectPage;
+  /**
+   * 광고 페이지는 이 창에서 직접 고른다. 페이지 게시물 참여·광고 현황에서 고른 페이지를
+   * 끌어오지 않는다 — 창을 열 때마다 비어 있고(이어서 만들 때만 그 광고가 쓰던 페이지),
+   * 여기서 고른 값도 이 창에만 둔다.
+   */
+  const [pageId, setPageId] = useState(resumeProp?.pageId || '');
+  useEffect(() => {
+    if (open) setPageId(resumeProp?.pageId || '');
+  }, [open, resumeProp?.pageId]);
+  const page = pagesState.pages.find((p) => p.id === pageId && (p.canAdvertise || p.id === resumeProp?.pageId)) || null;
+  const selectPage = setPageId;
 
   // 멈춘 광고의 예산·기간·타겟·노출 위치를 한 번 채운다.
   useEffect(() => {
