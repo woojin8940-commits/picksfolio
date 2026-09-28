@@ -221,9 +221,13 @@ export async function removeAdRecords(username: string, ids: string[]): Promise<
 /**
  * 메타에 그 객체가 더는 없다는 오류인지(광고 관리자에서 지웠거나 오래돼 사라진 것).
  * 권한 오류(10/200)와 섞이면 멀쩡한 광고 기록을 지우게 되므로 '없음' 만 골라낸다.
+ * ids= 로 여러 개를 한 번에 읽을 때 하나라도 없으면 메타는 100 이 아니라 803("Some of
+ * the aliases you requested do not exist")으로 돌려준다 — 이것도 '없음' 으로 본다.
  */
 export const isMissingObject = (res: GraphResult): boolean =>
-  !res.ok && res.errorCode === 100 && (res.errorSubcode === 33 || /does not exist|do not exist/i.test(res.error || ""));
+  !res.ok &&
+  (res.errorCode === 803 ||
+    (res.errorCode === 100 && (res.errorSubcode === 33 || /does not exist|do not exist/i.test(res.error || ""))));
 
 /* ------------------------------------------------------------------------------------------ */
 /* 집행 조건 → 메타 파라미터                                                                   */
