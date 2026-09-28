@@ -404,6 +404,9 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
             <div className="border-t border-slate-100 px-5 py-4 bg-white">
               {error && <p className="text-[11px] text-rose-500 font-black mb-2">{error}</p>}
+              {connected && !page && !submitting && (
+                <p className="text-[11px] text-blue-600 font-black mb-2">광고 페이지를 선택해 주세요</p>
+              )}
               <button
                 type="button"
                 onClick={submit}

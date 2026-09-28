@@ -132,6 +132,16 @@ export const writeSelectedPageId = (username: string, pageId: string) => {
   } catch {}
 };
 
+/** 새로 연동·재연동·연동 해제 직후에는 이전에 고른 페이지를 잊고 선택 전 상태로 돌린다. */
+export const clearSelectedPageId = (username: string) => {
+  try {
+    localStorage.removeItem(pageKey(username));
+  } catch {}
+  try {
+    window.dispatchEvent(new Event(PAGE_EVENT));
+  } catch {}
+};
+
 export const subscribeSelectedPage = (onChange: () => void): (() => void) => {
   window.addEventListener(PAGE_EVENT, onChange);
   window.addEventListener('storage', onChange);

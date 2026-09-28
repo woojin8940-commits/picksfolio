@@ -12,6 +12,7 @@ import {
   notifyMetaAdsChanged,
   setMetaAdStatus,
   subscribeMetaAds,
+  clearSelectedPageId,
 } from '../utils/metaAdsApi';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import MetaAdConnectCard from './MetaAdConnectCard';
@@ -638,6 +639,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
 
     if (ok) {
       setCallbackNotice({ ok: true, text: 'Meta 계정 연동을 마쳤습니다. 아래에서 광고 계정을 선택해 주세요.' });
+      // 새로 연동·재연동했으면 예전에 고른 페이지는 잊는다 — 페이지는 목록에서 다시 직접 고른다.
+      clearSelectedPageId(cleanUsername);
       // 방금 저장된 진단 결과를 읽어 온다(캐시가 아니라 서버에서).
       void refreshConnection(true);
     } else {
@@ -652,7 +655,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
       '',
       `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
     );
-  }, [refreshConnection]);
+  }, [refreshConnection, cleanUsername]);
 
   // '연동 설정' 으로 안내 화면을 다시 펼친 상태. 연동이 되어 있어도 계정을 바꾸거나
   // 다시 연동하러 들어올 수 있어야 하므로 연동 상태와는 따로 둔다.

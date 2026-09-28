@@ -6,6 +6,7 @@ import type { MetaPage } from '../utils/metaAdsApi';
  * 광고 페이지 고르기 — 연동한 메타 계정이 관리하는 페이스북 페이지(GET /me/accounts).
  *
  * 광고는 이 페이지 이름으로 나간다. 목록은 메타가 돌려준 그대로이고, 카드를 눌러 고른다.
+ * 미리 골라 두지 않는다 — 페이지가 하나뿐이어도 브랜드가 직접 눌러야 선택된다.
  * 광고 작업 권한(ADVERTISE)이 없는 페이지도 보여 주되 고를 수 없게 하고 이유를 적는다 —
  * 목록에서 빼면 브랜드는 "내 페이지가 왜 없지" 를 광고 관리자에서 찾아야 한다.
  */
@@ -72,7 +73,15 @@ const MetaPagePicker: React.FC<MetaPagePickerProps> = ({
     );
   }
 
+  const hasSelection = !!selectedId && pages.some((p) => p.id === selectedId);
+
   return (
+    <>
+    {!hasSelection && (
+      <p className="mt-1.5 text-[11px] font-black text-blue-600">
+        광고를 집행할 페이지를 선택해 주세요 · 불러온 페이지 {pages.length}개
+      </p>
+    )}
     <div
       className={compact ? 'mt-1.5 flex gap-2 overflow-x-auto pb-1' : 'mt-1.5 space-y-1.5'}
       role="radiogroup"
@@ -122,6 +131,7 @@ const MetaPagePicker: React.FC<MetaPagePickerProps> = ({
         );
       })}
     </div>
+    </>
   );
 };
 
