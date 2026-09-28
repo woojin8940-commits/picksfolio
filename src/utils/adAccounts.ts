@@ -1,5 +1,6 @@
 import { apiService } from '../services/apiService';
 import type { MetaAdsDiagnosisPayload } from '../services/apiService';
+import { clearSelectedPageId } from './metaAdsApi';
 
 /**
  * 메타 광고 계정 연동 — 광고 화면이 "누구의 광고인지"를 아는 자리.
@@ -213,6 +214,7 @@ export const disconnectMetaAccount = async (username: string): Promise<MetaAdCon
     try {
       localStorage.removeItem(selectionKey(username));
     } catch {}
+    clearSelectedPageId(username);
     notify();
   }
   return ok ? DISCONNECTED : toAdConnection(username, cache.get(key));
