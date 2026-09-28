@@ -314,7 +314,7 @@ export const platformTextPatterns = [
   },
   {
     "source": "^지원자 선정은 픽스폴리오 담당자(.+?)가 진행합니다\\.$",
-    "replacement": "Applicant selection is conducted by PIXfolio staff member$1."
+    "replacement": "Applicant selection is conducted by Picksfolio staff member$1."
   },
   {
     "source": "^이미지 · PDF · 영상 파일 · 최대 (.+?)MB$",
@@ -754,7 +754,7 @@ export const platformTextPatterns = [
   },
   {
     "source": "^픽스폴리오 (.+?) 정기결제$",
-    "replacement": "Pixfolio $1 Regular payment"
+    "replacement": "Picksfolio $1 Regular payment"
   },
   {
     "source": "^(.+?)에 포함되어 있습니다$",
