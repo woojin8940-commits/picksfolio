@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0B0F1A">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
+    <title>인플루언서 지원하기 | PICKSFOLIO</title>
+    <meta name="description" content="픽스폴리오와 함께할 인플루언서를 모집합니다. 성함, 연락처, 인스타그램 프로필만 남겨주시면 담당자가 직접 연락드립니다.">
+    <meta property="og:title" content="인플루언서 지원하기 | PICKSFOLIO" />
+    <meta property="og:description" content="픽스폴리오와 함께할 인플루언서를 모집합니다. 간단한 정보만 남겨주시면 직접 연락드립니다." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://picks-folio.com/influencer-apply" />
+    <meta property="og:image" content="https://picks-folio.com/og-image.png" />
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+            background: #F4F5FA;
+            color: #0B0F1A;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+        .wrap { max-width: 32rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+        .home {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            font-size: 1.25rem; font-weight: 900; letter-spacing: -0.04em;
+            color: #0B0F1A; text-decoration: none; margin-bottom: 2.5rem;
+        }
+        .home .dot { width: 6px; height: 6px; border-radius: 999px; background: #2563EB; transform: translateY(4px); }
+        .eyebrow {
+            display: inline-block; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em;
+            color: #2563EB; background: #EDF2FF; padding: 0.35rem 0.75rem; border-radius: 999px; margin-bottom: 1rem;
+        }
+        h1 { font-size: 1.875rem; font-weight: 900; letter-spacing: -0.04em; line-height: 1.25; margin-bottom: 0.75rem; }
+        .lead { color: #5B6382; font-size: 0.95rem; font-weight: 600; margin-bottom: 2rem; }
+        .card {
+            background: #fff; border-radius: 1.5rem; padding: 1.75rem 1.25rem;
+            box-shadow: 0 30px 60px -40px rgba(11,15,26,0.35); border: 1px solid rgba(11,15,26,0.06);
+        }
+        @media (min-width: 640px) { .card { padding: 2rem; } h1 { font-size: 2.25rem; } }
+        .field { margin-bottom: 1.25rem; }
+        label.title { display: block; font-size: 0.875rem; font-weight: 800; margin-bottom: 0.5rem; }
+        label.title .req { color: #2563EB; margin-left: 2px; }
+        input[type="text"], input[type="tel"], input[type="url"] {
+            width: 100%; font: inherit; font-size: 1rem; font-weight: 600; color: #0B0F1A;
+            background: #F4F5FA; border: 1.5px solid transparent; border-radius: 0.875rem;
+            padding: 0.9rem 1rem; outline: none; transition: border-color .15s, background .15s;
+        }
+        input::placeholder { color: #A6ADC6; font-weight: 500; }
+        input:focus { border-color: #2563EB; background: #fff; }
+        .hint { font-size: 0.75rem; color: #8B93AE; font-weight: 600; margin-top: 0.4rem; }
+        .consent {
+            display: flex; gap: 0.6rem; align-items: flex-start; background: #F4F5FA;
+            border-radius: 0.875rem; padding: 0.9rem 1rem; margin: 1.5rem 0; cursor: pointer;
+        }
+        .consent input { margin-top: 0.25rem; width: 1.05rem; height: 1.05rem; accent-color: #2563EB; flex-shrink: 0; }
+        .consent span { font-size: 0.8rem; color: #5B6382; font-weight: 600; line-height: 1.55; }
+        .consent b { color: #0B0F1A; }
+        .consent a { color: #2563EB; }
+        button[type="submit"] {
+            width: 100%; font: inherit; font-size: 1rem; font-weight: 900; color: #fff;
+            background: #0B0F1A; border: 0; border-radius: 999px; padding: 1rem; cursor: pointer;
+            transition: transform .1s, opacity .15s;
+        }
+        button[type="submit"]:active { transform: scale(0.98); }
+        button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
+        .error { color: #DC2626; font-size: 0.85rem; font-weight: 700; margin-top: 0.75rem; text-align: center; display: none; }
+        .done { text-align: center; padding: 1.5rem 0.5rem; display: none; }
+        .done .check {
+            width: 3.5rem; height: 3.5rem; border-radius: 999px; background: #EDF2FF; color: #2563EB;
+            display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; font-size: 1.6rem; font-weight: 900;
+        }
+        .done h2 { font-size: 1.35rem; font-weight: 900; letter-spacing: -0.03em; margin-bottom: 0.5rem; }
+        .done p { color: #5B6382; font-size: 0.9rem; font-weight: 600; }
+        .done a { display: inline-block; margin-top: 1.5rem; color: #0B0F1A; font-weight: 800; font-size: 0.9rem; }
+        .hidden-field { display: none; }
+        footer { margin-top: 2rem; text-align: center; font-size: 0.75rem; color: #A6ADC6; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <main class="wrap">
+        <a class="home" href="/">PICKS<span class="dot"></span></a>
+
+        <span class="eyebrow">INFLUENCER RECRUIT</span>
+        <h1>픽스폴리오와 함께할<br>인플루언서를 찾습니다</h1>
+        <p class="lead">간단한 정보만 남겨주세요. 확인 후 담당자가 직접 연락드립니다.</p>
+
+        <div class="card">
+            <form id="apply-form" name="influencer-apply" method="POST" action="/influencer-apply" data-netlify="true" netlify-honeypot="bot-field">
+                <input type="hidden" name="form-name" value="influencer-apply" />
+                <input type="hidden" name="subject" value="[픽스폴리오] 새 인플루언서 지원서가 도착했습니다" />
+                <p class="hidden-field"><label>이 칸은 비워두세요 <input name="bot-field" /></label></p>
+
+                <div class="field">
+                    <label class="title" for="name">성함<span class="req">*</span></label>
+                    <input id="name" type="text" name="name" placeholder="홍길동" autocomplete="name" required maxlength="50" />
+                </div>
+
+                <div class="field">
+                    <label class="title" for="phone">연락처<span class="req">*</span></label>
+                    <input id="phone" type="tel" name="phone" placeholder="010-1234-5678" autocomplete="tel" inputmode="tel" required maxlength="20" pattern="[0-9\-\s+()]{9,20}" />
+                </div>
+
+                <div class="field">
+                    <label class="title" for="instagram">인스타그램 프로필 링크<span class="req">*</span></label>
+                    <input id="instagram" type="text" name="instagram" placeholder="https://instagram.com/아이디" autocomplete="url" required maxlength="200" />
+                    <p class="hint">프로필 링크 또는 @아이디를 입력해주세요.</p>
+                </div>
+
+                <label class="consent">
+                    <input type="checkbox" name="privacy_consent" value="동의" required />
+                    <span><b>(필수) 개인정보 수집·이용 동의</b><br>
+                    수집 항목: 성함, 연락처, 인스타그램 프로필 · 목적: 인플루언서 지원 검토 및 연락 · 보유 기간: 지원 검토 완료 후 1년. 자세한 내용은 <a href="/privacy" target="_blank">개인정보처리방침</a>을 확인해주세요.</span>
+                </label>
+
+                <button type="submit" id="submit-btn">지원하기</button>
+                <p class="error" id="error">제출에 실패했습니다. 잠시 후 다시 시도해주세요.</p>
+            </form>
+
+            <div class="done" id="done">
+                <div class="check">✓</div>
+                <h2>지원이 완료되었습니다</h2>
+                <p>남겨주신 연락처로 담당자가 직접 연락드릴게요.<br>감사합니다!</p>
+                <a href="/">픽스폴리오 홈으로 →</a>
+            </div>
+        </div>
+
+        <footer>&copy; Picksfolio. All rights reserved.</footer>
+    </main>
+
+    <script>
+        (function () {
+            var form = document.getElementById('apply-form');
+            var btn = document.getElementById('submit-btn');
+            var err = document.getElementById('error');
+            var done = document.getElementById('done');
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                err.style.display = 'none';
+                btn.disabled = true;
+                btn.textContent = '제출 중...';
+
+                // /influencer-apply 는 SPA catch-all 보다 먼저 이 정적 파일로 연결되지만,
+                // 폼 처리는 정적 파일 경로로 직접 보내야 확실하게 Netlify Forms 에 도달한다.
+                fetch('/influencer-apply.html', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams(new FormData(form)).toString()
+                }).then(function (res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    form.style.display = 'none';
+                    done.style.display = 'block';
+                }).catch(function () {
+                    err.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = '지원하기';
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

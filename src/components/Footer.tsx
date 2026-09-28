@@ -106,6 +106,15 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy, onN
               {en ? 'Privacy Policy' : '개인정보처리방침'}
             </button>
           </div>
+          {/* 광고로 모집하는 인플루언서 지원 설문. 정적 페이지(public/influencer-apply.html)라
+              SPA 라우팅이 아닌 일반 링크로 이동한다. */}
+          <a
+            href="/influencer-apply"
+            className="mt-8 flex w-full sm:w-auto sm:inline-flex items-center justify-center gap-2 bg-[#0B0F1A] text-white hover:bg-[#1F2433] px-6 py-3.5 rounded-full text-sm md:text-base font-black transition-all active:scale-[0.97]"
+          >
+            {en ? 'Apply as an Influencer' : '인플루언서 지원하기'}
+            <ArrowRight size={17} strokeWidth={2.8} />
+          </a>
           <p className="text-[#A6ADC6] text-xs font-bold mt-6">&copy; {new Date().getFullYear()} Picksfolio. All rights reserved.</p>
         </div>
       </div>

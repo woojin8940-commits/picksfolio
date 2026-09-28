@@ -31,6 +31,12 @@
   to = "/profile.html"
   status = 200
 
+# 인플루언서 지원 설문(Netlify Forms) 정적 페이지. SPA catch-all 보다 먼저 매칭.
+[[redirects]]
+  from = "/influencer-apply"
+  to = "/influencer-apply.html"
+  status = 200
+
 # PortOne(포트원) 결제 리다이렉트 복귀 정적 페이지. SPA catch-all 보다 먼저 매칭.
 [[redirects]]
   from = "/portone/return"
