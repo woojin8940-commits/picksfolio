@@ -276,43 +276,45 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
   const hasActionButtons = !!socials?.businessProposal || defaultButtons.length > 0 || customButtons.length > 0;
 
   /**
-   * 기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버) · 비즈니스 제안 · 커스텀 버튼.
+   * 기본 버튼(카카오톡 · 유튜브 · 네이버 · 쓰레드 · 틱톡 · 메일) · 비즈니스 제안 · 커스텀 버튼.
    *
    * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다 — 예전에 버튼 줄을 두 곳에
    * 따로 적어 두었더니 한쪽만 고쳐져서 레이아웃을 바꾸면 버튼이 달라지는 일이 있었다.
    *
-   * 기본 버튼 바탕은 일부러 심심하게 둔다. 강조색(accentColor)은 비즈니스 제안 버튼
-   * 하나만 쓰고, 나머지는 테마에 맞춘 흰/투명 배경 + 얇은 선으로만 구분한다. 대신
-   * 이름 앞에 플랫폼 로고를 붙인다(components/PlatformLogo).
+   * 강조색(accentColor)은 비즈니스 제안 버튼 하나만 쓴다. 기본 버튼은 글자 없이
+   * 플랫폼 로고 타일(components/PlatformLogo)만 테마에 맞춘 얇은 테두리 안에 둔다.
    */
   const actionButtons = (
     <>
+      {/* 기본 버튼은 이름 대신 플랫폼 로고 하나로 보여 준다. 로고만으로 어느 채널인지
+          알아볼 수 있어서, 글자 버튼을 여러 개 늘어놓는 것보다 줄이 가볍고 정돈돼 보인다.
+          로고 줄은 한 줄을 통째로 쓰고(w-full), 비즈니스 제안 · 커스텀 버튼은 그 아래
+          줄에 온다. 이름은 화면에 적지 않는 대신 aria-label · title 로 남겨 둔다. */}
+      {defaultButtons.length > 0 && (
+        <div className="w-full flex items-center justify-center flex-wrap gap-3">
+          {defaultButtons.map(btn => (
+            <a
+              key={btn.key}
+              {...externalLinkProps(btn.url)}
+              aria-label={btn.label}
+              title={btn.label}
+              className={`flex items-center justify-center rounded-[14px] p-[3px] border transition-all duration-200 shrink-0 cursor-pointer hover:-translate-y-0.5 active:translate-y-0 active:scale-95 ${softShadow} ${
+                isDark
+                  ? 'bg-white/[0.07] border-white/15 hover:border-white/30'
+                  : 'bg-white border-[#0B0F1A]/10 hover:border-[#0B0F1A]/20'
+              }`}
+            >
+              <PlatformLogo platform={btn.key} size={34} />
+            </a>
+          ))}
+        </div>
+      )}
       {socials?.businessProposal && (
         <a {...externalLinkProps(proposalHref)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials?.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials?.businessProposalText) || '#FFFFFF' }}>
           <Briefcase size={14} strokeWidth={2.5} />
           {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
         </a>
       )}
-      {defaultButtons.map(btn => (
-        <a
-          key={btn.key}
-          {...externalLinkProps(btn.url)}
-          className={`flex items-center px-4 py-2.5 rounded-xl text-xs font-bold border transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer hover:-translate-y-0.5 active:translate-y-0 active:scale-95 ${softShadow} ${
-            isDark
-              ? 'bg-white/[0.07] border-white/15 text-white hover:bg-white/[0.12] hover:border-white/25'
-              : 'bg-white border-[#0B0F1A]/10 text-[#39415C] hover:border-[#0B0F1A]/20'
-          }`}
-          /* 색을 직접 고른 버튼만 인라인으로 덮어쓴다 — 고르지 않았으면 위의 테마 색 그대로. */
-          style={{
-            backgroundColor: normalizeHexColor(btn.bg) || undefined,
-            color: normalizeHexColor(btn.text) || undefined,
-            borderColor: btn.bg ? 'transparent' : undefined,
-          }}
-        >
-          <PlatformLogo platform={btn.key} size={16} className="mr-2" />
-          {btn.label}
-        </a>
-      ))}
       {customButtons.map((btn: any) => (
         <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
           <ExternalLink size={14} strokeWidth={2.5} />

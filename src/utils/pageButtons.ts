@@ -24,7 +24,7 @@
  * 필요하지 않다).
  */
 
-export type DefaultButtonKey = 'kakao' | 'youtube' | 'tiktok' | 'naver';
+export type DefaultButtonKey = 'kakao' | 'youtube' | 'naver' | 'threads' | 'tiktok' | 'mail';
 
 export type DefaultButtonDef = {
   key: DefaultButtonKey;
@@ -37,8 +37,10 @@ export type DefaultButtonDef = {
 export const DEFAULT_BUTTONS: DefaultButtonDef[] = [
   { key: 'kakao', label: '카카오톡', placeholder: 'pf.kakao.com/@채널이름 또는 오픈채팅 주소' },
   { key: 'youtube', label: '유튜브', placeholder: 'youtube.com/@채널' },
-  { key: 'tiktok', label: '틱톡', placeholder: 'tiktok.com/@아이디' },
   { key: 'naver', label: '네이버', placeholder: 'blog.naver.com/아이디 또는 스마트스토어 주소' },
+  { key: 'threads', label: '쓰레드', placeholder: 'threads.net/@아이디' },
+  { key: 'tiktok', label: '틱톡', placeholder: 'tiktok.com/@아이디' },
+  { key: 'mail', label: '메일', placeholder: 'example@naver.com' },
 ];
 
 /** 이름이 저장되는 socials 칸. 주소 칸(`kakao`) 옆의 `kakaoLabel`. */
@@ -91,6 +93,19 @@ const HANDLE_HOME: Record<DefaultButtonKey, (handle: string) => string> = {
   youtube: handle => `https://www.youtube.com/@${handle.replace(/^@/, '')}`,
   tiktok: handle => `https://www.tiktok.com/@${handle.replace(/^@/, '')}`,
   naver: handle => `https://blog.naver.com/${handle.replace(/^@/, '')}`,
+  threads: handle => `https://www.threads.net/@${handle.replace(/^@/, '')}`,
+  mail: handle => handle,
+};
+
+/**
+ * 메일 버튼 주소. 주소창에 적는 것은 메일 주소 하나뿐이라, 앞에 mailto: 를 붙여
+ * 누르면 메일 앱이 받는 사람이 채워진 채로 열리게 한다. 이미 mailto: 로 적었으면
+ * 그대로 둔다. @ 가 없으면 메일 주소가 아니므로 버튼을 그리지 않는다.
+ */
+const normalizeMailUrl = (value: string): string => {
+  const address = value.replace(/^mailto:/i, '').trim();
+  if (!address.includes('@')) return '';
+  return `mailto:${address}`;
 };
 
 /**
@@ -127,6 +142,7 @@ const repairKakaoUrl = (url: string): string => {
 export const normalizeButtonUrl = (key: DefaultButtonKey, raw: string): string => {
   const value = (raw || '').trim();
   if (!value) return '';
+  if (key === 'mail') return normalizeMailUrl(value);
   const finish = (url: string) => (key === 'kakao' ? repairKakaoUrl(url) : url);
   if (/^https?:\/\//i.test(value)) return finish(value);
   if (!value.includes('.') && !value.includes('/')) {

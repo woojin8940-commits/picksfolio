@@ -891,13 +891,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className={LABEL}>제품 URL</label>
+                  <label className={LABEL}>제품 URL <span className="font-bold text-slate-400">(선택)</span></label>
                   <input
                     type="url"
                     value={form.product_url}
                     onChange={e => patch('product_url', e.target.value)}
                     className={INPUT}
-                    placeholder="https://"
+                    placeholder="없으면 비워 두세요"
                   />
                 </div>
               </div>
