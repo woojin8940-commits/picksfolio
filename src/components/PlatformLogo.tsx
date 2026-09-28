@@ -102,3 +102,30 @@ export const PlatformLogo: React.FC<{
 };
 
 export default PlatformLogo;
+
+/**
+ * 타일 없이 마크만 그린 단색 로고. 색은 감싼 요소의 글자색(currentColor)을 따른다 —
+ * 공개 페이지의 기본 버튼이 카테고리 버튼처럼 선만 있는 알약이 되면서, 브랜드색 타일
+ * 대신 버튼 글자와 같은 색의 마크가 필요해졌다.
+ */
+export const PlatformMark: React.FC<{
+  platform: DefaultButtonKey;
+  size?: number;
+  className?: string;
+}> = ({ platform, size = 14, className = '' }) => {
+  const mark = MARKS[platform];
+  if (!mark) return null;
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      focusable="false"
+      className={`shrink-0 ${className}`}
+    >
+      <path d={mark.path} />
+    </svg>
+  );
+};
