@@ -2,9 +2,14 @@ import { getStore } from "@netlify/blobs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Config, Context } from "@netlify/functions";
 import {
+  buildBaitCommentPlan,
   buildCommentDmPlan,
   buildDirectDmPlan,
+  buildMainDmPlan,
+  DEFAULT_FOLLOW_GATE_BUTTON_LABEL,
+  DEFAULT_FOLLOW_GATE_MESSAGE,
   describeDmError,
+  postbackCard,
   postCommentReply,
   sendDmMessages,
 } from "./_shared/instagram-dm.mts";
@@ -33,6 +38,18 @@ import { backupCommentEvents, enqueueCommentEvents } from "./_shared/dm-jobs.mts
 import type { QueuedComment } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
+import {
+  baitGateKey,
+  baitMainKey,
+  baitPayload,
+  baitSuspended,
+  commentIdFromBaitPayload,
+  getBaitPending,
+  noteBaitFailure,
+  noteBaitSuccess,
+  notifyAdminBaitIssue,
+  saveBaitPending,
+} from "./_shared/dm-bait.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
@@ -92,6 +109,20 @@ interface DmAutomationItem {
   createdAt?: string;
   /** 설정 화면에서 이 자동화를 마지막으로 고친 시각(api-dm-automation 이 찍는다). */
   updatedAt?: string;
+  /**
+   * 2단계 발송(미끼 → 본 메시지) 사용 여부. 켜져 있으면 댓글 비공개 답장으로는
+   * `baitMessage` + postback 버튼만 보내고, 버튼을 누른 사람에게 위의
+   * message/buttons/cards(+ mainIntro)를 본 메시지로 보낸다. 팔로우 조건이 있는
+   * 자동화는 저장 시점에 항상 켜진다(클릭 전에는 팔로우 여부를 알 수 없다).
+   */
+  baitEnabled?: boolean;
+  baitMessage?: string;
+  baitButtonLabel?: string;
+  /** 본 메시지 앞에 먼저 보낼 텍스트(선택). */
+  mainIntro?: string;
+  /** 팔로우 조건에 맞지 않는 사람이 버튼을 눌렀을 때 보낼 안내와 재확인 버튼 라벨. */
+  followGateMessage?: string;
+  followGateButtonLabel?: string;
 }
 /** DM 창 첫 화면의 "자주 묻는 질문" 한 건. */
 interface DmFaqItem {
@@ -167,7 +198,24 @@ function buildCommentPlan(a: DmAutomationItem): DmPlan {
 
 /** 대화창이 열린 상대에게 IGSID 로 직접 보낼 때 쓰는 계획(설정한 순서 그대로). */
 function buildDirectPlan(a: DmAutomationItem): DmPlan {
+  if (usesBait(a)) return buildMainDmPlan(dmContentOf(a), a.mainIntro);
   return buildDirectDmPlan(dmContentOf(a));
+}
+
+/** 설정상 2단계 발송을 쓰는 자동화인지(팔로우 조건이 있으면 항상 쓴다). */
+function usesBait(a: DmAutomationItem): boolean {
+  return Boolean(a.baitEnabled) || a.followFilter === "followers" || a.followFilter === "non_followers";
+}
+
+/**
+ * 1단계(미끼) 비공개 답장 계획. 미끼 카드가 거부되면 기존 1통 카드가 대신 나간다
+ * (buildBaitCommentPlan 의 fallback).
+ */
+function buildBaitPlan(a: DmAutomationItem, commentId: string): DmPlan {
+  return buildBaitCommentPlan(
+    { message: a.baitMessage, buttonLabel: a.baitButtonLabel, payload: baitPayload(commentId) },
+    dmContentOf(a),
+  );
 }
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
@@ -585,6 +633,215 @@ async function handleFaqPostback(ctx: DmTriggerContext, event: any): Promise<voi
 }
 
 /**
+ * 2단계 발송 — 댓글 비공개 답장으로 보낸 미끼 카드의 버튼을 누른 이벤트(postback).
+ *
+ * 이 클릭은 인스타그램에서 "상대가 우리에게 말을 건 것"으로 처리돼 24시간 대화창이
+ * 열린다. 그래서 여기서부터는 IGSID 로 여러 통(긴 텍스트 · 여러 버튼 · 캐러셀)을
+ * 보낼 수 있다.
+ *
+ * 순서:
+ *  1) payload(`bait_<댓글ID>`)로 대기 기록을 찾고, 누른 사람이 댓글 작성자인지 본다.
+ *  2) 후보 자동화 중 팔로우 조건이 있으면 지금(대화창이 열린 뒤) 팔로우 여부를 조회해
+ *     맞는 자동화를 고른다. 맞는 게 없으면 "팔로우 후 다시 눌러 주세요" 안내와 같은
+ *     payload 의 재확인 버튼을 보낸다 — 다시 누르면 이 함수가 처음부터 다시 판정한다.
+ *  3) 본 메시지는 댓글당 1회만 보낸다(여러 번 눌러도 한 번).
+ *
+ * 본 메시지가 "대화창 밖"으로 거부되면 Meta 가 버튼 클릭을 더 이상 대화 수락으로
+ * 인정하지 않는다는 신호다. 연달아 그러면 2단계 발송을 멈추고(dm-bait 서킷 브레이커)
+ * 이후 댓글에는 기존 1통 카드가 나가게 하며, 운영자에게 알린다. 형식 오류로 거부되면
+ * 이 사람에게는 기존 1통 카드 내용으로 한 번 더 보낸다.
+ */
+async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<void> {
+  const postback = event?.postback;
+  if (!postback) return;
+  const senderId = String(event?.sender?.id || "");
+  if (!senderId || ctx.ownIds.has(senderId)) return;
+  const commentId = commentIdFromBaitPayload(String(postback?.payload || ""));
+  if (!commentId) return;
+
+  const { username, settings, igId, accessToken } = ctx;
+  await noteDmContact({ username, igsid: senderId, text: postback?.title, kind: "postback" }).catch(() => undefined);
+
+  const skip = (reason: string, extra: Record<string, unknown> = {}) =>
+    appendLog(username, { kind: "dm", status: "skipped", trigger: "bait_click", reason, recipientId: senderId, commentId, ...extra });
+
+  const pending = await getBaitPending(username, commentId);
+  if (!pending) return skip("대기 중인 1단계 메시지를 찾지 못했습니다(오래된 버튼일 수 있습니다).");
+  if (pending.fromId && pending.fromId !== senderId) return skip("댓글 작성자가 아닌 사람이 누른 버튼입니다.");
+
+  const blocked = await ctx.blocked();
+  if (blocked) return skip(blocked);
+
+  const candidates = pending.automationIds
+    .map((id) => (settings.automations || []).find((a) => a.id === id))
+    .filter((a): a is DmAutomationItem => Boolean(a && a.enabled && hasContent(a)));
+  if (candidates.length === 0) return skip("연결된 자동화가 삭제되었거나 꺼져 있습니다.");
+
+  let follows: boolean | null = null;
+  if (candidates.some((a) => a.followFilter === "followers" || a.followFilter === "non_followers")) {
+    follows = await fetchFollowsBusiness({ host: graphHost(settings), igsid: senderId, accessToken });
+    if (follows === null) console.warn("[ig-webhook] follow state unknown at bait click — sending without follow filter");
+  }
+  const automation = candidates.find((a) => passesFollowFilter(a, follows));
+  const eventId = String(postback?.mid || `${senderId}_${event?.timestamp || ""}`);
+  const send = (messages: Record<string, unknown>[]) =>
+    sendDmMessages({
+      graphHost: graphHost(settings),
+      graphVersion: GRAPH_VERSION,
+      igId,
+      accessToken,
+      recipient: { id: senderId },
+      messages,
+      bestEffortFrom: messages.length,
+    });
+
+  // 팔로우 조건에 맞지 않음 → 안내 + 재확인 버튼(같은 payload).
+  if (!automation) {
+    const gateRule = candidates[0];
+    if (!(await claimIfNew(username, baitGateKey(eventId), true))) return;
+    const text = (gateRule.followGateMessage || "").trim() || DEFAULT_FOLLOW_GATE_MESSAGE;
+    const card = postbackCard(text, gateRule.followGateButtonLabel || "", baitPayload(commentId), DEFAULT_FOLLOW_GATE_BUTTON_LABEL);
+    const result = await send([card]);
+    if (!result.ok && result.errorKind !== "uncertain") await release(username, baitGateKey(eventId), true);
+    await appendLog(username, {
+      kind: "dm",
+      status: result.ok ? "sent" : "failed",
+      trigger: "bait_follow_gate",
+      recipientId: senderId,
+      commentId,
+      ruleId: gateRule.id,
+      ruleName: gateRule.name,
+      reason: gateRule.followFilter === "followers" ? "팔로워가 아니어서 팔로우 안내를 보냈습니다." : "이미 팔로워여서 안내를 보냈습니다.",
+      messageId: result.messageId,
+      error: result.ok ? undefined : describeDmError(result.errorKind || "other", result.error),
+      errorKind: result.ok ? undefined : result.errorKind,
+    });
+    return;
+  }
+
+  const mainKey = baitMainKey(commentId);
+  if (!(await claimIfNew(username, mainKey, true))) {
+    console.warn("[ig-webhook] bait main message already sent — click ignored", commentId);
+    return;
+  }
+
+  const plan = buildMainDmPlan(dmContentOf(automation), automation.mainIntro);
+  for (const payload of plan.messages) {
+    const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
+    if (body) await noteSentText(username, body);
+  }
+
+  try {
+    let result = await send(plan.messages);
+    let usedFallback = false;
+
+    // 본 메시지가 형식 오류로 거부됨(카드 이미지 등) → 기존 1통 카드 내용으로 한 번 더.
+    if (!result.ok && !result.partial && result.errorKind === "other") {
+      const single = buildCommentPlan(automation);
+      const fallbackMessages = single.messages.slice(0, 1);
+      if (fallbackMessages.length > 0) {
+        const retried = await send(fallbackMessages);
+        if (!retried.ok && single.fallback) {
+          result = await send([single.fallback]);
+        } else {
+          result = retried;
+        }
+        usedFallback = result.ok;
+      }
+    }
+
+    if (result.ok || result.partial) {
+      await noteBaitSuccess(username);
+      await appendLog(username, {
+        kind: "dm",
+        status: "sent",
+        trigger: "bait_main",
+        stage: "main",
+        partial: result.partial,
+        recipientId: senderId,
+        commentId,
+        ruleId: automation.id,
+        ruleName: automation.name,
+        ruleUpdatedAt: automation.updatedAt,
+        messageId: result.messageId,
+        usedFallback: usedFallback || undefined,
+        error: result.partial ? result.error : undefined,
+      });
+      return;
+    }
+
+    const kind = result.errorKind || "other";
+    if (kind !== "uncertain") await release(username, mainKey, true);
+
+    if (kind === "rate_limit" || kind === "throttled") {
+      // 발송 한도 — 대기열로 넘긴다(대화창은 방금 열렸으므로 24시간 안에 나간다).
+      try {
+        await createScheduledJob({
+          id: `bait_${commentId}`,
+          username,
+          igAccountId: igId,
+          recipientId: senderId,
+          sendAt: new Date(Date.now() + (result.retryAfterMs || 60_000)).toISOString(),
+          message: [automation.mainIntro?.trim(), automation.messageType === "carousel" ? "" : automation.message]
+            .filter(Boolean)
+            .join("\n\n"),
+          buttons: automation.messageType === "carousel" ? [] : automation.buttons || [],
+          messageType: automation.messageType === "carousel" ? "carousel" : "text",
+          cards: automation.messageType === "carousel" ? automation.cards : undefined,
+          source: "trigger",
+          createdAt: new Date().toISOString(),
+          status: "pending",
+          ruleId: automation.id,
+          ruleName: automation.name,
+        });
+        await claimIfNew(username, mainKey, true);
+        await appendLog(username, { kind: "dm", status: "scheduled", trigger: "bait_main", recipientId: senderId, commentId, ruleId: automation.id, ruleName: automation.name });
+        return;
+      } catch (e) {
+        console.error("[ig-webhook] bait main scheduling failed:", (e as Error)?.message);
+      }
+    }
+
+    /**
+     * 대화창 밖 / 권한 오류 — 버튼 클릭이 대화 수락으로 인정되지 않았다는 뜻이다.
+     * 이 사람에게는 더 보낼 방법이 없다(비공개 답장 1통은 이미 미끼로 썼다).
+     */
+    if (kind === "outside_window" || kind === "permission" || kind === "other") {
+      const tripped = await noteBaitFailure(username, describeDmError(kind, result.error));
+      if (tripped) {
+        await notifyAdminBaitIssue(
+          username,
+          `버튼 클릭 뒤 본 메시지가 연달아 거부돼(${kind}) 24시간 동안 기존 1통 카드 방식으로 전환했습니다. Meta 정책 변경 여부를 확인하세요.`,
+          "suspended",
+        );
+      }
+    }
+    await appendLog(username, {
+      kind: "dm",
+      status: "failed",
+      trigger: "bait_main",
+      stage: "main",
+      recipientId: senderId,
+      commentId,
+      ruleId: automation.id,
+      ruleName: automation.name,
+      error: describeDmError(kind, result.error),
+      errorKind: kind,
+    });
+  } catch (e: any) {
+    await appendLog(username, {
+      kind: "dm",
+      status: "failed",
+      trigger: "bait_main",
+      recipientId: senderId,
+      commentId,
+      ruleId: automation.id,
+      error: e?.message || "send error",
+    });
+  }
+}
+
+/**
  * 받은 DM 처리 — 첫 인사말과 키워드 자동 답장.
  *
  * 명단 기록(`noteDmContact`)은 발송이 막혀 있어도 먼저 남긴다. 이 명단이 예약
@@ -911,6 +1168,9 @@ export async function processWebhookPayload(
         await handleFaqPostback(triggerCtx, event).catch((e) =>
           console.warn("[ig-webhook] faq postback failed:", (e as Error)?.message),
         );
+        await handleBaitPostback(triggerCtx, event).catch((e) =>
+          console.warn("[ig-webhook] bait postback failed:", (e as Error)?.message),
+        );
         await handleInboundMessage(triggerCtx, event).catch((e) =>
           console.warn("[ig-webhook] inbound DM trigger failed:", (e as Error)?.message),
         );
@@ -964,8 +1224,17 @@ export async function processWebhookPayload(
         );
         if (candidates.length === 0) continue;
 
+        /**
+         * 2단계 발송(미끼 → 본 메시지)을 쓰는 자동화는 팔로우 조건을 지금 보지 않는다.
+         * 댓글 시점에는 대화 이력이 없어 팔로우 조회가 대부분 응답하지 않으므로, 미끼를
+         * 먼저 보내고 버튼을 누른 순간(대화창이 열린 뒤) 조회해 알맞은 본 메시지를
+         * 고른다. 2단계 방식이 막혀 멈춰 있으면(baitSuspended) 기존 방식 그대로다.
+         */
+        const baitPaused = candidates.some(usesBait) ? await baitSuspended(username) : false;
+        const baitOn = (a: DmAutomationItem) => usesBait(a) && !baitPaused;
+
         let follows: boolean | null = null;
-        if (candidates.some((a) => a.followFilter === "followers" || a.followFilter === "non_followers")) {
+        if (candidates.some((a) => !baitOn(a) && (a.followFilter === "followers" || a.followFilter === "non_followers"))) {
           follows = await fetchFollowsBusiness({
             host: graphHost(settings),
             igsid: fromId,
@@ -976,8 +1245,15 @@ export async function processWebhookPayload(
           }
         }
 
-        const automation = candidates.find((a) => passesFollowFilter(a, follows));
+        const automation = candidates.find((a) => baitOn(a) || passesFollowFilter(a, follows));
         if (!automation) continue;
+        const bait = baitOn(automation);
+        // 버튼을 누른 시점에 다시 고를 후보(우선순위 순). 팔로워용·비팔로워용을 나눠
+        // 걸어 둔 경우에도 클릭한 사람에게 맞는 쪽이 나간다.
+        const baitCandidateIds = bait ? candidates.filter(baitOn).map((a) => a.id) : [];
+        if (usesBait(automation) && baitPaused) {
+          console.warn("[ig-webhook] 2-step DM suspended — sending single-card fallback", commentId);
+        }
 
         if (onlyAutomationId && automation.sendMode !== "scheduled") continue;
         const configuredSchedule = Date.parse(automation.scheduledAt || "");
@@ -1040,6 +1316,13 @@ export async function processWebhookPayload(
               commentAt: new Date(entryMs).toISOString(),
               publicReply: reply ? { commentId: parentId || commentId, message: reply } : undefined,
               sendDm,
+              bait: bait
+                ? {
+                    message: automation.baitMessage || "",
+                    buttonLabel: automation.baitButtonLabel || "",
+                    automationIds: baitCandidateIds,
+                  }
+                : undefined,
               source: "comment",
               backfill: Boolean(onlyAutomationId),
               ruleId: automation.id,
@@ -1173,7 +1456,7 @@ export async function processWebhookPayload(
         if (!hasContent(automation)) continue;
         if (repliedNow) await wait(SEND_SPACING_MS);
 
-        const plan = buildCommentPlan(automation);
+        const legacyPlan = buildCommentPlan(automation);
         /**
          * 설정에는 내용이 있는데 실제로 보낼 수 있는 메시지가 없는 경우.
          *
@@ -1182,7 +1465,7 @@ export async function processWebhookPayload(
          * 없고, 전부 그런 카드면 남는 메시지가 없다. 조용히 넘기면 사용자는 이유를
          * 알 수 없으니 활동 기록에 남긴다.
          */
-        if (plan.messages.length === 0) {
+        if (legacyPlan.messages.length === 0) {
           outcome.failed = (outcome.failed || 0) + 1;
           outcome.error = "보낼 수 있는 메시지가 없습니다.";
           outcome.errorKind = "invalid_payload";
@@ -1199,7 +1482,12 @@ export async function processWebhookPayload(
           continue;
         }
 
+        // 2단계 발송이면 비공개 답장 한 통은 미끼 카드다(거부되면 기존 1통 카드로 대체).
+        const plan = bait ? buildBaitPlan(automation, commentId) : legacyPlan;
         const messages = plan.messages;
+        if (plan.fallback && typeof (plan.fallback as any)?.text === "string") {
+          await noteSentText(username, (plan.fallback as any).text);
+        }
         // 우리가 보낸 문구로 남긴다. 발송 직후 인스타그램이 돌려주는 발신 에코를
         // "외부 서비스가 보낸 DM"으로 잘못 표시하지 않으려면 발송 전에 남겨야 한다
         // (에코가 발송 응답보다 먼저 도착할 수 있다).
@@ -1307,6 +1595,27 @@ export async function processWebhookPayload(
             });
           }
 
+          /**
+           * 미끼 카드가 거부돼 기존 1통 카드로 대신 나간 경우. 받는 사람에게는 본문이
+           * 도착했지만 2단계 방식은 실패한 것이다 — Meta 가 postback 버튼을 막았을 수
+           * 있어 상태 기록과 운영자 알림을 남긴다.
+           */
+          const baitFellBack = bait && !retryViaIgsid && Boolean(result?.ok && result.usedFallback);
+          if (bait && !retryViaIgsid && result?.ok && !result.usedFallback) {
+            await saveBaitPending(username, {
+              commentId,
+              fromId,
+              automationIds: baitCandidateIds,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          if (baitFellBack) {
+            const tripped = await noteBaitFailure(username, "1단계(미끼) 카드가 거부돼 1통 카드로 대체 발송했습니다.");
+            if (tripped) {
+              await notifyAdminBaitIssue(username, "미끼 카드(postback 버튼)가 연달아 거부돼 24시간 동안 기존 1통 카드 방식으로 전환했습니다.", "suspended");
+            }
+          }
+
           if (result && (result.ok || result.partial)) {
             outcome.sent = (outcome.sent || 0) + result.sent;
             outcome.partial = Boolean(outcome.partial || result.partial || result.followUpError);
@@ -1329,6 +1638,9 @@ export async function processWebhookPayload(
                */
               followUpSkipped: result.followUpError || undefined,
               usedFallback: result.usedFallback || undefined,
+              // 2단계 발송: 미끼가 나갔으면 "bait", 막혀서 1통 카드로 보냈으면 "single_fallback".
+              stage: bait && !retryViaIgsid ? (baitFellBack ? "single_fallback" : "bait") : undefined,
+              baitSuspended: usesBait(automation) && baitPaused ? true : undefined,
             });
           } else {
             // 못 보냈으니 기록을 지운다 — 재전송 때 다시 시도할 수 있어야 한다.

@@ -6,7 +6,8 @@ import {
   DM_AUTOMATION_TIER,
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
-import { normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
+import { BAIT_BUTTON_LABEL_MAX, BAIT_TEXT_MAX, normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
+import { readBaitHealth } from "./_shared/dm-bait.mts";
 import {
   adoptSharedInstagramLink,
   disconnectLinkFeature,
@@ -109,6 +110,17 @@ interface DmAutomationItem {
    * "가장 최근에 설정한 것"을 우선하는 기준으로 쓴다.
    */
   updatedAt?: string;
+  /**
+   * 2단계 발송(미끼 → 본 메시지). 켜져 있으면 댓글 비공개 답장으로는 `baitMessage`
+   * (80자) + postback 버튼 하나만 보내고, 버튼을 누른 사람에게 message/buttons/cards
+   * 를 본 메시지로 보낸다. 팔로우 조건이 있으면 항상 켜진다.
+   */
+  baitEnabled: boolean;
+  baitMessage: string;
+  baitButtonLabel: string;
+  mainIntro: string;
+  followGateMessage: string;
+  followGateButtonLabel: string;
 }
 
 /**
@@ -324,6 +336,9 @@ function sanitizeAutomation(a: any): DmAutomationItem {
   const scheduledMs = Date.parse(String(a?.scheduledAt || ""));
   const scheduled = a?.sendMode === "scheduled" && !Number.isNaN(scheduledMs);
 
+  const followFilter: DmAutomationItem["followFilter"] =
+    a?.followFilter === "followers" || a?.followFilter === "non_followers" ? a.followFilter : "all";
+
   return {
     id: String(a?.id || genId("auto")),
     name,
@@ -332,10 +347,7 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     keywords,
     replyEnabled: Boolean(a?.replyEnabled),
     replies,
-    followFilter:
-      a?.followFilter === "followers" || a?.followFilter === "non_followers"
-        ? a.followFilter
-        : "all",
+    followFilter,
     mediaScope,
     mediaIds,
     messageType,
@@ -346,6 +358,14 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     scheduledAt: scheduled ? new Date(scheduledMs).toISOString() : "",
     createdAt: String(a?.createdAt || new Date().toISOString()),
     updatedAt: a?.updatedAt ? String(a.updatedAt) : undefined,
+    // 팔로우 여부는 버튼을 누른 뒤에야 조회할 수 있으므로 팔로우 조건이 있으면 강제로 켠다.
+    baitEnabled: followFilter !== "all" || Boolean(a?.baitEnabled),
+    // 미끼는 카드 제목 한 줄(80자)에 들어가야 비공개 답장 한 통으로 안전하게 나간다.
+    baitMessage: String(a?.baitMessage || "").trim().slice(0, BAIT_TEXT_MAX),
+    baitButtonLabel: String(a?.baitButtonLabel || "").trim().slice(0, BAIT_BUTTON_LABEL_MAX),
+    mainIntro: String(a?.mainIntro || "").slice(0, 1000),
+    followGateMessage: String(a?.followGateMessage || "").slice(0, 1000),
+    followGateButtonLabel: String(a?.followGateButtonLabel || "").trim().slice(0, BAIT_BUTTON_LABEL_MAX),
   };
 }
 
@@ -611,6 +631,8 @@ export default async (req: Request, context: Context) => {
       // 이 앱이 보내지 않은 자동 DM(인스타그램 자체 자동 메시지·다른 자동화 서비스)이
       // 감지됐다면 함께 내려준다. 화면에서 "왜 설정과 다른 문구가 오는지" 안내한다.
       externalDm: await readForeignDm(username),
+      // 2단계 발송(미끼 → 본 메시지)이 막혀 기존 1통 카드로 자동 전환돼 있는지.
+      baitHealth: await readBaitHealth(username).catch(() => null),
       // 디엠 자동화는 프로 플랜 전용이다. 화면에서 업그레이드 안내를 띄울 수 있게 함께 내려준다.
       entitled: await dmAutomationAllowed(username, auth.userId),
       requiredTier: DM_AUTOMATION_TIER,

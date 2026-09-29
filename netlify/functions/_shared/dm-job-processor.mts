@@ -5,6 +5,7 @@ import { getDmContact, withinDmWindow } from "./dm-contacts.mts";
 import { claimJob, finishJob, releaseJobClaim } from "./dm-schedule-store.mts";
 import type { DmScheduledJob } from "./dm-schedule-store.mts";
 import {
+  buildBaitCommentPlan,
   buildCommentDmPlan,
   buildDirectDmPlan,
   describeDmError,
@@ -17,6 +18,7 @@ import { linkFeatureOff } from "./instagram-metrics.mts";
 import { completeDmJob, enqueueScheduledJob, pauseDmAccount, retryDmJob } from "./dm-jobs.mts";
 import type { DmJob } from "./dm-jobs.mts";
 import { processWebhookPayload } from "../instagram-webhook.mts";
+import { baitPayload, baitSuspended, noteBaitFailure, notifyAdminBaitIssue, saveBaitPending } from "./dm-bait.mts";
 
 /**
  * 예약 DM 발송기(1분 주기).
@@ -277,7 +279,16 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
         buttons: job.buttons,
         cards: job.cards,
       };
-      const plan = isPrivateReply ? buildCommentDmPlan(content) : buildDirectDmPlan(content);
+      const legacyPlan = isPrivateReply ? buildCommentDmPlan(content) : buildDirectDmPlan(content);
+      /**
+       * 2단계 발송 예약이면 비공개 답장 한 통은 미끼 카드다. 미끼가 거부되면 기존
+       * 1통 카드가 대신 나간다. 2단계 방식이 멈춰 있으면(Meta 정책 변경 의심) 처음부터
+       * 기존 1통 카드로 보낸다.
+       */
+      const bait = isPrivateReply && job.bait && !(await baitSuspended(job.username)) ? job.bait : undefined;
+      const plan = bait && legacyPlan.messages.length > 0
+        ? buildBaitCommentPlan({ message: bait.message, buttonLabel: bait.buttonLabel, payload: baitPayload(job.commentId!) }, content)
+        : legacyPlan;
       if (plan.messages.length === 0) {
         await finishScheduled(key, queued, {
           ...job,
@@ -374,6 +385,20 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
       }
 
       const sentAt = new Date().toISOString();
+      if (bait && result.ok && plan !== legacyPlan) {
+        if (result.usedFallback) {
+          if (await noteBaitFailure(job.username, "1단계(미끼) 카드가 거부돼 1통 카드로 대체 발송했습니다.")) {
+            await notifyAdminBaitIssue(job.username, "미끼 카드(postback 버튼)가 연달아 거부돼 24시간 동안 기존 1통 카드 방식으로 전환했습니다.", "suspended");
+          }
+        } else if (result.messageId) {
+          await saveBaitPending(job.username, {
+            commentId: job.commentId!,
+            fromId: job.recipientId,
+            automationIds: bait.automationIds?.length ? bait.automationIds : [job.ruleId || ""].filter(Boolean),
+            createdAt: sentAt,
+          });
+        }
+      }
       if (result.ok || result.partial) {
         await finishScheduled(key, queued, {
           ...job,
