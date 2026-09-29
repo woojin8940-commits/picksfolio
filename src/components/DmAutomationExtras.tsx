@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  AlertCircle, Check, HelpCircle, Loader2, MessageSquareReply, Plus, Trash2,
+  AlertCircle, Check, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, Trash2,
 } from 'lucide-react';
 import {
   apiService, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
@@ -102,6 +102,129 @@ export const toLocalInput = (d: Date): string => {
 };
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+/* ────────────────────────── 0. 답글/DM 발송 속도 ────────────────────────── */
+
+export const DM_SEND_SPEED_MIN = 50;
+export const DM_SEND_SPEED_MAX = 700;
+export const DM_SEND_SPEED_DEFAULT = 400;
+
+/** 시간당 발송량 구간 — 안전 / 기본(권장) / 주의. */
+const speedTier = (v: number) =>
+  v <= 200
+    ? { label: '안전', range: '50~200건', tone: 'bg-emerald-50 border-emerald-200 text-emerald-700', bar: 'accent-emerald-500',
+        desc: '메타 스팸 감지 위험이 낮아요. 대신 발송이 다소 느려질 수 있어요.' }
+    : v <= 500
+      ? { label: '기본', range: '201~500건', tone: 'bg-sky-50 border-sky-200 text-sky-700', bar: 'accent-sky-500',
+          desc: '속도와 계정 안정성의 균형을 맞춘 권장 구간이에요.' }
+      : { label: '주의', range: '501~700건', tone: 'bg-amber-50 border-amber-200 text-amber-800', bar: 'accent-amber-500',
+          desc: '발송은 빠르지만, 계정 상태에 따라 기능 제한 가능성이 있어요.' };
+
+interface SpeedProps {
+  userName: string;
+  value: number;
+  onChange: (v: number) => void;
+  onNotice: Notice;
+}
+
+/**
+ * 답글/DM 발송 속도 설정(스팸 방지).
+ *
+ * 짧은 시간에 답글·DM 이 몰리면 메타가 비정상 활동으로 판단해 기능을 제한할 수
+ * 있다(이벤트 댓글 급증, 인기 릴스 댓글 폭주, 자동 DM 동시 발송). 고른 시간당
+ * 발송량에 맞춰 발송 간격을 자동으로 벌리고, 한도를 넘은 발송은 다음 시간에
+ * 순서대로 보낸다. 저장 즉시 반영된다.
+ */
+export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onChange, onNotice }) => {
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(value); }, [value]);
+
+  const clamp = (v: number) => Math.min(DM_SEND_SPEED_MAX, Math.max(DM_SEND_SPEED_MIN, Math.round(v) || DM_SEND_SPEED_MIN));
+  const tier = speedTier(draft);
+  const interval = 3600 / draft;
+  const dirty = draft !== value;
+
+  const save = async () => {
+    const next = clamp(draft);
+    setDraft(next);
+    setSaving(true);
+    const result = await apiService.saveDmSendSpeed(userName, next);
+    setSaving(false);
+    if (!result.ok) {
+      onNotice('err', result.error || '발송 속도를 저장하지 못했습니다.');
+      return;
+    }
+    onChange(result.sendSpeed ?? next);
+    onNotice('ok', `발송 속도를 시간당 ${result.sendSpeed ?? next}건으로 저장했어요. 바로 적용됩니다.`);
+  };
+
+  return (
+    <SectionShell
+      icon={<Gauge size={17} />}
+      title="답글/DM 발송 속도"
+      desc="짧은 시간에 답글·DM 이 몰리면 메타가 스팸으로 판단해 계정 기능을 제한할 수 있어요. 시간당 발송량에 맞춰 발송 간격을 자동으로 조절해 계정을 보호합니다."
+      right={<span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-black ${tier.tone}`}>{tier.label}</span>}
+    >
+      <div className="flex items-end justify-between gap-3 mb-2">
+        <p className="text-xs font-bold text-slate-500">시간당 발송량 (답글 + DM)</p>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={DM_SEND_SPEED_MIN}
+            max={DM_SEND_SPEED_MAX}
+            step={10}
+            value={draft}
+            onChange={(e) => setDraft(Number(e.target.value))}
+            onBlur={() => setDraft(clamp(draft))}
+            className="w-20 rounded-xl border border-slate-200 px-2 py-1.5 text-right text-sm font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          />
+          <span className="text-xs font-bold text-slate-500">건/시간</span>
+        </div>
+      </div>
+      <input
+        type="range"
+        min={DM_SEND_SPEED_MIN}
+        max={DM_SEND_SPEED_MAX}
+        step={10}
+        value={clamp(draft)}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        className={`w-full ${tier.bar}`}
+        aria-label="시간당 발송량"
+      />
+      <div className="grid grid-cols-3 gap-2 mt-2 text-[10px] md:text-[11px] font-bold text-center">
+        <span className="text-emerald-600">🟩 안전 50~200</span>
+        <span className="text-sky-600">🟦 기본 201~500</span>
+        <span className="text-amber-600">🟨 주의 501~700</span>
+      </div>
+
+      <div className={`mt-4 rounded-2xl border px-4 py-3 text-[11px] md:text-xs font-medium leading-relaxed ${tier.tone}`}>
+        <b>{tier.label} ({tier.range})</b> — {tier.desc}
+        <br />약 {interval >= 60 ? `${Math.round(interval / 6) / 10}분` : `${Math.round(interval * 10) / 10}초`}에 한 통씩 고르게 나갑니다.
+      </div>
+
+      <div className="mt-3">
+        <HintBox>
+          시간당 한도에 닿으면 남은 답글·DM 은 버려지지 않고, 다음 시간에 들어온 순서대로 발송돼요.
+          기본값은 시간당 {DM_SEND_SPEED_DEFAULT}건이며, 계정 상황에 맞게 {DM_SEND_SPEED_MIN}~{DM_SEND_SPEED_MAX}건 사이에서 조절할 수 있어요.
+        </HintBox>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        {draft !== DM_SEND_SPEED_DEFAULT && (
+          <button
+            type="button"
+            onClick={() => setDraft(DM_SEND_SPEED_DEFAULT)}
+            className="rounded-xl py-2.5 px-4 text-xs md:text-sm font-black text-slate-500 hover:bg-slate-100 transition-colors"
+          >
+            기본값으로
+          </button>
+        )}
+        <SaveButton saving={saving} disabled={!dirty} onClick={() => void save()} />
+      </div>
+    </SectionShell>
+  );
+};
 
 /* ────────────────────────── 1. 자주 묻는 질문 ────────────────────────── */
 

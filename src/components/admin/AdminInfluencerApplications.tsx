@@ -35,19 +35,28 @@ const STATUS_STYLE: Record<Status, string> = {
   done: 'bg-emerald-50 text-emerald-600',
 };
 
-/** "@아이디" 나 "아이디" 로 적어도 눌러서 열 수 있게 프로필 주소로 바꾼다. */
+/**
+ * 지원서의 인스타그램 계정 이름. 지금은 계정 이름만 받지만, 예전 지원서에는
+ * 프로필 링크나 "@아이디"가 들어 있어 거기서도 계정 이름만 뽑아 낸다.
+ */
+const instagramHandle = (raw: string) => {
+  let v = String(raw || '').trim();
+  const m = v.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+  if (m) v = m[1];
+  return v.replace(/^@+/, '').replace(/[/?#].*$/, '').trim();
+};
+
+/** 계정 이름으로 만든 프로필 링크(https://www.instagram.com/계정이름/). */
 const instagramHref = (raw: string) => {
-  const v = raw.trim();
-  if (/^https?:\/\//i.test(v)) return v;
-  if (/instagram\.com/i.test(v)) return `https://${v.replace(/^\/+/, '')}`;
-  return `https://instagram.com/${v.replace(/^@/, '')}`;
+  const handle = instagramHandle(raw);
+  return handle ? `https://www.instagram.com/${handle}/` : '';
 };
 
 const toCsv = (rows: Application[]) => {
   const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['지원일시', '성함', '연락처', '인스타그램', '상태', '메모'];
+  const head = ['지원일시', '성함', '연락처', '인스타그램 계정', '프로필 링크', '상태', '메모'];
   const body = rows.map((r) =>
-    [new Date(r.created_at).toLocaleString('ko-KR'), r.name, r.phone, r.instagram, STATUS_LABEL[r.status], r.memo]
+    [new Date(r.created_at).toLocaleString('ko-KR'), r.name, r.phone, instagramHandle(r.instagram), instagramHref(r.instagram), STATUS_LABEL[r.status], r.memo]
       .map(esc)
       .join(','),
   );
@@ -225,9 +234,11 @@ const AdminInfluencerApplications: React.FC<Props> = ({ token }) => {
                       href={instagramHref(a.instagram)}
                       target="_blank"
                       rel="noreferrer"
+                      title={instagramHref(a.instagram)}
                       className="block text-[11px] font-bold text-blue-600 hover:underline truncate"
                     >
-                      {a.instagram}
+                      @{instagramHandle(a.instagram)}
+                      <span className="ml-1 font-medium text-slate-400">instagram.com/{instagramHandle(a.instagram)}</span>
                     </a>
                     <p className="text-[10px] text-slate-400 font-bold mt-0.5">
                       {new Date(a.created_at).toLocaleString('ko-KR')}

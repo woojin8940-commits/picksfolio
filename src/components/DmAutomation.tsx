@@ -4,7 +4,7 @@ import {
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
-  ArrowUp, ArrowDown, Images, Clock, CalendarClock, RefreshCw,
+  ArrowUp, ArrowDown, Images, Clock, CalendarClock, RefreshCw, Info,
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
@@ -15,7 +15,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import ManualDmModal from './ManualDmModal';
 import Toggle from './DmToggle';
-import { DmFaqSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -34,8 +34,19 @@ interface DmAutomationProps {
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 const blankCard = (): DmCarouselCard => ({
-  id: genId('card'), title: '', subtitle: '', imageUrl: '', buttonLabel: '', buttonUrl: '',
+  id: genId('card'), title: '', subtitle: '', imageUrl: '', buttonLabel: '', buttonUrl: '', buttons: [],
 });
+
+/** 카드 한 장에 달 수 있는 버튼 수(인스타그램 제네릭 템플릿 기준 최대 3개). */
+const CARD_BUTTON_MAX = 3;
+
+/** 카드 버튼 목록. 예전에 저장된 카드(버튼 1개 필드)는 목록으로 옮겨 읽는다. */
+const cardButtonList = (c: DmCarouselCard): DmMessageButton[] =>
+  Array.isArray(c.buttons)
+    ? c.buttons
+    : c.buttonLabel || c.buttonUrl
+      ? [{ id: `${c.id}_b0`, label: c.buttonLabel || '', url: c.buttonUrl || '' }]
+      : [];
 
 /**
  * 새 자동화의 기본 문구는 화면 언어를 따라간다.
@@ -99,7 +110,7 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   keywords: Array.isArray(a.keywords) ? a.keywords : [],
   replies: Array.isArray(a.replies) ? a.replies : [],
   buttons: Array.isArray(a.buttons) ? a.buttons : [],
-  cards: Array.isArray(a.cards) ? a.cards : [],
+  cards: Array.isArray(a.cards) ? a.cards.map((c) => ({ ...c, buttons: cardButtonList(c) })) : [],
   mediaIds: Array.isArray(a.mediaIds) ? a.mediaIds : [],
   mediaScope: a.mediaScope === 'selected' ? 'selected' : 'all',
   messageType: a.messageType === 'carousel' ? 'carousel' : 'text',
@@ -243,7 +254,7 @@ const imageUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && 
  */
 const cardSendable = (c: DmCarouselCard): boolean =>
   Boolean(normalizeImageUrl(c.imageUrl)) || Boolean(c.subtitle.trim()) ||
-  Boolean(c.buttonLabel.trim() && isValidLinkUrl(c.buttonUrl));
+  cardButtonList(c).some((b) => Boolean(b.label.trim() && isValidLinkUrl(b.url)));
 
 /** 인스타그램 피드 게시물에서 카드 이미지로 쓸 수 있는 사진 주소. (영상은 썸네일) */
 const feedImageOf = (m: InstagramMedia): string =>
@@ -345,7 +356,7 @@ const DmPreview: React.FC<{
   message: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
-  /** 2단계 발송이면 먼저 도착하는 미끼 카드(문구 + 버튼 하나). */
+  /** 2단계 발송이면 먼저 도착하는 예고 카드(문구 + 버튼 하나). */
   bait?: { message: string; buttonLabel: string } | null;
   /** 2단계 본 메시지 앞에 먼저 가는 텍스트. */
   intro?: string;
@@ -368,7 +379,7 @@ const DmPreview: React.FC<{
       </div>
       {bait && (
         <>
-          <p className="text-[10px] font-black text-pink-500 mb-1.5">1단계 · 댓글 직후 도착</p>
+          <p className="text-[10px] font-black text-pink-500 mb-1.5">1단계 · 예고 메시지</p>
           <div className="flex items-end gap-2 mb-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
               <Instagram size={15} />
@@ -417,11 +428,11 @@ const DmPreview: React.FC<{
                       ? <p data-user-content className="text-[12px] font-black text-slate-800 truncate">{c.title}</p>
                       : <p className="text-[12px] font-black text-slate-800 truncate">카드 제목</p>}
                     {c.subtitle && <p data-user-content className="text-[11px] text-slate-500 font-medium truncate">{c.subtitle}</p>}
-                    {c.buttonLabel && (
-                      <div data-user-content className="mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
-                        {c.buttonLabel}
+                    {cardButtonList(c).filter((b) => b.label.trim()).map((b) => (
+                      <div key={b.id} data-user-content className="mt-1.5 first:mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
+                        {b.label}
                       </div>
-                    )}
+                    ))}
                   </div>
                 </div>
               ))}
@@ -605,8 +616,15 @@ const CarouselBuilder: React.FC<{
 
       {cards.map((c, i) => {
         // 카드 버튼도 링크가 잘못되면 발송 시 통째로 빠진다.
-        const cardUrlInvalid =
-          linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim());
+        const cardBtns = cardButtonList(c);
+        const btnInvalid = (b: DmMessageButton) =>
+          linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim());
+        const cardUrlInvalid = cardBtns.some(btnInvalid);
+        // 버튼 목록을 바꾸면 첫 버튼을 예전 필드에도 같이 적어 둔다(구버전 발송기 호환).
+        const setButtons = (buttons: DmMessageButton[]) =>
+          setCard(c.id, { buttons, buttonLabel: buttons[0]?.label || '', buttonUrl: buttons[0]?.url || '' });
+        const patchButton = (id: string, p: Partial<DmMessageButton>) =>
+          setButtons(cardBtns.map((b) => (b.id === id ? { ...b, ...p } : b)));
         const imageInvalid = imageUrlBroken(c.imageUrl);
         const working = busy[c.id];
         const error = imageError[c.id];
@@ -818,27 +836,53 @@ const CarouselBuilder: React.FC<{
               </div>
             </div>
 
-            {/* 카드 버튼 */}
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={c.buttonLabel}
-                onChange={(e) => setCard(c.id, { buttonLabel: e.target.value })}
-                placeholder="버튼 이름 (예: 보기)"
-                maxLength={20}
-                className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
-              />
-              <input
-                value={c.buttonUrl}
-                onChange={(e) => setCard(c.id, { buttonUrl: cleanLinkInput(e.target.value) })}
-                onBlur={(e) => {
-                  const value = normalizeLinkUrl(e.currentTarget.value);
-                  if (value) setCard(c.id, { buttonUrl: value });
-                }}
-                placeholder="버튼 링크 (https://...)"
-                className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
-                  cardUrlInvalid ? 'border-red-300' : 'border-slate-200'
-                }`}
-              />
+            {/* 카드 버튼 (최대 3개) */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-500">
+                <Link2 size={12} /> 카드 버튼 <span className="text-slate-300 font-bold">(최대 {CARD_BUTTON_MAX}개)</span>
+              </div>
+              {cardBtns.map((b) => (
+                <div key={b.id} className="flex gap-2 items-center">
+                  <div className="flex-1 grid grid-cols-2 gap-2">
+                    <input
+                      value={b.label}
+                      onChange={(e) => patchButton(b.id, { label: e.target.value })}
+                      placeholder="버튼 이름 (예: 보기)"
+                      maxLength={20}
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                    />
+                    <input
+                      value={b.url}
+                      onChange={(e) => patchButton(b.id, { url: cleanLinkInput(e.target.value) })}
+                      onBlur={(e) => {
+                        const value = normalizeLinkUrl(e.currentTarget.value);
+                        if (value) patchButton(b.id, { url: value });
+                      }}
+                      placeholder="버튼 링크 (https://...)"
+                      className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
+                        btnInvalid(b) ? 'border-red-300' : 'border-slate-200'
+                      }`}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setButtons(cardBtns.filter((x) => x.id !== b.id))}
+                    aria-label="버튼 삭제"
+                    className="w-8 h-8 shrink-0 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {cardBtns.length < CARD_BUTTON_MAX && (
+                <button
+                  type="button"
+                  onClick={() => setButtons([...cardBtns, { id: genId('cbtn'), label: '', url: '' }])}
+                  className="w-full border border-dashed border-slate-300 rounded-lg py-2 text-[11px] font-black text-slate-500 hover:border-pink-400 hover:text-pink-500"
+                >
+                  + 카드 버튼 추가
+                </button>
+              )}
             </div>
             {cardUrlInvalid && (
               <p className="flex items-center gap-1 px-1 text-[10px] font-bold text-red-500">
@@ -925,8 +969,7 @@ const AutomationEditor: React.FC<{
     draft.buttons.some((b) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim())) ||
     draft.cards.some(
       (c) =>
-        linkUrlBroken(c.buttonUrl) ||
-        (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim()) ||
+        cardButtonList(c).some((b) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim())) ||
         // 카드 이미지도 인스타그램이 직접 받아가는 주소다. 잘못돼 있으면 서버가 저장을 거절한다.
         imageUrlBroken(c.imageUrl),
     );
@@ -968,7 +1011,7 @@ const AutomationEditor: React.FC<{
           : brokenLinks
             ? '링크·이미지 주소를 https:// 로 시작하는 주소로 고쳐주세요.'
             : !baitValid
-              ? '1단계 메시지 문구와 버튼 이름을 입력해주세요.'
+              ? '예고 메시지 문구와 버튼 이름을 입력해주세요.'
             : draft.messageType === 'carousel'
               ? '이미지나 제목이 있는 카드를 한 장 이상 만들어주세요.'
               : '보낼 DM 메시지를 입력해주세요.';
@@ -982,11 +1025,19 @@ const AutomationEditor: React.FC<{
       // 즉시 발송으로 되돌렸다면 예약 시각은 남겨두지 않는다.
       scheduledAt: draft.sendMode === 'scheduled' ? draft.scheduledAt : '',
       buttons: draft.buttons.map((b) => ({ ...b, url: normalizeLinkUrl(b.url) })),
-      cards: draft.cards.map((c) => ({
-        ...c,
-        buttonUrl: normalizeLinkUrl(c.buttonUrl),
-        imageUrl: normalizeImageUrl(c.imageUrl),
-      })),
+      cards: draft.cards.map((c) => {
+        const buttons = cardButtonList(c)
+          .filter((b) => b.label.trim() || b.url.trim())
+          .slice(0, CARD_BUTTON_MAX)
+          .map((b) => ({ ...b, url: normalizeLinkUrl(b.url) }));
+        return {
+          ...c,
+          buttons,
+          buttonLabel: buttons[0]?.label || '',
+          buttonUrl: buttons[0]?.url || '',
+          imageUrl: normalizeImageUrl(c.imageUrl),
+        };
+      }),
     });
   };
 
@@ -1184,7 +1235,7 @@ const AutomationEditor: React.FC<{
               {draft.followFilter !== 'all' && (
                 <p className="flex items-start gap-1.5 mt-2 text-[11px] text-pink-600 font-bold leading-relaxed">
                   <AlertCircle size={13} className="shrink-0 mt-px" />
-                  팔로워 구분 발송을 위해서는 1단계 메시지가 필요합니다. 버튼을 누른 순간 팔로우 여부를 확인해 본 메시지를 보냅니다.
+                  팔로워 구분 발송을 위해서는 예고 메시지가 필요합니다. 버튼을 누른 순간 팔로우 여부를 확인해 본 메시지를 보냅니다.
                 </p>
               )}
             </div>
@@ -1286,16 +1337,16 @@ const AutomationEditor: React.FC<{
               </div>
 
               {/*
-                2단계 발송(미끼 메시지). 댓글 비공개 답장은 댓글 1건당 1통뿐이라, 켜면 첫 통은
+                2단계 발송(예고 메시지). 댓글 비공개 답장은 댓글 1건당 1통뿐이라, 켜면 첫 통은
                 짧은 문구 + 버튼 하나만 보내고 버튼을 누른 사람에게 아래 본 메시지를 보낸다.
                 버튼 클릭으로 대화창이 열려 본문 길이·통 수 제한이 사라진다.
               */}
               <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-black text-slate-900">미끼 메시지 사용</p>
+                    <p className="text-sm font-black text-slate-900">예고 메시지 사용</p>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5 leading-relaxed">
-                      댓글 직후 짧은 안내와 버튼을 먼저 보내고, 버튼을 누르면 본 메시지(긴 글·여러 버튼·캐러셀)를 보냅니다.
+                      댓글 직후 짧은 예고 메시지와 버튼을 먼저 보내고, 버튼을 누르면 본 메시지(긴 글·여러 버튼·캐러셀)를 보냅니다.
                     </p>
                   </div>
                   <Toggle
@@ -1304,16 +1355,23 @@ const AutomationEditor: React.FC<{
                     disabled={baitForced}
                   />
                 </div>
+                <p className="flex items-start gap-1.5 mt-3 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 text-[11px] text-slate-600 font-medium leading-relaxed">
+                  <Info size={13} className="shrink-0 mt-px text-slate-400" />
+                  <span>
+                    인스타그램 정책상 댓글에 보내는 DM은 <b>댓글 1개당 1통</b>만 보낼 수 있고, 버튼을 넣으면 글자 수도 {CARD_TEXT_MAX}자로 줄어요.
+                    긴 글·여러 버튼·캐러셀을 보내려면 예고 메시지를 켜 주세요. 받는 사람이 예고 메시지의 버튼을 누르면 대화가 열려 본 메시지를 보낼 수 있어요.
+                  </span>
+                </p>
                 {baitForced && (
                   <p className="flex items-start gap-1.5 mt-2 text-[11px] text-pink-600 font-bold leading-relaxed">
                     <AlertCircle size={13} className="shrink-0 mt-px" />
-                    팔로워 구분 발송을 위해서는 1단계 메시지가 필요합니다.
+                    팔로워 구분 발송을 위해서는 예고 메시지가 필요합니다.
                   </p>
                 )}
 
                 {baitOn && (
                   <div className="mt-4 space-y-2">
-                    <p className="text-xs font-black text-slate-500">1단계 · 댓글 직후 보낼 메시지</p>
+                    <p className="text-xs font-black text-slate-500">1단계 · 댓글 직후 보낼 예고 메시지</p>
                     <textarea
                       value={draft.baitMessage || ''}
                       onChange={(e) => patch({ baitMessage: e.target.value.slice(0, CARD_TEXT_MAX) })}
@@ -1363,7 +1421,15 @@ const AutomationEditor: React.FC<{
                       </div>
                     )}
 
-                    <p className="pt-3 text-xs font-black text-slate-500">2단계 · 버튼을 누르면 보낼 본 메시지</p>
+                  </div>
+                )}
+              </div>
+
+              {/* 2단계 · 본 메시지 — 예고 메시지를 켜면 형식(텍스트/캐러셀) 선택과 내용이 이 안에 들어간다. */}
+              <div className={baitOn ? 'rounded-2xl border border-pink-200 bg-pink-50/30 p-4' : ''}>
+              {baitOn && (
+                <div className="mb-4 space-y-2">
+                    <p className="text-xs font-black text-pink-600">2단계 · 버튼을 누르면 보낼 본 메시지</p>
                     <textarea
                       value={draft.mainIntro || ''}
                       onChange={(e) => patch({ mainIntro: e.target.value })}
@@ -1373,12 +1439,10 @@ const AutomationEditor: React.FC<{
                       className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
                     />
                     <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
-                      아래에서 본 메시지 형식과 내용을 정해 주세요. 버튼 클릭이 막혀 본 메시지를 보낼 수 없을 때는 자동으로 기존 1통 카드 방식으로 발송됩니다.
+                      아래에서 텍스트 또는 캐러셀을 골라 본 메시지를 설정해 주세요. 버튼 클릭이 막혀 본 메시지를 보낼 수 없을 때는 자동으로 기존 1통 카드 방식으로 발송됩니다.
                     </p>
-                  </div>
-                )}
-              </div>
-
+                </div>
+              )}
               {/* 메시지 형식 선택 */}
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {([
@@ -1506,6 +1570,7 @@ const AutomationEditor: React.FC<{
                   />
                 </div>
               )}
+              </div>
             </div>
           </div>
 
@@ -1647,6 +1712,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
     replies: [],
   });
+  const [sendSpeed, setSendSpeed] = useState<number>(() => cachedSettings?.sendSpeed || DM_SEND_SPEED_DEFAULT);
 
   /** 추가 기능 섹션들이 쓰는 알림. 상단 배너를 그대로 재사용한다. */
   const notify = (type: 'ok' | 'err', text: string) => {
@@ -1667,6 +1733,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       baitHealth,
       faq,
       direct,
+      sendSpeed,
       ...overrides,
     } as DmAutomationSettings);
   };
@@ -1742,6 +1809,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         setBaitHealth(s.baitHealth || null);
         if (s.faq) setFaq(s.faq);
         if (s.direct) setDirect(s.direct);
+        if (s.sendSpeed) setSendSpeed(s.sendSpeed);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
         if (s.connected) void loadMedia({ refresh: true });
@@ -2442,7 +2510,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                       className="inline-flex items-center gap-1 bg-violet-100 text-violet-600 rounded-lg px-2 py-1 text-[11px] font-bold"
                       title="댓글 직후 버튼 메시지를 먼저 보내고, 버튼을 누르면 본 메시지를 보내요."
                     >
-                      <Zap size={11} /> 2단계 발송
+                      <Zap size={11} /> 예고 메시지
                     </span>
                   )}
                   {a.messageType === 'carousel' && (
@@ -2551,6 +2619,18 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
           onChange={setFaq}
           onNotice={notify}
         />
+        {/* 스팸 방지 — 답글/DM 발송 속도(시간당 발송량). */}
+        {connected && (
+          <DmSendSpeedSection
+            userName={userName}
+            value={sendSpeed}
+            onChange={(v) => {
+              setSendSpeed(v);
+              writeSettingsCache({ sendSpeed: v });
+            }}
+            onNotice={notify}
+          />
+        )}
       </div>
 
       {/* 성과 요약 (연결 시) */}

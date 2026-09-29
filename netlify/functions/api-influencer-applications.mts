@@ -6,7 +6,7 @@ import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 /**
  * 광고로 모집하는 인플루언서 지원서(/influencer-apply).
  *
- *   POST  — 공개. 지원 페이지가 성함 · 연락처 · 인스타 프로필을 저장한다.
+ *   POST  — 공개. 지원 페이지가 성함 · 연락처 · 인스타 계정 이름을 저장한다.
  *   GET   — 운영자. 운영 콘솔의 "인플루언서 지원자" 탭이 목록을 읽는다.
  *   PATCH — 운영자. 연락 상태와 메모를 바꾼다.
  *
@@ -18,6 +18,14 @@ import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 const STATUSES = ["new", "contacted", "done"] as const;
 
 const clip = (raw: unknown, max: number) => String(raw ?? "").trim().slice(0, max);
+
+/** "https://instagram.com/abc/", "@abc", "abc" → "abc" */
+function toInstagramHandle(raw: string): string {
+  let v = raw.trim();
+  const m = v.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+  if (m) v = m[1];
+  return v.replace(/^@+/, "").replace(/[/?#].*$/, "").trim();
+}
 
 export default async (req: Request) => {
   if (req.method === "POST") {
@@ -35,9 +43,17 @@ export default async (req: Request) => {
 
     const name = clip(body.name, 50);
     const phone = clip(body.phone, 20);
-    const instagram = clip(body.instagram, 200);
+    // 지원 페이지는 계정 이름만 받는다. 링크나 @아이디가 와도 계정 이름만 저장하고,
+    // 프로필 링크는 운영 콘솔이 계정 이름으로 만들어 보여 준다.
+    const instagram = toInstagramHandle(clip(body.instagram, 200));
     if (!name || !phone || !instagram) {
-      return Response.json({ error: "성함, 연락처, 인스타그램 프로필을 모두 입력해 주세요." }, { status: 400 });
+      return Response.json({ error: "성함, 연락처, 인스타그램 계정 이름을 모두 입력해 주세요." }, { status: 400 });
+    }
+    if (!/^[A-Za-z0-9._]{1,30}$/.test(instagram)) {
+      return Response.json(
+        { error: "인스타그램 계정 이름은 영문, 숫자, 마침표(.), 밑줄(_)만 입력해 주세요." },
+        { status: 400 },
+      );
     }
     if (body.privacy_consent !== true && body.privacy_consent !== "동의") {
       return Response.json({ error: "개인정보 수집·이용에 동의해 주세요." }, { status: 400 });
