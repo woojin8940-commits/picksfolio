@@ -296,10 +296,44 @@ export function buildCommentDmPlan(content: DmContent): DmPlan {
     }
   }
 
-  // 텍스트 형식. 본문이 길어 버튼 카드가 두 번째 통이 되는 경우, 그 카드는 부가
-  // 메시지로 둔다 — 본문은 이미 도착했으므로 실패로 기록하면 안 된다.
+  /**
+   * 텍스트 + 링크 버튼. 본문이 카드 제목 한도(80자)를 넘으면 buildDmMessages 는
+   * [본문 텍스트] → [버튼 카드] 2통으로 나누는데, 비공개 답장은 첫 통만 도착하므로
+   * 버튼 카드가 통째로 빠졌다("종종 링크 버튼이 안 온다"). 그래서 댓글 답장에서는
+   * 본문과 버튼을 항상 카드 한 장에 담는다 — 제목(80자) + 설명(80자)까지 본문을
+   * 싣고, 그보다 긴 본문은 잘리더라도 버튼이 반드시 도착하게 한다.
+   * 카드가 형식 오류로 거부될 때만 본문 + 링크 주소를 글로 보낸다.
+   */
+  const buttons = toWebUrlButtons(content.buttons);
+  const message = (content.message || "").trim();
+  if (buttons.length > 0 && message.length > CARD_TEXT_MAX) {
+    const { title, subtitle } = splitCardText(message);
+    const element: Record<string, unknown> = { title, buttons };
+    if (subtitle) element.subtitle = subtitle;
+    const fallbackText = [message, ...buttons.map((b) => `${b.title}: ${b.url}`)].join("\n\n");
+    return {
+      messages: [genericTemplate([element])],
+      bestEffortFrom: 1,
+      fallback: { text: fallbackText.slice(0, TEXT_MAX) },
+    };
+  }
+
   const messages = buildDmMessages(content);
   return { messages, bestEffortFrom: Math.min(1, messages.length) };
+}
+
+/**
+ * 긴 본문을 카드 제목/설명(각 80자)으로 나눈다. 가능하면 줄바꿈·공백에서 끊고,
+ * 설명에도 다 들어가지 않으면 끝을 '…'로 줄인다.
+ */
+function splitCardText(message: string): { title: string; subtitle: string } {
+  const head = message.slice(0, CARD_TEXT_MAX);
+  let cut = Math.max(head.lastIndexOf("\n"), head.lastIndexOf(" "));
+  if (cut < CARD_TEXT_MAX / 2) cut = CARD_TEXT_MAX;
+  const title = message.slice(0, cut).trim();
+  const rest = message.slice(cut).trim();
+  const subtitle = rest.length > CARD_TEXT_MAX ? `${rest.slice(0, CARD_TEXT_MAX - 1).trimEnd()}…` : rest;
+  return { title, subtitle };
 }
 
 /** 대화창이 열린 상대(IGSID)용 계획 — 설정한 순서 그대로 전부 보낸다. */
