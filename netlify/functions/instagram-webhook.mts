@@ -118,7 +118,7 @@ interface DmAutomationItem {
   baitEnabled?: boolean;
   baitMessage?: string;
   baitButtonLabel?: string;
-  /** 본 메시지 앞에 먼저 보낼 텍스트(선택). */
+  /** 본 메시지 앞에 먼저 보낼 텍스트(선택). 캐러셀 본 메시지에만 쓴다. */
   mainIntro?: string;
   /** 팔로우 조건에 맞지 않는 사람이 버튼을 눌렀을 때 보낼 안내와 재확인 버튼 라벨. */
   followGateMessage?: string;
@@ -192,13 +192,18 @@ function dmContentOf(a: DmAutomationItem) {
  * 감싸 보낸다. 댓글 1건당 1통 제한 때문에 순서가 중요하다 —
  * 자세한 내용은 _shared/instagram-dm.mts 참고.
  */
+/** 인사말은 캐러셀 본 메시지에만 붙인다(텍스트는 본문에 바로 적으면 된다). */
+function mainIntroOf(a: DmAutomationItem): string {
+  return a.messageType === "carousel" ? (a.mainIntro || "").trim() : "";
+}
+
 function buildCommentPlan(a: DmAutomationItem): DmPlan {
   return buildCommentDmPlan(dmContentOf(a));
 }
 
 /** 대화창이 열린 상대에게 IGSID 로 직접 보낼 때 쓰는 계획(설정한 순서 그대로). */
 function buildDirectPlan(a: DmAutomationItem): DmPlan {
-  if (usesBait(a)) return buildMainDmPlan(dmContentOf(a), a.mainIntro);
+  if (usesBait(a)) return buildMainDmPlan(dmContentOf(a), mainIntroOf(a));
   return buildDirectDmPlan(dmContentOf(a));
 }
 
@@ -725,7 +730,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
     return;
   }
 
-  const plan = buildMainDmPlan(dmContentOf(automation), automation.mainIntro);
+  const plan = buildMainDmPlan(dmContentOf(automation), mainIntroOf(automation));
   for (const payload of plan.messages) {
     const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
     if (body) await noteSentText(username, body);
@@ -782,7 +787,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
           igAccountId: igId,
           recipientId: senderId,
           sendAt: new Date(Date.now() + (result.retryAfterMs || 60_000)).toISOString(),
-          message: [automation.mainIntro?.trim(), automation.messageType === "carousel" ? "" : automation.message]
+          message: [mainIntroOf(automation), automation.messageType === "carousel" ? "" : automation.message]
             .filter(Boolean)
             .join("\n\n"),
           buttons: automation.messageType === "carousel" ? [] : automation.buttons || [],

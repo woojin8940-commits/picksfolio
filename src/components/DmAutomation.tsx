@@ -1426,10 +1426,12 @@ const AutomationEditor: React.FC<{
               </div>
 
               {/* 2단계 · 본 메시지 — 예고 메시지를 켜면 형식(텍스트/캐러셀) 선택과 내용이 이 안에 들어간다. */}
-              <div className={baitOn ? 'rounded-2xl border border-pink-200 bg-pink-50/30 p-4' : ''}>
+              <div className={baitOn ? 'rounded-2xl border border-slate-200 bg-white p-4' : ''}>
               {baitOn && (
                 <div className="mb-4 space-y-2">
-                    <p className="text-xs font-black text-pink-600">2단계 · 버튼을 누르면 보낼 본 메시지</p>
+                    <p className="text-xs font-black text-slate-500">2단계 · 버튼을 누르면 보낼 본 메시지</p>
+                    {/* 인사말은 캐러셀일 때만 받는다. 텍스트는 본문에 바로 적으면 된다. */}
+                    {draft.messageType === 'carousel' && (
                     <textarea
                       value={draft.mainIntro || ''}
                       onChange={(e) => patch({ mainIntro: e.target.value })}
@@ -1438,6 +1440,7 @@ const AutomationEditor: React.FC<{
                       placeholder="본 메시지 앞에 먼저 보낼 인사말 (선택)"
                       className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
                     />
+                    )}
                     <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
                       아래에서 텍스트 또는 캐러셀을 골라 본 메시지를 설정해 주세요. 버튼 클릭이 막혀 본 메시지를 보낼 수 없을 때는 자동으로 기존 1통 카드 방식으로 발송됩니다.
                     </p>
@@ -1584,7 +1587,7 @@ const AutomationEditor: React.FC<{
                 buttons={draft.buttons}
                 cards={draft.cards}
                 bait={baitOn ? { message: draft.baitMessage || '', buttonLabel: draft.baitButtonLabel || '' } : null}
-                intro={baitOn ? draft.mainIntro : ''}
+                intro={baitOn && draft.messageType === 'carousel' ? draft.mainIntro : ''}
               />
             </div>
           </div>
@@ -1601,7 +1604,7 @@ const AutomationEditor: React.FC<{
                 buttons={draft.buttons}
                 cards={draft.cards}
                 bait={baitOn ? { message: draft.baitMessage || '', buttonLabel: draft.baitButtonLabel || '' } : null}
-                intro={baitOn ? draft.mainIntro : ''}
+                intro={baitOn && draft.messageType === 'carousel' ? draft.mainIntro : ''}
               />
           </div>
         </div>
