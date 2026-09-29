@@ -29,6 +29,13 @@ import {
 import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import {
+  DM_SEND_SPEED_DEFAULT,
+  DM_SEND_SPEED_MAX,
+  DM_SEND_SPEED_MIN,
+  normalizeDmSendSpeed,
+  writeDmSendSpeed,
+} from "./_shared/dm-send-speed.mts";
 import { clearFeedCache } from "./_shared/instagram-feed.mts";
 
 /**
@@ -77,6 +84,8 @@ interface DmCarouselCard {
   imageUrl: string;
   buttonLabel: string;
   buttonUrl: string;
+  /** 카드 버튼 목록(최대 3개). 첫 버튼은 buttonLabel/buttonUrl 에도 같이 적는다. */
+  buttons?: DmMessageButton[];
 }
 
 interface DmAutomationItem {
@@ -193,6 +202,11 @@ interface DmSettings {
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
   rules: unknown[];
+  /**
+   * 답글/DM 발송 속도 — 시간당 최대 발송량(답글 + DM 합산, 50~700건, 기본 400건).
+   * 발송기는 이 값으로 발송 간격을 고르게 벌린다(dm-send-speed.mts).
+   */
+  sendSpeed?: number;
   updatedAt?: string;
   /** 계정별 웹훅(`subscribed_apps`) 구독을 마친 시각. */
   webhookSubscribedAt?: string;
@@ -310,14 +324,29 @@ function sanitizeAutomation(a: any): DmAutomationItem {
   const cards: DmCarouselCard[] = Array.isArray(a?.cards)
     ? a.cards
         .slice(0, 10)
-        .map((c: any) => ({
-          id: String(c?.id || genId("card")),
-          title: String(c?.title || "").slice(0, 80),
-          subtitle: String(c?.subtitle || "").slice(0, 80),
-          imageUrl: requireImage(c?.imageUrl, `'${name}' 카드`),
-          buttonLabel: String(c?.buttonLabel || "").slice(0, 20),
-          buttonUrl: requireLink(c?.buttonUrl, `'${name}' 카드 버튼`),
-        }))
+        .map((c: any) => {
+          // 버튼 목록이 없으면(예전 화면) 단일 버튼 필드를 목록으로 옮긴다.
+          const rawButtons: any[] = Array.isArray(c?.buttons)
+            ? c.buttons
+            : [{ label: c?.buttonLabel, url: c?.buttonUrl }];
+          const buttons: DmMessageButton[] = rawButtons
+            .map((b: any) => ({
+              id: String(b?.id || genId("cbtn")),
+              label: String(b?.label || "").slice(0, 20),
+              url: requireLink(b?.url, `'${name}' 카드 버튼`),
+            }))
+            .filter((b) => b.label.trim() || b.url)
+            .slice(0, 3);
+          return {
+            id: String(c?.id || genId("card")),
+            title: String(c?.title || "").slice(0, 80),
+            subtitle: String(c?.subtitle || "").slice(0, 80),
+            imageUrl: requireImage(c?.imageUrl, `'${name}' 카드`),
+            buttonLabel: buttons[0]?.label || "",
+            buttonUrl: buttons[0]?.url || "",
+            buttons,
+          };
+        })
         .filter((c: DmCarouselCard) => c.title || c.imageUrl || c.buttonUrl)
     : [];
 
@@ -609,6 +638,12 @@ export default async (req: Request, context: Context) => {
     // 위에서 옮겨 적은 연동에는 구독이 없으므로, 여기서 처음 걸린다.
     const data = dmOff ? linked : await healWebhookSubscription(username, key, linked);
     const { accessToken, ownerAuthUserId, ...safe } = data;
+    const sendSpeed = normalizeDmSendSpeed(data.sendSpeed ?? DM_SEND_SPEED_DEFAULT);
+    // 저장한 뒤 다른 계정으로 다시 연동했어도 발송기가 같은 속도를 읽도록 맞춰 둔다.
+    if (!dmOff && data.sendSpeed != null && (data.igUserId || data.igAccountId)) {
+      await writeDmSendSpeed([data.igUserId, data.igAccountId], sendSpeed)
+        .catch((e) => console.warn("[dm-automation] send speed sync failed:", (e as Error)?.message));
+    }
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
@@ -621,6 +656,7 @@ export default async (req: Request, context: Context) => {
         replies: Array.isArray(data.direct?.replies) ? data.direct!.replies : [],
       },
       connected: !dmOff && Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
+      sendSpeed,
       hasAccessToken: !dmOff && Boolean(accessToken),
       /**
        * 어떤 웹훅 필드가 걸려 있는지. 화면은 이 값으로 경고를 띄우지 않는다 —
@@ -661,6 +697,50 @@ export default async (req: Request, context: Context) => {
     if (body?.action === "dismissExternalDm") {
       await clearForeignDm(username);
       return Response.json({ success: true, externalDm: null });
+    }
+
+    /**
+     * 답글/DM 발송 속도(시간당 발송량) 저장. 즉시 반영된다.
+     *
+     * 계정 보호용 설정이라 플랜과 무관하게 언제든 바꿀 수 있다 — 속도를 낮추려는
+     * 사람을 결제 안내로 막을 이유가 없다.
+     */
+    if (body?.action === "saveSendSpeed") {
+      const raw = Number(body?.sendSpeed);
+      if (!Number.isFinite(raw) || raw < DM_SEND_SPEED_MIN || raw > DM_SEND_SPEED_MAX) {
+        return Response.json(
+          {
+            error: `시간당 발송량은 ${DM_SEND_SPEED_MIN}~${DM_SEND_SPEED_MAX}건 사이로 설정해 주세요.`,
+            code: "INVALID_SEND_SPEED",
+          },
+          { status: 400 },
+        );
+      }
+      const sendSpeed = normalizeDmSendSpeed(raw);
+      let stored: DmSettings | null;
+      try {
+        stored = await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => ({
+          ...DEFAULT_SETTINGS,
+          ...(current || {}),
+          sendSpeed,
+          updatedAt: now,
+        }));
+      } catch (e) {
+        if (e instanceof BlobWriteConflictError) {
+          return Response.json(
+            {
+              error: "다른 저장이 동시에 진행돼 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+              code: "SAVE_CONFLICT",
+            },
+            { status: 409 },
+          );
+        }
+        throw e;
+      }
+      if (stored?.igUserId || stored?.igAccountId) {
+        await writeDmSendSpeed([stored.igUserId, stored.igAccountId], sendSpeed);
+      }
+      return Response.json({ success: true, sendSpeed });
     }
 
     // 자동화 저장/켜기는 프로 플랜에서만 가능하다. (연동 해제는 위에서 이미 처리 — 플랜과

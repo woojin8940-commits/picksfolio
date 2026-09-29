@@ -40,6 +40,30 @@ export interface DmCard {
   imageUrl: string;
   buttonLabel: string;
   buttonUrl: string;
+  /**
+   * 카드 버튼 목록(최대 3개). 있으면 이 목록을 쓰고, 없으면(예전에 저장된 카드)
+   * buttonLabel/buttonUrl 한 개를 버튼으로 쓴다. 첫 버튼은 buttonLabel/buttonUrl 에도
+   * 같이 적혀 있다.
+   */
+  buttons?: DmButton[];
+}
+
+/** 카드 한 장에 달 수 있는 버튼 수(제네릭 템플릿 요소당 최대 3개). */
+export const CARD_BUTTON_MAX = 3;
+
+/** 카드에서 보낼 수 있는 버튼(라벨과 올바른 링크가 모두 있는 것)만 골라 낸다. */
+export function cardButtons(c: DmCard): DmButton[] {
+  const raw = Array.isArray(c.buttons) && c.buttons.length > 0
+    ? c.buttons
+    : [{ label: c.buttonLabel || "", url: c.buttonUrl || "" }];
+  const out: DmButton[] = [];
+  for (const b of raw) {
+    const label = String(b?.label || "").trim();
+    const url = normalizeLinkUrl(String(b?.url || ""));
+    if (label && url) out.push({ label, url });
+    if (out.length >= CARD_BUTTON_MAX) break;
+  }
+  return out;
 }
 
 export interface DmContent {
@@ -159,8 +183,8 @@ export function toCardElements(cards?: DmCard[]): Record<string, unknown>[] {
     const title = (c.title || "").trim();
     const subtitle = (c.subtitle || "").trim();
     const image = normalizeImageUrl(c.imageUrl);
-    const buttonUrl = normalizeLinkUrl(c.buttonUrl);
-    const hasButton = Boolean((c.buttonLabel || "").trim() && buttonUrl);
+    const buttons = cardButtons(c);
+    const hasButton = buttons.length > 0;
 
     // 제목 외에 아무 속성도 없는 요소는 Graph API 가 거부한다("At least one
     // property must be set in addition to title"). 그 한 장 때문에 캐러셀 전체가
@@ -173,11 +197,13 @@ export function toCardElements(cards?: DmCard[]): Record<string, unknown>[] {
     if (subtitle) el.subtitle = subtitle.slice(0, CARD_TEXT_MAX);
     if (image) el.image_url = image;
     if (hasButton) {
-      const url = buttonUrl;
-      el.default_action = { type: "web_url", url };
-      el.buttons = [
-        { type: "web_url", url, title: c.buttonLabel.trim().slice(0, BUTTON_LABEL_MAX) },
-      ];
+      // 카드 자체를 눌렀을 때는 첫 버튼 링크로 보낸다.
+      el.default_action = { type: "web_url", url: buttons[0].url };
+      el.buttons = buttons.map((b) => ({
+        type: "web_url",
+        url: b.url,
+        title: b.label.slice(0, BUTTON_LABEL_MAX),
+      }));
     }
 
     elements.push(el);
@@ -199,8 +225,7 @@ function cardsFallbackText(cards?: DmCard[]): string {
   for (const c of (Array.isArray(cards) ? cards : []).slice(0, CARD_MAX)) {
     if (!c) continue;
     const lines = [(c.title || "").trim(), (c.subtitle || "").trim()].filter(Boolean);
-    const buttonUrl = normalizeLinkUrl(c.buttonUrl);
-    if (buttonUrl) lines.push(buttonUrl);
+    for (const b of cardButtons(c)) lines.push(`${b.label}: ${b.url}`);
     if (lines.length > 0) blocks.push(lines.join("\n"));
   }
   return blocks.join("\n\n").slice(0, TEXT_MAX);

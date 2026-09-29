@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0B0F1A">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
     <title>인플루언서 지원하기 | PICKSFOLIO</title>
-    <meta name="description" content="픽스폴리오와 함께할 인플루언서를 모집합니다. 성함, 연락처, 인스타그램 프로필만 남겨주시면 담당자가 직접 연락드립니다.">
+    <meta name="description" content="픽스폴리오와 함께할 인플루언서를 모집합니다. 성함, 연락처, 인스타그램 계정 이름만 남겨주시면 담당자가 직접 연락드립니다.">
     <meta property="og:title" content="인플루언서 지원하기 | PICKSFOLIO" />
     <meta property="og:description" content="픽스폴리오와 함께할 인플루언서를 모집합니다. 간단한 정보만 남겨주시면 직접 연락드립니다." />
     <meta property="og:type" content="website" />
@@ -51,6 +51,12 @@
         }
         input::placeholder { color: #A6ADC6; font-weight: 500; }
         input:focus { border-color: #2563EB; background: #fff; }
+        .handle { position: relative; }
+        .handle .at {
+            position: absolute; left: 1rem; top: 50%; transform: translateY(-50%);
+            font-size: 1rem; font-weight: 700; color: #8B93AE; pointer-events: none;
+        }
+        .handle input[type="text"] { padding-left: 2.1rem; }
         .hint { font-size: 0.75rem; color: #8B93AE; font-weight: 600; margin-top: 0.4rem; }
         .consent {
             display: flex; gap: 0.6rem; align-items: flex-start; background: #F4F5FA;
@@ -105,15 +111,18 @@
                 </div>
 
                 <div class="field">
-                    <label class="title" for="instagram">인스타그램 프로필 링크<span class="req">*</span></label>
-                    <input id="instagram" type="text" name="instagram" placeholder="https://instagram.com/아이디" autocomplete="url" required maxlength="200" />
-                    <p class="hint">프로필 링크 또는 @아이디를 입력해주세요.</p>
+                    <label class="title" for="instagram">인스타그램 계정 이름<span class="req">*</span></label>
+                    <div class="handle">
+                        <span class="at">@</span>
+                        <input id="instagram" type="text" name="instagram" placeholder="picksfolio" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required pattern="@?[A-Za-z0-9._]{1,30}" title="영문, 숫자, 마침표(.), 밑줄(_)로 된 계정 이름을 입력해주세요." />
+                    </div>
+                    <p class="hint">링크 없이 계정 이름(아이디)만 적어주세요. 예) picksfolio</p>
                 </div>
 
                 <label class="consent">
                     <input type="checkbox" name="privacy_consent" value="동의" required />
                     <span><b>(필수) 개인정보 수집·이용 동의</b><br>
-                    수집 항목: 성함, 연락처, 인스타그램 프로필 · 목적: 인플루언서 지원 검토 및 연락 · 보유 기간: 지원 검토 완료 후 1년. 자세한 내용은 <a href="/privacy" target="_blank">개인정보처리방침</a>을 확인해주세요.</span>
+                    수집 항목: 성함, 연락처, 인스타그램 계정 이름 · 목적: 인플루언서 지원 검토 및 연락 · 보유 기간: 지원 검토 완료 후 1년. 자세한 내용은 <a href="/privacy" target="_blank">개인정보처리방침</a>을 확인해주세요.</span>
                 </label>
 
                 <button type="submit" id="submit-btn">지원하기</button>
@@ -137,6 +146,21 @@
             var btn = document.getElementById('submit-btn');
             var err = document.getElementById('error');
             var done = document.getElementById('done');
+            var handleInput = document.getElementById('instagram');
+
+            // 계정 이름만 받는다. 링크나 @아이디를 붙여 넣어도 계정 이름만 남긴다.
+            function toHandle(raw) {
+                var v = String(raw || '').trim();
+                var m = v.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+                if (m) v = m[1];
+                return v.replace(/^@+/, '').replace(/[\/?#].*$/, '').trim();
+            }
+            handleInput.addEventListener('blur', function () {
+                handleInput.value = toHandle(handleInput.value);
+            });
+            handleInput.addEventListener('paste', function () {
+                setTimeout(function () { handleInput.value = toHandle(handleInput.value); }, 0);
+            });
 
             form.addEventListener('submit', function (e) {
                 e.preventDefault();
@@ -144,6 +168,7 @@
                 btn.disabled = true;
                 btn.textContent = '제출 중...';
 
+                handleInput.value = toHandle(handleInput.value);
                 var data = new FormData(form);
                 var payload = {
                     name: data.get('name'),

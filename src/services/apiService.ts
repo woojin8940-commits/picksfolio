@@ -920,6 +920,8 @@ export interface DmAutomationSettings {
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
   rules?: DmRule[];
+  /** 답글/DM 발송 속도 — 시간당 최대 발송량(답글 + DM 합산, 50~700건). */
+  sendSpeed?: number;
   /** 인스타그램 장기 토큰 만료 시각(ISO). 만료되면 재연동이 필요하다. */
   tokenExpiresAt?: string;
   updatedAt?: string;
@@ -973,8 +975,11 @@ export interface DmCarouselCard {
   title: string;
   subtitle: string;
   imageUrl: string;
+  /** 첫 번째 버튼(예전 저장본 호환용). 저장할 때 buttons[0] 과 같게 맞춘다. */
   buttonLabel: string;
   buttonUrl: string;
+  /** 카드 버튼 목록 — 카드 한 장에 최대 3개. */
+  buttons?: DmMessageButton[];
 }
 
 /**
@@ -3865,6 +3870,32 @@ export const apiService = {
       };
     } catch (e) {
       console.error('[API] Failed to save DM FAQ:', e);
+      return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  /** 답글/DM 발송 속도(시간당 발송량) 저장. 저장 즉시 발송 간격에 반영된다. */
+  async saveDmSendSpeed(
+    username: string,
+    sendSpeed: number,
+  ): Promise<{ ok: boolean; error?: string; sendSpeed?: number }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'saveSendSpeed', sendSpeed }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.success !== true) {
+        return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
+      }
+      clearMemory(`dmAutomation:${normalizeAccount(username)}`);
+      return { ok: true, sendSpeed: data?.sendSpeed };
+    } catch (e) {
+      console.error('[API] Failed to save DM send speed:', e);
       return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
     }
   },
