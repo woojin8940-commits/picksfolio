@@ -2418,6 +2418,19 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         </section>
       )}
 
+      {/* 스팸 방지 — 답글/DM 발송 속도(시간당 발송량, 계정 전체). 피드 바로 아래에 얇게 둔다. */}
+      {connected && (
+        <DmSendSpeedSection
+          userName={userName}
+          value={sendSpeed}
+          onChange={(v) => {
+            setSendSpeed(v);
+            writeSettingsCache({ sendSpeed: v });
+          }}
+          onNotice={notify}
+        />
+      )}
+
       {/* 자동화 목록 */}
       <section>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -2622,18 +2635,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
           onChange={setFaq}
           onNotice={notify}
         />
-        {/* 스팸 방지 — 답글/DM 발송 속도(시간당 발송량). */}
-        {connected && (
-          <DmSendSpeedSection
-            userName={userName}
-            value={sendSpeed}
-            onChange={(v) => {
-              setSendSpeed(v);
-              writeSettingsCache({ sendSpeed: v });
-            }}
-            onNotice={notify}
-          />
-        )}
       </div>
 
       {/* 성과 요약 (연결 시) */}
