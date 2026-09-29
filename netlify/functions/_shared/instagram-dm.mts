@@ -556,23 +556,40 @@ interface SendOneResult {
   errorKind?: DmErrorKind;
 }
 
+/** 한 DM 의 뒤 통을 보내기 전 두는 간격. */
+const FOLLOW_UP_GAP_MS = 400;
+
 async function postOneMessage(args: {
   igId: string;
   url: string;
   accessToken: string;
   recipient: Record<string, string>;
   message: Record<string, unknown>;
+  /**
+   * 같은 DM 을 이루는 뒤 통(본문 텍스트 뒤의 링크 버튼 카드 등)인지.
+   *
+   * 발송 간격(기본 약 9초)은 "DM 한 건"끼리 벌리려는 것이다. 한 DM 이 여러 통으로
+   * 나뉜 경우 그 뒤 통까지 간격을 적용하면 텍스트만 먼저 오고 버튼 카드는 한참
+   * 뒤에(또는 웹훅이 기다리지 못해 아예) 도착한다. 그래서 첫 통이 예약을 받아
+   * 나갔다면 뒤 통은 예약 없이 짧은 간격만 두고 곧바로 보낸다.
+   */
+  followUp?: boolean;
 }): Promise<SendOneResult> {
   const { url, accessToken, recipient, message } = args;
-  let reservation: Awaited<ReturnType<typeof reserveDmSend>>;
-  try {
-    reservation = await reserveDmSend(args.igId, recipient.comment_id ? "private_reply" : "direct");
-  } catch {
-    return { ok: false, error: "발송 대기열에 연결하지 못했습니다.", errorKind: "throttled", retryAfterMs: 60_000 };
+  let reservation: Awaited<ReturnType<typeof reserveDmSend>> | null = null;
+  if (args.followUp) {
+    // 인스타그램이 순서를 뒤바꾸지 않도록 바로 앞 통과 최소 간격만 둔다.
+    await new Promise((resolve) => setTimeout(resolve, FOLLOW_UP_GAP_MS));
+  } else {
+    try {
+      reservation = await reserveDmSend(args.igId, recipient.comment_id ? "private_reply" : "direct");
+    } catch {
+      return { ok: false, error: "발송 대기열에 연결하지 못했습니다.", errorKind: "throttled", retryAfterMs: 60_000 };
+    }
+    if (!reservation.allowed) return { ok: false, errorKind: "throttled", retryAfterMs: reservation.retryAfterMs };
   }
-  if (!reservation.allowed) return { ok: false, errorKind: "throttled", retryAfterMs: reservation.retryAfterMs };
   const finish = async (result: SendOneResult) => {
-    await finishDmSend(args.igId, reservation.token!, result);
+    if (reservation?.token) await finishDmSend(args.igId, reservation.token, result);
     return result;
   };
   try {
@@ -650,7 +667,8 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
 
   for (let i = 0; i < messages.length; i += 1) {
     const to = i === 0 ? recipient : followUpRecipient || recipient;
-    let attempt = await postOneMessage({ igId, url, accessToken, recipient: to, message: messages[i] });
+    // 첫 통이 이미 나갔으면 뒤 통은 발송 간격 없이 이어 보낸다(한 DM 의 일부다).
+    let attempt = await postOneMessage({ igId, url, accessToken, recipient: to, message: messages[i], followUp: i > 0 && sent > 0 });
 
     /**
      * 첫 통이 "형식" 문제로 거부된 경우에만 대체 메시지를 쓴다.
