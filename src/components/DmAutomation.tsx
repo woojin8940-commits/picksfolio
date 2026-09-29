@@ -127,11 +127,24 @@ const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
 };
 
 /**
- * 인스타그램 제네릭 템플릿 카드의 제목 길이 제한. 본문이 이 길이를 넘으면
- * 본문은 일반 텍스트 버블로 먼저 도착하고 링크 버튼은 별도 카드로 이어진다.
- * (발송 로직: netlify/functions/_shared/instagram-dm.mts)
+ * 인스타그램 제네릭 템플릿 카드의 제목 길이 제한. 댓글 자동 DM 은 1통만 도착하므로
+ * 링크 버튼이 있으면 본문과 버튼을 카드 한 장에 담는다. 본문이 이 길이를 넘으면
+ * 설명 줄(80자)까지 이어 싣고, 그래도 넘치는 부분은 잘린다.
+ * (발송 로직: netlify/functions/_shared/instagram-dm.mts 의 buildCommentDmPlan)
  */
 const CARD_TEXT_MAX = 80;
+
+/** 발송기(splitCardText)와 같은 기준으로 본문을 카드 제목/설명으로 나눈다. */
+const splitCardText = (message: string): { title: string; subtitle: string } => {
+  if (message.length <= CARD_TEXT_MAX) return { title: message, subtitle: '' };
+  const head = message.slice(0, CARD_TEXT_MAX);
+  let cut = Math.max(head.lastIndexOf('\n'), head.lastIndexOf(' '));
+  if (cut < CARD_TEXT_MAX / 2) cut = CARD_TEXT_MAX;
+  const title = message.slice(0, cut).trim();
+  const rest = message.slice(cut).trim();
+  const subtitle = rest.length > CARD_TEXT_MAX ? `${rest.slice(0, CARD_TEXT_MAX - 1).trimEnd()}…` : rest;
+  return { title, subtitle };
+};
 
 /** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
 const CARD_MAX_COUNT = 10;
@@ -316,8 +329,8 @@ const DmPreview: React.FC<{
   const isCarousel = messageType === 'carousel' && validCards.length > 0;
   // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
   const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
-  // 본문이 카드 제목 한도를 넘으면 본문 텍스트와 버튼 카드가 두 개의 버블로 도착한다.
-  const splitBubbles = validButtons.length > 0 && message.trim().length > CARD_TEXT_MAX;
+  // 링크 버튼이 있으면 본문과 버튼이 카드 한 장으로 도착한다(긴 본문은 잘린다).
+  const cardText = splitCardText(message.trim());
   return (
     <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3 text-slate-400">
@@ -356,8 +369,8 @@ const DmPreview: React.FC<{
             </div>
           ) : (
             <div className="space-y-1.5">
-              {/* 버튼이 없거나 본문이 길면 본문은 별도의 텍스트 버블로 도착한다. */}
-              {(validButtons.length === 0 || splitBubbles) && (
+              {/* 버튼이 없으면 본문은 텍스트 버블로 도착한다. */}
+              {validButtons.length === 0 && (
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
                   {message
                     ? (
@@ -374,15 +387,22 @@ const DmPreview: React.FC<{
               )}
               {validButtons.length > 0 && (
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
-                  {splitBubbles ? (
-                    <p className="px-4 py-3 text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
-                      👇 아래 버튼을 눌러주세요
-                    </p>
-                  ) : (
-                    <p data-user-content className="px-4 py-3 text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
-                      {message}
-                    </p>
-                  )}
+                  <div className="px-4 py-3">
+                    {cardText.title ? (
+                      <p data-user-content className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                        {cardText.title}
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                        👇 아래 버튼을 눌러주세요
+                      </p>
+                    )}
+                    {cardText.subtitle && (
+                      <p data-user-content className="mt-0.5 text-[12px] text-slate-500 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                        {cardText.subtitle}
+                      </p>
+                    )}
+                  </div>
                   <div className="border-t border-slate-100">
                     {validButtons.map((b) => (
                       <div
@@ -1228,6 +1248,16 @@ const AutomationEditor: React.FC<{
                     className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
                   />
                   <p className="text-right text-[10px] text-slate-400 font-bold mt-1">{draft.message.length}/1000</p>
+                  {/* 댓글 DM 은 1통만 도착해 링크 버튼이 있으면 본문이 카드 한 장에 담긴다. */}
+                  {draft.buttons.some((b) => b.label.trim() || b.url.trim()) && (
+                    <p className={`mt-1 text-[11px] font-bold leading-relaxed ${
+                      draft.message.trim().length > CARD_TEXT_MAX ? 'text-red-500' : 'text-slate-400'
+                    }`}>
+                      {draft.message.trim().length > CARD_TEXT_MAX
+                        ? `링크 버튼을 함께 보낼 때는 본문을 ${CARD_TEXT_MAX}자 이내로 작성해 주세요. (현재 ${draft.message.trim().length}자) 인스타그램은 댓글 1건당 DM을 1통만 허용해, 본문과 버튼이 카드 한 장에 담기며 ${CARD_TEXT_MAX}자를 넘는 내용은 작게 표시되거나 잘릴 수 있습니다.`
+                        : `링크 버튼을 함께 보낼 때는 본문을 ${CARD_TEXT_MAX}자 이내로 작성해 주세요.`}
+                    </p>
+                  )}
 
                   {/* 링크 버튼 */}
                   <div className="mt-2 space-y-2">
