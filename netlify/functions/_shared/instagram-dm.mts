@@ -455,6 +455,14 @@ export interface SendDmArgs {
   bestEffortFrom?: number;
   /** 첫 통이 형식 오류로 거부됐을 때 대신 보낼 메시지(`DmPlan.fallback`). */
   fallback?: Record<string, unknown>;
+  /**
+   * 방금 거부된 발송을 대신하는 발송인지(첫 통부터 발송 간격 없이 보낸다).
+   *
+   * 거부된 첫 시도가 이미 발송 순서를 받아 썼다. 대체 메시지가 순서를 새로 받으려
+   * 하면 발송 간격(기본 약 9초)에 걸려 throttled 로 끝나고, 대기열은 거부될 원래
+   * 메시지를 다시 보내므로 대체 메시지는 끝내 나가지 않는다.
+   */
+  continuation?: boolean;
 }
 
 /**
@@ -668,16 +676,27 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
   for (let i = 0; i < messages.length; i += 1) {
     const to = i === 0 ? recipient : followUpRecipient || recipient;
     // 첫 통이 이미 나갔으면 뒤 통은 발송 간격 없이 이어 보낸다(한 DM 의 일부다).
-    let attempt = await postOneMessage({ igId, url, accessToken, recipient: to, message: messages[i], followUp: i > 0 && sent > 0 });
+    let attempt = await postOneMessage({
+      igId,
+      url,
+      accessToken,
+      recipient: to,
+      message: messages[i],
+      followUp: (i > 0 && sent > 0) || (i === 0 && Boolean(args.continuation)),
+    });
 
     /**
      * 첫 통이 "형식" 문제로 거부된 경우에만 대체 메시지를 쓴다.
      *
      * 권한 만료·발송 한도·이미 답장함 같은 오류는 대체 메시지로도 똑같이 실패하고,
      * 이미 도착했을 수 있는 메시지를 한 번 더 보낼 위험만 남는다.
+     *
+     * 대체 메시지는 거부된 첫 통의 발송 순서를 이어 쓴다(`followUp`). 순서를 새로
+     * 받으려 하면 발송 간격에 걸려 throttled 로 끝나고, 대기열이 다시 시도할 때도
+     * 원래 메시지가 또 거부돼 대체 메시지는 영영 나가지 않았다.
      */
     if (!attempt.ok && i === 0 && fallback && attempt.errorKind === "other") {
-      const retried = await postOneMessage({ igId, url, accessToken, recipient: to, message: fallback });
+      const retried = await postOneMessage({ igId, url, accessToken, recipient: to, message: fallback, followUp: true });
       usedFallback = retried.ok;
       attempt = retried;
     }

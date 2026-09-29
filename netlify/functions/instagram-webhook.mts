@@ -701,7 +701,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
   }
   const automation = candidates.find((a) => passesFollowFilter(a, follows));
   const eventId = String(postback?.mid || `${senderId}_${event?.timestamp || ""}`);
-  const send = (messages: Record<string, unknown>[]) =>
+  const send = (messages: Record<string, unknown>[], continuation = false) =>
     sendDmMessages({
       graphHost: graphHost(settings),
       graphVersion: GRAPH_VERSION,
@@ -710,6 +710,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
       recipient: { id: senderId },
       messages,
       bestEffortFrom: messages.length,
+      continuation,
     });
 
   // 팔로우 조건에 맞지 않음 → 안내 + 재확인 버튼(같은 payload).
@@ -753,13 +754,15 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
     let usedFallback = false;
 
     // 본 메시지가 형식 오류로 거부됨(카드 이미지 등) → 기존 1통 카드 내용으로 한 번 더.
+    // 거부된 시도의 발송 순서를 이어 쓴다 — 순서를 새로 받으면 발송 간격에 걸려
+    // 대체 메시지가 나가지 못하고, 대기열은 거부될 원래 본 메시지를 다시 보낸다.
     if (!result.ok && !result.partial && result.errorKind === "other") {
       const single = buildCommentPlan(automation);
       const fallbackMessages = single.messages.slice(0, 1);
       if (fallbackMessages.length > 0) {
-        const retried = await send(fallbackMessages);
+        const retried = await send(fallbackMessages, true);
         if (!retried.ok && single.fallback) {
-          result = await send([single.fallback]);
+          result = await send([single.fallback], true);
         } else {
           result = retried;
         }
@@ -808,6 +811,8 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
 
     if (kind === "rate_limit" || kind === "throttled") {
       // 발송 한도 — 대기열로 넘긴다(대화창은 방금 열렸으므로 24시간 안에 나간다).
+      // 만들어 둔 본 메시지 페이로드를 그대로 싣는다. 문구·버튼·카드로 다시 조립하면
+      // 캐러셀 앞 인사말이 빠진다(캐러셀 설정은 카드 한 통만 만든다).
       try {
         await createScheduledJob({
           id: `bait_${commentId}`,
@@ -815,12 +820,9 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
           igAccountId: igId,
           recipientId: senderId,
           sendAt: new Date(Date.now() + (result.retryAfterMs || 60_000)).toISOString(),
-          message: [mainIntroOf(automation), automation.messageType === "carousel" ? "" : automation.message]
-            .filter(Boolean)
-            .join("\n\n"),
-          buttons: automation.messageType === "carousel" ? [] : automation.buttons || [],
-          messageType: automation.messageType === "carousel" ? "carousel" : "text",
-          cards: automation.messageType === "carousel" ? automation.cards : undefined,
+          message: "",
+          buttons: [],
+          payloads: plan.messages,
           source: "trigger",
           createdAt: new Date().toISOString(),
           status: "pending",
@@ -1606,6 +1608,7 @@ export async function processWebhookPayload(
            * 도착하는 일이 생겼다. 받는 사람에게는 같은 안내가 연달아 오는 것으로
            * 보이므로, 확실하지 않으면 다시 보내지 않고 실패로 기록한다.
            */
+          let directFollowUpQueued = false;
           const retryViaIgsid =
             Boolean(fromId) &&
             Boolean(result && !result.ok && !result.partial && result.errorKind === "already_sent") &&
@@ -1615,6 +1618,7 @@ export async function processWebhookPayload(
             // 이 경로는 대화창이 열려 있어야 성공한다. 열려 있다면 여러 통을 보낼 수
             // 있으므로, 설정한 순서(인사말 → 카드)를 그대로 살린다.
             const direct = buildDirectPlan(automation);
+            const directMessages = direct.messages.length > 0 ? direct.messages : messages;
             sendAttempted = true;
             outcome.sideEffectAttempted = true;
             result = await sendDmMessages({
@@ -1623,8 +1627,19 @@ export async function processWebhookPayload(
               igId,
               accessToken,
               recipient: { id: fromId },
-              messages: direct.messages.length > 0 ? direct.messages : messages,
+              messages: directMessages,
               bestEffortFrom: direct.bestEffortFrom,
+            });
+            // 본문 뒤 링크 버튼 카드 등 못 보낸 나머지 통은 대기열이 이어 보낸다.
+            directFollowUpQueued = await queueRemainingDmMessages({
+              id: `comment_rest_${commentId}`,
+              username,
+              igAccountId: igId,
+              recipientId: fromId,
+              messages: directMessages,
+              result,
+              ruleId: automation.id,
+              ruleName: automation.name,
             });
           }
 
@@ -1651,13 +1666,14 @@ export async function processWebhookPayload(
 
           if (result && (result.ok || result.partial)) {
             outcome.sent = (outcome.sent || 0) + result.sent;
-            outcome.partial = Boolean(outcome.partial || result.partial || result.followUpError);
+            outcome.partial = Boolean(outcome.partial || (result.partial && !directFollowUpQueued) || result.followUpError);
             // partial 은 본문이 이미 도착한 상태다. 실패로 기록하면 화면의 활동
             // 기록에서 도착한 DM 이 실패로 보인다.
             await appendLog(username, {
               kind: "dm",
               status: "sent",
-              partial: result.partial,
+              partial: result.partial && !directFollowUpQueued,
+              followUpQueued: directFollowUpQueued || undefined,
               recipientId: fromId,
               ruleId: automation.id,
               ruleName: automation.name,
