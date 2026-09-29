@@ -96,6 +96,11 @@ export interface DmScheduledJob {
   ruleId?: string;
   ruleName?: string;
   igAccountId?: string;
+  /**
+   * 이미 만들어 둔 메시지 페이로드(있으면 message/buttons/cards 대신 그대로 보낸다).
+   * 여러 통으로 나뉜 DM 의 "못 보낸 나머지 통"을 이어 보낼 때 쓴다.
+   */
+  payloads?: Record<string, unknown>[];
 }
 
 const pendingPrefix = (username: string) => `job/${username.toLowerCase()}/`;
@@ -123,6 +128,53 @@ export async function createScheduledJob(job: DmScheduledJob): Promise<void> {
     console.warn("[dm-schedule] queue insert failed:", (e as Error)?.message);
   }
   await store().setJSON(`${pendingPrefix(job.username)}${suffixOf(job)}`, job);
+}
+
+/**
+ * 여러 통으로 나뉜 DM(본문 텍스트 → 링크 버튼 카드 등) 중 발송 간격·한도 때문에
+ * 못 보낸 나머지 통을 대기열에 넣는다.
+ *
+ * 한 DM 의 뒤 통은 발송 간격 없이 곧바로 나가지만(instagram-dm 의 `followUp`),
+ * 인스타그램이 한도 초과로 거절하는 등 뒤 통이 못 나가는 경우가 있다. 예전에는
+ * 이 결과를 "일부 발송 = 성공"으로 기록하고 끝내, 텍스트만 도착하고 링크 버튼
+ * 카드는 영영 나가지 않았다. 남은 통은 대기열이 이어 보낸다. 넣었으면 true.
+ */
+export async function queueRemainingDmMessages(args: {
+  id: string;
+  username: string;
+  igAccountId: string;
+  recipientId: string;
+  messages: Record<string, unknown>[];
+  result: { sent: number; partial: boolean; errorKind?: string; retryAfterMs?: number };
+  ruleId?: string;
+  ruleName?: string;
+}): Promise<boolean> {
+  const { result } = args;
+  if (!result.partial || !args.recipientId) return false;
+  if (result.errorKind !== "throttled" && result.errorKind !== "rate_limit") return false;
+  const rest = args.messages.slice(result.sent);
+  if (rest.length === 0) return false;
+  try {
+    await createScheduledJob({
+      id: args.id,
+      username: args.username,
+      igAccountId: args.igAccountId,
+      recipientId: args.recipientId,
+      sendAt: new Date(Date.now() + Math.max(result.retryAfterMs || 0, 1000)).toISOString(),
+      message: "",
+      buttons: [],
+      payloads: rest,
+      source: "trigger",
+      createdAt: new Date().toISOString(),
+      status: "pending",
+      ruleId: args.ruleId,
+      ruleName: args.ruleName,
+    });
+    return true;
+  } catch (e) {
+    console.error("[dm-schedule] follow-up queue failed:", (e as Error)?.message);
+    return false;
+  }
 }
 
 /** 한 사용자의 예약 목록(대기 + 완료 기록)을 발송 시각 순으로 돌려준다. */

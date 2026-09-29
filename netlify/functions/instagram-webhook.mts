@@ -33,7 +33,7 @@ import {
   wasSentByUs,
 } from "./_shared/dm-send-registry.mts";
 import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
-import { createScheduledJob } from "./_shared/dm-schedule-store.mts";
+import { createScheduledJob, queueRemainingDmMessages } from "./_shared/dm-schedule-store.mts";
 import { backupCommentEvents, enqueueCommentEvents } from "./_shared/dm-jobs.mts";
 import type { QueuedComment } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
@@ -504,11 +504,23 @@ async function sendTriggerDm(
     });
 
     if (result.ok || result.partial) {
+      // 본문 텍스트 뒤 링크 버튼 카드가 발송 간격에 걸렸으면 대기열로 이어 보낸다.
+      const followUpQueued = await queueRemainingDmMessages({
+        id: `trigger_rest_${claimKey}`,
+        username,
+        igAccountId: igId,
+        recipientId,
+        messages: plan.messages,
+        result,
+        ruleId,
+        ruleName,
+      });
       await appendLog(username, {
         kind: "dm",
         status: "sent",
         trigger,
-        partial: result.partial,
+        partial: result.partial && !followUpQueued,
+        followUpQueued: followUpQueued || undefined,
         recipientId,
         ruleId,
         ruleName,
@@ -757,12 +769,28 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
 
     if (result.ok || result.partial) {
       await noteBaitSuccess(username);
+      /**
+       * 긴 본문 + 링크 버튼은 [텍스트] → [버튼 카드] 2통이다. 계정 발송 간격(기본 약
+       * 9초) 때문에 두 번째 통이 `throttled` 로 끝나면 예전에는 그대로 버려져 텍스트만
+       * 도착했다. 남은 통은 대기열이 간격에 맞춰 이어 보낸다.
+       */
+      const followUpQueued = await queueRemainingDmMessages({
+        id: `bait_rest_${commentId}`,
+        username,
+        igAccountId: igId,
+        recipientId: senderId,
+        messages: plan.messages,
+        result,
+        ruleId: automation.id,
+        ruleName: automation.name,
+      });
       await appendLog(username, {
         kind: "dm",
         status: "sent",
         trigger: "bait_main",
         stage: "main",
-        partial: result.partial,
+        partial: result.partial && !followUpQueued,
+        followUpQueued: followUpQueued || undefined,
         recipientId: senderId,
         commentId,
         ruleId: automation.id,

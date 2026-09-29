@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { dmAutomationAllowed } from "./dm-automation-access.mts";
 import { appendDmLog } from "./dm-automation-log.mts";
 import { getDmContact, withinDmWindow } from "./dm-contacts.mts";
-import { claimJob, finishJob, releaseJobClaim } from "./dm-schedule-store.mts";
+import { claimJob, finishJob, queueRemainingDmMessages, releaseJobClaim } from "./dm-schedule-store.mts";
 import type { DmScheduledJob } from "./dm-schedule-store.mts";
 import {
   buildBaitCommentPlan,
@@ -286,7 +286,11 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
        * 기존 1통 카드로 보낸다.
        */
       const bait = isPrivateReply && job.bait && !(await baitSuspended(job.username)) ? job.bait : undefined;
-      const plan = bait && legacyPlan.messages.length > 0
+      // 앞서 못 보낸 나머지 통(링크 버튼 카드 등)은 만들어 둔 페이로드를 그대로 보낸다.
+      const storedPayloads = !isPrivateReply && Array.isArray(job.payloads) && job.payloads.length > 0 ? job.payloads : null;
+      const plan = storedPayloads
+        ? { messages: storedPayloads, bestEffortFrom: storedPayloads.length }
+        : bait && legacyPlan.messages.length > 0
         ? buildBaitCommentPlan({ message: bait.message, buttonLabel: bait.buttonLabel, payload: baitPayload(job.commentId!) }, content)
         : legacyPlan;
       if (plan.messages.length === 0) {
@@ -348,6 +352,7 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
         }
       }
 
+      let resultMessages = plan.messages;
       let result = await sendDmMessages({
         ...sendArgs,
         recipient: isPrivateReply ? { comment_id: job.commentId! } : { id: job.recipientId },
@@ -374,6 +379,7 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
       ) {
         const direct = buildDirectDmPlan(content);
         if (direct.messages.length > 0) {
+          resultMessages = direct.messages;
           result = await sendDmMessages({
             ...sendArgs,
             recipient: { id: job.recipientId },
@@ -399,6 +405,17 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
           });
         }
       }
+      // 이 예약도 여러 통이면 뒤 통이 발송 간격에 걸릴 수 있다 — 남은 통을 다시 대기열로.
+      const followUpQueued = await queueRemainingDmMessages({
+        id: `${job.id}_rest${result.sent}`,
+        username: job.username,
+        igAccountId: job.igAccountId || sendArgs.igId,
+        recipientId: job.recipientId,
+        messages: resultMessages,
+        result,
+        ruleId: job.ruleId,
+        ruleName: job.ruleName,
+      });
       if (result.ok || result.partial) {
         await finishScheduled(key, queued, {
           ...job,
@@ -406,7 +423,7 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
           sentAt,
           error: replyFailure?.error || result.error || result.followUpError,
           errorKind: replyFailure?.kind || result.errorKind,
-          partial: Boolean(replyFailure || result.partial || result.followUpError),
+          partial: Boolean(replyFailure || (result.partial && !followUpQueued) || result.followUpError),
         });
         await appendDmLog(
           job.username,
@@ -414,7 +431,8 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
             kind: "dm",
             status: "sent",
             trigger: "scheduled",
-            partial: result.partial,
+            partial: result.partial && !followUpQueued,
+            followUpQueued: followUpQueued || undefined,
             recipientId: job.recipientId,
             ruleId: job.ruleId || job.id,
             ruleName: job.ruleName ? `${job.ruleName} (예약)` : "예약 발송",
