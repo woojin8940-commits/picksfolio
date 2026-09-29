@@ -159,27 +159,33 @@ export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onCh
     onNotice('ok', `발송 속도를 시간당 ${result.sendSpeed ?? next}건으로 저장했어요. 바로 적용됩니다.`);
   };
 
+  // 슬라이더 아래 3구간 막대 — 전체 범위(50~700) 대비 각 구간의 폭.
+  const span = DM_SEND_SPEED_MAX - DM_SEND_SPEED_MIN;
+  const pct = (v: number) => `${((v - DM_SEND_SPEED_MIN) / span) * 100}%`;
+  const segments = [
+    { label: '안전', range: '50~200', from: DM_SEND_SPEED_MIN, to: 200, bar: 'bg-emerald-400', text: 'text-emerald-600' },
+    { label: '기본', range: '201~500', from: 200, to: 500, bar: 'bg-sky-400', text: 'text-sky-600' },
+    { label: '주의', range: '501~700', from: 500, to: DM_SEND_SPEED_MAX, bar: 'bg-amber-400', text: 'text-amber-600' },
+  ];
+
   return (
-    <section className="bg-white px-4 py-3 md:px-5 rounded-2xl border border-slate-100 shadow-sm mb-6">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p
-          className="flex items-center gap-1.5 text-sm font-black text-slate-900 shrink-0"
-          title="짧은 시간에 답글·DM 이 몰리면 메타가 스팸으로 판단해 계정 기능을 제한할 수 있어요. 한도에 닿은 발송은 버려지지 않고 다음 시간에 순서대로 나갑니다."
-        >
-          <Gauge size={15} className="text-slate-400" /> 발송 속도
-        </p>
-        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${tier.tone}`}>{tier.label}</span>
-        <input
-          type="range"
-          min={DM_SEND_SPEED_MIN}
-          max={DM_SEND_SPEED_MAX}
-          step={10}
-          value={clamp(draft)}
-          onChange={(e) => setDraft(Number(e.target.value))}
-          className={`flex-1 min-w-[120px] ${tier.bar}`}
-          aria-label="시간당 발송량 (답글 + DM)"
-        />
-        <div className="flex items-center gap-1 shrink-0">
+    <section className="bg-white p-4 md:p-5 rounded-3xl border border-slate-100 shadow-sm mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0">
+            <Gauge size={15} />
+          </div>
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-sm md:text-base font-black text-slate-900">
+              답글/DM 발송 속도
+              <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${tier.tone}`}>{tier.label}</span>
+            </p>
+            <p className="text-[11px] md:text-xs text-slate-500 font-medium leading-relaxed mt-0.5">
+              답글·DM 이 짧은 시간에 몰리면 메타가 스팸으로 판단할 수 있어요. 시간당 발송량에 맞춰 간격을 자동으로 조절합니다.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           <input
             type="number"
             min={DM_SEND_SPEED_MIN}
@@ -188,23 +194,62 @@ export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onCh
             value={draft}
             onChange={(e) => setDraft(Number(e.target.value))}
             onBlur={() => setDraft(clamp(draft))}
-            className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-right text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+            className="w-[72px] rounded-xl border border-slate-200 px-2 py-1.5 text-right text-sm font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+            aria-label="시간당 발송량 (답글 + DM)"
           />
-          <span className="text-[11px] font-bold text-slate-500">건/시간</span>
+          <span className="text-[11px] font-bold text-slate-500">건/ 시간당</span>
+          {dirty && (
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving}
+              className="ml-1 inline-flex items-center gap-1 rounded-xl bg-slate-900 text-white px-3 py-1.5 text-xs font-black hover:bg-slate-800 disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} 저장
+            </button>
+          )}
         </div>
-        {dirty && (
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving}
-            className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-3 py-1.5 text-[11px] font-black hover:bg-slate-800 disabled:opacity-50"
-          >
-            {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} 저장
-          </button>
-        )}
       </div>
-      <p className="mt-1.5 text-[11px] font-medium text-slate-500 leading-relaxed">
-        답글 + DM 합산 · 약 {interval >= 60 ? `${Math.round(interval / 6) / 10}분` : `${Math.round(interval * 10) / 10}초`}에 한 통씩 · 안전 50~200 / 기본 201~500 / 주의 501~700 (기본값 {DM_SEND_SPEED_DEFAULT}건)
+
+      <div className="mt-4">
+        <input
+          type="range"
+          min={DM_SEND_SPEED_MIN}
+          max={DM_SEND_SPEED_MAX}
+          step={10}
+          value={clamp(draft)}
+          onChange={(e) => setDraft(Number(e.target.value))}
+          className={`w-full ${tier.bar}`}
+          aria-label="시간당 발송량 (답글 + DM)"
+        />
+        <div className="relative mt-1 flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+          {segments.map((sg) => (
+            <span
+              key={sg.label}
+              className={`h-full ${sg.bar} ${tier.label === sg.label ? 'opacity-100' : 'opacity-30'}`}
+              style={{ width: `calc(${pct(sg.to)} - ${pct(sg.from)})` }}
+            />
+          ))}
+        </div>
+        <div className="mt-1.5 flex text-[10px] md:text-[11px] font-bold">
+          {segments.map((sg) => (
+            <span
+              key={sg.label}
+              className={`text-center ${tier.label === sg.label ? sg.text : 'text-slate-400'}`}
+              style={{ width: `calc(${pct(sg.to)} - ${pct(sg.from)})` }}
+            >
+              {sg.label} {sg.range}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className={`mt-3 rounded-2xl border px-3.5 py-2.5 text-[11px] md:text-xs font-medium leading-relaxed ${tier.tone}`}>
+        <b>{tier.label} ({tier.range})</b> — {tier.desc}
+        <span className="opacity-80"> 약 {interval >= 60 ? `${Math.round(interval / 6) / 10}분` : `${Math.round(interval * 10) / 10}초`}에 한 통씩 고르게 나가요.</span>
+      </div>
+      <p className="mt-2 text-[10px] md:text-[11px] font-medium text-slate-400 leading-relaxed">
+        답글 + DM 합산 기준 · 한도를 넘은 발송은 버려지지 않고 다음 시간에 순서대로 나가요 · 기본값 시간당 {DM_SEND_SPEED_DEFAULT}건
       </p>
     </section>
   );
