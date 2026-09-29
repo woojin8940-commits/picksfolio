@@ -701,7 +701,12 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
   }
   const automation = candidates.find((a) => passesFollowFilter(a, follows));
   const eventId = String(postback?.mid || `${senderId}_${event?.timestamp || ""}`);
-  const send = (messages: Record<string, unknown>[], continuation = false) =>
+  /**
+   * 버튼을 누른 사람에게 보내는 메시지(본 메시지 · 팔로우 안내 · 대체 메시지)는
+   * 계정 발송 간격을 기다리지 않는다 — 몇 통이든 순서대로 곧바로 나간다.
+   * (통 사이에는 순서가 뒤바뀌지 않도록 0.4초만 둔다.)
+   */
+  const send = (messages: Record<string, unknown>[]) =>
     sendDmMessages({
       graphHost: graphHost(settings),
       graphVersion: GRAPH_VERSION,
@@ -710,7 +715,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
       recipient: { id: senderId },
       messages,
       bestEffortFrom: messages.length,
-      continuation,
+      continuation: true,
     });
 
   // 팔로우 조건에 맞지 않음 → 안내 + 재확인 버튼(같은 payload).
@@ -754,15 +759,13 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
     let usedFallback = false;
 
     // 본 메시지가 형식 오류로 거부됨(카드 이미지 등) → 기존 1통 카드 내용으로 한 번 더.
-    // 거부된 시도의 발송 순서를 이어 쓴다 — 순서를 새로 받으면 발송 간격에 걸려
-    // 대체 메시지가 나가지 못하고, 대기열은 거부될 원래 본 메시지를 다시 보낸다.
     if (!result.ok && !result.partial && result.errorKind === "other") {
       const single = buildCommentPlan(automation);
       const fallbackMessages = single.messages.slice(0, 1);
       if (fallbackMessages.length > 0) {
-        const retried = await send(fallbackMessages, true);
+        const retried = await send(fallbackMessages);
         if (!retried.ok && single.fallback) {
-          result = await send([single.fallback], true);
+          result = await send([single.fallback]);
         } else {
           result = retried;
         }
