@@ -935,6 +935,8 @@ export interface DmAutomationSettings {
    * 계속 도착한다. 감지되면 화면에서 그 사실과 끄는 방법을 안내한다.
    */
   externalDm?: { text: string; at: string; count: number } | null;
+  /** 2단계 발송이 막혀 기존 1통 카드 방식으로 자동 전환된 상태(있으면). */
+  baitHealth?: { consecutiveFailures: number; suspendedUntil?: string; lastError?: string; lastFailureAt?: string } | null;
   /** 계정별 웹훅 구독(`subscribed_apps`)을 마친 시각. 비어 있으면 구독 자체가 없다. */
   webhookSubscribedAt?: string;
   /**
@@ -1122,6 +1124,21 @@ export interface DmAutomationItem {
    * 여러 개일 때 발송기가 "가장 최근에 설정한 것"을 고르는 기준이다.
    */
   updatedAt?: string;
+  /**
+   * 2단계 발송(미끼 → 본 메시지). 켜면 댓글 DM 은 짧은 문구 + 버튼 하나(1단계)만
+   * 나가고, 버튼을 누른 사람에게 message/buttons/cards 가 본 메시지(2단계)로 나간다.
+   * 팔로우 조건(followers / non_followers)이 있으면 항상 켜진다.
+   */
+  baitEnabled?: boolean;
+  /** 1단계 문구(최대 80자). */
+  baitMessage?: string;
+  /** 1단계 버튼 라벨(최대 20자). */
+  baitButtonLabel?: string;
+  /** 2단계 본 메시지 앞에 먼저 보낼 텍스트(선택). */
+  mainIntro?: string;
+  /** 팔로우 조건에 맞지 않는 사람이 버튼을 눌렀을 때 보낼 안내 / 재확인 버튼 라벨. */
+  followGateMessage?: string;
+  followGateButtonLabel?: string;
 }
 
 // 연동된 인스타그램 계정의 피드 게시물.

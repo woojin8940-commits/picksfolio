@@ -55,6 +55,15 @@ const defaultDmMessage = (t: TranslateFn) => t(
 
 const defaultButtonLabel = (t: TranslateFn) => t('dm.defaultButtonLabel', '링크 바로가기', 'Open link');
 
+/**
+ * 2단계 발송(미끼 → 본 메시지) 기본 문구. 서버(instagram-dm.mts)의 기본값과 같다 —
+ * 비워 두고 저장해도 발송기가 같은 문구로 채운다.
+ */
+const DEFAULT_BAIT_MESSAGE = '댓글 감사합니다! 아래 버튼을 눌러주세요 👇';
+const DEFAULT_BAIT_BUTTON_LABEL = '메시지 받기';
+const DEFAULT_FOLLOW_GATE_MESSAGE = '팔로우 후 아래 버튼을 다시 눌러주시면 안내 메시지를 보내드릴게요!';
+const DEFAULT_FOLLOW_GATE_BUTTON_LABEL = '팔로우했어요';
+
 const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   id: genId('auto'),
   name: '',
@@ -72,6 +81,12 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   cards: [],
   sendMode: 'instant',
   scheduledAt: '',
+  baitEnabled: false,
+  baitMessage: DEFAULT_BAIT_MESSAGE,
+  baitButtonLabel: DEFAULT_BAIT_BUTTON_LABEL,
+  mainIntro: '',
+  followGateMessage: DEFAULT_FOLLOW_GATE_MESSAGE,
+  followGateButtonLabel: DEFAULT_FOLLOW_GATE_BUTTON_LABEL,
   createdAt: new Date().toISOString(),
 });
 
@@ -91,6 +106,13 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   // 예약 시각이 없는 예약은 성립하지 않는다(발송 시점을 알 수 없다) → 즉시 발송으로 본다.
   sendMode: a.sendMode === 'scheduled' && a.scheduledAt ? 'scheduled' : 'instant',
   scheduledAt: typeof a.scheduledAt === 'string' ? a.scheduledAt : '',
+  // 팔로우 조건은 버튼을 누른 시점에 확인하므로 2단계 발송이 전제다.
+  baitEnabled: (a.followFilter || 'all') !== 'all' || Boolean(a.baitEnabled),
+  baitMessage: typeof a.baitMessage === 'string' ? a.baitMessage : DEFAULT_BAIT_MESSAGE,
+  baitButtonLabel: typeof a.baitButtonLabel === 'string' ? a.baitButtonLabel : DEFAULT_BAIT_BUTTON_LABEL,
+  mainIntro: typeof a.mainIntro === 'string' ? a.mainIntro : '',
+  followGateMessage: typeof a.followGateMessage === 'string' ? a.followGateMessage : DEFAULT_FOLLOW_GATE_MESSAGE,
+  followGateButtonLabel: typeof a.followGateButtonLabel === 'string' ? a.followGateButtonLabel : DEFAULT_FOLLOW_GATE_BUTTON_LABEL,
 });
 
 const dmSettingsCacheKey = (username: string) => `picks_dm_automation_${username.toLowerCase()}`;
@@ -323,20 +345,58 @@ const DmPreview: React.FC<{
   message: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
-}> = ({ igUsername, messageType, message, buttons, cards }) => {
+  /** 2단계 발송이면 먼저 도착하는 미끼 카드(문구 + 버튼 하나). */
+  bait?: { message: string; buttonLabel: string } | null;
+  /** 2단계 본 메시지 앞에 먼저 가는 텍스트. */
+  intro?: string;
+}> = ({ igUsername, messageType, message, buttons, cards, bait, intro }) => {
   // 미리보기도 발송기와 같은 기준으로 카드를 고른다(제목 또는 올바른 이미지 주소).
   const validCards = cards.filter(cardSendable);
   const isCarousel = messageType === 'carousel' && validCards.length > 0;
   // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
   const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
   // 링크 버튼이 있으면 본문과 버튼이 카드 한 장으로 도착한다(긴 본문은 잘린다).
-  const cardText = splitCardText(message.trim());
+  // 2단계 본 메시지는 1통 제한이 없어 본문이 잘리지 않는다. 카드 제목 한도를 넘는
+  // 본문은 텍스트로 먼저 가고 버튼 카드가 뒤따른다(발송기 buildDmMessages 와 같은 기준).
+  const longMain = Boolean(bait) && message.trim().length > CARD_TEXT_MAX;
+  const cardText = longMain ? { title: '', subtitle: '' } : bait ? { title: message.trim(), subtitle: '' } : splitCardText(message.trim());
   return (
     <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3 text-slate-400">
         <Instagram size={13} />
         <span className="text-[11px] font-black">DM 미리보기</span>
       </div>
+      {bait && (
+        <>
+          <p className="text-[10px] font-black text-pink-500 mb-1.5">1단계 · 댓글 직후 도착</p>
+          <div className="flex items-end gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
+              <Instagram size={15} />
+            </div>
+            <div className="max-w-[85%] min-w-0 bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
+              <div className="px-4 py-3">
+                <p data-user-content className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                  {bait.message.trim() || DEFAULT_BAIT_MESSAGE}
+                </p>
+              </div>
+              <div data-user-content className="border-t border-slate-100 w-full text-center py-2.5 text-[12px] font-bold text-pink-600 truncate px-3">
+                {bait.buttonLabel.trim() || DEFAULT_BAIT_BUTTON_LABEL}
+              </div>
+            </div>
+          </div>
+          <p className="text-[10px] font-black text-pink-500 mb-1.5">2단계 · 버튼을 누르면 도착</p>
+          {intro?.trim() && (
+            <div className="flex items-end gap-2 mb-1.5">
+              <div className="w-8 shrink-0" />
+              <div className="max-w-[85%] min-w-0 bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+                <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                  {intro}
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
       <div className="flex items-end gap-2">
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
           <Instagram size={15} />
@@ -370,7 +430,7 @@ const DmPreview: React.FC<{
           ) : (
             <div className="space-y-1.5">
               {/* 버튼이 없으면 본문은 텍스트 버블로 도착한다. */}
-              {validButtons.length === 0 && (
+              {(validButtons.length === 0 || longMain) && (
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
                   {message
                     ? (
@@ -881,7 +941,13 @@ const AutomationEditor: React.FC<{
   const scheduleStale =
     draft.sendMode === 'scheduled' && !Number.isNaN(scheduleMs) && scheduleMs <= Date.now();
 
+  /** 팔로우 조건을 쓰면 버튼을 누른 시점에 확인해야 하므로 2단계 발송이 강제된다. */
+  const baitForced = draft.followFilter !== 'all';
+  const baitOn = baitForced || Boolean(draft.baitEnabled);
+  const baitValid = !baitOn || Boolean((draft.baitMessage || '').trim() && (draft.baitButtonLabel || '').trim());
+
   const canSave = messageValid &&
+    baitValid &&
     mediaValid &&
     !brokenLinks &&
     scheduleValid &&
@@ -901,6 +967,8 @@ const AutomationEditor: React.FC<{
           ? '예약 발송할 날짜·시간을 정해주세요.'
           : brokenLinks
             ? '링크·이미지 주소를 https:// 로 시작하는 주소로 고쳐주세요.'
+            : !baitValid
+              ? '1단계 메시지 문구와 버튼 이름을 입력해주세요.'
             : draft.messageType === 'carousel'
               ? '이미지나 제목이 있는 카드를 한 장 이상 만들어주세요.'
               : '보낼 DM 메시지를 입력해주세요.';
@@ -1104,7 +1172,7 @@ const AutomationEditor: React.FC<{
                   <button
                     key={f}
                     type="button"
-                    onClick={() => patch({ followFilter: f })}
+                    onClick={() => patch(f === 'all' ? { followFilter: f } : { followFilter: f, baitEnabled: true })}
                     className={`rounded-xl border-2 px-3 py-2.5 text-center transition-all text-xs font-black ${
                       draft.followFilter === f ? 'border-pink-500 bg-pink-50 text-pink-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                     }`}
@@ -1113,6 +1181,12 @@ const AutomationEditor: React.FC<{
                   </button>
                 ))}
               </div>
+              {draft.followFilter !== 'all' && (
+                <p className="flex items-start gap-1.5 mt-2 text-[11px] text-pink-600 font-bold leading-relaxed">
+                  <AlertCircle size={13} className="shrink-0 mt-px" />
+                  팔로워 구분 발송을 위해서는 1단계 메시지가 필요합니다. 버튼을 누른 순간 팔로우 여부를 확인해 본 메시지를 보냅니다.
+                </p>
+              )}
             </div>
 
             {/* 4. 발송 시점 — 즉시 / 예약 */}
@@ -1211,6 +1285,100 @@ const AutomationEditor: React.FC<{
                 <h4 className="text-sm md:text-base font-black text-slate-900">보낼 DM 메시지</h4>
               </div>
 
+              {/*
+                2단계 발송(미끼 메시지). 댓글 비공개 답장은 댓글 1건당 1통뿐이라, 켜면 첫 통은
+                짧은 문구 + 버튼 하나만 보내고 버튼을 누른 사람에게 아래 본 메시지를 보낸다.
+                버튼 클릭으로 대화창이 열려 본문 길이·통 수 제한이 사라진다.
+              */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-900">미끼 메시지 사용</p>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5 leading-relaxed">
+                      댓글 직후 짧은 안내와 버튼을 먼저 보내고, 버튼을 누르면 본 메시지(긴 글·여러 버튼·캐러셀)를 보냅니다.
+                    </p>
+                  </div>
+                  <Toggle
+                    on={baitOn}
+                    onClick={() => { if (!baitForced) patch({ baitEnabled: !draft.baitEnabled }); }}
+                    disabled={baitForced}
+                  />
+                </div>
+                {baitForced && (
+                  <p className="flex items-start gap-1.5 mt-2 text-[11px] text-pink-600 font-bold leading-relaxed">
+                    <AlertCircle size={13} className="shrink-0 mt-px" />
+                    팔로워 구분 발송을 위해서는 1단계 메시지가 필요합니다.
+                  </p>
+                )}
+
+                {baitOn && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-xs font-black text-slate-500">1단계 · 댓글 직후 보낼 메시지</p>
+                    <textarea
+                      value={draft.baitMessage || ''}
+                      onChange={(e) => patch({ baitMessage: e.target.value.slice(0, CARD_TEXT_MAX) })}
+                      rows={2}
+                      maxLength={CARD_TEXT_MAX}
+                      placeholder={DEFAULT_BAIT_MESSAGE}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
+                    />
+                    <p className="text-right text-[10px] text-slate-400 font-bold">{(draft.baitMessage || '').length}/{CARD_TEXT_MAX}</p>
+                    <input
+                      value={draft.baitButtonLabel || ''}
+                      onChange={(e) => patch({ baitButtonLabel: e.target.value })}
+                      maxLength={20}
+                      placeholder={`버튼 이름 (예: ${DEFAULT_BAIT_BUTTON_LABEL})`}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                    />
+                    <p className="flex items-start gap-1.5 text-[11px] text-slate-400 font-bold leading-relaxed">
+                      <AlertCircle size={12} className="shrink-0 mt-px" />
+                      버튼을 누르면 무엇을 받는지 솔직하게 적어 주세요. 받는 내용과 다른 문구로 클릭을 유도하면 인스타그램 스팸 정책에 걸릴 수 있습니다.
+                    </p>
+
+                    {baitForced && (
+                      <div className="mt-3 rounded-xl bg-slate-50 border border-slate-100 p-3 space-y-2">
+                        <p className="text-xs font-black text-slate-500">
+                          {draft.followFilter === 'followers'
+                            ? '팔로우하지 않은 사람이 버튼을 누르면 보낼 안내'
+                            : '이미 팔로우한 사람이 버튼을 누르면 보낼 안내'}
+                        </p>
+                        <textarea
+                          value={draft.followGateMessage || ''}
+                          onChange={(e) => patch({ followGateMessage: e.target.value })}
+                          rows={2}
+                          maxLength={CARD_TEXT_MAX}
+                          placeholder={DEFAULT_FOLLOW_GATE_MESSAGE}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
+                        />
+                        <input
+                          value={draft.followGateButtonLabel || ''}
+                          onChange={(e) => patch({ followGateButtonLabel: e.target.value })}
+                          maxLength={20}
+                          placeholder={`다시 확인 버튼 이름 (예: ${DEFAULT_FOLLOW_GATE_BUTTON_LABEL})`}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                        />
+                        <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
+                          안내와 함께 다시 확인 버튼이 나갑니다. 조건을 충족한 뒤 버튼을 누르면 본 메시지가 발송됩니다.
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="pt-3 text-xs font-black text-slate-500">2단계 · 버튼을 누르면 보낼 본 메시지</p>
+                    <textarea
+                      value={draft.mainIntro || ''}
+                      onChange={(e) => patch({ mainIntro: e.target.value })}
+                      rows={2}
+                      maxLength={1000}
+                      placeholder="본 메시지 앞에 먼저 보낼 인사말 (선택)"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
+                    />
+                    <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
+                      아래에서 본 메시지 형식과 내용을 정해 주세요. 버튼 클릭이 막혀 본 메시지를 보낼 수 없을 때는 자동으로 기존 1통 카드 방식으로 발송됩니다.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* 메시지 형식 선택 */}
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {([
@@ -1249,7 +1417,7 @@ const AutomationEditor: React.FC<{
                   />
                   <p className="text-right text-[10px] text-slate-400 font-bold mt-1">{draft.message.length}/1000</p>
                   {/* 댓글 DM 은 1통만 도착해 링크 버튼이 있으면 본문이 카드 한 장에 담긴다. */}
-                  {draft.buttons.some((b) => b.label.trim() || b.url.trim()) && (
+                  {!baitOn && draft.buttons.some((b) => b.label.trim() || b.url.trim()) && (
                     <p className={`mt-1 text-[11px] font-bold leading-relaxed ${
                       draft.message.trim().length > CARD_TEXT_MAX ? 'text-red-500' : 'text-slate-400'
                     }`}>
@@ -1322,8 +1490,9 @@ const AutomationEditor: React.FC<{
                   */}
                   <p className="flex items-start gap-1.5 text-[11px] text-slate-400 font-bold leading-relaxed">
                     <AlignLeft size={13} className="shrink-0 mt-px" />
-                    캐러셀은 카드 한 통으로 발송됩니다. 인스타그램이 메시지 한 통에 텍스트와 카드를
-                    함께 담지 못하기 때문에, 인사말처럼 전하고 싶은 문구는 카드의 제목·설명에 적어 주세요.
+                    {baitOn
+                      ? '캐러셀은 버튼을 누른 사람에게 카드 한 통으로 발송됩니다. 인사말은 위 2단계 인사말 칸에 적으면 카드보다 먼저 도착합니다.'
+                      : '캐러셀은 카드 한 통으로 발송됩니다. 인스타그램이 메시지 한 통에 텍스트와 카드를 함께 담지 못하기 때문에, 인사말처럼 전하고 싶은 문구는 카드의 제목·설명에 적어 주세요.'}
                   </p>
 
                   <CarouselBuilder
@@ -1343,7 +1512,15 @@ const AutomationEditor: React.FC<{
           {/* 우: 미리보기 (데스크톱 고정) */}
           <div className="hidden lg:block bg-slate-50/60 border-l border-slate-100 p-6">
             <div className="sticky top-0">
-              <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
+              <DmPreview
+                igUsername={igUsername}
+                messageType={draft.messageType}
+                message={draft.message}
+                buttons={draft.buttons}
+                cards={draft.cards}
+                bait={baitOn ? { message: draft.baitMessage || '', buttonLabel: draft.baitButtonLabel || '' } : null}
+                intro={baitOn ? draft.mainIntro : ''}
+              />
             </div>
           </div>
 
@@ -1352,7 +1529,15 @@ const AutomationEditor: React.FC<{
             형제 항목이 되어 설정 영역을 0 높이까지 밀어낸다.
           */}
           <div className="lg:hidden px-5 pb-5">
-            <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
+            <DmPreview
+                igUsername={igUsername}
+                messageType={draft.messageType}
+                message={draft.message}
+                buttons={draft.buttons}
+                cards={draft.cards}
+                bait={baitOn ? { message: draft.baitMessage || '', buttonLabel: draft.baitButtonLabel || '' } : null}
+                intro={baitOn ? draft.mainIntro : ''}
+              />
           </div>
         </div>
 
@@ -1441,6 +1626,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(() => cachedSettings?.externalDm || null);
 
   /**
+   * 2단계 발송(미끼 → 본 메시지) 상태. 버튼 클릭 뒤 본 메시지가 연달아 거부되면
+   * 발송기가 잠시 기존 1통 카드 방식으로 되돌린다. 그 사실을 사용자에게 알린다.
+   */
+  const [baitHealth, setBaitHealth] = useState<DmAutomationSettings['baitHealth']>(() => cachedSettings?.baitHealth || null);
+  const baitSuspendedUntil = Date.parse(baitHealth?.suspendedUntil || '');
+  const baitPaused = !Number.isNaN(baitSuspendedUntil) && baitSuspendedUntil > Date.now();
+
+  /**
    * 댓글 자동화와 별도로 저장·발송되는 추가 기능들.
    *
    *  faq     DM 창 첫 화면의 추천 질문 버튼(아이스브레이커).
@@ -1471,6 +1664,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       automations,
       entitled,
       externalDm,
+      baitHealth,
       faq,
       direct,
       ...overrides,
@@ -1545,6 +1739,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
+        setBaitHealth(s.baitHealth || null);
         if (s.faq) setFaq(s.faq);
         if (s.direct) setDirect(s.direct);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
@@ -2045,6 +2240,25 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         </section>
       )}
 
+      {/* 2단계 발송이 막혀 1통 카드 방식으로 자동 전환된 상태 */}
+      {connected && baitPaused && automations.some((a) => a.baitEnabled || a.followFilter !== 'all') && (
+        <section className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 p-5 md:p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="text-amber-500 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm md:text-base font-black text-amber-800">
+                2단계 발송을 잠시 멈추고 1통 카드로 보내고 있어요
+              </h3>
+              <p className="text-[12px] md:text-sm text-amber-700 font-medium mt-1">
+                버튼을 누른 뒤 보내는 본 메시지가 인스타그램에서 연달아 거부됐어요. 그동안 새 댓글에는
+                기존처럼 본 메시지를 카드 한 통으로 압축해 보냅니다(팔로우 조건 확인은 댓글 시점에 합니다).
+                {' '}{new Date(baitSuspendedUntil).toLocaleString('ko-KR')} 이후 자동으로 다시 시도합니다.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 연동 계정 피드 게시물 */}
       {connected && (
         <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-6">
@@ -2223,6 +2437,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                       {fmtDateTime(a.scheduledAt) || '예약'} 예약
                     </span>
                   ))}
+                  {(a.baitEnabled || a.followFilter !== 'all') && (
+                    <span
+                      className="inline-flex items-center gap-1 bg-violet-100 text-violet-600 rounded-lg px-2 py-1 text-[11px] font-bold"
+                      title="댓글 직후 버튼 메시지를 먼저 보내고, 버튼을 누르면 본 메시지를 보내요."
+                    >
+                      <Zap size={11} /> 2단계 발송
+                    </span>
+                  )}
                   {a.messageType === 'carousel' && (
                     <span className="inline-flex items-center gap-1 bg-pink-100 text-pink-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                       <GalleryHorizontalEnd size={11} /> 캐러셀 {(a.cards || []).filter(cardSendable).length}장

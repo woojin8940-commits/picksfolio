@@ -342,6 +342,69 @@ export function buildDirectDmPlan(content: DmContent): DmPlan {
   return { messages, bestEffortFrom: messages.length };
 }
 
+/* ────────────────────────── 2단계 발송(미끼 → 본 메시지) ────────────────────────── */
+
+/** 1단계(미끼) 문구 길이 상한 — 제네릭 템플릿 카드 제목 한도와 같다. */
+export const BAIT_TEXT_MAX = CARD_TEXT_MAX;
+/** 버튼 라벨 길이 상한. */
+export const BAIT_BUTTON_LABEL_MAX = BUTTON_LABEL_MAX;
+export const DEFAULT_BAIT_MESSAGE = "댓글 감사합니다! 아래 버튼을 눌러주세요 👇";
+export const DEFAULT_BAIT_BUTTON_LABEL = "메시지 받기";
+export const DEFAULT_FOLLOW_GATE_MESSAGE = "팔로우 후 아래 버튼을 다시 눌러주시면 안내 메시지를 보내드릴게요!";
+export const DEFAULT_FOLLOW_GATE_BUTTON_LABEL = "팔로우했어요";
+
+/**
+ * postback 버튼 하나를 담은 카드 한 장.
+ *
+ * 링크(web_url) 버튼이 아니라 postback 버튼이어야 한다. 사람이 누르면 인스타그램이
+ * `messaging_postbacks` 웹훅을 보내는데, 이 클릭은 "상대가 우리에게 말을 건 것"이라
+ * 24시간 대화창이 열린다. 링크 버튼은 브라우저만 열 뿐 우리에게 아무것도 알리지
+ * 않아 대화가 열리지 않는다.
+ */
+export function postbackCard(text: string, buttonLabel: string, payload: string, fallbackLabel: string) {
+  const title = (text || "").trim().slice(0, CARD_TEXT_MAX) || BUTTON_ONLY_CARD_TITLE;
+  const label = (buttonLabel || "").trim().slice(0, BUTTON_LABEL_MAX) || fallbackLabel;
+  return genericTemplate([
+    { title, buttons: [{ type: "postback", title: label, payload: payload.slice(0, 1000) }] },
+  ]);
+}
+
+/**
+ * 1단계(미끼) 댓글 비공개 답장 계획.
+ *
+ * 비공개 답장 한 통에는 짧은 문구 + postback 버튼 카드만 싣는다. 인스타그램이 이
+ * 카드를 형식 오류로 거부하면(정책 변경으로 postback 버튼을 막는 경우 등) 그 한 번의
+ * 비공개 답장 기회는 아직 남아 있으므로, 기존 "1통 카드"(buildCommentDmPlan)를 대신
+ * 보낸다 — 2단계로 넘어가지 못해도 받는 사람에게는 본문과 링크가 도착한다.
+ */
+export function buildBaitCommentPlan(
+  bait: { message?: string; buttonLabel?: string; payload: string },
+  legacy: DmContent,
+): DmPlan {
+  const card = postbackCard(
+    bait.message || DEFAULT_BAIT_MESSAGE,
+    bait.buttonLabel || "",
+    bait.payload,
+    DEFAULT_BAIT_BUTTON_LABEL,
+  );
+  const single = buildCommentDmPlan(legacy).messages[0];
+  return { messages: [card], bestEffortFrom: 1, fallback: single };
+}
+
+/**
+ * 2단계(본 메시지) 계획 — 버튼 클릭으로 대화창이 열린 상대에게 IGSID 로 보낸다.
+ *
+ * 창이 열려 있으니 여러 통을 순서대로 보낼 수 있다. 선택 인트로 텍스트 → 본문
+ * (긴 텍스트는 텍스트 + 버튼 카드로 나뉘고, 캐러셀은 카드 한 통) 순서다. 모든 통이
+ * 도착해야 성공으로 본다.
+ */
+export function buildMainDmPlan(content: DmContent, intro?: string): DmPlan {
+  const messages = buildDmMessages(content);
+  const lead = (intro || "").trim();
+  if (lead) messages.unshift({ text: lead.slice(0, TEXT_MAX) });
+  return { messages, bestEffortFrom: messages.length };
+}
+
 export interface SendDmArgs {
   graphHost: string;
   graphVersion: string;

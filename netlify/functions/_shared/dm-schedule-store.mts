@@ -84,6 +84,12 @@ export interface DmScheduledJob {
   commentId?: string;
   publicReply?: { commentId: string; message: string };
   sendDm?: boolean;
+  /**
+   * 2단계 발송(미끼 → 본 메시지)을 쓰는 댓글 예약이면 미끼 문구와 버튼을 누른 시점에
+   * 다시 고를 자동화 후보. 비공개 답장으로는 미끼만 나가고, 본 메시지는 클릭 뒤
+   * 웹훅이 설정에서 읽어 보낸다(_shared/dm-bait.mts).
+   */
+  bait?: { message: string; buttonLabel: string; automationIds: string[] };
   /** 댓글이 달린 시각(ISO). 7일 창 판정에 쓴다. */
   commentAt?: string;
   /** 이 예약을 만든 자동화(기록·화면 표시용). */
