@@ -1,6 +1,7 @@
 import { getStore } from '@netlify/blobs'
 import { mapConcurrent } from './_shared/concurrency.mts'
 import { getSupabaseServer } from './_shared/supabase.mts'
+import { authActivityById, BUSINESS_ROLES, listAllAuthUsers } from './_shared/auth-user-activity.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import { applyComplimentaryMembership } from './_shared/complimentary-memberships.mts'
 import {
@@ -18,6 +19,29 @@ import type { Config, Context } from '@netlify/functions'
 type MembershipPlan = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live'
 
 type SellerVerificationBlob = SellerMembershipRecord
+
+/**
+ * 운영자가 표시한 "주목" 상태. `profiles` 에는 featured 칸이 없어서(수정이 42703 으로
+ * 실패했다) 아이디별로 Blobs 에 둔다.
+ */
+type FeaturedRecord = { featured: boolean; featured_at: string | null; featured_note: string }
+const featuredStore = () => getStore({ name: 'admin-featured', consistency: 'strong' })
+const featuredKey = (username: string) => encodeURIComponent(username.toLowerCase())
+
+async function readFeaturedMap(): Promise<Map<string, FeaturedRecord>> {
+  const store = featuredStore()
+  const map = new Map<string, FeaturedRecord>()
+  try {
+    const { blobs } = await store.list()
+    await mapConcurrent(blobs, 8, async ({ key }) => {
+      const record = (await store.get(key, { type: 'json' })) as FeaturedRecord | null
+      if (record) map.set(decodeURIComponent(key), record)
+    })
+  } catch (e) {
+    console.warn('[admin-influencers] featured list failed:', e)
+  }
+  return map
+}
 
 function membershipSource(
   stored: SellerVerificationBlob | null,
@@ -56,13 +80,22 @@ export default async (req: Request, context: Context) => {
       //    below to surface accounts. Otherwise a transient DB error or a
       //    schema drift on the role column makes the operator dashboard
       //    look completely empty.
+      // 가입 · 마지막 로그인 시각은 Auth 가 원본이다(profiles 에는 그 칸이 없다).
+      let authUsers: Awaited<ReturnType<typeof listAllAuthUsers>> | null = null
+      try {
+        authUsers = await listAllAuthUsers(supabase)
+      } catch (e) {
+        console.warn('[admin-influencers] auth.admin.listUsers failed:', e)
+      }
+      const activity = await authActivityById(supabase, authUsers || [])
+      const featuredMap = await readFeaturedMap()
+
       let profiles: any[] = []
       {
         const filtered = await supabase
           .from('profiles')
-          .select('id, username, full_name, email, phone, role, kakao_id, featured, featured_at, featured_note, last_login_at, login_count, created_at')
+          .select('id, username, full_name, email, phone, role, kakao_id')
           .or('role.is.null,role.eq.user')
-          .order('created_at', { ascending: false })
 
         if (filtered.error) {
           console.warn('[admin-influencers] role-filtered profiles query failed, retrying without role filter:', filtered.error.message)
@@ -71,8 +104,7 @@ export default async (req: Request, context: Context) => {
           // use a `biz/` username prefix) out client-side.
           const all = await supabase
             .from('profiles')
-            .select('id, username, full_name, email, phone, kakao_id, featured, featured_at, featured_note, last_login_at, login_count, created_at')
-            .order('created_at', { ascending: false })
+            .select('id, username, full_name, email, phone, kakao_id')
           if (all.error) {
             console.warn('[admin-influencers] unfiltered profiles query also failed:', all.error.message)
           } else {
@@ -198,12 +230,12 @@ export default async (req: Request, context: Context) => {
             full_name: p.full_name,
             email: p.email,
             phone: p.phone,
-            featured: !!p.featured,
-            featured_at: p.featured_at,
-            featured_note: p.featured_note,
-            last_login_at: p.last_login_at,
-            login_count: p.login_count || 0,
-            created_at: p.created_at,
+            featured: !!featuredMap.get(blobKey)?.featured,
+            featured_at: featuredMap.get(blobKey)?.featured_at || null,
+            featured_note: featuredMap.get(blobKey)?.featured_note || null,
+            last_login_at: activity.get(p.id)?.last_login_at || null,
+            login_count: 0,
+            created_at: activity.get(p.id)?.created_at || null,
             views: a.views,
             clicks: a.clicks,
             proposals_total: pr.total,
@@ -229,7 +261,8 @@ export default async (req: Request, context: Context) => {
       )
 
       // 4) Business accounts. They live in the same `profiles` table with a
-      //    `biz/` prefix on the username and `role='business'`. Surface them
+      //    `biz/` prefix on the username and `role='operator'` (business-auth
+      //    가입이 쓰는 값; 예전 값 'business' 도 함께 본다). Surface them
       //    so the operator dashboard can list 비즈니스 회원 separately.
       //    Fall back to a username-prefix filter if the role column query
       //    fails so business accounts still appear.
@@ -237,17 +270,15 @@ export default async (req: Request, context: Context) => {
       {
         const byRole = await supabase
           .from('profiles')
-          .select('id, username, full_name, email, phone, last_login_at, login_count, created_at')
-          .eq('role', 'business')
-          .order('created_at', { ascending: false })
+          .select('id, username, full_name, email, phone')
+          .in('role', BUSINESS_ROLES)
 
         if (byRole.error) {
           console.warn('[admin-influencers] role=business query failed, falling back to biz/ prefix:', byRole.error.message)
           const byPrefix = await supabase
             .from('profiles')
-            .select('id, username, full_name, email, phone, last_login_at, login_count, created_at')
+            .select('id, username, full_name, email, phone')
             .like('username', 'biz/%')
-            .order('created_at', { ascending: false })
           if (byPrefix.error) {
             console.warn('[admin-influencers] biz/ prefix fallback failed:', byPrefix.error.message)
           } else {
@@ -264,7 +295,12 @@ export default async (req: Request, context: Context) => {
       //      auth user via the admin API and append the orphans as 유저 rows so
       //      the operator can still see and act on them.
       try {
+        if (!authUsers) throw new Error('auth users unavailable')
+        // 관리자처럼 목록에 넣지 않는 역할도 프로필은 있다 — 그 계정을 "프로필 없는
+        // 유저"로 잘못 붙이지 않도록 전체 프로필 ID 를 기준으로 본다.
+        const { data: allProfileIds } = await supabase.from('profiles').select('id')
         const profileIds = new Set<string>([
+          ...((allProfileIds || []).map((p: any) => p.id)),
           ...((profiles || []).map((p: any) => p.id)),
           ...((businessProfiles || []).map((p: any) => p.id)),
         ])
@@ -272,15 +308,8 @@ export default async (req: Request, context: Context) => {
           (profiles || []).map((p: any) => String(p.username || '').toLowerCase()),
         )
 
-        let page = 1
-        const perPage = 1000
-        while (true) {
-          const { data: authData, error: authErr } = await supabase.auth.admin.listUsers({
-            page,
-            perPage,
-          })
-          if (authErr) throw authErr
-          const users = authData?.users || []
+        {
+          const users = authUsers
           const orphans = users.filter(u => !profileIds.has(u.id)).map(u => {
             const meta = (u.user_metadata || {}) as Record<string, any>
             const emailLocal = (u.email || '').split('@')[0] || ''
@@ -340,8 +369,6 @@ export default async (req: Request, context: Context) => {
               membership_promo_free_until: stored?.membership_promo_free_until || null,
             })
           }
-          if (users.length < perPage) break
-          page++
         }
 
         influencers.sort((a, b) => {
@@ -411,10 +438,11 @@ export default async (req: Request, context: Context) => {
         full_name: p.full_name,
         email: p.email,
         phone: p.phone,
-        last_login_at: p.last_login_at,
-        login_count: p.login_count || 0,
-        created_at: p.created_at,
+        last_login_at: activity.get(p.id)?.last_login_at || null,
+        login_count: 0,
+        created_at: activity.get(p.id)?.created_at || null,
       }))
+        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
 
       return Response.json({
         influencers,
@@ -455,14 +483,23 @@ export default async (req: Request, context: Context) => {
       if (Object.keys(profileUpdate).length > 0) {
         const { data, error } = await supabase
           .from('profiles')
-          .update(profileUpdate)
+          .select('username')
           .eq('username', username)
-          .select('username, featured, featured_at, featured_note')
           .maybeSingle()
 
         if (error) throw error
         if (!data) return Response.json({ error: 'Influencer not found' }, { status: 404 })
-        profileRow = data
+        const store = featuredStore()
+        const key = featuredKey(username)
+        const current = ((await store.get(key, { type: 'json' })) as FeaturedRecord | null) ||
+          { featured: false, featured_at: null, featured_note: '' }
+        const next: FeaturedRecord = {
+          featured: profileUpdate.featured ?? current.featured,
+          featured_at: 'featured_at' in profileUpdate ? profileUpdate.featured_at : current.featured_at,
+          featured_note: profileUpdate.featured_note ?? current.featured_note,
+        }
+        await store.setJSON(key, next)
+        profileRow = { username: data.username, ...next }
       }
 
       let membershipResult: {

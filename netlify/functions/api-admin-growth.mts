@@ -1,5 +1,6 @@
 import { getSupabaseServer } from './_shared/supabase.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
+import { authActivityById } from './_shared/auth-user-activity.mts'
 import type { Config, Context } from '@netlify/functions'
 
 // Admin growth metrics
@@ -29,10 +30,19 @@ export default async (req: Request, _context: Context) => {
 
     // Influencer signups. Include NULL role so legacy profiles
     // count toward growth metrics alongside explicitly-tagged users.
-    const { data: influencerProfiles } = await supabase
-      .from('profiles')
-      .select('username, created_at, last_login_at')
-      .or('role.is.null,role.eq.user')
+    // 가입 · 로그인 시각은 Auth 에서 붙인다 — profiles 에는 그 칸이 없다.
+    const [{ data: profileRows }, activity] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id, username')
+        .or('role.is.null,role.eq.user'),
+      authActivityById(supabase),
+    ])
+    const influencerProfiles = (profileRows || []).map((p: any) => ({
+      username: p.username as string,
+      created_at: activity.get(p.id)?.created_at || null,
+      last_login_at: activity.get(p.id)?.last_login_at || null,
+    }))
 
     const newInfluencers30d = (influencerProfiles || []).filter(
       p => p.created_at && new Date(p.created_at) >= thirtyDaysAgo

@@ -2,6 +2,7 @@ import { getDatabase } from '@picks/netlify-database'
 import { getStore } from '@netlify/blobs'
 import { getSupabaseServer } from './_shared/supabase.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
+import { authActivityById, BUSINESS_ROLES } from './_shared/auth-user-activity.mts'
 import type { Config, Context } from '@netlify/functions'
 
 /**
@@ -86,10 +87,18 @@ async function accountCounts() {
   }
   try {
     const supabase = getSupabaseServer()
-    const [{ data: infRows }, { data: bizRows }] = await Promise.all([
-      supabase.from('profiles').select('created_at').or('role.is.null,role.eq.user'),
-      supabase.from('profiles').select('created_at').eq('role', 'business'),
+    // profiles 에는 가입 시각 칸이 없어 Auth 의 가입 시각을 붙인다. 비즈니스 가입은
+    // role 을 'operator' 로 저장한다(BUSINESS_ROLES).
+    const [{ data: infIds, error: infError }, { data: bizIds, error: bizError }, activity] = await Promise.all([
+      supabase.from('profiles').select('id').or('role.is.null,role.eq.user'),
+      supabase.from('profiles').select('id').in('role', BUSINESS_ROLES),
+      authActivityById(supabase),
     ])
+    if (infError || bizError) throw infError || bizError
+    const withCreatedAt = (rows: any[] | null) =>
+      (rows || []).map((p) => ({ created_at: activity.get(p.id)?.created_at || null }))
+    const infRows = withCreatedAt(infIds)
+    const bizRows = withCreatedAt(bizIds)
     const now = Date.now()
     const todayStr = new Date(now).toISOString().slice(0, 10)
     const d7 = now - 7 * 24 * 60 * 60 * 1000
