@@ -89,11 +89,23 @@ export default async (req: Request) => {
       account_type === "business" ? ["operator", "admin"] : ["user"];
 
     if (action === "find-id" || action === "reset-lookup") {
-      const { data: profiles } = await supabase
+      // profiles 에는 created_at 컬럼이 없다. 예전에는 여기서 created_at 을 함께
+      // 골랐는데, Supabase 가 "column does not exist" 오류를 돌려주고 그 오류를
+      // 무시하고 있었기 때문에 아이디 찾기는 정보가 있어도 항상 "일치하는 계정이
+      // 없습니다" 로 끝났다. 가입일은 Auth 사용자 정보에서 가져온다.
+      const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
-        .select("username, full_name, created_at")
+        .select("id, username, full_name")
         .eq("phone", cleanPhone)
         .in("role", roleFilter);
+
+      if (profilesError) {
+        console.error("find-account: profiles lookup failed", profilesError.message);
+        return Response.json({
+          success: false,
+          error: "계정 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+        });
+      }
 
       const matched = (profiles || []).filter(
         (p) => normalizeName(p.full_name) === normalizeName(cleanName)
@@ -106,14 +118,18 @@ export default async (req: Request) => {
         });
       }
 
-      return Response.json({
-        success: true,
-        accounts: matched.map((p) => ({
-          username: p.username,
-          display_name: p.full_name || "",
-          created_at: p.created_at,
-        })),
-      });
+      const accounts = await Promise.all(
+        matched.map(async (p) => {
+          const { data } = await supabase.auth.admin.getUserById(p.id);
+          return {
+            username: p.username,
+            display_name: p.full_name || "",
+            created_at: data?.user?.created_at || null,
+          };
+        })
+      );
+
+      return Response.json({ success: true, accounts });
     }
 
     // 화면(FindAccount.tsx)은 "reset-pw" 를 보낸다. 서버가 "reset-password" 만
@@ -129,11 +145,19 @@ export default async (req: Request) => {
         return Response.json({ success: false, error: "비밀번호는 6자 이상이어야 합니다." });
       }
 
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
         .select("id, username, full_name")
         .eq("phone", cleanPhone)
         .in("role", roleFilter);
+
+      if (profilesError) {
+        console.error("find-account: profiles lookup failed", profilesError.message);
+        return Response.json({
+          success: false,
+          error: "계정 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+        });
+      }
 
       let matched = (profiles || []).filter(
         (p) => normalizeName(p.full_name) === normalizeName(cleanName)

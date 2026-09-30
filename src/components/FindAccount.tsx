@@ -19,7 +19,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   const [showVerificationInput, setShowVerificationInput] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [foundAccounts, setFoundAccounts] = useState<Array<{ username: string; display_name: string; created_at: string }>>([]);
+  const [foundAccounts, setFoundAccounts] = useState<Array<{ username: string; display_name: string; created_at: string | null }>>([]);
   const [selectedUsername, setSelectedUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -367,7 +367,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
                     <div key={i} className="bg-white rounded-xl p-4 border border-[#0B0F1A]/[0.07]">
                       <p className={`font-black text-base ${accentClasses.text}`}>{acc.username}</p>
                       {acc.display_name && <p className="text-xs text-[#8B93AE] font-medium mt-0.5">{acc.display_name}</p>}
-                      <p className="text-[10px] text-[#A6ADC6] font-bold mt-1">{isEn ? 'Joined: ' : '가입일: '}{new Date(acc.created_at).toLocaleDateString(isEn ? 'en-US' : 'ko-KR')}</p>
+                      {acc.created_at && <p className="text-[10px] text-[#A6ADC6] font-bold mt-1">{isEn ? 'Joined: ' : '가입일: '}{new Date(acc.created_at).toLocaleDateString(isEn ? 'en-US' : 'ko-KR')}</p>}
                     </div>
                   ))}
                 </div>
