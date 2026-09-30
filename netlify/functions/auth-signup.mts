@@ -7,6 +7,7 @@ import {
   phoneNotVerifiedResponse,
 } from "./_shared/phone-verification.mts";
 import { checkUsernameRules } from "./_shared/username-rules.mts";
+import { attachAuthPhone } from "./_shared/auth-phone.mts";
 
 const SUPABASE_URL =
   "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -142,7 +143,8 @@ export default async (req: Request) => {
 
     // 동일인이 같은 이메일·휴대폰으로 여러 계정을 만들 수 있어야 하므로, Supabase
     // auth 단계의 고유 제약(이메일·휴대폰)에 막히지 않도록 처리한다.
-    //  - 휴대폰: auth 단계에서 고유 제약을 걸지 않는다(번호는 profiles에만 저장).
+    //  - 휴대폰: 번호의 기준은 profiles.phone 이다. Auth 에는 계정을 만든 뒤
+    //    attachAuthPhone 으로 따로 넣고, 번호가 겹쳐 실패해도 가입은 계속한다.
     //  - 이메일: 실제 이메일로 먼저 시도하고, 이미 쓰인 이메일이면(=재가입) 아이디
     //    기반의 고유 이메일로 대체한다. 로그인은 profiles.email로 인증하므로,
     //    어떤 경우든 실제로 사용된 인증 이메일을 profiles.email에 저장한다.
@@ -242,6 +244,10 @@ export default async (req: Request) => {
         success: false,
         error: "개인페이지를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.",
       });
+    }
+
+    if (authData?.user) {
+      await attachAuthPhone(supabase, authData.user.id, cleanPhone);
     }
 
     // 가입이 끝난 뒤에 인증을 소진시킨다 — 중간에 실패한 시도가 인증을 태우면

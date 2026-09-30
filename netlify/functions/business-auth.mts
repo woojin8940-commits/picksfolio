@@ -8,6 +8,7 @@ import {
 } from "./_shared/phone-verification.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { checkUsernameRules } from "./_shared/username-rules.mts";
+import { attachAuthPhone } from "./_shared/auth-phone.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -157,6 +158,7 @@ export default async (req: Request) => {
           await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
           return Response.json({ success: false, error: "회원정보를 저장하지 못했습니다. 다시 시도해 주세요." });
         }
+        await attachAuthPhone(supabase, authData.user.id, cleanContactPhone);
       }
 
       await consumePhoneVerification(phoneVerification.id);
