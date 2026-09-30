@@ -116,15 +116,13 @@ export default async (req: Request, context: Context) => {
     {
       const filtered = await supabase
         .from('profiles')
-        .select('username, created_at')
+        .select('username')
         .or('role.is.null,role.eq.user')
-        .order('created_at', { ascending: false })
       if (filtered.error) {
         console.warn('[admin-proposals] role-filtered profiles query failed, retrying without role filter:', filtered.error.message)
         const all = await supabase
           .from('profiles')
-          .select('username, created_at')
-          .order('created_at', { ascending: false })
+          .select('username')
         if (!all.error) {
           profileRows = (all.data || []).filter((p: any) => !String(p.username || '').startsWith('biz/'))
         }
