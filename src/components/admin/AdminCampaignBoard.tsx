@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKRW, formatSignedKRW } from '../../utils/formatters';
-import { REWARD_MODES, rewardModeOf, type RewardMode } from '../../utils/campaignBrief';
+import { REWARD_MODES, isManagerListupMode, rewardModeOf, type RewardMode } from '../../utils/campaignBrief';
 
 /**
  * 캠페인 관리 — 모든 캠페인이 어디까지 갔고 누가 맡았는지 한 표로 본다.
@@ -83,12 +83,19 @@ const daysLeft = (d: unknown) => {
  * 위, 그다음이 담당자 없는 캠페인(지원이 들어와도 아무도 선정하지 않는다), 그다음이
  * 승인은 났는데 명단이 빈 캠페인이다. 마감된 캠페인은 손댈 것이 없으니 0점.
  */
+/**
+ * 담당자 리스트업이 있어야 하는데 명단이 비어 있는 캠페인.
+ * 제품 협찬형은 지원자만 받아 리스트업 자체가 없으므로 "멈춤"으로 세지 않는다.
+ */
+const isStalled = (c: any) =>
+  c.status === 'active' && isManagerListupMode(c.reward_mode) && num(c.listed_count) === 0;
+
 const attentionScore = (c: any) => {
   if (c.status === 'inactive' || c.status === 'admin_rejected') return 0;
   let score = 0;
   if (c.status === 'pending_approval') score += 100;
   if (!c.manager_username) score += 50;
-  if (c.status === 'active' && num(c.listed_count) === 0) score += 30;
+  if (isStalled(c)) score += 30;
   // 수락은 됐는데 단가가 비어 있으면 정산이 막힌다.
   score += Math.max(0, num(c.accepted_count) - num(c.priced_count)) * 5;
   const left = daysLeft(c.end_date);
@@ -168,7 +175,7 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
       s.running += num(c.collab_running);
       s.margin += num(c.margin_amount);
       s.unpriced += Math.max(0, num(c.accepted_count) - num(c.priced_count));
-      if (c.status === 'active' && num(c.listed_count) === 0) s.stalled++;
+      if (isStalled(c)) s.stalled++;
     }
     return s;
   }, [campaigns]);
@@ -177,7 +184,7 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
     const q = query.trim().toLowerCase();
     const rows = campaigns.filter(c => {
       if (filter === 'unassigned' && c.manager_username) return false;
-      if (filter === 'stalled' && !(c.status === 'active' && num(c.listed_count) === 0)) return false;
+      if (filter === 'stalled' && !isStalled(c)) return false;
       if (filter === 'active' && c.status !== 'active') return false;
       if (filter === 'pending_approval' && c.status !== 'pending_approval') return false;
       if (filter === 'inactive' && c.status !== 'inactive') return false;
@@ -360,7 +367,7 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
               const margin = num(c.margin_amount);
               const brandAmount = num(c.brand_amount);
               const unpriced = Math.max(0, num(c.accepted_count) - num(c.priced_count));
-              const stalled = c.status === 'active' && num(c.listed_count) === 0;
+              const stalled = isStalled(c);
               const rm = rewardModeOf(c.reward_mode);
               const left = daysLeft(c.end_date);
               const isOpen = !!expanded[c.id];

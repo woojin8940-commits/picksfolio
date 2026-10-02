@@ -108,10 +108,16 @@ export default async (req: Request, context: Context) => {
 
     // Resolve the actual image URL directly instead of using the redirect proxy,
     // because KakaoTalk's crawler does not follow 302 redirects for og:image.
+    // 영상(.mp4 등)이나 편집 중 남은 blob: 주소는 미리보기 이미지가 될 수 없다 —
+    // 그런 값이면 다음 후보로 넘어간다.
+    const usableImage = (value?: string) =>
+      typeof value === 'string' && /^(https?:\/\/|\/(?!\/))/i.test(value) && !/\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(value)
+        ? value
+        : undefined
     const directImage =
-      data.design?.portfolioHeaderImage ||
-      data.blocks?.[0]?.coverMedia ||
-      data.profile?.avatar_url
+      usableImage(data.design?.portfolioHeaderImage) ||
+      usableImage(data.blocks?.[0]?.coverMedia) ||
+      usableImage(data.profile?.avatar_url)
 
     const ogImage = directImage || `${url.origin}/og-image.png?v=2`
 

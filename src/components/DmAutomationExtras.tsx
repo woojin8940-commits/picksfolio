@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle, Check, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, Trash2,
 } from 'lucide-react';
@@ -128,6 +128,39 @@ interface SpeedProps {
 }
 
 /**
+ * 서버 값을 따라가는 편집 초안.
+ *
+ * 예전에는 부모 값이 바뀔 때마다 초안을 무조건 덮었다. 화면은 먼저 보관해 둔 설정으로
+ * 그린 뒤 서버 응답으로 한 번 더 맞추는데, 그 사이에 고치기 시작한 내용(질문 · 답장 ·
+ * 속도)이 응답이 도착하는 순간 사라졌다. 사용자가 고친 게 없을 때만 따라가고, 저장이
+ * 끝난 뒤(markSynced)에는 서버가 확정한 값을 다시 받는다.
+ */
+function useServerDraft<T>(value: T, onResync?: (next: T) => void) {
+  const [draft, setDraftState] = useState<T>(value);
+  const editedRef = useRef(false);
+  /** 초안 밖에서 들고 있는 입력(키워드 원문 등)을 고친 경우. 초안 비교로는 알 수 없다. */
+  const sideEditedRef = useRef(false);
+  const syncedRef = useRef(value);
+  useEffect(() => {
+    // 손댔더라도 마지막으로 맞춘 값과 같다면 고친 게 없는 것으로 본다.
+    const unchanged = JSON.stringify(draft) === JSON.stringify(syncedRef.current);
+    syncedRef.current = value;
+    if (sideEditedRef.current || (editedRef.current && !unchanged)) return;
+    editedRef.current = false;
+    setDraftState(value);
+    onResync?.(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const setDraft = (next: React.SetStateAction<T>) => {
+    editedRef.current = true;
+    setDraftState(next);
+  };
+  const markEdited = () => { sideEditedRef.current = true; };
+  const markSynced = () => { editedRef.current = false; sideEditedRef.current = false; };
+  return { draft, setDraft, markEdited, markSynced };
+}
+
+/**
  * 답글/DM 발송 속도 설정(스팸 방지).
  *
  * 짧은 시간에 답글·DM 이 몰리면 메타가 비정상 활동으로 판단해 기능을 제한할 수
@@ -136,9 +169,8 @@ interface SpeedProps {
  * 순서대로 보낸다. 저장 즉시 반영된다.
  */
 export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onChange, onNotice }) => {
-  const [draft, setDraft] = useState(value);
+  const { draft, setDraft, markSynced } = useServerDraft(value);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setDraft(value); }, [value]);
 
   const clamp = (v: number) => Math.min(DM_SEND_SPEED_MAX, Math.max(DM_SEND_SPEED_MIN, Math.round(v) || DM_SEND_SPEED_MIN));
   const tier = speedTier(draft);
@@ -155,6 +187,7 @@ export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onCh
       onNotice('err', result.error || '발송 속도를 저장하지 못했습니다.');
       return;
     }
+    markSynced();
     onChange(result.sendSpeed ?? next);
     onNotice('ok', `발송 속도를 시간당 ${result.sendSpeed ?? next}건으로 저장했어요. 바로 적용됩니다.`);
   };
@@ -271,11 +304,9 @@ interface FaqProps {
 export const DmFaqSection: React.FC<FaqProps> = ({
   userName, connected, entitled, masterEnabled, value, onChange, onNotice,
 }) => {
-  const [draft, setDraft] = useState<DmFaqSettings>(value);
+  // 서버가 확정한 값(등록 시각·실패 이유 포함)으로 화면을 맞춘다 — 고치는 중이 아닐 때만.
+  const { draft, setDraft, markSynced } = useServerDraft<DmFaqSettings>(value);
   const [saving, setSaving] = useState(false);
-
-  // 서버가 확정한 값(등록 시각·실패 이유 포함)으로 화면을 맞춘다.
-  useEffect(() => { setDraft(value); }, [value]);
 
   const items = draft.items || [];
   const patchItem = (id: string, patch: Partial<DmFaqItem>) =>
@@ -303,7 +334,10 @@ export const DmFaqSection: React.FC<FaqProps> = ({
       items: items.filter((f) => f.question.trim()),
     });
     setSaving(false);
-    if (result.faq) onChange(result.faq);
+    if (result.faq) {
+      markSynced();
+      onChange(result.faq);
+    }
     if (result.ok) {
       onNotice(
         'ok',
@@ -438,7 +472,15 @@ interface TriggerProps {
 export const DmTriggerSection: React.FC<TriggerProps> = ({
   userName, connected, entitled, masterEnabled, value, onChange, onNotice,
 }) => {
-  const [draft, setDraft] = useState<DmDirectSettings>(value);
+  const kwTextOf = (v: DmDirectSettings) => {
+    const next: Record<string, string> = {};
+    for (const r of v.replies || []) next[r.id] = (r.keywords || []).join(', ');
+    return next;
+  };
+  const { draft, setDraft, markEdited, markSynced } = useServerDraft<DmDirectSettings>(
+    value,
+    (v) => setKwTextState(kwTextOf(v)),
+  );
   const [saving, setSaving] = useState(false);
   /**
    * 키워드 입력창의 원본 문자열.
@@ -447,14 +489,11 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
    * 사라져 계속 입력할 수 없다. 화면에서는 문자열을 그대로 들고 있다가 저장할 때
    * 배열로 바꾼다.
    */
-  const [kwText, setKwText] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    setDraft(value);
-    const next: Record<string, string> = {};
-    for (const r of value.replies || []) next[r.id] = (r.keywords || []).join(', ');
-    setKwText(next);
-  }, [value]);
+  const [kwText, setKwTextState] = useState<Record<string, string>>(() => kwTextOf(value));
+  const setKwText = (next: Record<string, string>) => {
+    markEdited();
+    setKwTextState(next);
+  };
 
   const greeting = draft.greeting;
   const replies = draft.replies || [];
@@ -515,6 +554,7 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
     const result = await apiService.saveDmTriggers(userName, resolved);
     setSaving(false);
     if (result.ok) {
+      markSynced();
       onChange(result.direct || resolved);
       onNotice('ok', 'DM 자동 응답을 저장했어요.');
     } else {

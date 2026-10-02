@@ -32,6 +32,7 @@ import {
 } from "./_shared/dm-send-registry.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { withDmSendDeadline } from "./_shared/dm-send-budget.mts";
+import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 
 /**
  * 인스타그램 발송(수동).
@@ -235,7 +236,10 @@ const handleSend = async (req: Request) => {
   }
 
   const igId = settings?.igUserId || settings?.igAccountId;
-  if (!settings || !igId || !settings.accessToken) {
+  // 자동 디엠만 "연동 해제"해도 토큰은 인사이트 · 매칭이 함께 쓰므로 남아 있다.
+  // 웹훅 · 예약 발송과 같이, 해제된 상태에서는 수동 발송도 막는다.
+  const dmOff = linkFeatureOff(settings as MetaLink | null, "dm");
+  if (!settings || !igId || !settings.accessToken || dmOff) {
     await appendLog(username, {
       status: "skipped",
       reason: "not_connected",

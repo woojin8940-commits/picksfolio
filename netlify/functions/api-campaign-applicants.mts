@@ -8,8 +8,9 @@ import {
 import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { parseAmount } from "./_shared/collab-records.mts";
 import { createCollabForApplication, logCollabEvent, norm } from "./_shared/collab-workflow.mts";
-import { buildSnapshots, loadManagerContacts, mirrorCollabProposal } from "./_shared/campaign-listup.mts";
+import { buildSnapshots, loadManagerContacts, mirrorCollabProposal, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
+import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 
 /**
  * 캠페인 지원자 — 조회와 선정.
@@ -94,20 +95,43 @@ export default async (req: Request) => {
        * 브랜드 응답에는 이 값이 아예 들어가지 않는다 — 브랜드가 보는 것은 지원서에
        * 적힌 연락처뿐이고, 등록서에 적어 낸 번호는 픽스폴리오에 준 것이다.
        */
-      const [snapshots, contacts] = await Promise.all([
+      const [snapshots, contacts, quoteRows] = await Promise.all([
         buildSnapshots(db, usernames),
         viewerRole === "manager"
           ? loadManagerContacts(db, usernames, campaign_id)
           : Promise.resolve(new Map()),
+        // 담당자가 이 캠페인 명단에서 정해 둔 제시가. 브랜드가 보는 단가는 이것뿐이다.
+        db.sql`
+          SELECT LOWER(influencer_username) AS username, quoted_fee, quoted_second_use_fee
+          FROM campaign_listups
+          WHERE campaign_id = ${campaign_id}
+        ` as PromiseLike<any[]>,
       ]);
+      const quotes = new Map(
+        ((quoteRows as any[]) || []).map((q) => [
+          norm(q.username),
+          {
+            quotedFee: Math.max(0, Math.trunc(Number(q.quoted_fee || 0)) || 0),
+            quotedSecondUseFee: Math.max(0, Math.trunc(Number(q.quoted_second_use_fee || 0)) || 0),
+          },
+        ]),
+      );
 
       const rewardMode = normalizeRewardMode(campaign.reward_mode);
       return Response.json({
-        applicants: rows.map((r) => ({
-          ...r,
-          insights: snapshots.get(norm(r.applicant_username)) || null,
-          contact_card: contacts.get(norm(r.applicant_username)) || null,
-        })),
+        applicants: rows.map((r) => {
+          const key = norm(r.applicant_username);
+          const insights = snapshots.get(key) || null;
+          const quote = quotes.get(key);
+          return {
+            ...r,
+            // 브랜드에게는 인플루언서 등록 단가를 보내지 않는다(withoutRegisteredPrices 주석).
+            insights: viewerRole === "brand" ? withoutRegisteredPrices(insights) : insights,
+            contact_card: contacts.get(key) || null,
+            quoted_fee: quote?.quotedFee || 0,
+            quoted_second_use_fee: quote?.quotedSecondUseFee || 0,
+          };
+        }),
         viewerRole,
         // 브랜드 화면이 "수락" 버튼과 "추천 의견" 중 무엇을 보여줄지 여기서 갈린다.
         selectionBy: isOpenApplyMode(rewardMode) ? "brand" : "manager",
@@ -286,7 +310,14 @@ export default async (req: Request) => {
         selectedBy: actorRole,
         rewardType: appRow.reward_type,
         fee,
-        startDate: appRow.start_date,
+        // 단계 마감일은 "협업 시작일로부터 며칠"이다. 캠페인 start_date 는 모집 시작일이라,
+        // 그대로 넘기면 모집이 끝난 뒤 선정된 협업의 가이드 · 배송 마감이 만들어지는
+        // 순간 이미 지나 있었다. 선정한 날(KST)부터 센다 — 모집 시작 전이면 시작일부터.
+        startDate: (() => {
+          const today = todayInSeoul();
+          const campaignStart = String(appRow.start_date || "").slice(0, 10);
+          return /^\d{4}-\d{2}-\d{2}$/.test(campaignStart) && campaignStart > today ? campaignStart : today;
+        })(),
         brief: {
           productName: appRow.product_name,
           productUrl: appRow.product_url,

@@ -73,6 +73,14 @@ export default async (req: Request, context: Context) => {
         console.warn("[api-site-restore] Blob sync failed:", syncErr);
       }
 
+      // GET /api/site 응답은 CDN 에 캐시된다. 저장(api-site)과 같이 비워 주지 않으면
+      // 복원 직후에도 몇 분간 복원 전 문서가 나가고, 그걸 읽은 편집기가 다음 저장에서
+      // 복원을 되돌린다.
+      try {
+        const { purgeCache } = await import("@netlify/functions");
+        await purgeCache({ tags: [`site-${encodeURIComponent(username)}`] }).catch(() => {});
+      } catch {}
+
       return Response.json({ success: true });
     }
 

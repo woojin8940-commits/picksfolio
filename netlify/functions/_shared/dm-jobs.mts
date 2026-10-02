@@ -136,7 +136,9 @@ export async function reschedulePendingCommentJobs(
     .eq("username", username.toLowerCase())
     .eq("status", "pending")
     .eq("attempts", 0)
-    .is("error_kind", null)
+    // 예약 시각 전에 깨어난 작업은 "throttled" 로 다시 대기한다(dm-job-processor).
+    // 그 작업도 함께 옮겨야 예약 시각을 앞당겼을 때 이미 쌓인 댓글이 새 시각에 나간다.
+    .or("error_kind.is.null,error_kind.eq.throttled")
     .contains("payload", { source: "comment", ruleId });
   if (error) throw error;
 }

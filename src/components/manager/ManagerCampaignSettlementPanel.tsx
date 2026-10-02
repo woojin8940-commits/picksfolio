@@ -201,14 +201,23 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
     };
   }, [rows]);
 
-  /** 브랜드가 보내야 하는 금액. 담당자가 적은 청구액이 있으면 그것이 먼저다. */
-  const invoiceAmount = Number(brand?.invoiceAmount || 0) || Number(billing?.amount || 0) || totals.total;
+  /**
+   * 브랜드가 보내야 하는 금액. 담당자가 적은 청구액이 있으면 그것이 먼저다.
+   *
+   * 광고비가 아직 없을 때 인플루언서 보수 합계(totals.total)로 메우지 않는다 — 그 값으로
+   * 입금 확인을 누르면 마진 0원짜리 청구가 저장되고 브랜드 정산 화면에 보수가 찍혔다.
+   */
+  const invoiceAmount = Number(brand?.invoiceAmount || 0) || Number(billing?.amount || 0);
   /** 인플루언서에게 나갈 보수 합계와 그 차액. 마진이 0원 이하면 광고비를 잘못 적은 것이다. */
   const payoutTotal = Number(billing?.payoutAmount || 0);
   const marginAmount = invoiceAmount - payoutTotal;
 
   const markReceived = async () => {
     const amount = digitsOf(amountInput) || invoiceAmount;
+    if (amount <= 0) {
+      alert('브랜드 입금액을 먼저 입력해 주세요. 광고비가 정해지지 않은 캠페인입니다.');
+      return;
+    }
     if (
       !confirm(
         `브랜드 입금을 확인 완료로 처리합니다.\n입금액 ${amount.toLocaleString('ko-KR')}원\n\n` +

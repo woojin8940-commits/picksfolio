@@ -525,7 +525,9 @@ async function processQueuedComment(job: DmJob): Promise<boolean> {
       const delay = result.errorKind === "throttled" ? result.retryAfterMs || 1000 : Math.max(result.retryAfterMs || 0, retryDelay(job.attempts));
       await retryDmJob(job, delay, result.error || "일시적인 발송 오류", result.errorKind || "other");
       if (result.errorKind === "rate_limit") {
-        await pauseDmAccount(igAccountId, delay).catch((e) =>
+        // 큐에 넣을 때 작업의 계정은 settings.igUserId 로 맞춰졌다(웹훅의 계정 ID 와 다를
+        // 수 있다). 발송기가 보는 행과 같은 계정을 멈춰야 쿨다운이 실제로 걸린다.
+        await pauseDmAccount(job.ig_account_id || igAccountId, delay).catch((e) =>
           console.error("[scheduled-dm] account pause failed:", e),
         );
       }
