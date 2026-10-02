@@ -2348,8 +2348,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
       {/* Mobile Preview Area — 리스트 바로 옆 고정 너비 칼럼. 기기는 화면 높이에 맞춰 크기가 정해지므로
           항상 한눈에 들어온다. 큰 화면에서는 칼럼을 넓혀 기기가 세로 여백까지 더 크게 채운다.
-          별도의 세로 스크롤은 두지 않는다 */}
-      <div className="hidden xl:block flex-none w-[600px] 2xl:w-[720px] bg-[#F8FAFC] sticky top-0 h-screen overflow-hidden">
+          별도의 세로 스크롤은 두지 않는다.
+          칸을 overflow-hidden 으로 자르지 않는다 — 기기의 그림자(shadow-2xl)가 칸 아래로 번지는데,
+          자르면 '실제 페이지 확인하기' 바로 밑에서 그림자가 칼로 벤 듯 끊겨 가로 경계선처럼 보였다.
+          기기는 화면 높이에 맞춰 줄어들어 넘치지 않으므로 스크롤도 생기지 않는다 */}
+      <div className="hidden xl:block flex-none w-[600px] 2xl:w-[720px] bg-[#F8FAFC] sticky top-0 h-screen">
         <div className="min-h-full flex items-center justify-center px-4 py-2">
         <PhoneFrame
           size="xl"
