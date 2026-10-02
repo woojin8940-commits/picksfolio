@@ -53,7 +53,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   children
 }) => {
   const { t } = useLanguage();
-  const [stats, setStats] = useState({ views: 0, visitors: 0, clicks: 0, ctr: 0 });
+  const [stats, setStats] = useState({ views: 0, visitors: 0, clicks: 0, ctr: 0, engagementRate: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -489,8 +489,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 trend={startDate === endDate && startDate === todayInSeoul() ? t('dash.realtime', '실시간', 'Real-time') : undefined}
               />
               <StatCard
-                label={t('dash.ctrLabel', '링크 클릭률', 'Click Through Rate')}
-                value={`${stats.ctr}%`}
+                label={t('dash.engagementLabel', '참여율', 'Engagement Rate')}
+                value={`${stats.engagementRate}%`}
                 trend={startDate === endDate && startDate === todayInSeoul() ? t('dash.realtime', '실시간', 'Real-time') : undefined}
               />
 

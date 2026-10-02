@@ -8,12 +8,14 @@ interface DayData {
   views: number;
   visitors: string[];
   clicks: number;
+  // 그날 한 번이라도 클릭한 방문자 ID. 참여율(클릭한 방문자 ÷ 방문자)의 분자다.
+  clickers?: string[];
   blockClicks: Record<string, number>;
   referrers: Record<string, number>;
 }
 
 function emptyDay(): DayData {
-  return { views: 0, visitors: [], clicks: 0, blockClicks: {}, referrers: {} };
+  return { views: 0, visitors: [], clicks: 0, clickers: [], blockClicks: {}, referrers: {} };
 }
 
 function dayKey(username: string, date: string): string {
@@ -63,6 +65,7 @@ export default async (req: Request, context: Context) => {
       let totalClicks = 0;
       let legacyVisitors = 0;
       const visitors = new Set<string>();
+      const clickers = new Set<string>();
       const merged: Record<string, number> = {};
       const days = await mapConcurrent(dates, 8, date =>
         store.get(dayKey(username, date), { type: "json" }) as Promise<DayData | null>,
@@ -75,6 +78,9 @@ export default async (req: Request, context: Context) => {
             data.visitors.forEach(visitor => visitors.add(String(visitor)));
           } else {
             legacyVisitors += data.views || 0;
+          }
+          if (Array.isArray(data.clickers)) {
+            data.clickers.forEach(clicker => clickers.add(String(clicker)));
           }
         }
         if (data?.blockClicks) {
@@ -90,7 +96,12 @@ export default async (req: Request, context: Context) => {
         .slice(0, 10);
 
       const ctr = totalViews > 0 ? Math.round((totalClicks / totalViews) * 100) : 0;
-      const stats = { views: totalViews, visitors: visitors.size + legacyVisitors, clicks: totalClicks, ctr };
+      const totalVisitors = visitors.size + legacyVisitors;
+      // 방문 기록이 상한(10000명)에 걸려 빠진 사람이 클릭만 남겼을 수 있어서 100%로 자른다.
+      const engagementRate = totalVisitors > 0
+        ? Math.min(100, Math.round((clickers.size / totalVisitors) * 100))
+        : 0;
+      const stats = { views: totalViews, visitors: totalVisitors, clicks: totalClicks, ctr, engagementRate };
       if (type === "stats") return Response.json(stats);
       if (type === "top-items") return Response.json({ topItems });
       return Response.json({ ...stats, topItems });
@@ -121,6 +132,12 @@ export default async (req: Request, context: Context) => {
         existing.clicks = (existing.clicks || 0) + 1;
         existing.blockClicks = existing.blockClicks || {};
         existing.blockClicks[blockId] = (existing.blockClicks[blockId] || 0) + 1;
+        if (visitorId) {
+          existing.clickers = existing.clickers || [];
+          if (existing.clickers.length < 10000 && !existing.clickers.includes(visitorId)) {
+            existing.clickers.push(visitorId);
+          }
+        }
       } else {
         existing.views = (existing.views || 0) + 1;
         if (visitorId) {
