@@ -14,6 +14,7 @@ import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import ManualDmModal from './ManualDmModal';
+import CollabMatchRegister from './CollabMatchRegister';
 import Toggle from './DmToggle';
 import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
@@ -1634,6 +1635,25 @@ const AutomationEditor: React.FC<{
 
 /* ────────────────────────── 토글 ────────────────────────── */
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
+/**
+ * 인플루언서 자동 디엠 이용 조건 안내. 잠금 안내와 이용 중 안내가 같은 문장을 쓴다 —
+ * 등록 전에 읽은 조건과 등록 후에 보는 조건이 다르면 안 된다.
+ *
+ * "3개월 동안 협업이 없으면 중단될 수 있다" 는 자동 규칙이 아니라 담당자 판단이다
+ * (api-manager-dm-access). 제안을 못 받은 기간은 중단 사유가 아니므로 그것도 함께 적는다.
+ */
+const DmMatchPolicyNote: React.FC<{ tone?: 'slate' | 'emerald' }> = ({ tone = 'slate' }) => (
+  <ul
+    className={`mt-2 space-y-1 text-[11px] md:text-xs font-bold leading-relaxed ${
+      tone === 'emerald' ? 'text-emerald-700' : 'text-slate-500'
+    }`}
+  >
+    <li>· 등록 후 <strong>3개월 동안 캠페인 협업이 없으면</strong> 자동 디엠 이용이 중단될 수 있어요.</li>
+    <li>· 담당자가 제안을 드리지 못해 협업이 없었던 경우에는 계속 이용할 수 있어요.</li>
+    <li>· 중단되더라도 만들어 둔 자동화는 그대로 남고, 담당자가 제안한 유가시딩 캠페인을 수락하면 다시 열려요.</li>
+  </ul>
+);
+
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = false }) => {
   const { t } = useLanguage();
   const cachedSettings = useMemo(() => readJson<DmAutomationSettings>(dmSettingsCacheKey(userName)), [userName]);
@@ -1680,9 +1700,13 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   /** 연동이 만료돼 다시 동의가 필요한 상태. 이때는 "다시 시도"가 아니라 재연동이 답이다. */
   const [mediaNeedsReauth, setMediaNeedsReauth] = useState(false);
 
-  // 디엠 자동화는 프로 플랜 전용 기능이다. 서버가 계정 자격(entitled)을 함께 내려주며,
-  // 자격이 없으면 저장·발송이 403 으로 막히므로 화면에서도 업그레이드 안내를 보여준다.
+  // 자동 디엠 이용 자격. 인플루언서는 브랜드 매칭받기 등록, 브랜드는 자동 디엠 플랜
+  // 구독으로 열린다. 서버가 자격(entitled)과 이유(dmAccess)를 함께 내려주며, 자격이
+  // 없으면 저장·발송이 403 으로 막히므로 화면에서도 무엇을 하면 열리는지 안내한다.
   const [entitled, setEntitled] = useState(() => cachedSettings?.entitled !== false);
+  const [dmAccess, setDmAccess] = useState<{ suspended?: boolean; suspendedReason?: string } | null>(
+    () => (cachedSettings as any)?.dmAccess || null,
+  );
 
   /**
    * 이 앱이 보내지 않았는데 계정에서 나간 자동 DM.
@@ -1808,6 +1832,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         const nextAutomations = Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : [];
         setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
+        setDmAccess((s as any).dmAccess || null);
         setExternalDm(s.externalDm || null);
         setBaitHealth(s.baitHealth || null);
         if (s.faq) setFaq(s.faq);
@@ -1836,6 +1861,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // OAuth 연동 콜백 결과 처리 (?ig_connected / ?ig_error)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // 이 화면 안의 브랜드 매칭받기 등록에서 시작한 연동이면 등록 카드가 결과를 읽고
+    // 등록서를 되살린다(CollabMatchRegister). 여기서 주소를 먼저 지우면 그 복원이 끊긴다.
+    if (params.get('collab_match')) {
+      load();
+      return;
+    }
     if (params.get('ig_connected')) {
       setBanner({ type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' });
       // 연동 직후 바로 연동된 화면을 보여주고, 최신 정보를 다시 불러온다.
@@ -1870,7 +1901,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     id?: string;
   }) => {
     if (!entitled) {
-      setBanner({ type: 'err', text: '디엠 자동화는 프로 플랜(월 18,700원) 전용 기능이에요. 멤버십에서 프로 플랜을 구독하면 바로 사용할 수 있어요.' });
+      setBanner({
+        type: 'err',
+        text: isBusiness
+          ? '브랜드 계정의 자동 디엠은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있어요.'
+          : dmAccess?.suspended
+            ? '담당자 판단으로 자동 디엠 이용이 중단되었어요. 유가시딩 캠페인 제안을 수락하면 다시 열립니다.'
+            : '자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요.',
+      });
       return { ok: false as const };
     }
     setSaving(true);
@@ -2127,47 +2165,91 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         </div>
       )}
 
-      {/* 프로 플랜 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
-          다른 멤버십 안내(멤버십 게이트 · 타임라인 AI 게이트)와 같은 밝은 카드
-          형태로 맞추고, 색도 멤버십 화면의 프로 플랜 카드와 같은 계열로 쓴다. */}
+      {/* 자동 디엠 이용 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
+          인플루언서는 브랜드 매칭받기 등록(결제 없음), 브랜드는 자동 디엠 플랜 구독으로 열린다.
+          담당자가 중단한 경우에는 사유와 다시 여는 방법을 함께 보여 준다. */}
       {!entitled && (
         <section className="mb-6 rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-xl shrink-0 shadow-md">
-              🚀
+              {isBusiness ? '💬' : dmAccess?.suspended ? '⏸️' : '🤝'}
             </div>
             <div className="min-w-0">
-              <h3 className="text-base md:text-lg font-black text-slate-900">디엠 자동화는 프로 플랜 전용 기능입니다</h3>
-              {isNativeApp() ? (
-                <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
-                  프로 플랜에 가입하면 모든 멤버십 혜택과 함께 인스타그램 디엠 자동화를 사용할 수 있어요.
-                  가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 이용됩니다.
-                </p>
-              ) : (
+              {isBusiness ? (
                 <>
-                  <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
-                    프로 플랜(월 18,700원 · 부가세 포함)을 구독하면 모든 멤버십 플랜 혜택과 함께 인스타그램 디엠 자동화를
-                    사용할 수 있어요. 구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
-                  </p>
-                  {/* 구독 전에도 막히지 않는 것을 함께 적는다. 브랜드는 이 카드만 보고
-                      "연동도 성과 조회도 프로 전용"이라고 읽어 캠페인 성과 확인을
-                      미루게 되는데, 실제로 잠기는 것은 저장과 발송뿐이다. */}
-                  {isBusiness && (
-                    <p className="text-slate-500 text-xs md:text-sm font-medium mt-2 leading-relaxed">
-                      인스타그램 계정 연동과 콘텐츠 성과(태그된 콘텐츠) 조회는 프로 플랜 없이도 그대로 사용할 수 있어요.
+                  <h3 className="text-base md:text-lg font-black text-slate-900">브랜드 자동 디엠은 자동 디엠 플랜으로 이용할 수 있어요</h3>
+                  {isNativeApp() ? (
+                    <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                      자동 디엠 플랜(월 5,900원)은 PICKS Folio 웹사이트에서 구독할 수 있으며, 웹에서 구독하면 앱에서도 그대로 이용됩니다.
                     </p>
+                  ) : (
+                    <>
+                      <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                        자동 디엠 플랜(월 5,900원 · 부가세 포함)을 구독하면 인스타그램 댓글 자동 DM 을 바로 사용할 수 있어요.
+                        구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
+                      </p>
+                      {/* 구독 전에도 막히지 않는 것을 함께 적는다. 실제로 잠기는 것은 저장과 발송뿐이다. */}
+                      <p className="text-slate-500 text-xs md:text-sm font-medium mt-2 leading-relaxed">
+                        인스타그램 계정 연동과 콘텐츠 성과(태그된 콘텐츠) 조회는 구독 없이도 그대로 사용할 수 있어요.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                        className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg"
+                      >
+                        자동 디엠 플랜 보기
+                      </button>
+                    </>
                   )}
+                </>
+              ) : dmAccess?.suspended ? (
+                <>
+                  <h3 className="text-base md:text-lg font-black text-slate-900">자동 디엠 이용이 중단되었어요</h3>
+                  {dmAccess.suspendedReason && (
+                    <p className="text-rose-600 text-xs md:text-sm font-bold mt-1 leading-relaxed">사유: {dmAccess.suspendedReason}</p>
+                  )}
+                  <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                    담당자가 보내는 유가시딩 캠페인 제안을 수락하면 자동 디엠이 바로 다시 열려요. 만들어 둔 자동화는 지워지지 않고 그대로 남아 있습니다.
+                  </p>
                   <button
                     type="button"
-                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-campaign-collab'))}
                     className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg"
                   >
-                    멤버십 플랜 보기
+                    받은 제안 보기
                   </button>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-base md:text-lg font-black text-slate-900">자동 디엠은 브랜드 매칭받기를 등록해야 사용할 수 있어요</h3>
+                  <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                    내 채널 정보를 브랜드 매칭받기에 등록하면 결제 없이 인스타그램 자동 디엠을 바로 사용할 수 있어요.
+                    등록하면 담당자가 조건에 맞는 브랜드 캠페인을 제안해 드립니다.
+                  </p>
+                  <DmMatchPolicyNote />
+                  {/* 다른 화면으로 보내지 않고 이 자리에서 바로 등록한다. 접수가 끝나면
+                      자격을 다시 받아 와 잠금 안내를 걷어 낸다. */}
+                  <div className="mt-4 max-w-sm">
+                    <CollabMatchRegister
+                      variant="influencer"
+                      applicantUsername={userName}
+                      returnView="dm-automation"
+                      onRegisteredChange={() => load()}
+                    />
+                  </div>
                 </>
               )}
             </div>
           </div>
+        </section>
+      )}
+
+      {/* 매칭 등록으로 자동 디엠을 쓰는 인플루언서에게, 이용이 무엇에 걸려 있는지 늘 보이게 둔다.
+          모르고 지내다 중단 안내를 처음 받으면 "갑자기 막혔다" 로 읽힌다. */}
+      {entitled && !isBusiness && loaded && (
+        <section className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-5 py-4">
+          <p className="text-sm font-black text-emerald-800">브랜드 매칭받기 등록으로 자동 디엠을 무료로 이용 중이에요</p>
+          <DmMatchPolicyNote tone="emerald" />
         </section>
       )}
 
@@ -2444,7 +2526,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                 type="button"
                 onClick={() => setEditing(blankAutomation(t))}
                 disabled={!entitled}
-                title={entitled ? undefined : t('common.proPlanNotice', '디엠 자동화는 프로 플랜 전용 기능이에요.', 'DM Automation is a Pro Plan exclusive feature.')}
+                title={entitled ? undefined : t('common.dmAccessNotice', '자동 디엠 이용 조건을 먼저 확인해 주세요.', 'Check the DM automation requirements first.')}
                 className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-xs md:text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 <Plus size={16} /> {t('dm.addAutomation', '자동화 추가하기', 'Add Automation')}

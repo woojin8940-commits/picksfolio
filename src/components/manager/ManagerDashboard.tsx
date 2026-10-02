@@ -3,6 +3,7 @@ import ManagerInfluencerDirectory from './ManagerInfluencerDirectory';
 import ManagerCampaignsPanel, { isMyTurn } from './ManagerCampaignsPanel';
 import ManagerBrandPicksPanel from './ManagerBrandPicksPanel';
 import ManagerChatPanel from './ManagerChatPanel';
+import ManagerDmAccessPanel from './ManagerDmAccessPanel';
 import { apiService } from '../../services/apiService';
 
 /**
@@ -10,8 +11,9 @@ import { apiService } from '../../services/apiService';
  *
  * 운영자가 일반 계정을 담당자로 배정하면 로그인 후 이 화면이 뜬다. 운영 콘솔과
  * 나눠 둔 이유는 권한 범위다. 담당자는 승인·정산·회원 관리를 하지 않는다. 담당자가
- * 하는 일은 인플루언서를 알고, 캠페인에 배정하고, 대화하는 것 셋뿐이므로 메뉴도
- * 넷을 넘기지 않는다. 여기에 운영 탭을 하나씩 얹기 시작하면 결국 운영 콘솔이 두 벌이 된다.
+ * 하는 일은 인플루언서를 알고, 캠페인에 배정하고, 대화하는 것이다. 여기에 운영 탭을
+ * 하나씩 얹기 시작하면 결국 운영 콘솔이 두 벌이 된다. 예외는 "자동 디엠 관리" 하나다 —
+ * 제안을 계속 거절하는 사람인지는 리스트업을 직접 한 담당자가 가장 잘 판단한다.
  *
  * 첫 탭이 "브랜드 선택"인 이유는 그것이 유일하게 답을 기다리는 일이기 때문이다.
  * 브랜드가 명단에서 사람을 고르면 그 요청은 캠페인 안쪽 명단에만 남아, 담당자가
@@ -36,13 +38,14 @@ interface ManagerDashboardProps {
   onNavigateCreator?: () => void;
 }
 
-type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'chat';
+type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'chat' | 'dm-access';
 
 const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 진행하기' },
   { key: 'influencers', label: '인플루언서', hint: '카테고리별 전체 명부' },
   { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정과 검수' },
   { key: 'chat', label: '대화', hint: '인플루언서 · 브랜드 채널' },
+  { key: 'dm-access', label: '자동 디엠 관리', hint: '매칭 등록자 · 제안 거절 · 이용 중단' },
 ];
 
 const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
@@ -55,7 +58,8 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   const initialProposalId = initialParams.get('proposal') || '';
   const requestedTab = initialParams.get('tab');
   const [tab, setTab] = useState<ManagerTab>(
-    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'chat'
+    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'chat' ||
+      requestedTab === 'dm-access'
       ? requestedTab
       : 'picks',
   );
@@ -188,6 +192,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
           />
         )}
         {tab === 'influencers' && <ManagerInfluencerDirectory onNotify={notify} />}
+        {tab === 'dm-access' && <ManagerDmAccessPanel onNotify={notify} />}
         {tab === 'campaigns' && (
           <ManagerCampaignsPanel
             managerUsername={username}

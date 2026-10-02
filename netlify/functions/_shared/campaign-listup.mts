@@ -9,6 +9,7 @@ import {
 } from "./collab-workflow.mts";
 import { todayInSeoul } from "./campaign-recruit.mts";
 import { refreshStaleChannelImages } from "./instagram-metrics.mts";
+import { reopenDmAccessOnPaidListupAccept } from "./dm-access-control.mts";
 
 /**
  * 리스트업(후보 제안) 공용 로직.
@@ -1038,6 +1039,13 @@ export async function acceptListup(input: {
     actorUsername: norm(input.actorUsername),
     summary: `${creatorUsername} 리스트업 제안 수락`,
     payload: { listupId: listup.id, applicationId, fee: offer.fee },
+  });
+
+  // 5) 담당자가 중단했던 자동 디엠을 다시 연다(유가시딩 제안 수락일 때만).
+  await reopenDmAccessOnPaidListupAccept({
+    username: creatorUsername,
+    rewardMode: campaign.reward_mode,
+    campaignTitle: String(campaign.title || ""),
   });
 
   return {

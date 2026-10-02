@@ -64,6 +64,18 @@ export default async (req: Request) => {
       .eq("id", data.user.id)
       .maybeSingle();
 
+    // 인플루언서(일반 유저)는 카카오 간편로그인으로만 들어온다. 아이디·비밀번호 로그인은
+    // 운영자(role=admin)가 운영 콘솔(/operator-login)에 들어올 때만 남긴다. 예전 아이디·
+    // 비밀번호 계정의 유저네임은 카카오로 다시 가입한 뒤 링크 만들기 화면에서 이어받는다
+    // (auth-claim-username · _shared/legacy-username).
+    if (String(profile?.role || "").trim().toLowerCase() !== "admin") {
+      return Response.json({
+        success: false,
+        code: "KAKAO_ONLY",
+        error: "인플루언서 계정은 카카오 간편로그인으로만 로그인할 수 있어요. 카카오로 시작하면 쓰던 링크를 그대로 이어받을 수 있습니다.",
+      });
+    }
+
     const resolvedUsername = profile?.username || usernameClean.replace(/@.*$/, "");
 
     if (!profile && resolvedUsername) {

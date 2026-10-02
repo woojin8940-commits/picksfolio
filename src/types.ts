@@ -164,7 +164,7 @@ export interface BusinessAccount {
 // 접으면서 함께 없앴다(예전 제출 기록은 서버 응답에서 걸러진다).
 export interface SellerVerification {
   membership_active?: boolean;
-  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live' | null;
+  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'live' | null;
   membership_started_at?: string | null;
   billing_key?: string | null;
   billing_key_issued_at?: string | null;
@@ -208,7 +208,7 @@ export interface SellerVerification {
 export interface MembershipBillingHistoryEntry {
   at: string;
   // 'live_plan' 은 판매 종료된 라이브 커머스 멤버십의 과거 청구 기록에만 남는다.
-  tier: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live_plan';
+  tier: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'live_plan';
   amountKrw: number;
   // 'promo' 는 출시 혜택 코드로 무료로 시작한 구독의 첫 기록이다(금액 0).
   kind: 'initial' | 'recurring' | 'promo';

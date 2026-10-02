@@ -7,7 +7,6 @@ import {
   payClaudePlan,
 } from '../utils/claudeCharge';
 import { isNativeApp } from '../utils/appEnv';
-import { membershipCovers } from '../utils/membershipTiers';
 import { AiMarkdown } from './AiMarkdown';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
@@ -250,18 +249,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
   const [aiInput, setAiInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  // Whether the current account's plan includes the AI assistant. AI is bundled
-  // into the AI 협업 멤버십 (6,900) and every tier above it (커머스 13,900 · 프로 18,700)
-  // — the plain 스탠다드 (4,900) tier does not include it. Stays null until loaded.
-  const [aiEnabled, setAiEnabled] = useState<boolean | null>(() => {
-    // Business (company) accounts always get the AI assistant — it is part of the
-    // business collaboration workspace, not gated behind the influencer AI
-    // membership. Regular accounts unlock it through their AI-enabled membership.
-    if (userType === 'business') return true;
-    const cached = apiService.getCachedSellerVerification(normalizedUserName);
-    if (!cached) return null;
-    return membershipCovers(cached, 'standard_ai');
-  });
+  // 캠페인 AI 는 멤버십 없이 모든 계정에 무료로 열려 있다(서버는 하루 사용량만 센다).
+  const [aiEnabled] = useState<boolean | null>(true);
   const aiEndRef = useRef<HTMLDivElement>(null);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
   // 브랜드가 준 기본 가이드(이미지·PDF)를 AI 대화창에 바로 붙여 읽히기 위한 첨부.
@@ -290,20 +279,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     }
   }, [aiModel, claudeData, refreshClaudeCredits]);
 
-  useEffect(() => {
-    // Business accounts have the AI assistant unconditionally; skip the
-    // influencer membership lookup for them.
-    if (userType === 'business') {
-      setAiEnabled(true);
-      return;
-    }
-    let cancelled = false;
-    apiService.getSellerVerification(normalizedUserName).then((data) => {
-      if (cancelled) return;
-      setAiEnabled(membershipCovers(data, 'standard_ai'));
-    });
-    return () => { cancelled = true; };
-  }, [normalizedUserName, userType]);
 
   // While a conversation (or the AI chat) is open on mobile, hide the app's
   // bottom navigation bar so the message composer can sit flush at the very
@@ -446,7 +421,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       });
       const data = await res.json();
       if (!res.ok) {
-        if (data?.code === 'MEMBERSHIP_REQUIRED') setAiEnabled(false);
         // Claude plan not active / credits exhausted — surface the wallet modal so
         // the user can activate or recharge without losing the conversation.
         if (data?.code === 'CLAUDE_PLAN_REQUIRED' || data?.code === 'CLAUDE_CREDITS_EMPTY') {

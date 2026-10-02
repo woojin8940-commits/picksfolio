@@ -30,7 +30,6 @@ const CampaignShowcase = lazyWithRetry(() => import('./components/CampaignShowca
 const DataBoardSection = lazyWithRetry(() => import('./components/DataBoardSection'));
 // Auth and the logged-in dashboard are not needed for the public homepage, so
 // they are code-split out of the initial bundle for a faster first paint.
-const SignupPage = lazyWithRetry(() => import('./components/SignupPage'));
 const LoginPage = lazyWithRetry(() => import('./components/LoginPage'));
 const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard'));
 const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
@@ -321,7 +320,6 @@ const App: React.FC = () => {
   /** 협업 현황에서 눌러 들어온 캠페인 협업 id. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabFocusId, setCollabFocusId] = useState<string | null>(null);
   const [targetUser, setTargetUser] = useState(initialPublicUserRef.current);
-  const [initialId, setInitialId] = useState('');
   const [userName, setUserName] = useState(() => sessionGet('picks_user_session') || '');
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!sessionGet('picks_user_session'));
 
@@ -1608,7 +1606,8 @@ const App: React.FC = () => {
       return;
     }
     if (params.get('collab_match')) {
-      applySubView('campaigns');
+      // 자동 디엠 화면에서 매칭 등록을 하다 연동하러 나갔다면 그 화면으로 돌아간다.
+      applySubView(params.get('from') === 'dm-automation' ? 'dm-automation' : 'campaigns');
       return;
     }
     // 인사이트 화면에서 시작한 연동(?ig_insights)은 그 화면으로 되돌린다. 아래
@@ -1657,6 +1656,13 @@ const App: React.FC = () => {
     };
     window.addEventListener('navigate-timeline', handler);
     return () => window.removeEventListener('navigate-timeline', handler);
+  }, []);
+
+  // 자동 디엠 화면의 "브랜드 매칭받기 등록하기" — 등록 카드가 있는 캠페인 목록으로 보낸다.
+  useEffect(() => {
+    const handler = () => setSubView('campaigns');
+    window.addEventListener('navigate-campaigns', handler);
+    return () => window.removeEventListener('navigate-campaigns', handler);
   }, []);
 
   // Listen for navigate-membership custom events (e.g. AI assistant upsell)
@@ -2260,7 +2266,14 @@ const App: React.FC = () => {
       <main className="flex-1">
         {view === 'home' ? (
           <>
-            <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
+            <Hero
+              onSignup={(id) => {
+                // 가입은 카카오로만 한다. 홈에서 적은 링크는 카카오 로그인 뒤 링크 만들기
+                // 화면(SetupLink)이 이어서 채워 넣도록 남겨 둔다.
+                try { if (id) sessionStorage.setItem('picks_desired_link', id); } catch { /* 저장 불가 환경 */ }
+                navigate('signup');
+              }}
+            />
             {/* 히어로 다음은 실시간 트렌드 보드, 그 아래가 캠페인 소개다. */}
             <LazyRoute fallback={null}>
               <DataBoardSection />
@@ -2269,16 +2282,8 @@ const App: React.FC = () => {
               <CampaignShowcase onSignup={() => navigate('signup')} />
             </LazyRoute>
           </>
-        ) : view === 'signup' ? (
-          <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
-          <SignupPage
-            initialId={initialId}
-            onNavigateHome={() => navigate('home')}
-            onNavigateLogin={() => navigate('login')}
-            onSignupSuccess={() => navigate('login')}
-          />
-          </LazyRoute>
         ) : (
+          // 'signup' 도 같은 화면이다 — 인플루언서 가입은 카카오 간편로그인으로만 한다.
           <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
           <LoginPage
             onNavigateHome={() => navigate('home')}

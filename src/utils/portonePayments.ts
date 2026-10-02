@@ -52,7 +52,7 @@ export interface PortOneIntent {
   // claude credit grant kind
   kind?: 'activation' | 'recharge';
   // membership subscription tier
-  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro';
+  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm';
   promoCode?: string;
   savedAt?: number;
 }

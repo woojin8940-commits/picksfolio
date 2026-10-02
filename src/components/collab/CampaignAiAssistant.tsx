@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { apiService, authHeaders } from '../../services/apiService';
-import { membershipCovers } from '../../utils/membershipTiers';
 import {
   CAPTION_MAX_LENGTH,
   StoryboardScene,
@@ -284,12 +283,8 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(-1);
   const [files, setFiles] = useState<File[]>([]);
-  // 멤버십 확인이 끝나기 전에는 null. 캐시가 있으면 그것으로 먼저 그린다 —
-  // 탭을 누른 직후에 안내문이 번쩍 바뀌지 않게 한다.
-  const [aiEnabled, setAiEnabled] = useState<boolean | null>(() => {
-    const cached = apiService.getCachedSellerVerification(normalized);
-    return cached ? membershipCovers(cached, 'standard_ai') : null;
-  });
+  // 캠페인 AI 는 멤버십 없이 모든 계정에 무료로 열려 있다(서버는 하루 사용량만 센다).
+  const [aiEnabled] = useState<boolean | null>(true);
 
   /**
    * 지금 들고 있는 대화가 어느 캠페인 것인지.
@@ -364,17 +359,6 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     };
   }, [detail]);
 
-  useEffect(() => {
-    let alive = true;
-    if (aiEnabled === null && normalized) {
-      apiService.getSellerVerification(normalized).then(data => {
-        if (alive) setAiEnabled(membershipCovers(data, 'standard_ai'));
-      });
-    }
-    return () => {
-      alive = false;
-    };
-  }, [aiEnabled, normalized]);
 
   /**
    * 마지막 말이 보이게 맞춘다.
@@ -451,7 +435,6 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         });
         const data = await res.json();
         if (!res.ok) {
-          if (data?.code === 'MEMBERSHIP_REQUIRED') setAiEnabled(false);
           setMessages(prev => [
             ...prev,
             {

@@ -7,6 +7,7 @@ import {
   addOneMonth,
   normalizeTier,
   isDue,
+  isSellableTier,
   MAX_BILLING_FAILURES,
   verifyMembershipBillingKey,
   type MembershipTier,
@@ -115,11 +116,18 @@ export default async () => {
         // 사용자가 해지를 누르면 결제한 이용 기간(= 다음 결제일)까지는 그대로
         // 열어 두고 예약만 걸어 둔다. 그 날짜가 되면 카드를 긁는 대신 멤버십을
         // 끈다 — 다음 달 결제가 나가지 않고, 남은 기간은 모두 사용한 상태가 된다.
-        if (record.membership_cancel_at_period_end) {
+        // 판매를 종료한 예전 플랜(스탠다드 · AI 협업 · 커머스 · 프로)은 다음 결제일에
+        // 청구하지 않고 끝낸다. 그 플랜이 열어 주던 기능은 이제 모두 무료이고, 자동 디엠은
+        // 인플루언서는 매칭 등록, 브랜드는 자동 디엠 플랜으로 열린다. 해지 예약과 같은
+        // 길로 끝내므로 결제한 기간까지는 그대로 쓰고, 그 뒤로는 결제가 나가지 않는다.
+        const retired = !isSellableTier(sub.plan);
+        if (record.membership_cancel_at_period_end || retired) {
           const at = new Date().toISOString();
           const ended: { done: boolean } = { done: false };
           await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
-            if (!latest || !latest.membership_cancel_at_period_end) return null;
+            if (!latest) return null;
+            const latestRetired = !isSellableTier(normalizeTier(latest.membership_plan));
+            if (!latest.membership_cancel_at_period_end && !latestRetired) return null;
             if (!latest[sub.activeField]) return null;
             if (!isDue(latest[sub.nextField] as string | null | undefined, now)) return null;
             ended.done = true;
@@ -136,7 +144,9 @@ export default async () => {
           if (ended.done) {
             canceled++;
             console.log(
-              `[membership-billing] Ended ${username} (${sub.plan}) — canceled by member, paid period over`,
+              `[membership-billing] Ended ${username} (${sub.plan}) — ${
+                retired ? "retired plan, no further charge" : "canceled by member, paid period over"
+              }`,
             );
           } else {
             skipped++;

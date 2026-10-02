@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { checkUsernameRules, normalizeUsername } from "./_shared/username-rules.mts";
+import { legacyTransferDecision, moveLegacyUsername } from "./_shared/legacy-username.mts";
 
 /**
  * 가입 직후 "나만의 링크"(= 아이디)를 정하는 요청.
@@ -104,8 +105,8 @@ export default async (req: Request) => {
     // 쓰이고 있는 이름이 "확인하지 못했습니다" 로 답해진다.
     const [{ data: owners, error: ownerError }, { data: mine, error: mineError }] = await withDeadline(
       Promise.all([
-        supabase.from("profiles").select("id").eq("username", username).limit(1),
-        supabase.from("profiles").select("id, username").eq("id", auth.userId).maybeSingle(),
+        supabase.from("profiles").select("id, role, kakao_id, phone").eq("username", username).limit(1),
+        supabase.from("profiles").select("id, username, kakao_id, phone").eq("id", auth.userId).maybeSingle(),
       ]),
       PROFILE_LOOKUP_TIMEOUT_MS,
     );
@@ -118,7 +119,27 @@ export default async (req: Request) => {
     }
 
     const owner = Array.isArray(owners) ? owners[0] : null;
-    if (owner && owner.id !== auth.userId) return fail("taken", TAKEN_MESSAGE);
+    // 주인이 예전 아이디·비밀번호 계정이면, 카카오로 다시 가입한 본인이 그 이름을 이어받을
+    // 수 있다(_shared/legacy-username 참고). 본인 확인이 안 되면 이전 코드를 요청한다.
+    let legacyMove: { method: "phone" | "code"; codeId: number | null } | null = null;
+    if (owner && owner.id !== auth.userId) {
+      const decision = await legacyTransferDecision({
+        username,
+        owner,
+        me: mine,
+        transferCode: (body as any)?.transferCode,
+      });
+      if (decision.kind === "taken") return fail("taken", TAKEN_MESSAGE);
+      if (decision.kind === "code_required") {
+        return fail(
+          "legacy_code_required",
+          decision.codeGiven
+            ? "이전 코드가 맞지 않거나 만료되었습니다. 운영자에게 받은 코드를 다시 확인해 주세요."
+            : "예전 아이디·비밀번호 계정에서 쓰던 링크입니다. 본인이라면 운영자에게 받은 이전 코드를 입력해 주세요.",
+        );
+      }
+      legacyMove = { method: decision.method, codeId: decision.codeId };
+    }
 
     // 이미 이 링크로 저장돼 있으면 성공으로 답한다 — 저장은 됐는데 응답만 못 받아
     // 다시 누른 경우(모바일 회선에서 흔하다)가 오류로 끝나지 않아야 한다.
@@ -140,6 +161,24 @@ export default async (req: Request) => {
         },
         { status: 409 },
       );
+    }
+
+    if (legacyMove && owner) {
+      // 예전 계정의 페이지 내용(site_data)과 협업 기록은 유저네임에 묶여 있으므로 그대로
+      // 이어받는다. 같은 사람이므로 잔여 검사(site_data)는 하지 않는다.
+      const moved = await moveLegacyUsername({
+        supabase,
+        username,
+        fromUserId: String(owner.id),
+        toUserId: auth.userId,
+        hasProfile: !!mine,
+        method: legacyMove.method,
+        codeId: legacyMove.codeId,
+      });
+      if (!moved.ok) {
+        return fail("write", "링크를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+      }
+      return Response.json({ success: true, username, transferred: true });
     }
 
     try {
