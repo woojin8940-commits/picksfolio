@@ -214,14 +214,29 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
    * 읽히는 값만 쓰고, 아니면 테마 명암에 맞는 색으로 대체한다.
    */
   const coverFadeHex = normalizeHexColor(themeBg) || (isDark ? '#050A15' : '#FFFFFF');
-  const coverFade = `linear-gradient(to top, ${coverFadeHex} 0%, ${coverFadeHex}88 15%, transparent 50%)`;
+  /**
+   * 커버 아래쪽을 녹이는 마스크. 예전에는 사진 위에 배경색 그라데이션을 한 겹 더
+   * 덮었는데, 미리보기의 축소(transform)와 데스크톱 zoom 에서 두 겹의 가장자리가
+   * 서로 다른 소수점 픽셀로 깎여 사진 아래 · 오른쪽 끝에 회색 실선이 비쳤다.
+   * 사진 자체를 투명하게 지우면 겹이 하나라 경계선이 생기지 않는다. 같은 비율
+   * (0% · 15% · 50%)이라 보이는 모양은 예전 덮개와 같다.
+   */
+  const coverFadeMask = 'linear-gradient(to top, transparent 0%, rgba(0,0,0,0.47) 15%, #000 50%)';
   /**
    * 커버 사진이 뜨기 전에 그 자리를 채우는 배경. 사진이 있는 페이지는 테마 배경색으로
    * 두어(기본 design 의 파란 그라데이션이 한 번 스치지 않게) 사진이 스며들게 한다.
    */
-  const coverPlaceholder = design.portfolioHeaderImage
-    ? coverFadeHex
-    : design.portfolioHeaderColor || 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)';
+  const coverArtStyle: React.CSSProperties = {
+    background: design.portfolioHeaderImage
+      ? coverFadeHex
+      : design.portfolioHeaderColor || 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)',
+    WebkitMaskImage: coverFadeMask,
+    maskImage: coverFadeMask,
+  };
+  /**
+   * 커버 사진이 뜨기 전에 그 자리를 채우는 배경. 사진이 있는 페이지는 테마 배경색으로
+   * 두어(기본 design 의 파란 그라데이션이 한 번 스치지 않게) 사진이 스며들게 한다.
+   */
   const textColor = isDark ? 'text-white' : 'text-slate-900';
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
@@ -600,31 +615,31 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
           <div className="flex-1 flex flex-col">
             <div
               className={`relative aspect-[4/5] flex-shrink-0 -mx-3 ${w('md:-mx-6')}`}
-              style={{ background: coverPlaceholder }}
             >
-              {design.portfolioHeaderImage && (
-                <MediaAuto
-                  src={design.portfolioHeaderImage}
-                  priority
-                  fadeIn
-                  width={1280}
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
-                />
-              )}
-              {/* 커버도 색도 정하지 않은 페이지의 기본 사진. 아래 큐레이션 커버와 같은
-                  컴포넌트로 그린다 — 예전에는 이 한 곳만 SafeImage 라서, 같은 사진이
-                  레이아웃에 따라 한쪽은 번쩍이고 한쪽은 스며들었다. */}
-              {!design.portfolioHeaderImage && !design.portfolioHeaderColor && (
-                <MediaAuto
-                  src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"
-                  priority
-                  fadeIn
-                  width={1280}
-                  className="w-full h-full object-cover"
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
+              <div className="absolute inset-0" style={coverArtStyle}>
+                {design.portfolioHeaderImage && (
+                  <MediaAuto
+                    src={design.portfolioHeaderImage}
+                    priority
+                    fadeIn
+                    width={1280}
+                    className="w-full h-full object-cover"
+                    style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
+                  />
+                )}
+                {/* 커버도 색도 정하지 않은 페이지의 기본 사진. 아래 큐레이션 커버와 같은
+                    컴포넌트로 그린다 — 예전에는 이 한 곳만 SafeImage 라서, 같은 사진이
+                    레이아웃에 따라 한쪽은 번쩍이고 한쪽은 스며들었다. */}
+                {!design.portfolioHeaderImage && !design.portfolioHeaderColor && (
+                  <MediaAuto
+                    src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"
+                    priority
+                    fadeIn
+                    width={1280}
+                    className="w-full h-full object-cover"
+                  />
+                )}
+              </div>
               {coverIdentity}
             </div>
 
@@ -714,19 +729,19 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
               className={`relative aspect-[4/5] flex-shrink-0 -mx-3 ${w('md:-mx-6')}`}
-              style={{ background: coverPlaceholder }}
             >
-              {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
-                <MediaAuto
-                  src={design.portfolioHeaderImage || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"}
-                  priority
-                  fadeIn
-                  width={1280}
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
+              <div className="absolute inset-0" style={coverArtStyle}>
+                {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
+                  <MediaAuto
+                    src={design.portfolioHeaderImage || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"}
+                    priority
+                    fadeIn
+                    width={1280}
+                    className="w-full h-full object-cover"
+                    style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
+                  />
+                )}
+              </div>
               {coverIdentity}
             </div>
 
