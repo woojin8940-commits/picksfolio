@@ -35,7 +35,7 @@ export const getAnalyticsForRange = async (
   if (!res.ok) throw new Error(`Analytics HTTP ${res.status}`);
   const data = await res.json();
   return {
-    stats: { views: data.views || 0, visitors: data.visitors ?? data.views ?? 0, clicks: data.clicks || 0, ctr: data.ctr || 0 },
+    stats: { views: data.views || 0, visitors: data.visitors ?? data.views ?? 0, clicks: data.clicks || 0, ctr: data.ctr || 0, engagementRate: data.engagementRate || 0 },
     topItems: (data.topItems || []).map((item: any) => ({
       id: item.blockId || item.id, count: item.clicks || item.count || 0,
     })),
@@ -56,7 +56,7 @@ export const trackClick = (username: string, blockId: string) => {
   fetch(analyticsApi(username), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'track-click', blockId, date: dateKey })
+    body: JSON.stringify({ action: 'track-click', blockId, date: dateKey, visitorId: getVisitorId() })
   }).catch(e => console.error('Failed to track click:', e));
 };
 

@@ -5,7 +5,7 @@ import { isNativeApp } from '../utils/appEnv';
 import { apiService, authHeaders, setActiveBusinessAccount } from '../services/apiService';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 // 홈 상단 숫자는 크리에이터 대시보드와 같은 것을 본다 — 내 개인페이지 방문자 수와
-// 링크 클릭률. 그래서 데이터도 같은 곳에서(분석 API · 사이트 설정) 가져온다.
+// 참여율. 그래서 데이터도 같은 곳에서(분석 API · 사이트 설정) 가져온다.
 import { getAnalyticsForRange } from '../services/analyticsService';
 import { getSiteSettings } from '../services/settingsService';
 import { todayInSeoul } from '../utils/formatters';
@@ -189,7 +189,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
    * 알고 싶은 것은 크리에이터 계정과 마찬가지로 "내 개인페이지가 얼마나 열렸고
    * 링크가 얼마나 눌렸나" 다. 그래서 일반 계정 대시보드와 똑같은 세 칸을 쓴다.
    */
-  const [stats, setStats] = useState({ views: 0, visitors: 0, clicks: 0, ctr: 0 });
+  const [stats, setStats] = useState({ views: 0, visitors: 0, clicks: 0, ctr: 0, engagementRate: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [startDate, setStartDate] = useState(() => todayInSeoul());
@@ -229,7 +229,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   };
 
   /**
-   * 개인페이지 방문자 · 클릭률 · 클릭 TOP 3.
+   * 개인페이지 방문자 · 참여율 · 클릭 TOP 3.
    *
    * 크리에이터 대시보드와 같은 두 곳을 함께 부른다 — 기간별 분석과 사이트 설정.
    * 블록 제목은 설정에만 있고 클릭 수는 분석에만 있어서, 둘을 맞춰야 TOP 3 에
@@ -514,7 +514,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       </header>
 
       <div>
-          {/* Stats Row — 일반 계정 대시보드와 같은 세 칸(방문자 · 링크 클릭률 · 클릭 TOP 3). */}
+          {/* Stats Row — 일반 계정 대시보드와 같은 세 칸(방문자 · 참여율 · 클릭 TOP 3). */}
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 mb-6 md:mb-8">
             <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">방문자 수</p>
@@ -524,9 +524,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               </div>
             </div>
             <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
-              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">링크 클릭률</p>
+              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">참여율</p>
               <div className="flex items-end gap-2">
-                <span className="text-xl md:text-3xl font-black text-slate-900">{stats.ctr}%</span>
+                <span className="text-xl md:text-3xl font-black text-slate-900">{stats.engagementRate}%</span>
                 {isRealtimeRange && <span className="text-[10px] md:text-sm font-black text-blue-600 mb-0.5">실시간</span>}
               </div>
             </div>

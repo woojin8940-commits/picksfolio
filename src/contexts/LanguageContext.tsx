@@ -238,6 +238,7 @@ const translations: Record<string, { ko: string; en: string }> = {
   'dash.ctr': { ko: '클릭률', en: 'CTR' },
   'dash.visitors': { ko: '방문자 수', en: 'Visitors' },
   'dash.ctrLabel': { ko: '링크 클릭률', en: 'Click Through Rate' },
+  'dash.engagementLabel': { ko: '참여율', en: 'Engagement Rate' },
   'dash.realtime': { ko: '실시간', en: 'Real-time' },
   'dash.top3': { ko: '클릭 TOP 3', en: 'Top 3 Clicks' },
   'dash.collecting': { ko: '데이터 수집 중', en: 'Collecting data...' },
