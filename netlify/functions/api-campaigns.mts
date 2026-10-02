@@ -193,6 +193,12 @@ export default async (req: Request) => {
         if ((result[0] as any).deleted_at && !verified) {
           return Response.json({ error: "Campaign not found" }, { status: 404 });
         }
+        // 승인 전 · 반려된 캠페인도 주인 외에는 없는 캠페인이다. 반려 사유 · 담당자 등
+        // 운영 정보가 그대로 실려 나간다.
+        const unapproved = ["pending_approval", "admin_rejected"].includes(String((result[0] as any).status || ""));
+        if (unapproved && !verified) {
+          return Response.json({ error: "Campaign not found" }, { status: 404 });
+        }
         return Response.json({ campaign: verified ? shaped : stripContact([shaped])[0] });
       }
 
@@ -203,7 +209,10 @@ export default async (req: Request) => {
       // 브랜드 관리 화면은 승인 대기·마감 등 모든 상태를 봐야 하므로, business 조회에는
       // status 조건을 걸지 않는다(명시로 넘긴 경우는 제외). 공개 목록은 기본 'active'.
       const statusParam = url.searchParams.get("status") || "";
-      const status = business ? statusParam : statusParam || "active";
+      // 공개 목록에서는 승인을 거친 상태만 고를 수 있다. ?status=pending_approval 처럼
+      // 넘기면 승인 전 · 반려된 캠페인(반려 사유 포함)이 누구에게나 열렸다.
+      const publicStatus = statusParam === "inactive" ? "inactive" : "active";
+      const status = business ? statusParam : publicStatus;
       const pattern = search ? `%${search}%` : "";
 
       let verifiedBusiness = false;

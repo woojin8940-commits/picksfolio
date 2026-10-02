@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatCountKo, formatNumberWithCommas, parseWonText } from '../../utils/formatters';
+import { formatCountKo, formatKoreanWon, formatNumberWithCommas, parseWonText } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 import { MediaLink, MediaThumb } from './MediaThumb';
 import { copyText } from '../../utils/clipboard';
@@ -423,6 +423,14 @@ interface InfluencerCandidateCardProps {
    * 보인다.
    */
   contentFormat?: string;
+  /**
+   * 브랜드 화면에서 쓰는 단가 — 픽스폴리오 담당자가 정한 제시가.
+   *
+   * 이 값을 넘기면 인플루언서가 등록한 단가 대신 이 금액만 보여 준다(금액이 0 이면
+   * "담당자 안내 예정"). 브랜드에게 보이는 단가는 언제나 담당자가 정한 금액이어야 한다.
+   * 담당자 화면은 넘기지 않는다 — 등록 단가를 보고 제시가를 정해야 하기 때문이다.
+   */
+  managerPrice?: { fee?: number; secondUseFee?: number } | null;
 }
 
 const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
@@ -434,6 +442,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   defaultExpanded,
   mediaMode = 'mixed',
   contentFormat,
+  managerPrice,
 }) => {
   const [expanded, setExpanded] = useState(!!defaultExpanded);
   const m = metricsFrom(data);
@@ -680,7 +689,24 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
             줄을 늘린다 — 단가를 못 읽으면 브랜드는 이 카드에서 결정을 못 한다. */}
         <div className="mt-2 pt-2 border-t border-slate-200/70">
           <p className="text-[10px] text-slate-400 font-black uppercase">광고비</p>
-          {priceLines.length > 0 ? (
+          {managerPrice !== undefined ? (
+            Number(managerPrice?.fee || 0) > 0 ? (
+              <div className="mt-0.5 space-y-0.5">
+                <p className="text-[15px] md:text-[17px] text-blue-600 font-black break-keep leading-snug">
+                  {formatKoreanWon(Number(managerPrice?.fee || 0))}
+                </p>
+                {Number(managerPrice?.secondUseFee || 0) > 0 && (
+                  <p className="text-[11px] text-slate-500 font-bold">
+                    2차 활용 {formatKoreanWon(Number(managerPrice?.secondUseFee || 0))}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-[13px] text-slate-400 font-black break-keep leading-snug mt-0.5">
+                담당자가 금액을 안내해 드립니다
+              </p>
+            )
+          ) : priceLines.length > 0 ? (
             <div className="mt-0.5 space-y-0.5">
               {priceLines.map((p, i) => (
                 <div key={`${p.label}-${i}`} className="flex items-baseline gap-1.5">

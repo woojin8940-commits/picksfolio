@@ -197,7 +197,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     return 2;
   });
   // 저장된 테마 읽기. 'custom' 은 팔레트에서 배경색을 직접 고른 상태다.
-  // 값이 비었을 때의 기본값은 호출하는 쪽이 정한다 — 예전 동작을 그대로 둔다.
+  // 값이 비었을 때는 공개 페이지(DEFAULT_PUBLIC_DESIGN)와 같은 'white' 를 쓴다 — 미리보기와 실제 페이지가 달라지지 않게.
   const readTheme = (value: unknown, fallback: ThemePreset): ThemePreset =>
     value === 'midnight' || value === 'white' || value === 'custom' ? value : fallback;
   const [themePreset, setThemePreset] = useState<ThemePreset>(() => {
@@ -416,6 +416,25 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     }
   };
 
+  // 업로드 직전 값. 업로드가 실패하면 미리보기로 넣어 둔 blob: 주소를 이 값으로
+  // 되돌린다 — 그대로 두면 저장 버튼이 임시 주소를 서버에 올려, 공개 페이지에
+  // 깨진 이미지가 남았다.
+  const currentImageFor = (target: typeof uploadTarget): string => {
+    if (!target) return '';
+    if (target.type === 'block') return editForm.coverMedia || '';
+    if (target.type === 'cover') return coverImage || '';
+    return (editForm.products || []).find(p => p.id === target.productId)?.image || '';
+  };
+
+  const restoreImage = (previous: string, target: typeof uploadTarget) => {
+    if (target?.type === 'cover' && !previous) {
+      setCoverImage(undefined);
+      fullDesignRef.current = { ...fullDesignRef.current, portfolioHeaderImage: undefined };
+      return;
+    }
+    applyImageToForm(previous, target);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !uploadTarget) return;
@@ -441,6 +460,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       if (fileInputRef.current) fileInputRef.current.value = '';
       setIsUploading(true);
       const currentTarget = uploadTarget;
+      const previousImage = currentImageFor(currentTarget);
       try {
         const blobUrl = URL.createObjectURL(file);
         applyImageToForm(blobUrl, currentTarget);
@@ -454,6 +474,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
         showSuccessFeedback('영상이 업로드되었습니다!');
       } catch (error) {
         console.error('[Upload] 에러:', error);
+        restoreImage(previousImage, currentTarget);
         setSaveMessage('영상 업로드 중 오류가 발생했습니다. 다시 시도해주세요.');
         setToastType('error');
         setShowToast(true);
@@ -480,6 +501,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
     setIsUploading(true);
     const currentTarget = uploadTarget;
+    const previousImage = currentImageFor(currentTarget);
 
     try {
       // 1. 크롭된 이미지 사용 (이미 크롭 완료됨)
@@ -509,6 +531,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       showSuccessFeedback('이미지가 업로드되었습니다!');
     } catch (error) {
       console.error('[Upload] 에러:', error);
+      restoreImage(previousImage, currentTarget);
       setSaveMessage('이미지 처리 중 오류가 발생했습니다. 다시 시도해주세요.');
       setToastType('error');
       setShowToast(true);
@@ -573,6 +596,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   useEffect(() => {
     const loadData = async () => {
+      // 프리페치 캐시는 첫 화면을 빨리 그리는 데만 쓴다. 캐시에는 socials · 카테고리 ·
+      // 폴더가 없어서, 여기서 바로 끝내면 그 값들이 localStorage(비었거나 오래된 값)로
+      // 남고 다음 디자인 저장이 서버의 커스텀 버튼 · 카테고리를 덮어썼다. 그래서 캐시를
+      // 먼저 그린 뒤에도 아래 API 로드를 끝까지 진행한다(getSiteData 는 프리페치가
+      // 채운 캐시를 바로 돌려주므로 추가 대기는 거의 없다).
       const cached = getCachedLinkData(userName);
       if (cached) {
         const cachedBlocks = cached.settings?.source === 'primary'
@@ -581,15 +609,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
             ? cached.settings.blocks
             : cached.gridItems;
         if (Array.isArray(cachedBlocks)) setBlocks(cachedBlocks);
-        if (cached.settings) applySettings(cached.settings);
+        if (cached.settings && cached.settings.source !== 'profile') applySettings(cached.settings);
         setIsLoading(false);
-        return;
       }
 
       const hasLocalDesign = readLocalItem(`picks_design_${userName.toLowerCase()}`);
       const hasLocalBlocks = readLocalItem(`picks_blocks_${userName.toLowerCase()}`);
 
-      if (!hasLocalDesign && !hasLocalBlocks) {
+      if (!cached && !hasLocalDesign && !hasLocalBlocks) {
         setIsLoading(true);
       }
 
@@ -657,13 +684,19 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           ]);
           if (disposed) return;
 
+          // API 를 못 읽었을 때 폴백이 "실제로 저장된 문서"를 찾은 경우에만 화면을
+          // 바꾼다. getSiteSettings 는 아무것도 못 찾으면 빈 blocks 를 돌려주는데, 그걸
+          // 그대로 넣으면 이미 그려 둔 게시물이 사라진 빈 편집기가 되고, 그 상태에서 한
+          // 개만 추가해 저장해도 서버의 게시물 전체가 그 한 개로 바뀌었다. profile 폴백의
+          // 이름은 가입 실명(full_name)이라 공개 프로필에 쓰면 안 된다.
+          const hasRealSettings = !!settings && (settings.source === 'primary' || settings.source === 'legacy');
           if (gridItems && gridItems.length > 0) {
             setBlocks(gridItems);
-          } else if (settings && Array.isArray(settings.blocks)) {
-            setBlocks(settings.blocks);
+          } else if (hasRealSettings && Array.isArray(settings!.blocks)) {
+            setBlocks(settings!.blocks);
           }
 
-          if (settings) {
+          if (settings && (hasRealSettings || settings.source === 'local')) {
             applySettings(settings);
           }
         }
@@ -680,7 +713,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
         setHomePriority(settings.design.homePriority === 'portfolio' ? 'portfolio' : 'curation');
         setLayoutTemplate(settings.design.templateType === TemplateType.LINK_LIST ? 'list' : 'grid');
         setColumns(settings.design.gridColumns as 1 | 2 | 3 || 2);
-        setThemePreset(readTheme(settings.design.theme, 'midnight'));
+        setThemePreset(readTheme(settings.design.theme, 'white'));
         setAccentColor(settings.design.accentColor || (settings.design.theme === 'white' ? '#0f172a' : '#3B82F6'));
         setCustomGradient(settings.design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)');
         setCustomBg(
@@ -998,6 +1031,29 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
      */
     const socialsPayload: Record<string, any> = { ...cleanedSocials };
     if (!cleanedSocials.hideSearchBar) socialsPayload.hideSearchBar = null;
+    // 위에서 지운 버튼 이름 · 색도 같은 이유로 null 을 보내야 서버에서 지워진다.
+    [
+      'businessProposalBg',
+      'businessProposalText',
+      ...DEFAULT_BUTTONS.flatMap(def => [buttonLabelKey(def.key), buttonBgKey(def.key), buttonTextKey(def.key)]),
+    ].forEach(key => {
+      if (!(key in cleanedSocials)) socialsPayload[key] = null;
+    });
+
+    // 디자인도 같다. 커버 삭제 · 카테고리 색 되돌리기는 값을 undefined 로 만드는데,
+    // JSON 에서 빠진 키는 서버가 예전 값을 그대로 둔다 → 새로고침하면 지운 커버가
+    // 다시 나타났다. 지운 칸은 null 로 보낸다.
+    const designPayload: Record<string, any> = { ...designUpdate };
+    ([
+      'portfolioHeaderImage',
+      'portfolioHeaderImagePosition',
+      'categoryBgColor',
+      'categoryTextColor',
+      'categoryIdleBgColor',
+      'categoryIdleTextColor',
+    ] as const).forEach(key => {
+      if (designPayload[key] === undefined || designPayload[key] === '') designPayload[key] = null;
+    });
 
     // 즉시 로컬 저장
     fullDesignRef.current = designUpdate as Record<string, any>;
@@ -1008,7 +1064,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
     // 클라우드 동기화 완료 후 결과 표시
     try {
-      const result = await apiService.saveSiteDataResult(userName, { design: designUpdate as any, profile, socials: socialsPayload });
+      const result = await apiService.saveSiteDataResult(userName, { design: designPayload as any, profile, socials: socialsPayload });
       if (result.ok) {
         clearLinkCache(userName);
         showSuccessFeedback('저장되었습니다!');
@@ -1321,8 +1377,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const handleAddCategory = async () => {
     const trimmed = newCategoryName.trim();
     if (!trimmed) return;
-    if (managedCategories.includes(trimmed)) {
-      showSuccessFeedback('이미 존재하는 카테고리입니다!');
+    // '전체' 는 공개 페이지가 맨 앞에 붙이는 "모두 보기" 칩 이름이다. 같은 이름의
+    // 카테고리를 만들면 칩이 두 개 생기고, 눌러도 모든 게시물이 나온다.
+    if (managedCategories.includes(trimmed) || trimmed === '전체') {
+      showSuccessFeedback(trimmed === '전체' ? "'전체'는 카테고리 이름으로 쓸 수 없습니다." : '이미 존재하는 카테고리입니다!');
       return;
     }
     const updatedCats = [...linkGridCategories, trimmed];
@@ -1380,8 +1438,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       setEditingCategoryName(null);
       return;
     }
-    if (managedCategories.includes(trimmed)) {
-      showSuccessFeedback('이미 존재하는 카테고리입니다!');
+    // '전체' 는 공개 페이지가 맨 앞에 붙이는 "모두 보기" 칩 이름이다. 같은 이름의
+    // 카테고리를 만들면 칩이 두 개 생기고, 눌러도 모든 게시물이 나온다.
+    if (managedCategories.includes(trimmed) || trimmed === '전체') {
+      showSuccessFeedback(trimmed === '전체' ? "'전체'는 카테고리 이름으로 쓸 수 없습니다." : '이미 존재하는 카테고리입니다!');
       return;
     }
     const updatedBlocks = blocks.map(b => b.category === oldName ? { ...b, category: trimmed } : b);
@@ -1951,8 +2011,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       bg={socials.businessProposalBg}
                       text={socials.businessProposalText}
                       bgFallback={accentColor}
-                      onBg={(hex) => setSocials({ ...socials, businessProposalBg: hex || '' })}
-                      onText={(hex) => setSocials({ ...socials, businessProposalText: hex || '' })}
+                      onBg={(hex) => setSocials((prev: any) => ({ ...prev, businessProposalBg: hex || '' }))}
+                      onText={(hex) => setSocials((prev: any) => ({ ...prev, businessProposalText: hex || '' }))}
                     />
                   </div>
                 )}
@@ -2042,16 +2102,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       bg={btn.color}
                       text={btn.textColor}
                       bgFallback="#2563EB"
-                      onBg={(hex) => {
-                        const updated = [...(socials.customButtons || [])];
+                      onBg={(hex) => setSocials((prev: any) => {
+                        const updated = [...(prev.customButtons || [])];
                         updated[idx] = { ...updated[idx], color: hex || '#2563EB' };
-                        setSocials({ ...socials, customButtons: updated });
-                      }}
-                      onText={(hex) => {
-                        const updated = [...(socials.customButtons || [])];
+                        return { ...prev, customButtons: updated };
+                      })}
+                      onText={(hex) => setSocials((prev: any) => {
+                        const updated = [...(prev.customButtons || [])];
                         updated[idx] = { ...updated[idx], textColor: hex || '' };
-                        setSocials({ ...socials, customButtons: updated });
-                      }}
+                        return { ...prev, customButtons: updated };
+                      })}
                     />
                   </div>
                 ))}

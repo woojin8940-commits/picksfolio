@@ -113,7 +113,11 @@ const loadBrandPicks = async (db: any, me: string, mineOnly: boolean) =>
     JOIN campaigns c ON c.id = l.campaign_id
     WHERE l.brand_decision = 'pick'
       AND l.outreach_status <> 'accepted'
-      AND c.status = 'active'
+      -- 모집 마감(inactive)은 "새 지원을 안 받는다"일 뿐이다. 유가시딩은 마감일이 곧
+      -- 업로드 시작일이라, 마감 다음 날부터 브랜드가 고른 후보가 담당자 화면에서
+      -- 사라졌다. 삭제된 캠페인의 선택은 뺀다.
+      AND c.deleted_at IS NULL
+      AND c.status IN ('active', 'inactive')
       AND c.admin_approved_at IS NOT NULL
       AND (${mineOnly} = false OR LOWER(COALESCE(c.manager_username, '')) = ${me})
     ORDER BY l.brand_decided_at DESC NULLS LAST, l.created_at DESC
@@ -158,7 +162,19 @@ const loadCampaigns = async (db: any, me: string, mineOnly: boolean) =>
     -- 브랜드가 목록에서 내린 캠페인(deleted_at)은 담당자 일감에서도 빠진다.
     -- 이력에는 그대로 남아 있다(api-campaigns 의 DELETE 주석 참고).
     WHERE c.deleted_at IS NULL
-      AND c.status = 'active'
+      -- 자동 마감(scheduled-campaign-close)된 캠페인도 진행 중인 협업 · 결정을 기다리는
+      -- 지원자 · 아직 제안을 보내지 않은 선택 후보가 있으면 담당자 일감으로 남긴다.
+      AND (
+        c.status = 'active'
+        OR (
+          c.status = 'inactive'
+          AND (
+            EXISTS (SELECT 1 FROM campaign_collabs cc WHERE cc.campaign_id = c.id AND cc.status = 'in_progress')
+            OR EXISTS (SELECT 1 FROM campaign_applications a WHERE a.campaign_id = c.id AND a.status = 'pending')
+            OR EXISTS (SELECT 1 FROM campaign_listups l WHERE l.campaign_id = c.id AND l.brand_decision = 'pick' AND l.outreach_status <> 'accepted')
+          )
+        )
+      )
       AND c.admin_approved_at IS NOT NULL
       AND (${mineOnly} = false OR LOWER(COALESCE(c.manager_username, '')) = ${me})
     ORDER BY

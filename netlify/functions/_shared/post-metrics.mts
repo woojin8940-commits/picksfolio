@@ -548,9 +548,18 @@ export async function loadCampaignMetrics(
     `,
     db.sql`
       SELECT cc.id, cc.creator_username, cc.upload_url, cc.upload_confirmed_at,
-             cc.status, cc.cancelled_at, COALESCE(ct.fee, 0) AS fee
+             cc.status, cc.cancelled_at, COALESCE(ct.fee, 0) AS fee,
+             -- 브랜드가 보는 금액은 보수가 아니라 광고비다(_shared/brand-billing.mts 와 같은 규칙):
+             -- 명단 제시가가 있으면 그 값, 명단을 거쳤는데 비어 있으면 0, 아니면 보수.
+             CASE
+               WHEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0) > 0
+                 THEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0)
+               WHEN cl.collab_id IS NOT NULL THEN 0
+               ELSE COALESCE(ct.fee, 0)
+             END AS brand_fee
       FROM campaign_collabs cc
       LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+      LEFT JOIN campaign_listups cl ON cl.collab_id = cc.id
       WHERE cc.campaign_id = ${campaignId}
         AND (${creator} = '' OR LOWER(cc.creator_username) = ${creator})
     `,
@@ -575,6 +584,7 @@ export async function loadCampaignMetrics(
   );
   const liveIds = new Set(collabs.map((c) => String(c.id)));
   const feeOf = new Map(collabs.map((c) => [String(c.id), intOf(c.fee)]));
+  const brandFeeOf = new Map(collabs.map((c) => [String(c.id), intOf(c.brand_fee)]));
   const withUpload = collabs.filter((c) => String(c.upload_url || "").trim());
 
   // 숫자가 실제로 들어온 줄만 합산한다. 실패로 남은 줄은 0 이 아니라 없는 값이다.
@@ -613,6 +623,9 @@ export async function loadCampaignMetrics(
        */
       measuredSpend: measured.reduce((sum, p) => sum + (feeOf.get(p.collabId) || 0), 0),
       totalSpend: collabs.reduce((sum, c) => sum + intOf(c.fee), 0),
+      /** 위 두 값의 브랜드용(광고비 기준). 브랜드 응답에는 이 값이 지급액 자리에 들어간다. */
+      brandMeasuredSpend: measured.reduce((sum, p) => sum + (brandFeeOf.get(p.collabId) || 0), 0),
+      brandTotalSpend: collabs.reduce((sum, c) => sum + intOf(c.brand_fee), 0),
       collectedAt:
         live.map((p) => p.collectedAt).filter(Boolean).sort().slice(-1)[0] || null,
     },

@@ -938,12 +938,21 @@ const AutomationEditor: React.FC<{
 
   const patch = (p: Partial<DmAutomationItem>) => setDraft((d) => ({ ...d, ...p }));
 
+  // 입력칸 앞에 # 아이콘이 있어 "#가격" 처럼 # 까지 치는 경우가 많다. 댓글에는 보통
+  // # 이 없으므로 앞의 # 은 떼고 저장한다.
+  const cleanKeyword = (value: string) => value.trim().replace(/^#+/, '').trim();
   const addKeyword = () => {
-    const k = keywordInput.trim();
+    const k = cleanKeyword(keywordInput);
     if (!k || draft.keywords.includes(k)) { setKeywordInput(''); return; }
     patch({ keywords: [...draft.keywords, k] });
     setKeywordInput('');
   };
+  // 입력만 하고 Enter · 추가를 누르지 않은 키워드도 저장에 포함한다 — 예전에는 조용히
+  // 버려져, 키워드가 없는 자동화가 저장되거나 저장 버튼이 막혔다.
+  const pendingKeyword = cleanKeyword(keywordInput);
+  const effectiveKeywords = pendingKeyword && !draft.keywords.includes(pendingKeyword)
+    ? [...draft.keywords, pendingKeyword]
+    : draft.keywords;
 
   const updateButton = (id: string, p: Partial<DmMessageButton>) =>
     patch({ buttons: draft.buttons.map((b) => (b.id === id ? { ...b, ...p } : b)) });
@@ -995,7 +1004,7 @@ const AutomationEditor: React.FC<{
     mediaValid &&
     !brokenLinks &&
     scheduleValid &&
-    (draft.commentMatch === 'all' || draft.keywords.length > 0);
+    (draft.commentMatch === 'all' || effectiveKeywords.length > 0);
 
   /**
    * 저장 버튼이 잠긴 이유. 예전에는 버튼만 흐려져서, 카드를 여러 장 만들어 둔
@@ -1005,7 +1014,7 @@ const AutomationEditor: React.FC<{
     ? ''
     : !mediaValid
       ? '적용할 게시물을 한 개 이상 선택해주세요.'
-      : draft.commentMatch === 'keyword' && draft.keywords.length === 0
+      : draft.commentMatch === 'keyword' && effectiveKeywords.length === 0
         ? '반응할 키워드를 한 개 이상 추가해주세요.'
         : !scheduleValid
           ? '예약 발송할 날짜·시간을 정해주세요.'
@@ -1022,6 +1031,7 @@ const AutomationEditor: React.FC<{
     // 스킴이 빠진 주소(`example.com`)는 여기서 https:// 를 붙여 저장한다.
     onSave({
       ...draft,
+      keywords: effectiveKeywords,
       name: draft.name.trim() || (draft.commentMatch === 'keyword' ? `키워드 DM` : '댓글 DM'),
       // 즉시 발송으로 되돌렸다면 예약 시각은 남겨두지 않는다.
       scheduledAt: draft.sendMode === 'scheduled' ? draft.scheduledAt : '',
@@ -1679,6 +1689,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 인스타그램 장기 토큰은 60일이면 만료된다. 만료되면 "연결됨"으로 보이지만 발송은
   // 전부 실패하므로, 남은 기간을 화면에서 알려 재연동을 유도한다.
   const [tokenExpiresAt, setTokenExpiresAt] = useState<string | undefined>(() => cachedSettings?.tokenExpiresAt);
+  // 토큰 갱신이 거절돼(비밀번호 변경 · 앱 권한 해제 등) 다시 동의가 필요하다고 표시된 상태.
+  // 만료일이 남아 있어도 DM 은 나가지 않으므로 만료와 같이 재연동을 안내한다.
+  const [tokenNeedsReauth, setTokenNeedsReauth] = useState<boolean>(() => Boolean((cachedSettings as any)?.needsReauth));
   const [automations, setAutomations] = useState<DmAutomationItem[]>(() =>
     Array.isArray(cachedSettings?.automations) ? cachedSettings!.automations.map(normalizeAutomation) : [],
   );
@@ -1829,6 +1842,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         setConnected(Boolean(s.connected));
         setIgUsername(s.igUsername || '');
         setTokenExpiresAt(s.tokenExpiresAt);
+        setTokenNeedsReauth(Boolean((s as any).needsReauth));
         const nextAutomations = Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : [];
         setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
@@ -2069,13 +2083,15 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 만료됐거나 임박한 토큰만 알린다. 평소에는 배지를 띄우지 않는다(하루 한 번 도는
   // scheduled-instagram-token-refresh 가 미리 갱신한다).
   const tokenStatus = useMemo(() => {
-    if (!connected || !tokenExpiresAt) return null;
+    if (!connected) return null;
+    if (tokenNeedsReauth) return { expired: true, days: 0 };
+    if (!tokenExpiresAt) return null;
     const ms = new Date(tokenExpiresAt).getTime() - Date.now();
     if (!Number.isFinite(ms)) return null;
     if (ms <= 0) return { expired: true, days: 0 };
     const days = Math.ceil(ms / 86_400_000);
     return days <= 7 ? { expired: false, days } : null;
-  }, [connected, tokenExpiresAt]);
+  }, [connected, tokenExpiresAt, tokenNeedsReauth]);
 
   // 아직 한 번도 못 불러왔는데 실패했다면, 스피너를 계속 돌리는 대신 이유와 재시도를
   // 준다. 로그인이 풀렸거나(401) 네트워크가 끊긴 경우가 대부분이다.

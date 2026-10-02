@@ -111,6 +111,9 @@ interface Applicant {
    * 그대로 보인다 — 담당자만 보는 메모가 아니다.
    */
   manager_note?: string;
+  /** 담당자가 이 캠페인 명단에서 정한 제시가. 브랜드 카드의 단가는 이 값만 쓴다. */
+  quoted_fee?: number;
+  quoted_second_use_fee?: number;
   // 수락한 뒤 만들어지는 협업 본체. 만드는 사람은 진행 방식에 따라 브랜드일 수도,
   // 담당자일 수도 있다.
   collab_id?: string;
@@ -1426,6 +1429,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                           /* 이 캠페인이 숏폼인지 피드인지에 따라 지원자가 등록해 둔
                              단가 중 해당하는 쪽을 앞세운다. */
                           contentFormat={selectedCampaign?.content_format}
+                          /* 브랜드에게 보이는 단가는 담당자가 정한 금액뿐이다.
+                             인플루언서 등록 단가는 서버가 응답에서 빼고 보낸다. */
+                          managerPrice={{ fee: app.quoted_fee || 0, secondUseFee: app.quoted_second_use_fee || 0 }}
                           /* 지원자 카드는 릴스·숏폼만 세 편 싣는다. 지원은 이미
                              "이 캠페인을 하겠다"는 뜻이라, 브랜드가 여기서 판단하는
                              것은 계정 톤이 아니라 이 사람이 만드는 영상이다. 피드

@@ -15,10 +15,15 @@ export default async (req: Request, context: Context) => {
   const store = getStore({ name: 'site-data', consistency: 'strong' })
   const data = (await store.get(username, { type: 'json' })) as Record<string, any> | null
 
+  // 영상이나 blob: 주소는 이미지로 쓸 수 없어 다음 후보로 넘긴다.
+  const usableImage = (value: unknown) =>
+    typeof value === 'string' && /^(https?:\/\/|\/(?!\/))/i.test(value) && !/\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(value)
+      ? value
+      : undefined
   const imageUrl =
-    data?.design?.portfolioHeaderImage ||
-    data?.blocks?.[0]?.coverMedia ||
-    data?.profile?.avatar_url
+    usableImage(data?.design?.portfolioHeaderImage) ||
+    usableImage(data?.blocks?.[0]?.coverMedia) ||
+    usableImage(data?.profile?.avatar_url)
 
   if (!imageUrl) {
     // Fallback to the default OG image

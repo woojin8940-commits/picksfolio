@@ -662,7 +662,9 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
       ? {
           // 계정 이름도 신원이다. 이름만 가리고 아이디를 남기면 가린 뜻이 없다.
           influencerUsername: base.outreachStatus === "accepted" ? base.influencerUsername : "",
-          snapshot: maskSnapshot(snapshot, base.outreachStatus),
+          // 인플루언서가 등록서에 적은 단가는 수락 전후 모두 브랜드에 보내지 않는다.
+          // 브랜드가 보는 단가는 담당자가 정한 제시가(quotedFee · quotedSecondUseFee)뿐이다.
+          snapshot: withoutRegisteredPrices(maskSnapshot(snapshot, base.outreachStatus)),
           // 지급액은 브랜드에게 나가지 않는다. 브랜드가 제시가와 지급액을 나란히 보면
           // 우리 마진이 그대로 드러나고, 그 자리에서 값을 깎는 협상이 시작된다.
           offer: { ...offer, fee: 0, secondUseFee: 0 },
@@ -727,6 +729,19 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
  *
  * 프로필 사진도 가리지 않는다. 릴스 썸네일과 같은 성질의 판단 재료다.
  */
+/**
+ * 브랜드에게 나가는 자료에서 인플루언서 등록 단가(광고비 · 게시물 · 숏폼)를 뺀다.
+ *
+ * 등록 단가는 인플루언서가 픽스폴리오에 적어 낸 "받고 싶은 금액"이고, 브랜드가 내는
+ * 금액은 담당자가 정한다. 둘이 함께 보이면 브랜드는 담당자 제시가를 등록 단가와 견줘
+ * 깎으려 하고, 그 차이(마진)가 그대로 드러난다. 화면에서 가리는 것이 아니라 응답에서
+ * 뺀다 — 실려 있으면 가린 것이 아니다.
+ */
+export function withoutRegisteredPrices<T>(snapshot: T): T {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  return { ...(snapshot as any), adPrice: "", postPrice: "", shortPrice: "" };
+}
+
 function maskSnapshot(snapshot: any, outreachStatus: string) {
   if (outreachStatus === "accepted") return snapshot;
   const name = String(snapshot?.name || "");
@@ -996,7 +1011,9 @@ export async function acceptListup(input: {
     managerUsername,
     rewardType: campaign.reward_type,
     fee: offer.fee,
-    startDate: offer.startDate || campaign.start_date,
+    // 제안에 시작일이 없으면 수락한 날부터 센다(위 조건표의 마감 계산과 같은 기준).
+    // 캠페인 start_date 는 등록 · 모집 시작일이라 그대로 쓰면 마감이 처음부터 지나 있다.
+    startDate: offer.startDate || todayInSeoul(),
     brief: {
       productName: campaign.product_name,
       productUrl: campaign.product_url,

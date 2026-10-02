@@ -629,7 +629,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           : [],
         // 희망 최소 조회수는 더 이상 받지 않는다. 컬럼과 예전 캠페인의 값은 그대로
         // 두고(이미 저장된 조건이므로), 새로 등록하는 캠페인에서는 0 으로 남긴다.
-        min_views: 0,
+        // 수정할 때는 아예 보내지 않는다 — 0 을 보내면 서버가 예전 값을 지웠다.
+        ...(editing ? {} : { min_views: 0 }),
         influencer_styles: picksInfluencer ? form.influencer_styles : [],
         exclude_keywords: picksInfluencer ? form.exclude_keywords : [],
         target_audience: picksInfluencer ? form.target_audience : '',

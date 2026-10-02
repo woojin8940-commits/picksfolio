@@ -287,6 +287,25 @@ function hasReplyContent(a: DmAutomationItem): boolean {
   return Boolean(a.replyEnabled) && (a.replies || []).some((r) => r && r.trim());
 }
 
+/**
+ * 키워드 비교용으로 글자를 맞춘다.
+ *
+ * 입력칸 앞에 # 아이콘이 있어 사용자가 "#가격" 처럼 넣는 경우가 많은데, 그대로 비교하면
+ * "가격 얼마예요?" 댓글에 걸리지 않았다. 앞의 # 을 떼고, 한글 자모 조합 차이(NFC)와
+ * 연속 공백 · 대소문자를 맞춘 뒤 부분 일치로 본다.
+ */
+function normalizeMatchText(value: string): string {
+  return String(value || "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function keywordHit(keywords: string[] | undefined, text: string): boolean {
+  const haystack = normalizeMatchText(text);
+  return (keywords || []).some((k) => {
+    const needle = normalizeMatchText(String(k || "").replace(/^#+/, ""));
+    return needle.length > 0 && haystack.includes(needle);
+  });
+}
+
 function matchAutomation(a: DmAutomationItem, text: string, mediaId: string): boolean {
   // DM 본문이 없어도 공개 답글만 남기는 자동화는 동작해야 한다.
   if (!a.enabled || (!hasContent(a) && !hasReplyContent(a))) return false;
@@ -295,8 +314,7 @@ function matchAutomation(a: DmAutomationItem, text: string, mediaId: string): bo
     if (!mediaId || !(a.mediaIds || []).includes(mediaId)) return false;
   }
   if (a.commentMatch === "all") return true;
-  const lower = text.toLowerCase();
-  return (a.keywords || []).some((k) => k && lower.includes(k.toLowerCase()));
+  return keywordHit(a.keywords, text);
 }
 
 /**
@@ -407,8 +425,7 @@ function hasTriggerContent(content: { message?: string; buttons?: DmButton[] }):
 function matchKeywordReply(r: DmKeywordReply, text: string): boolean {
   if (r.enabled === false) return false;
   if (!hasTriggerContent(r)) return false;
-  const lower = text.toLowerCase();
-  return (r.keywords || []).some((k) => k && lower.includes(k.toLowerCase()));
+  return keywordHit(r.keywords, text);
 }
 
 /**

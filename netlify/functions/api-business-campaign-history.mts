@@ -143,9 +143,17 @@ export default async (req: Request, context: Context) => {
       SELECT cc.id, cc.campaign_id, cc.creator_username, cc.status, cc.upload_url,
              cc.ad_code, cc.clean_file_url, cc.clean_file_name,
              cc.confirmed_at, cc.completed_at, cc.cancelled_at, cc.created_at,
-             COALESCE(ct.fee, 0) AS fee
+             -- 브랜드 화면이므로 금액은 인플루언서 보수가 아니라 브랜드가 내는 광고비다
+             -- (_shared/brand-billing.mts 와 같은 규칙). 보수를 실으면 마진이 드러난다.
+             CASE
+               WHEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0) > 0
+                 THEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0)
+               WHEN cl.collab_id IS NOT NULL THEN 0
+               ELSE COALESCE(ct.fee, 0)
+             END AS fee
       FROM campaign_collabs cc
       LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+      LEFT JOIN campaign_listups cl ON cl.collab_id = cc.id
       WHERE cc.campaign_id = ANY(${campaignIds})
       ORDER BY cc.created_at ASC
     `) as any[];

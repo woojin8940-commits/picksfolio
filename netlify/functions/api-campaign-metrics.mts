@@ -203,7 +203,12 @@ export default async (req: Request) => {
  */
 const shape = (data: any, role: Role, campaign: any) => {
   const budgetKrw = Number(campaign.budget_krw || 0);
-  const money = role === "influencer" ? null : costOf(data.totals, data.totals.measuredSpend);
+  // 브랜드에게는 인플루언서 보수의 합 대신 자기가 낸 광고비를 쓴다 — 보수 합계가 실리면
+  // 광고비와의 차이(마진)가 그대로 드러나고, 브랜드의 CPV 도 실제 집행액과 달라진다.
+  const { brandMeasuredSpend, brandTotalSpend, ...baseTotals } = data.totals;
+  const measuredSpend = role === "influencer" ? 0 : role === "brand" ? Number(brandMeasuredSpend || 0) : data.totals.measuredSpend;
+  const totalSpend = role === "influencer" ? 0 : role === "brand" ? Number(brandTotalSpend || 0) : data.totals.totalSpend;
+  const money = role === "influencer" ? null : costOf(data.totals, measuredSpend);
 
   return {
     role,
@@ -220,10 +225,10 @@ const shape = (data: any, role: Role, campaign: any) => {
     posts: data.posts,
     series: data.series,
     totals: {
-      ...data.totals,
+      ...baseTotals,
       // 인플루언서 화면에서는 지급액 합계를 지운다.
-      measuredSpend: role === "influencer" ? 0 : data.totals.measuredSpend,
-      totalSpend: role === "influencer" ? 0 : data.totals.totalSpend,
+      measuredSpend,
+      totalSpend,
     },
     cost: money,
     freshHours: FRESH_HOURS,

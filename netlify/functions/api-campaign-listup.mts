@@ -52,6 +52,8 @@ async function loadCampaign(db: any, campaignId: string) {
            product_name, product_url, upload_channel, content_format, video_concept,
            guideline_url, guideline_note, second_use_fee, second_use_note,
            upload_from, upload_to,
+           -- 브랜드가 내린 캠페인인지. 내린 캠페인에는 새 제안 · 수락을 받지 않는다.
+           deleted_at,
            -- 진행 방식이 협업 단계를 정한다(제품 협찬형에는 검수·정산 단계가 없다).
            -- package_tier 는 진행 방식이 없던 시절 캠페인의 대체값으로만 쓴다.
            -- 희망 인플루언서 조건은 담당자가 후보를 고를 때 읽는 값이다.
@@ -131,6 +133,8 @@ export default async (req: Request, context: Context) => {
           JOIN campaigns c ON c.id = l.campaign_id
           WHERE l.influencer_username = ${influencer}
             AND l.outreach_status IN ('sent', 'accepted', 'declined', 'expired')
+            -- 내린 캠페인의 답을 기다리는 제안은 보여 주지 않는다(이력은 남긴다).
+            AND (c.deleted_at IS NULL OR l.outreach_status <> 'sent')
           ORDER BY
             CASE l.outreach_status WHEN 'sent' THEN 0 ELSE 1 END,
             l.offer_sent_at DESC NULLS LAST
@@ -412,6 +416,9 @@ export default async (req: Request, context: Context) => {
       if (!campaign) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
+      if (campaign.deleted_at) {
+        return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
+      }
       // 제품 협찬형은 지원자만 받는다. 브랜드 화면에 리스트업 자리가 없으므로 여기서
       // 후보가 올라가면 아무도 보지 못하는 명단이 쌓인다.
       if (!isManagerListupMode(campaign.reward_mode)) {
@@ -534,6 +541,9 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE campaign_id = ${campaignId}
             AND outreach_status <> 'accepted'
+            -- 제안이 이미 나간 후보는 다시 확정하면서 빠뜨려도 pass 로 바꾸지 않는다.
+            -- 바꾸면 브랜드는 뺐다고 알고, 인플루언서는 그대로 수락할 수 있었다.
+            AND (outreach_status <> 'sent' OR id = ANY(${ids}))
         `;
         const rows = (await db.sql`
           SELECT * FROM campaign_listups WHERE campaign_id = ${campaignId}
@@ -557,6 +567,11 @@ export default async (req: Request, context: Context) => {
       const campaign = await loadCampaign(db, listup.campaign_id);
       if (!campaign) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
+      }
+      // 내린 캠페인의 후보는 정리(제안 회수 · 명단에서 빼기)만 받는다. 예전에는 받은
+      // 제안을 그대로 수락할 수 있어, 없는 캠페인으로 협업이 만들어졌다.
+      if (campaign.deleted_at && !["withdraw_offer", "remove", "note", "favorite"].includes(String(action || ""))) {
+        return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
       }
 
       const manager = await requireManager(req);
@@ -601,6 +616,12 @@ export default async (req: Request, context: Context) => {
             { status: 409 },
           );
         }
+        if (listup.outreach_status === "sent" && decision !== "pick") {
+          return Response.json(
+            { error: "이미 제안이 나간 후보입니다. 진행을 멈추려면 담당자에게 제안 회수를 요청해 주세요." },
+            { status: 409 },
+          );
+        }
         const changed = (await db.sql`
           UPDATE campaign_listups
           SET brand_decision = ${decision},
@@ -608,7 +629,7 @@ export default async (req: Request, context: Context) => {
               brand_decided_at = NOW(),
               updated_at = NOW()
           WHERE id = ${id}
-            AND (outreach_status <> 'accepted' OR ${decision} = 'pick')
+            AND (outreach_status NOT IN ('accepted', 'sent') OR ${decision} = 'pick')
           RETURNING id
         `) as any[];
         if (!changed.length) {
@@ -962,7 +983,7 @@ export default async (req: Request, context: Context) => {
                 responded_at = NOW(),
                 response_note = ${note},
                 updated_at = NOW()
-            WHERE id = ${id} AND outreach_status = 'sent'
+            WHERE id = ${id} AND outreach_status = 'sent' AND brand_decision = 'pick'
             RETURNING *
           `) as any[];
           claimedByThisRequest = Boolean(claimed[0]);

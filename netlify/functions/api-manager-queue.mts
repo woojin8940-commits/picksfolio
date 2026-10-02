@@ -55,7 +55,9 @@ export default async (req: Request) => {
           JOIN campaigns c ON c.id = ca.campaign_id
           WHERE ca.status = 'pending'
             AND c.deleted_at IS NULL
-            AND c.status = 'active'
+            -- 모집이 마감(inactive)돼도 이미 들어온 지원자는 결정을 기다린다. 제품 협찬 ·
+            -- 공동구매는 마감일이 곧 선정일이라, 여기서 빼면 선정할 지원자가 사라졌다.
+            AND c.status IN ('active', 'inactive')
             AND (${mineOnly} = false OR COALESCE(c.manager_username, '') = ${me})
           ORDER BY
             CASE ca.brand_preference WHEN 'shortlist' THEN 0 WHEN '' THEN 1 ELSE 2 END,

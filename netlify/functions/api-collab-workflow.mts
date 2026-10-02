@@ -30,6 +30,25 @@ import {
 } from "./_shared/collab-workflow.mts";
 
 /**
+ * DATE 칸을 "YYYY-MM-DD" 로 돌려준다.
+ *
+ * DB 드라이버는 DATE(1082) 를 JS Date 로 바꿔 준다. 예전처럼 String(date).split("T")
+ * 로 자르면 "Mon Oct 05 2026 00:00:00 GM" 같은 값이 되거나, 화 · 목요일("Tue"/"Thu")
+ * 에는 빈 문자열이 돼 지급일이 사라지고 정산 기록에도 그대로 저장됐다. 드라이버는
+ * 그날 0시(서버 로컬)로 만들기 때문에 로컬 연 · 월 · 일을 읽는다.
+ */
+function dateColumnText(value: unknown): string {
+  if (!value) return "";
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  const text = String(value);
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : "";
+}
+
+/**
  * 캠페인 협업 워크플로 API — 역할별 조회와 상태 변경.
  *
  *   GET   /api/collab-workflow?role=influencer|brand|manager[&username=]  목록
@@ -463,7 +482,7 @@ function shapeSettlementInfo(row: any, role: CollabRole, fee: number) {
     reviewedAt: row?.reviewed_at || null,
     reviewedBy: role === "influencer" ? "" : String(row?.reviewed_by || ""),
     /** 담당자가 적은 실제 지급일 (YYYY-MM-DD). 비면 아직 미정이다. */
-    payoutDate: row?.payout_date ? String(row.payout_date).split("T")[0] : "",
+    payoutDate: dateColumnText(row?.payout_date),
     payoutMemo: String(row?.payout_memo || ""),
     scheduledAt: row?.scheduled_at || null,
     scheduledBy: role === "influencer" ? "" : String(row?.scheduled_by || ""),
@@ -766,7 +785,7 @@ export default async (req: Request, context: Context) => {
         // 수락된 리스트업 제안의 금액. 조건표가 비어 있는 협업의 보수를 여기서 메운다 —
         // 상세 화면과 같은 규칙이어야 목록의 0원과 상세의 금액이 어긋나지 않는다.
         db.sql`
-          SELECT collab_id, offer FROM campaign_listups
+          SELECT collab_id, offer, quoted_fee, quoted_second_use_fee FROM campaign_listups
           WHERE collab_id = ANY(${ids})
         `,
       ]);
@@ -836,6 +855,26 @@ export default async (req: Request, context: Context) => {
       );
       const feeOf = (collabId: string) =>
         Math.trunc(Number(termMap.get(collabId)?.fee || 0)) || Number(listupFeeMap.get(collabId) || 0);
+      /**
+       * 브랜드 행의 금액은 보수가 아니라 브랜드가 보낼 광고비다(상세의 billing 과 같은 규칙,
+       * _shared/brand-billing.mts). 보수를 그대로 실으면 브랜드 화면의 "총 진행 예산"이
+       * 인플루언서 보수의 합이 되고, 응답만 열어 봐도 마진이 드러났다.
+       */
+      const listupQuoteMap = new Map(
+        (listupFeeRows || []).map((r) => {
+          const won = (raw: unknown) => {
+            const v = Math.trunc(Number(raw || 0));
+            return Number.isFinite(v) && v > 0 ? v : 0;
+          };
+          return [r.collab_id, won(r.quoted_fee) + won(r.quoted_second_use_fee)];
+        }),
+      );
+      const brandFeeOf = (collabId: string) =>
+        resolveBrandAmount({
+          quotedTotal: Number(listupQuoteMap.get(collabId) || 0),
+          listed: listupQuoteMap.has(collabId),
+          payoutFee: feeOf(collabId),
+        }).amount;
 
       /**
        * 정산 단계의 사실만. 목록 카드도 "지금 누가 무엇을 해야 하는가"를 이 값으로
@@ -1014,7 +1053,7 @@ export default async (req: Request, context: Context) => {
            * 합계에서 그만큼 비었다. 인플루언서 조회는 위에서 creator_username = 본인으로
            * 좁혀져 있고 상세 화면은 이미 같은 값을 보여 준다.
            */
-          fee: feeOf(row.id),
+          fee: role === "brand" ? brandFeeOf(row.id) : feeOf(row.id),
           feeLocked: Boolean(termMap.get(row.id)?.locked_at),
           /**
            * 담당자가 명단에 올려 시작된 협업인가.
@@ -1051,7 +1090,7 @@ export default async (req: Request, context: Context) => {
                   return {
                     submitted: Boolean(info?.submitted_at),
                     reviewedAt: info?.reviewed_at || null,
-                    payoutDate: info?.payout_date ? String(info.payout_date).split("T")[0] : "",
+                    payoutDate: dateColumnText(info?.payout_date),
                     paidAt: info?.paid_at || null,
                   };
                 })(),
@@ -1341,14 +1380,21 @@ export default async (req: Request, context: Context) => {
         feedbacks: shapeFeedbacks(feedbacks as any[], role),
         terms: terms
           ? {
-              fee: payoutFee,
-              netFee: netAfterWithholding(payoutFee),
+              // 브랜드에게는 보수 대신 자기가 보낼 광고비를 싣는다(위 billing 과 같은 값).
+              // 보수 · 실수령액 · 2차 활용 보수는 마진이 드러나는 숫자라 브랜드에 보내지 않는다.
+              fee: role === "brand" ? brandBill.amount : payoutFee,
+              netFee: role === "brand" ? 0 : netAfterWithholding(payoutFee),
               rewardType: terms.reward_type || "",
               rewardNote: terms.reward_note || "",
               scriptDue: terms.script_due || "",
               contentDue: terms.content_due || "",
               uploadDue: terms.upload_due || "",
-              deliverableSpec: terms.deliverable_spec || {},
+              deliverableSpec: role === "brand"
+                ? (() => {
+                    const { secondUseFee: _hidden, ...rest } = (terms.deliverable_spec || {}) as Record<string, unknown>;
+                    return rest;
+                  })()
+                : terms.deliverable_spec || {},
               guideUrl: terms.guide_url || "",
               guideNote: terms.guide_note || "",
               lockedAt: terms.locked_at,
@@ -1762,7 +1808,7 @@ export default async (req: Request, context: Context) => {
             {
               status: "completed",
               completed_at: new Date().toISOString(),
-              scheduled_date: info.payout_date ? String(info.payout_date).split("T")[0] : paidDate,
+              scheduled_date: dateColumnText(info.payout_date) || paidDate,
               ...(paidFee > 0 ? { amount: paidFee } : {}),
             },
             {
@@ -2357,6 +2403,20 @@ export default async (req: Request, context: Context) => {
           return jsonError("이전 단계가 아직 끝나지 않았습니다.", 409);
         }
 
+        /*
+         * 다섯 단계 묶음에는 "confirm" 단계가 없고 업로드 단계가 마지막이다. 그 업로드를
+         * 여기서 완료하면 예전에는 협업만 끝나고 upload_confirmed_at · 정산 예약이 빠져,
+         * 인플루언서 지급이 잡히지 않았다. 업로드 확인(confirm_step)과 같은 일을 한다.
+         */
+        const stageList = await loadStages(db, collabId);
+        const uploadStage = stageList.some((s) => s.stage_key === "confirm")
+          ? null
+          : await resolveStepStage(db, collabId, "upload");
+        const isFinalUpload = Boolean(uploadStage && uploadStage.id === stage.id);
+        if (isFinalUpload && !String(collab.upload_url || "").trim()) {
+          return jsonError("아직 게시물 링크가 등록되지 않았습니다.", 409);
+        }
+
         const note = String((body as any).note || "").slice(0, 2000);
         const completed = (await db.sql`
           UPDATE collab_stages
@@ -2388,6 +2448,16 @@ export default async (req: Request, context: Context) => {
             WHERE id = ${collabId}
           `;
           settlement = await scheduleSettlementFor(db, collab);
+        } else if (isFinalUpload) {
+          // 이미 확인된 협업이면 정산을 다시 잡지 않는다(confirm_step 과 같은 규칙).
+          const confirmed = (await db.sql`
+            UPDATE campaign_collabs
+            SET upload_confirmed_at = NOW(), upload_confirmed_by = ${caller.username},
+                confirmed_at = COALESCE(confirmed_at, NOW()), updated_at = NOW()
+            WHERE id = ${collabId} AND upload_confirmed_at IS NULL
+            RETURNING id
+          `) as any[];
+          if (confirmed?.[0]) settlement = await scheduleSettlementFor(db, collab);
         }
 
         const next = await openNextStage(db, collabId, stage.seq);

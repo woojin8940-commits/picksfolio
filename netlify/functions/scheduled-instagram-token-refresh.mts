@@ -1,182 +1,50 @@
-import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
-import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import {
+  RUN_INTERVAL_MS,
+  STALE_RUN_MS,
+  dispatchRefreshWorker,
+  newRunState,
+  readRunState,
+  saveNewRun,
+} from "./_shared/instagram-token-refresh.mts";
 
 /**
- * 인스타그램 장기 액세스 토큰 자동 갱신.
+ * 인스타그램 장기 액세스 토큰 자동 갱신 — 시작 · 감시 담당.
  *
- * "Instagram API with Instagram Login" 의 장기 토큰은 발급 후 60일이면 만료된다.
- * 만료되면 댓글 웹훅은 계속 도착하지만 DM 발송·피드 조회가 전부 실패하고, 화면에는
- * 여전히 "연결됨"으로 보여서 사용자는 원인을 알 수 없다. 지금까지는 갱신하는 곳이
- * 없어 연동 후 두 달이면 프로 플랜 기능이 조용히 멈췄다.
+ * 실제 갱신은 백그라운드 작업자(instagram-token-refresh-background)가 한다. 예약 함수는
+ * 약 30초면 끝나므로 계정을 직접 돌지 않고, 매시간 진행 상태 하나만 읽어 판단한다.
+ *   - 오늘 실행이 이미 끝났다 → 아무것도 하지 않는다.
+ *   - 실행 중이고 작업자가 최근에 진행을 알렸다 → 기다린다.
+ *   - 실행 중인데 작업자 소식이 끊겼다(배포 · 장애로 중단) → 남은 자리부터 다시 깨운다.
+ *   - 마지막 실행이 끝난 지 하루 가까이 지났다 → 새 실행을 연다.
  *
- * 그래서 하루 한 번 돌면서 만료가 가까운 토큰을 `ig_refresh_token` 으로 다시 60일
- * 짜리로 바꿔 끼운다. 갱신 조건은 Meta 쪽 제약을 그대로 따른다.
- *   - 발급 후 24시간이 지난 토큰만 갱신할 수 있다.
- *   - 이미 만료된 토큰은 갱신할 수 없다 → 사용자가 재연동해야 한다.
- *
- * 구 페이지 토큰(tokenSource ≠ instagram_login)은 만료가 없어 대상에서 제외한다.
- *
- * 보관함이 두 곳이다. 디엠 자동화(dm-automation)와 캠페인 등록(collab-instagram)은
- * 각자 따로 연동하므로 토큰도 따로 들고 있고, 갱신 규칙은 같다. 캠페인 쪽을 빼 두면
- * 두 달 뒤 브랜드 명단의 팔로워·조회수가 갱신되지 않기 시작한다.
- *
- * 기능을 끊어 둔 연동(`featuresOff`)도 대상에서 빼지 않는다. 브랜드가 자동 디엠을
- * 해제해도 콘텐츠 성과(태그된 콘텐츠)는 같은 토큰으로 계속 조회되므로
- * (_shared/tagged-media 의 loadBrandLink), 여기서 걸러 내면 60일 뒤 브랜드의 캠페인
- * 성과 화면이 "다시 연동해 주세요"로 바뀐다. 헛도는 갱신을 줄이려면 토큰 자체가
- * 지워졌는지로 걸러야 한다.
+ * 그래서 어느 단계에서 끊겨도 한 시간 안에 이어지고, 계정이 많아지면 작업자가 여러
+ * 번에 나눠 끝까지 간다. 구조 설명은 _shared/instagram-token-refresh.mts.
  */
-
-/** 갱신 대상 보관함. 이름과 키 접두사만 다르고 처리 방법은 같다. */
-const SOURCES = [
-  { store: "dm-automation", prefix: "dm_" },
-  { store: "collab-instagram", prefix: "ig_" },
-] as const;
-
-/** 만료까지 이 일수 이하로 남으면 갱신한다(하루 한 번 실행이므로 넉넉히 잡는다). */
-const REFRESH_WINDOW_DAYS = 14;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-interface DmSettings {
-  accessToken?: string;
-  tokenSource?: string;
-  tokenExpiresAt?: string;
-  igUsername?: string;
-  needsReauth?: boolean;
-  [k: string]: unknown;
-}
-
-/**
- * 되살릴 수 없는 토큰에 재연동 표시를 남긴다.
- *
- * 표시가 없으면 화면은 계속 "연동됨"으로 보이고, 사람은 갱신 버튼을 눌러서야
- * 영문 오류로 사실을 알게 된다. 밤사이에 미리 표시해 두면 다음에 화면을 여는
- * 순간부터 "다시 연동해 주세요"가 보인다.
- */
-async function markNeedsReauth(storeName: string, key: string, expectedToken: string): Promise<void> {
-  try {
-    await mutateBlobJSON<DmSettings>(storeName, key, (latest) => {
-      if (!latest || latest.accessToken !== expectedToken || latest.needsReauth) return null;
-      return {
-        ...latest,
-        needsReauth: true,
-        tokenInvalidAt: new Date().toISOString(),
-      };
-    });
-  } catch (e) {
-    console.warn(`[ig-token] ${key} 재연동 표시 실패:`, (e as Error)?.message);
-  }
-}
-
 export default async () => {
-  for (const source of SOURCES) {
-    await refreshStore(source.store, source.prefix);
-  }
-};
-
-async function refreshStore(storeName: string, prefix: string) {
-  const store = getStore({ name: storeName, consistency: "strong" });
+  const state = await readRunState();
   const now = Date.now();
 
-  const { blobs } = await store.list({ prefix });
-  if (blobs.length === 0) {
-    console.log(`[ig-token] ${storeName}: no records`);
+  if (state && !state.finishedAt) {
+    const quietFor = now - Date.parse(state.heartbeatAt || state.startedAt);
+    if (Number.isFinite(quietFor) && quietFor < STALE_RUN_MS) {
+      console.log(`[ig-token] run ${state.runId} in progress — waiting`);
+      return;
+    }
+    console.warn(`[ig-token] run ${state.runId} stalled — resuming from saved cursor`);
+    await dispatchRefreshWorker(state.runId);
     return;
   }
 
-  let refreshed = 0;
-  let expired = 0;
-  let failed = 0;
-  let skipped = 0;
+  if (state?.finishedAt && now - Date.parse(state.finishedAt) < RUN_INTERVAL_MS) return;
 
-  for (const blob of blobs) {
-    try {
-      const settings = (await store.get(blob.key, { type: "json" })) as DmSettings | null;
-      const token = settings?.accessToken;
-
-      // 연동돼 있고, 만료가 있는 Instagram Login 토큰만 대상.
-      if (!settings || !token || settings.tokenSource !== "instagram_login") {
-        skipped++;
-        continue;
-      }
-
-      const expiresAt = settings.tokenExpiresAt ? new Date(settings.tokenExpiresAt).getTime() : NaN;
-      // 만료 시각을 모르는(구 데이터) 토큰도 한 번 갱신해 만료 시각을 채워준다.
-      if (Number.isFinite(expiresAt)) {
-        if (expiresAt <= now) {
-          // 만료된 토큰은 갱신 자체가 불가능하다. 재연동만이 길이므로 표시를 남긴다.
-          expired++;
-          console.warn(`[ig-token] ${blob.key} token already expired — reconnect required`);
-          await markNeedsReauth(storeName, blob.key, token);
-          continue;
-        }
-        if (expiresAt - now > REFRESH_WINDOW_DAYS * DAY_MS) {
-          skipped++;
-          continue;
-        }
-      }
-
-      const res = await fetch(
-        "https://graph.instagram.com/refresh_access_token" +
-          `?grant_type=ig_refresh_token&access_token=${encodeURIComponent(token)}`,
-      );
-      const data = (await res.json().catch(() => ({}))) as any;
-
-      if (!res.ok || !data?.access_token) {
-        failed++;
-        console.error(
-          `[ig-token] refresh failed for ${blob.key}: ${data?.error?.message || `HTTP ${res.status}`}`,
-        );
-        // 권한이 해제됐거나 토큰이 무효면 내일 다시 시도해도 같은 실패다. 그런
-        // 경우에만 표시를 남긴다 — 일시적인 네트워크 오류로 멀쩡한 연동을 끊으면
-        // 사람은 필요 없는 재연동을 하게 된다.
-        const err = data?.error;
-        const msg = String(err?.message || "").toLowerCase();
-        const tokenDead =
-          Number(err?.code) === 190 ||
-          String(err?.type || "") === "OAuthException" ||
-          msg.includes("has not authorized application") ||
-          msg.includes("error validating access token") ||
-          msg.includes("session has expired");
-        if (tokenDead) await markNeedsReauth(storeName, blob.key, token);
-        continue;
-      }
-
-      const expiresIn = Number(data.expires_in || 0);
-      let updated = false;
-      await mutateBlobJSON<DmSettings>(storeName, blob.key, (latest) => {
-        if (!latest || latest.accessToken !== token) return null;
-        const { needsReauth, tokenInvalidAt, ...rest } = latest;
-        updated = true;
-        return {
-          ...rest,
-          accessToken: data.access_token,
-          tokenExpiresAt: expiresIn
-            ? new Date(Date.now() + expiresIn * 1000).toISOString()
-            : latest.tokenExpiresAt,
-          updatedAt: new Date().toISOString(),
-        };
-      });
-      if (updated) {
-        refreshed++;
-        console.log(`[ig-token] refreshed ${blob.key} (+${Math.round(expiresIn / 86400)}d)`);
-      } else {
-        skipped++;
-      }
-    } catch (e) {
-      failed++;
-      console.error(`[ig-token] error processing ${blob.key}:`, e);
-    }
-  }
-
-  console.log(
-    `[ig-token] ${storeName} done — refreshed ${refreshed}, expired ${expired}, ` +
-      `failed ${failed}, skipped ${skipped} of ${blobs.length}`,
-  );
-}
+  const next = newRunState();
+  await saveNewRun(next);
+  console.log(`[ig-token] starting run ${next.runId}`);
+  await dispatchRefreshWorker(next.runId);
+};
 
 export const config: Config = {
-  // 하루 한 번. 만료 14일 전부터 매일 시도하므로 하루 실패해도 여유가 있다.
-  schedule: "40 18 * * *",
+  // 매시간 상태만 확인한다(가볍다). 실제 갱신은 하루 한 번, 만료 14일 전부터 매일 시도한다.
+  schedule: "41 * * * *",
 };

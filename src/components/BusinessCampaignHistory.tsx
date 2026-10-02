@@ -146,6 +146,10 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   draft: { label: '작성 중', cls: 'bg-amber-50 text-amber-600' },
   pending: { label: '승인 대기', cls: 'bg-amber-50 text-amber-600' },
   rejected: { label: '반려', cls: 'bg-rose-50 text-rose-500' },
+  // 서버가 실제로 쓰는 상태 값. 없으면 화면에 'inactive' 같은 코드가 그대로 찍혔다.
+  inactive: { label: '마감', cls: 'bg-slate-100 text-slate-500' },
+  pending_approval: { label: '승인 대기', cls: 'bg-amber-50 text-amber-600' },
+  admin_rejected: { label: '반려', cls: 'bg-rose-50 text-rose-500' },
 };
 
 /** 모집중이 아니면 전부 '마감' 쪽으로 묶는다. 이력 화면에서 필요한 구분은 그 둘이다. */
