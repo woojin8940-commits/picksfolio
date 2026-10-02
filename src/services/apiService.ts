@@ -568,8 +568,9 @@ export interface ClaimUsernameResult {
  * "다시 로그인" 으로 끝나면 안 된다. 같은 이름으로 다시 보내도 결과가 같으므로
  * (서버가 이미 내 것이면 성공으로 답한다) 재시도가 안전하다.
  */
-export async function claimUsername(username: string): Promise<ClaimUsernameResult> {
-  const body = JSON.stringify({ username });
+export async function claimUsername(username: string, transferCode = ''): Promise<ClaimUsernameResult> {
+  // transferCode: 예전 아이디·비밀번호 계정의 유저네임을 이어받을 때 운영자에게 받은 이전 코드.
+  const body = JSON.stringify(transferCode ? { username, transferCode } : { username });
   const generic = '링크를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -3026,6 +3027,67 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to get manager influencers:', e);
       return { influencers: [], categories: [], error: '네트워크 오류' };
+    }
+  },
+
+  /**
+   * 담당자 "자동 디엠 이용자 관리" — 브랜드 매칭받기 등록자별 제안 · 수락 · 거절 집계와
+   * 담당자 조치(중단 · 재개 · 메모).
+   */
+  async getManagerDmAccess(
+    opts: { filter?: string; q?: string; minOffers?: number } = {},
+  ): Promise<{ rows?: any[]; summary?: any; criteria?: any; truncated?: boolean; error?: string }> {
+    try {
+      const params = new URLSearchParams();
+      if (opts.filter) params.set('filter', opts.filter);
+      if (opts.q) params.set('q', opts.q);
+      if (opts.minOffers) params.set('minOffers', String(opts.minOffers));
+      const qs = params.toString();
+      const res = await fetch(`/api/manager-dm-access${qs ? `?${qs}` : ''}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { rows: [], error: json?.error || '목록을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get manager dm access:', e);
+      return { rows: [], error: '네트워크 오류' };
+    }
+  },
+
+  async getManagerDmAccessHistory(username: string): Promise<{ events?: any[]; error?: string }> {
+    try {
+      const res = await fetch(`/api/manager-dm-access?history=${encodeURIComponent(username)}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { events: [], error: json?.error || '이력을 불러오지 못했습니다.' };
+      return json;
+    } catch {
+      return { events: [], error: '네트워크 오류' };
+    }
+  },
+
+  async updateManagerDmAccess(body: {
+    action: 'suspend' | 'reopen' | 'note';
+    username: string;
+    reason?: string;
+    note?: string;
+  }): Promise<{ success?: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/manager-dm-access', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...(await collabHeaders()) },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '처리하지 못했습니다.' };
+      return json;
+    } catch {
+      return { error: '네트워크 오류' };
     }
   },
 

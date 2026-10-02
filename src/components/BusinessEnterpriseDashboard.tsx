@@ -409,7 +409,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       subComponent = <LazyRoute><OpenScheduleManagement userName={businessUsername} /></LazyRoute>;
       break;
     case 'membership':
-      subComponent = <LazyRoute><MembershipPlan userName={businessUsername} /></LazyRoute>;
+      subComponent = <LazyRoute><MembershipPlan userName={businessUsername} accountType="brand" /></LazyRoute>;
       break;
     case 'inbox':
       subComponent = (

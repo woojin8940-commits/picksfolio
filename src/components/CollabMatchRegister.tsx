@@ -40,6 +40,16 @@ interface Props {
    * 펼쳤을 때 나오게 한다.
    */
   slim?: boolean;
+  /**
+   * 접수 · 취소가 끝났을 때 알린다. 자동 디엠 화면은 이 등록으로 이용 자격이 바뀌므로
+   * 접수 직후 자격을 다시 받아 와 잠금 안내를 걷어 낸다.
+   */
+  onRegisteredChange?: (registered: boolean) => void;
+  /**
+   * 인스타그램 연동을 마치고 돌아올 화면. 기본은 캠페인 목록이고, 자동 디엠 화면에서
+   * 등록하던 사람은 그 화면으로 되돌려야 이어서 쓸 수 있다.
+   */
+  returnView?: 'dm-automation';
 }
 
 
@@ -265,7 +275,7 @@ const moneyText = (display: string): string => {
   return digits ? `${formatNumberWithCommas(digits)}원` : '';
 };
 
-const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName, slim }) => {
+const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName, slim, onRegisteredChange, returnView }) => {
   const copy = COPY[variant];
   const [open, setOpen] = useState(false);
   /** 얇은 줄에서 "관리"를 펼쳤는지. 얇은 줄이 아닐 때는 쓰지 않는다. */
@@ -273,7 +283,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   const [submitting, setSubmitting] = useState(false);
 
   const [infForm, setInfForm] = useState({
-    name: '', contact: '', kakao_id: '',
+    name: '', contact: '',
     instagram_url: '', instagram_followers: '',
     youtube_url: '', youtube_followers: '',
     tiktok_url: '', tiktok_followers: '',
@@ -416,7 +426,6 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       setInfForm({
         name: String(app.name || ''),
         contact: String(app.contact || ''),
-        kakao_id: String(app.kakao_id || ''),
         instagram_url: String(app.instagram_url || ''),
         instagram_followers: num(app.instagram_followers),
         youtube_url: String(app.youtube_url || ''),
@@ -541,6 +550,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
     // 결과 파라미터는 한 번 읽고 지운다 — 새로고침 때 같은 안내가 다시 뜨지 않도록.
     params.delete(RETURN_FLAG);
+    params.delete('from');
     params.delete('ig_connected');
     params.delete('ig_error');
     params.delete('ig_metrics');
@@ -597,7 +607,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
   const reset = () => {
     setInfForm({
-      name: '', contact: '', kakao_id: '', instagram_url: '', instagram_followers: '', youtube_url: '', youtube_followers: '',
+      name: '', contact: '', instagram_url: '', instagram_followers: '', youtube_url: '', youtube_followers: '',
       tiktok_url: '', tiktok_followers: '', naver_blog_url: '', post_price: '', short_price: '', category: '',
     });
     setCustomCategory('');
@@ -627,7 +637,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     } catch {
       // 임시 저장이 안 되면 값만 잃을 뿐 연동 자체는 진행할 수 있다.
     }
-    const returnTo = `${window.location.pathname}?${RETURN_FLAG}=1`;
+    const returnTo = `${window.location.pathname}?${RETURN_FLAG}=1${returnView ? `&from=${returnView}` : ''}`;
     // 자동 디엠 · 인사이트와 같은 연동 하나를 쓴다. 예전에는 이 화면만의 전용
     // 연동('collab')으로 시작해서, 여기서 연동한 사람이 다른 두 화면에서 "계정을
     // 먼저 연동해주세요"를 또 만났다 — 같은 계정에 같은 동의 화면을 세 번 지나고,
@@ -727,9 +737,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     }
     setChannel(emptyChannel);
     writeChannelCache(applicantUsername, emptyChannel);
-    // 연동이 채워 주던 인스타 칸은 이제 본인이 적는 칸으로 돌아온다. 마지막으로
-    // 확인된 값을 그대로 넣어 둔다 — 빈칸부터 시작하면 방금까지 있던 숫자를 사람이
-    // 기억해 다시 적어야 한다.
+    // 인스타 정보는 연동으로만 받는다. 마지막으로 확인된 값은 등록서 수정 요청에
+    // 그대로 실려 가도록 남겨 둔다(다시 연동하면 연동값이 덮는다).
     setInfForm(f => ({
       ...f,
       instagram_url: f.instagram_url || (channel.handle ? `https://www.instagram.com/${channel.handle}/` : ''),
@@ -786,11 +795,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setSubmitting(false);
         return;
       }
-      // 카톡 아이디도 연락 수단이다. 담당자가 제안을 들고 가는 길이 대부분 카카오톡이라
-      // (전화는 받지 않는 시간대가 있고, 협업 메일은 스팸함으로 들어간다) 비어 있으면
-      // 명단에 올라가도 연락이 닿지 않는다.
-      if (variant === 'influencer' && !(payload as { kakao_id?: string }).kakao_id?.trim()) {
-        setNotice({ type: 'err', text: '카카오톡 아이디를 입력해 주세요. 담당자가 카톡으로 제안을 보냅니다.' });
+      // 인스타 프로필은 손으로 적지 않고 연동으로만 받는다. 브랜드가 보는 숫자가
+      // 메타에서 확인한 값이어야 하고, 자동 디엠도 같은 연동으로 돌아간다.
+      if (variant === 'influencer' && !channel.connected) {
+        setNotice({ type: 'err', text: '인스타그램 계정을 연동해 주세요. 연동한 계정의 정보가 브랜드에게 전달됩니다.' });
         setSubmitting(false);
         return;
       }
@@ -834,6 +842,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           // 확인을 누를 때까지 기다리게 하는데, 정작 알려 줄 내용은 그 뒤에 있는
           // 접수 완료 카드에 이미 다 적혀 있다.
           setNotice({ type: 'ok', text: '접수되었습니다. 담당자 확인 후 안내해 드립니다.' });
+          onRegisteredChange?.(true);
         }
         writeStateCache(variant, applicantUsername, {
           submitted: true,
@@ -880,6 +889,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       // 참고할 답이 없어, 등록 버튼이 다시 서버 응답을 기다렸다 뜬다.
       writeStateCache(variant, applicantUsername, { submitted: false, status: '', application: null });
       setNotice({ type: 'ok', text: `${copy.title} 접수가 취소되었습니다.` });
+      onRegisteredChange?.(false);
       alert(`${copy.title} 접수가 취소되었습니다.`);
     } else {
       alert(res.error || '취소하지 못했습니다.');
@@ -1115,11 +1125,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                 <div className="space-y-3">
                   <Field label="이름" required value={infForm.name} onChange={v => setInfForm(f => ({ ...f, name: v }))} placeholder="홍길동" />
                   <Field label="연락처" required value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: formatContact(v) }))} placeholder="010-0000-0000 / 이메일" />
-                  {/* 카톡 아이디 — 담당자가 실제로 가장 많이 쓰는 연락 수단이라 필수로
-                      받는다. 전화는 받지 않는 시간대가 있고 광고 협업 메일은 스팸함으로
-                      들어가서, 카톡 아이디가 없는 등록서는 제안을 들고 갈 길이 사실상
-                      끊긴다 — 담당자가 연락을 못 해 그대로 묻히는 일이 잦았다. */}
-                  <Field label="카카오톡 아이디" required value={infForm.kakao_id} onChange={v => setInfForm(f => ({ ...f, kakao_id: v.replace(/\s/g, '') }))} placeholder="담당자가 카톡으로 연락합니다" />
+                  {/* 카톡 아이디는 받지 않는다 — 인플루언서는 카카오 간편로그인으로만 가입하므로
+                      담당자는 가입 때 받은 카카오 계정·연락처로 연락한다. */}
 
                   {/* 인스타 계정 연동 — 브랜드가 보는 숫자의 출처가 여기서 정해진다. */}
                   <div className="pt-1">
@@ -1140,9 +1147,9 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                   <div className="pt-1">
                     <p className="text-xs font-black text-slate-500 mb-2">유튜브 · 틱톡 추가 가능 (선택사항)</p>
                     <div className="space-y-2.5">
-                      {channel.connected ? (
-                        // 연동을 마쳤으면 인스타 항목은 손으로 적게 하지 않는다.
-                        // 확인된 숫자 옆에 입력칸을 같이 두면 어느 쪽이 맞는지 알 수 없다.
+                      {/* 인스타그램은 위의 연동 카드로만 받는다. 프로필 링크를 손으로 적는 칸을
+                          두면 연동값과 어느 쪽이 맞는지 알 수 없다. */}
+                      {channel.connected && (
                         <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-bold text-slate-500">인스타그램</span>
@@ -1152,12 +1159,6 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                             {channel.handle ? `@${channel.handle}` : '연동된 계정'}
                           </p>
                         </div>
-                      ) : (
-                        <ChannelRow
-                          label="인스타그램 프로필 (선택)" urlPlaceholder="https://instagram.com/..."
-                          url={infForm.instagram_url} onUrl={v => setInfForm(f => ({ ...f, instagram_url: v }))}
-                          followers={infForm.instagram_followers} onFollowers={v => setInfForm(f => ({ ...f, instagram_followers: v }))}
-                        />
                       )}
                       <ChannelRow
                         label="유튜브 (선택사항)" urlPlaceholder="https://youtube.com/@..." followerPlaceholder="구독자"

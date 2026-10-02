@@ -5,7 +5,6 @@ import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
 import { apiService, authHeaders } from '../services/apiService';
-import { isNativeApp } from '../utils/appEnv';
 import { todayInSeoul } from '../utils/formatters';
 import { Block } from '../types';
 import AITrendAnalysis from './AITrendAnalysis';
@@ -47,7 +46,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateInsights,
   onNavigateBusiness,
   onNavigateCalendar,
-  onNavigateMembership,
   onNavigateOpenSchedule,
   onNavigateTimeline,
   onNavigateCampaigns,
@@ -324,14 +322,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-          {!isNativeApp() && (
-            <NavItem
-              icon="💎"
-              label={t('nav.membership', '멤버십 플랜', 'Membership')}
-              active={currentSubView === 'membership'}
-              onClick={onNavigateMembership}
-            />
-          )}
           <button
             type="button"
             onClick={() => {
@@ -379,9 +369,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <MobileNavItem icon="💬" label={t('nav.barTimeline', '타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
             <MobileNavItem icon="📅" label={t('nav.barCalendar', '협업현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="🗓️" label={t('nav.barSchedule', '오픈일정', 'Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
-            {!isNativeApp() && (
-              <MobileNavItem icon="💎" label={t('nav.barMembership', '멤버십', 'Plan')} active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
-            )}
           </div>
           {/* 오른쪽 끝을 흐리게 덮어 "여기서 끝이 아니다" 를 보여 준다. 잘린 칸이
               배경색으로 사라지면 막대가 딱 맞게 찬 것처럼 보여서 넘겨 볼 생각을
@@ -428,9 +415,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🗓️" label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-              {!isNativeApp() && (
-                <NavItem icon="💎" label={t('nav.membership', '멤버십 플랜', 'Membership')} active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
-              )}
               <button
                 type="button"
                 onClick={() => {

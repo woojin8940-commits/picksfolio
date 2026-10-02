@@ -17,13 +17,10 @@ import {
 } from '../utils/portonePayments';
 import { isNativeApp } from '../utils/appEnv';
 import {
-  PRO_PRICE,
+  BRAND_DM_PRICE,
   PROMO_CODE_LENGTH,
-  STANDARD_AI_PRICE,
-  STANDARD_PRICE,
   TIER_LABEL,
   TIER_PRICE,
-  TIER_RANK,
   normalizeTier,
   type MembershipTier,
 } from '../utils/membershipTiers';
@@ -31,6 +28,11 @@ import type { SellerVerification } from '../types';
 
 interface MembershipPlanProps {
   userName: string;
+  /**
+   * 어느 대시보드에서 열렸는지. 지금 판매하는 플랜은 브랜드 전용 자동 디엠 플랜 하나뿐이라
+   * 인플루언서 화면에는 플랜 카드 대신 "모든 기능 무료" 안내를 보여 준다.
+   */
+  accountType?: 'brand' | 'influencer';
 }
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
@@ -49,7 +51,8 @@ interface MembershipPlanProps {
 const ACTIVATION_PRICE_KRW = 9900;
 const ACTIVATION_GRANT_CREDITS = 3000;
 
-const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
+const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType = 'influencer' }) => {
+  const isBrand = accountType === 'brand';
   const { language, t } = useLanguage();
   const normalizedUserName = userName.replace(/^biz\//, '');
   const cachedVerification = apiService.getCachedSellerVerification(normalizedUserName);
@@ -71,8 +74,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   // 출시 혜택 코드(9자리 숫자). 코드를 확인하면 promo 에 "무엇을 주는 코드인지"가 담기고,
   // 결제 버튼은 첫 달 결제 대신 무료로 구독을 시작한다.
   const [promoInput, setPromoInput] = useState('');
-  const [promoChecking, setPromoChecking] = useState(false);
-  const [promoError, setPromoError] = useState<string | null>(null);
+  const [, setPromoChecking] = useState(false);
+  const [, setPromoError] = useState<string | null>(null);
   const [promo, setPromo] = useState<{
     plan: MembershipTier;
     planLabel: string;
@@ -81,7 +84,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     monthlyPriceKrw: number;
   } | null>(null);
   // 결제 대상 플랜 — 멤버십 티어.
-  const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
+  const [selectedTier, setSelectedTier] = useState<MembershipTier>('brand_dm');
 
   // Claude plan (prepaid AI add-on, billed separately from the memberships above).
   // Activating it opens a PortOne payment window right here; the base monthly grant
@@ -558,11 +561,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   // don't lose access.
   const currentPlan: MembershipTier | null = normalizeTier(verification?.membership_plan);
 
-  // 상위 플랜은 하위 플랜의 기능을 모두 포함한다. 현재 구독이 tier 를 이미
-  // 포함하고 있으면(= 더 높은 등급) 카드에 "○○에 포함되어 있습니다"를 띄운다.
-  const includedInCurrentPlan = (tier: MembershipTier) =>
-    membershipActive && !!currentPlan && TIER_RANK[currentPlan] > TIER_RANK[tier];
-
   // 구독 중인 플랜 카드의 상태 + 해지 버튼. 해지 예약이 걸린 동안에는 남은 이용
   // 기간과 "해지 취소"를 대신 보여준다(세 플랜 카드가 같은 UI 를 쓴다).
   const subscribedActions = (subscribedLabel: string) => (
@@ -635,9 +633,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       <header className="mb-8 md:mb-12">
         <h2 className="text-xl md:text-3xl font-black text-slate-900">{t('nav.membership', '멤버십 플랜', 'Membership Plans')}</h2>
         <p className="text-slate-500 mt-2 text-sm md:text-base leading-relaxed max-w-3xl">
-          {language === 'en'
-            ? 'Choose Standard for content features, AI Collaboration to add the timeline AI assistant and the content planning AI, or Pro Plan for all features including DM automation and the Insights menu. All plans are monthly subscriptions and include VAT.'
-            : '콘텐츠 기능이 필요하면 스탠다드, 협업 AI와 콘텐츠 기획 AI까지 더하려면 AI 협업, 디엠 자동화와 인사이트 메뉴를 포함해 모든 기능을 쓰려면 프로 플랜을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있고, 표시된 금액은 모두 부가세(VAT) 포함입니다.'}
+          {isBrand
+            ? language === 'en'
+              ? 'Every feature is free. Only Instagram DM automation needs the DM Automation plan (₩5,900/month, VAT incl.), which you can cancel anytime.'
+              : '모든 기능을 무료로 이용할 수 있어요. 인스타그램 자동 디엠만 자동 디엠 플랜(월 5,900원, 부가세 포함)을 구독하면 사용할 수 있고, 언제든 해지할 수 있습니다.'
+            : language === 'en'
+              ? 'Every feature is free — no membership needed. DM automation unlocks when you register for brand matching.'
+              : '멤버십 없이 모든 기능을 무료로 이용할 수 있어요. 자동 디엠은 브랜드 매칭받기를 등록하면 무료로 열립니다.'}
         </p>
       </header>
 
@@ -738,132 +740,65 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </section>
       )}
 
-      {/* Plan grid */}
+      {/* 플랜 — 지금 판매하는 플랜은 브랜드 전용 자동 디엠 플랜 하나뿐이다. 예전 플랜
+          (스탠다드 · AI 협업 · 프로)은 새로 구독할 수 없고, 구독 중이던 사람은 위의
+          "현재 구독" 카드에서 상태를 확인한다. */}
       <section className="mb-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 max-w-7xl">
-          {/* Standard Plan */}
-          <div className="relative rounded-2xl border-2 border-blue-200 bg-white p-6 md:p-8 shadow-sm">
+        {isBrand ? (
+          <div className="relative rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm max-w-xl">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                {language === 'en' ? 'Standard Membership' : '스탠다드 멤버십'}
+              <span className="bg-gradient-to-r from-indigo-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+                {language === 'en' ? 'DM Automation Plan' : '자동 디엠 플랜 · 💬 브랜드 전용'}
               </span>
             </div>
             <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">₩{STANDARD_PRICE.toLocaleString()}</span>
-              <span className="text-slate-500 text-sm mb-1">{language === 'en' ? '/ mo' : '원 / 월'}</span>
+              <span className="text-3xl md:text-4xl font-black text-slate-900">{BRAND_DM_PRICE.toLocaleString()}</span>
+              <span className="text-slate-500 text-sm mb-1">{language === 'en' ? 'KRW / mo' : '원 / 월'}</span>
               <span className="text-slate-400 text-xs mb-1.5 ml-1">{language === 'en' ? 'VAT incl.' : '부가세 포함'}</span>
             </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">{language === 'en' ? 'Full Content Access' : '콘텐츠 풀 액세스'}</h4>
+            <h4 className="font-bold text-slate-800 text-lg mb-3">{language === 'en' ? 'Instagram DM automation' : '인스타그램 자동 디엠'}</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>{language === 'en' ? 'Video Uploads' : '영상 업로드'}</strong></li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>{language === 'en' ? 'Upload 7+ Content Blocks' : '콘텐츠 7개 이상 업로드'}</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>디엠 자동화</strong>(인스타그램 댓글 → 자동 DM) 이용</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>키워드별 자동 응답 · 발송 이력 확인 · 수동 DM 발송</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>그 밖의 기능(캠페인 AI · 인사이트 · 영상 업로드 등)은 구독 없이 무료</li>
             </ul>
 
             {loading ? (
               <div className="text-slate-400 text-sm font-bold">{t('common.loading', '상태 확인 중...', 'Checking status...')}</div>
-            ) : membershipActive && currentPlan === 'standard' ? (
-              subscribedActions(language === 'en' ? 'Subscribed to Standard' : '스탠다드 멤버십 구독 중')
-            ) : includedInCurrentPlan('standard') ? (
-              <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                {language === 'en' ? `Included in ${TIER_LABEL[currentPlan!]}` : `${TIER_LABEL[currentPlan!]}에 포함되어 있습니다`}
-              </div>
+            ) : membershipActive && (currentPlan === 'brand_dm' || currentPlan === 'pro') ? (
+              currentPlan === 'brand_dm' ? (
+                subscribedActions(language === 'en' ? 'Subscribed' : '자동 디엠 플랜 구독 중')
+              ) : (
+                <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
+                  {language === 'en'
+                    ? 'DM automation is included in your current Pro plan until it ends.'
+                    : '이용 중인 프로 플랜이 끝날 때까지 자동 디엠이 포함되어 있습니다.'}
+                </div>
+              )
             ) : (
               <button
                 type="button"
-                onClick={() => handleStartSubscribe('standard')}
-                disabled={saving}
-                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
-              >
-                {language === 'en' ? `Subscribe for ₩${STANDARD_PRICE.toLocaleString()}` : `${STANDARD_PRICE.toLocaleString()}원으로 구독 시작`}
-              </button>
-            )}
-          </div>
-
-          {/* AI 협업 멤버십 (standard + AI) */}
-          <div className="relative rounded-2xl border-2 border-violet-200 bg-white p-6 md:p-8 shadow-sm">
-            <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-violet-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                {language === 'en' ? 'AI Collaboration · ✨ AI' : 'AI 협업 멤버십 · ✨ AI'}
-              </span>
-            </div>
-            <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">₩{STANDARD_AI_PRICE.toLocaleString()}</span>
-              <span className="text-slate-500 text-sm mb-1">{language === 'en' ? '/ mo' : '원 / 월'}</span>
-              <span className="text-slate-400 text-xs mb-1.5 ml-1">{language === 'en' ? 'VAT incl.' : '부가세 포함'}</span>
-            </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">{language === 'en' ? 'Standard + AI Collaboration Tools' : '스탠다드 + AI 사용할 수 있는 멤버십'}</h4>
-            <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 이용</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>대화 요약 · 일정 정리 · 답장 초안 작성</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>콘텐츠 기획 AI</strong> 이용 — 브랜드 가이드를 읽고 캠페인 기획안 · 본문 작성</li>
-            </ul>
-
-            {loading ? (
-              <div className="text-slate-400 text-sm font-bold">상태 확인 중...</div>
-            ) : membershipActive && currentPlan === 'standard_ai' ? (
-              subscribedActions('AI 협업 멤버십 구독 중')
-            ) : includedInCurrentPlan('standard_ai') ? (
-              <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                {TIER_LABEL[currentPlan!]}에 포함되어 있습니다
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleStartSubscribe('standard_ai')}
-                disabled={saving}
-                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
-              >
-                {membershipActive && currentPlan === 'standard'
-                  ? 'AI 협업 멤버십으로 업그레이드'
-                  : `${STANDARD_AI_PRICE.toLocaleString()}원으로 구독 시작`}
-              </button>
-            )}
-          </div>
-
-          {/* Pro Plan — 모든 멤버십 기능 + 디엠 자동화. 카드 형태(파스텔 테두리 ·
-              흰 배경 · 그라데이션 배지와 CTA)뿐 아니라 색 계열도 다른 플랜과
-              맞춘다. 초록 계열은 이 화면에서 "구독 중 · 완료" 상태 표시에 쓰이는
-              색이라, 프로 플랜만 초록으로 두면 다른 상품처럼 튀어 보인다. */}
-          <div className="relative rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm">
-            <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-indigo-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                프로 플랜 · 🚀 전체 기능
-              </span>
-            </div>
-            <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">{PRO_PRICE.toLocaleString()}</span>
-              <span className="text-slate-500 text-sm mb-1">원 / 월</span>
-              <span className="text-slate-400 text-xs mb-1.5 ml-1">부가세 포함</span>
-            </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">모든 멤버십 + 디엠 자동화 · 인사이트</h4>
-            <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>모든 멤버십 플랜</strong>(스탠다드 · AI 협업) 혜택 포함</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>디엠 자동화</strong>(인스타그램 댓글 → 자동 DM) 이용</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>키워드별 자동 응답 · 발송 이력 확인 · 수동 DM 발송</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>인사이트 메뉴</strong> 이용 — 릴스 조회 · 도달 · 저장 지표를 한눈에</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>협업 타임라인 AI 어시스턴트 포함</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>콘텐츠 기획 AI</strong> 포함 — 캠페인 기획안 · 본문 초안 작성</li>
-            </ul>
-
-            {loading ? (
-              <div className="text-slate-400 text-sm font-bold">상태 확인 중...</div>
-            ) : membershipActive && currentPlan === 'pro' ? (
-              subscribedActions('프로 플랜 구독 중')
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleStartSubscribe('pro')}
+                onClick={() => handleStartSubscribe('brand_dm')}
                 disabled={saving}
                 className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
               >
-                {membershipActive && currentPlan
-                  ? '프로 플랜으로 업그레이드'
-                  : `${PRO_PRICE.toLocaleString()}원으로 구독 시작`}
+                {language === 'en' ? `Subscribe for ₩${BRAND_DM_PRICE.toLocaleString()}` : `${BRAND_DM_PRICE.toLocaleString()}원으로 구독 시작`}
               </button>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-6 md:p-8 max-w-xl">
+            <h4 className="font-black text-slate-900 text-lg mb-3">
+              {language === 'en' ? 'Everything is free' : '모든 기능이 무료예요'}
+            </h4>
+            <ul className="space-y-2 text-sm text-slate-600">
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>영상 업로드 · 콘텐츠 업로드</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>캠페인 AI(협업 타임라인 AI 어시스턴트 · 콘텐츠 기획 AI)</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>인사이트 메뉴</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>자동 디엠</strong>은 <strong>브랜드 매칭받기</strong>를 등록하면 무료로 열립니다</li>
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* Claude plan — sold SEPARATELY from the memberships above. It is not a
@@ -880,7 +815,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <div className="flex-1">
               <h4 className="font-bold text-slate-800 text-lg mb-2">협업 AI를 Claude로 — {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</h4>
               <p className="text-sm text-slate-600 leading-relaxed mb-3">
-                협업 타임라인 AI는 기본적으로 제미나이(무료, AI 멤버십 포함)로 동작합니다. 깊은 분석이나 문서·계약서 검토처럼 더 강력한 답변이 필요할 때는 <strong>Claude</strong>를 선택할 수 있어요. 클로드 플랜은 멤버십과 <strong>별도로 결제</strong>하며, 결제하면 바로 크레딧이 충전됩니다.
+                협업 타임라인 AI는 기본적으로 제미나이로 무료로 동작합니다. 깊은 분석이나 문서·계약서 검토처럼 더 강력한 답변이 필요할 때는 <strong>Claude</strong>를 선택할 수 있어요. 클로드 플랜은 <strong>별도로 결제</strong>하며, 결제하면 바로 크레딧이 충전됩니다.
               </p>
               <ul className="space-y-1.5 text-sm text-slate-600">
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원 단건 결제 · <strong>{ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</strong> 충전</li>
@@ -942,16 +877,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <span>ℹ️</span> 안내사항
           </h4>
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
-            <li>스탠다드 멤버십은 월 {STANDARD_PRICE.toLocaleString()}원, AI 협업 멤버십은 월 {STANDARD_AI_PRICE.toLocaleString()}원, 프로 플랜은 월 {PRO_PRICE.toLocaleString()}원이며, 언제든 해지할 수 있습니다.</li>
-            <li><strong>멤버십은 가입일 기준 매월 자동결제(정기결제)됩니다.</strong> 신용·체크카드는 입력한 카드로, 카카오페이는 등록한 카카오페이로 매월 같은 날 자동 결제되며(첫 달은 가입 시 즉시 결제) 언제든 해지할 수 있습니다.</li>
-            <li><strong>해지하면 이미 결제한 이용 기간까지는 그대로 이용</strong>할 수 있고, 그 다음 달부터 자동결제가 중단되면서 멤버십이 해지됩니다. 이미 결제한 이용료는 환불되지 않고 남은 기간 이용으로 대체됩니다. 종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.</li>
+            <li>멤버십으로 잠겨 있던 기능(영상 업로드 · 캠페인 AI · 인사이트)은 모두 무료로 열렸습니다.</li>
+            <li>인플루언서의 자동 디엠은 <strong>브랜드 매칭받기</strong>를 등록하면 결제 없이 이용할 수 있습니다. 담당자가 리스트업한 캠페인 제안을 계속 거절하면 담당자 판단으로 이용이 중단될 수 있고, 유가시딩 캠페인 제안을 수락하면 다시 열립니다.</li>
+            <li>브랜드 계정의 자동 디엠은 <strong>자동 디엠 플랜(월 {BRAND_DM_PRICE.toLocaleString()}원)</strong>을 구독해야 이용할 수 있습니다. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다.</li>
+            <li><strong>해지하면 이미 결제한 이용 기간까지는 그대로 이용</strong>할 수 있고, 그 다음 달부터 자동결제가 중단됩니다. 종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.</li>
+            <li>예전 멤버십(스탠다드 · AI 협업 · 프로)을 구독 중이었다면 다음 결제일에 추가 결제 없이 종료됩니다.</li>
             <li><strong>표시된 모든 금액은 부가세(VAT 10%)가 포함된 금액</strong>입니다. 결제 시 추가로 청구되는 금액은 없습니다.</li>
-            <li>스탠다드 멤버십 구독 시 영상 업로드와 콘텐츠 7개 이상 업로드를 이용할 수 있습니다.</li>
-            <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 AI 협업 멤버십({STANDARD_AI_PRICE.toLocaleString()}원) 이상에 포함됩니다. 스탠다드 멤버십({STANDARD_PRICE.toLocaleString()}원)에는 포함되지 않습니다.</li>
-            <li><strong>콘텐츠 기획 AI</strong>(브랜드 가이드를 읽고 캠페인 기획안 · 본문 작성)는 AI 협업 멤버십과 프로 플랜에 포함되며, 멤버십을 구독하지 않으면 이용할 수 없습니다.</li>
-            <li>프로 플랜은 스탠다드 · AI 협업 멤버십 혜택을 포함하며, 인스타그램 디엠 자동화는 프로 플랜에서만 이용할 수 있습니다.</li>
             <li>디엠 자동화는 인스타그램 댓글에 반응해 자동으로 DM을 보내고, 키워드별 응답 문구와 발송 이력을 관리할 수 있습니다. 인스타그램 프로페셔널(비즈니스 · 크리에이터) 계정 연동이 필요합니다.</li>
-            <li><strong>인사이트 메뉴</strong>: 릴스 조회 · 도달 · 저장 지표와 반응 좋은 릴스 TOP 5, AI 콘텐츠 코칭을 함께 제공합니다. 비즈니스 계정은 우리 계정을 태그한 인플루언서 콘텐츠까지 인사이트에서 볼 수 있습니다.</li>
           </ul>
         </div>
       </section>
@@ -1216,73 +1148,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       : ' 등록하면 가입일 기준 매월 자동결제됩니다(첫 달은 지금 결제).'}
                   </p>
                 )}
-                {/* 코드 입력칸만 남긴다. 무슨 혜택이 있는 코드인지는 직접 연락받은
-                    사람만 알아야 하므로 화면에 설명을 쓰지 않는다. */}
-                <div className="pt-3 mt-1 border-t border-dashed border-slate-200">
-                  <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">
-                    코드 <span className="text-slate-400 normal-case tracking-normal font-bold">(선택)</span>
-                  </p>
-                  <div className="flex gap-2">
-                    {/* maxLength 에 여유를 둔 이유: 구분자가 섞인 붙여넣기(323-039-109)가
-                        잘려 들어오면 앞자리만 남는다. 넉넉히 받고 숫자만 남긴다.
-
-                        min-w-0 이 꼭 있어야 한다. flex 자식은 기본값이
-                        min-width:auto 라 자기 내용 너비 밑으로는 줄어들지
-                        않는다. 이 칸의 내용 너비는 placeholder('9자리 코드
-                        입력') 가 정하는데, index.css 가 휴대폰 입력칸을
-                        16px 로 못 박고 여기에 tracking-[0.2em] 까지 붙어서
-                        332px 이 나온다 — 폭 390px 폰의 이 줄(326px)보다
-                        넓다. 그래서 flex-1 만 있던 동안에는 줄이 89~159px
-                        넘쳐서(320·360·390px 폰 모두) 옆의 '코드 확인'
-                        버튼이 오른쪽으로 잘려 나갔고, 그 가로 넘침이 화면을
-                        옆으로 밀어 아래 막대까지 잘려 보이게 했다.
-                        min-w-0 으로 풀면 칸이 남는 폭까지 줄어 넘침이 0 이 된다. */}
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      name="membershipPromoCode"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-form-type="other"
-                      maxLength={PROMO_CODE_LENGTH + 2}
-                      value={promoInput}
-                      onChange={(e) => {
-                        setPromoInput(e.target.value.replace(/[^0-9]/g, '').slice(0, PROMO_CODE_LENGTH));
-                        // 코드를 고치면 앞서 확인한 결과는 더 이상 이 값이 아니다.
-                        setPromo(null);
-                        setPromoError(null);
-                      }}
-                      placeholder={`${PROMO_CODE_LENGTH}자리 코드 입력`}
-                      className={`flex-1 min-w-0 px-3 py-2.5 rounded-xl border text-sm font-bold tracking-[0.2em] focus:outline-none ${
-                        promo
-                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                          : promoError
-                            ? 'border-red-300 focus:border-red-400'
-                            : 'border-slate-200 focus:border-blue-400'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={verifyPromoCode}
-                      disabled={promoChecking || promoInput.replace(/[^0-9]/g, '').length !== PROMO_CODE_LENGTH}
-                      className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 whitespace-nowrap"
-                    >
-                      {promoChecking ? '확인 중…' : promo ? '확인됨' : '코드 확인'}
-                    </button>
-                  </div>
-                  {promo && (
-                    <p className="text-[11px] font-bold text-emerald-600 mt-2 leading-relaxed">
-                      ✓ 코드가 적용되었습니다. 오늘 결제 금액 0원.
-                    </p>
-                  )}
-                  {promoError && (
-                    <p className="text-[11px] font-bold text-red-600 mt-2">{promoError}</p>
-                  )}
-                </div>
+                {/* 출시 혜택 코드(프로 플랜 무료 기간)는 판매를 종료했다. 코드 입력칸을 두지 않는다. */}
               </div>
               <div className="text-xs text-slate-500 space-y-1">
-                <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
+                <p>✓ 구독 즉시 자동 디엠을 이용할 수 있습니다.</p>
                 {promo ? (
                   <p>
                     ✓ {formatDate(promo.freeUntil) ? `${formatDate(promo.freeUntil)}부터 ` : '무료 기간이 끝나면 '}
@@ -1293,11 +1162,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 )}
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                {selectedTier === 'pro'
-                  ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트, 콘텐츠 기획 AI, 인스타그램 디엠 자동화, 인사이트 메뉴(릴스 지표 · 릴스 TOP 5 · AI 코칭)가 즉시 활성화됩니다.'
-                  : selectedTier === 'standard_ai' || selectedTier === 'commerce'
-                    ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트와 콘텐츠 기획 AI가 즉시 활성화됩니다. 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'
-                    : '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트와 콘텐츠 기획 AI는 AI 협업 멤버십, 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'}
+                구독을 시작하면 인스타그램 디엠 자동화(댓글 → 자동 DM · 키워드별 응답 · 발송 이력)가 즉시 활성화됩니다.
               </p>
             </div>
             <div className="shrink-0 px-5 py-4 border-t border-slate-100 flex gap-2">

@@ -16,6 +16,7 @@ import AdminRevenueCards from './admin/AdminRevenueCards';
 import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import AdminInfluencerDatabase from './admin/AdminInfluencerDatabase';
 import AdminManagerAccounts from './admin/AdminManagerAccounts';
+import AdminLegacyUsernameTransfer from './admin/AdminLegacyUsernameTransfer';
 import AdminDmQueue from './admin/AdminDmQueue';
 import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import { isTestProposal } from '../utils/testData';
@@ -786,7 +787,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {/* 회원 관리 */}
         {activeTab === 'users' && (
           adminToken
-            ? <AdminInfluencersPanel token={adminToken} />
+            ? <><AdminLegacyUsernameTransfer token={adminToken} /><AdminInfluencersPanel token={adminToken} /></>
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 데이터가 표시됩니다." />
         )}
 

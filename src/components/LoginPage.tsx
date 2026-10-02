@@ -1,15 +1,9 @@
 
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Briefcase, Lock, Sparkles, User } from 'lucide-react';
+import { Briefcase, Sparkles } from 'lucide-react';
 import { supabase } from '../services/supabase';
-import { setAccountScope, sessionSet } from '../utils/accountScope';
-import { primeSupabaseSession } from '../services/apiService';
-import { login as netlifyLogin } from '@netlify/identity';
-import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
 import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
-
-const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
 
 interface LoginPageProps {
   onNavigateHome: () => void;
@@ -18,13 +12,17 @@ interface LoginPageProps {
   onAdminLoginSuccess?: (info?: { username: string; token: string }) => void;
 }
 
-const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup, onLoginSuccess, onAdminLoginSuccess }) => {
-  const { language, t } = useLanguage();
+/**
+ * 크리에이터(인플루언서) 로그인. 카카오 간편로그인 하나만 둔다.
+ *
+ * 아이디·비밀번호 로그인과 이메일 회원가입은 없앴다 — 처음 온 사람도 카카오로 시작하면
+ * 바로 가입된다. 예전 아이디·비밀번호 계정으로 쓰던 유저네임은 카카오로 다시 가입한 뒤
+ * 링크 만들기 화면에서 그대로 이어받을 수 있다(auth-claim-username 의 이전 규칙).
+ * 운영자는 /operator-login, 브랜드는 /business-login 을 쓴다.
+ */
+const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome }) => {
+  const { language } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
-  const [showFindAccount, setShowFindAccount] = useState(false);
-  // 아이디/비밀번호 로그인은 아무것도 저장하지 않는다 — 아이디를 채워 주는 일은
-  // 브라우저·OS 의 비밀번호 관리자(autoComplete)가 한다.
-  const [formData, setFormData] = useState({ id: '', password: '' });
 
   // 카카오 간편로그인이 콜백에서 끝내 실패하면 main.tsx 가 `?kakao_login=fail` 을
   // 남기고 이 화면으로 돌려보낸다. 조용히 로그인 폼만 보여 주면 사용자는 왜
@@ -35,17 +33,13 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     params.delete('kakao_login');
     const query = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
-    alert('카카오 로그인을 완료하지 못했습니다. 다시 시도하거나 아이디/비밀번호로 로그인해 주세요.');
+    alert('카카오 로그인을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }, []);
-
-  const isAdminEmail = (input: string) => {
-    return ADMIN_EMAILS.includes(input.trim().toLowerCase());
-  };
 
   const handleKakaoLogin = async () => {
     if (!supabase) {
       console.error('[Login] Supabase 클라이언트가 null입니다. 환경 변수를 확인하세요. VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
-      alert('서버 연결이 설정되지 않아 카카오 로그인을 사용할 수 없습니다. 아이디/비밀번호로 로그인해 주세요.');
+      alert('서버 연결이 설정되지 않아 카카오 로그인을 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
     setIsLoading(true);
@@ -61,165 +55,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
       setIsLoading(false);
     }
   };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      // Check if the input is an admin email — use Netlify Identity for admin auth
-      if (isAdminEmail(formData.id)) {
-        try {
-          const user = await netlifyLogin(formData.id.trim(), formData.password);
-          const roles: string[] = (user as any).app_metadata?.roles || [];
-          if (!roles.includes('admin') && !isAdminEmail(formData.id)) {
-            alert('관리자 권한이 없는 계정입니다.');
-            setIsLoading(false);
-            return;
-          }
-          if (onAdminLoginSuccess) {
-            // Netlify Identity 로 들어온 운영자도 이 탭을 운영자 슬롯으로 쓴다.
-            setAccountScope('operator');
-            onAdminLoginSuccess();
-          }
-          return;
-        } catch (err: any) {
-          if (err?.status === 401) {
-            alert('이메일 또는 비밀번호가 올바르지 않습니다.');
-          } else {
-            alert('관리자 로그인 중 오류가 발생했습니다: ' + (err?.message || '알 수 없는 오류'));
-          }
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // Use server-side auth endpoint for reliable login (handles email confirmation automatically)
-      console.log('[Login] 서버 인증 요청 시작:', { username: formData.id.trim() });
-      const response = await fetch('/.netlify/functions/auth-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: formData.id.trim(),
-          password: formData.password,
-        }),
-      });
-
-      console.log('[Login] 서버 응답 상태:', response.status, response.statusText);
-      const result = await response.json();
-      console.log('[Login] 서버 응답 데이터:', { success: result.success, error: result.error });
-
-      if (!response.ok) {
-        alert(result.error || '로그인 실패');
-        return;
-      }
-
-      if (result.success) {
-        const username = result.username || formData.id.trim().toLowerCase();
-        const hasSiteData = !!result.has_site_data;
-        const phone = result.phone || '';
-
-        // 운영자로 보낼지는 서버가 알려 준 역할(profiles.role)로만 판단한다.
-        // 예전에는 아이디 목록('picksfolio')을 화면에 박아 두고 골라냈는데, 그
-        // 아이디가 일반 계정에 다시 열린 뒤로는 새 주인이 로그인할 때마다 운영자
-        // 화면으로 끌려가 "관리자 권한이 필요합니다." 만 보게 됐다. 서버의 관리자
-        // 판정(_shared/admin-auth)도 역할을 보므로 같은 기준을 쓴다.
-        const isOperator = String(result.role || 'user').trim().toLowerCase() === 'admin';
-
-        if (isOperator && onAdminLoginSuccess) {
-          // 운영자로 들어오는 탭은 운영자 슬롯을 쓴다. 이 표시가 먼저 있어야 아래
-          // 저장과 Supabase 세션이 일반 유저 탭의 로그인을 덮지 않는다.
-          const slotChanged = setAccountScope('operator');
-          sessionSet('picks_user_session', username);
-          sessionSet('picks_admin_token', result.access_token || '');
-          if (supabase && result.access_token && result.refresh_token) {
-            // 슬롯이 바뀐 뒤 새로고침(아래)으로 넘어가야 하므로 저장이 끝날 때까지 기다린다.
-            try {
-              await supabase.auth.setSession({
-                access_token: result.access_token,
-                refresh_token: result.refresh_token,
-              });
-            } catch (err) {
-              console.warn('[Login] setSession warning:', err);
-            }
-          }
-          if (slotChanged) {
-            // 이 탭은 방금 일반 슬롯에서 운영자 슬롯으로 옮겨 왔다. Supabase
-            // 클라이언트는 페이지가 뜰 때의 슬롯 이름으로 만들어져 있어서, 한 번
-            // 새로 열어야 다른 탭(일반 유저)의 인증 알림과 완전히 갈라진다.
-            window.location.href = window.location.origin + '/operator';
-            return;
-          }
-          onAdminLoginSuccess({ username, token: result.access_token || '' });
-          return;
-        }
-
-        // Set localStorage BEFORE setSession so that the auth state listener
-        // can find the username and won't redirect to setup-link.
-        // 일반 계정으로 로그인했으니 이 탭은 다시 기본 슬롯이다.
-        const slotChanged = setAccountScope('user');
-        sessionSet('picks_user_session', username);
-
-        // 대시보드는 아래 onLoginSuccess 에서 곧바로 열리고, 그 화면들이 띄우는 첫
-        // 요청(받은 제안 · 협업 목록 · DM 자동화)은 setSession 이 끝나기 전에 나간다.
-        // 토큰을 API 계층에 먼저 넘겨 두지 않으면 그 요청들이 인증 헤더 없이 나가
-        // 방금 로그인했는데도 "로그인이 필요합니다" 를 보게 된다.
-        primeSupabaseSession(result.access_token || '', result.refresh_token || '');
-
-        // Call onLoginSuccess BEFORE setSession so that loginNavigationHandledRef
-        // is set before onAuthStateChange fires (prevents race condition to setup-link)
-        onLoginSuccess(username, hasSiteData, phone);
-
-        // Set Supabase session from server tokens if available
-        if (supabase && result.access_token && result.refresh_token) {
-          supabase.auth.setSession({
-            access_token: result.access_token,
-            refresh_token: result.refresh_token,
-          })
-            .then(() => {
-              // 운영자로 쓰던 탭에 일반 계정으로 로그인한 경우에만 해당한다.
-              // 세션이 새 슬롯에 저장된 뒤 한 번 새로 열어야 Supabase 클라이언트가
-              // 이 슬롯 이름으로 다시 만들어진다.
-              if (slotChanged) window.location.href = window.location.origin + '/admin';
-            })
-            .catch(err => console.warn('[Login] setSession warning:', err));
-        }
-      }
-    } catch (error: any) {
-      console.error('[Login] 로그인 오류 상세:', {
-        message: error?.message,
-        name: error?.name,
-        stack: error?.stack,
-        type: error instanceof TypeError ? 'TypeError (네트워크/CORS 오류 가능성)' : error?.constructor?.name,
-      });
-
-      // TypeError typically means network failure or CORS block
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        alert('서버에 연결할 수 없습니다. 네트워크 연결을 확인하거나, 잠시 후 다시 시도해주세요.\n\n(콘솔에서 상세 에러를 확인하세요)');
-      } else {
-        alert('서버 오류가 발생했습니다: ' + error.message);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
-
-  if (showFindAccount) {
-    return <FindAccount accountType="user" onBack={() => setShowFindAccount(false)} />;
-  }
-
-  // 홈과 같은 규칙을 쓰는 조각들. 입력칸·버튼이 여러 번 반복되므로 한곳에 모아 둔다.
-  const fieldShell =
-    'flex items-center gap-2.5 bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-4 py-3 transition-colors focus-within:border-[#2563EB] focus-within:bg-white';
-  const fieldInput =
-    'bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold placeholder:text-[#C3C9DC] text-sm';
 
   return (
     <div className="relative min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 pt-20 sm:pt-28 pb-12 sm:pb-16 overflow-hidden">
@@ -283,87 +118,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
 
         {/* 로그인 카드 — 홈의 흰 카드와 같은 테두리·그림자·둥근 정도다. */}
         <div className="mt-6 sm:mt-7 bg-white border border-[#0B0F1A]/[0.08] rounded-[1.5rem] sm:rounded-[1.75rem] p-5 sm:p-7 shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] animate-in fade-in slide-in-from-bottom-2 duration-500">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-black text-[#39415C] ml-1">
-                {language === 'en' ? 'Username or Email' : '아이디 또는 이메일'}
-              </label>
-              <div className={fieldShell}>
-                <User size={16} className="text-[#98A0BC] shrink-0" strokeWidth={2.5} />
-                <input
-                  type="text"
-                  name="id"
-                  placeholder={language === 'en' ? 'Enter username or admin email' : '아이디 또는 관리자 이메일'}
-                  required
-                  value={formData.id}
-                  onChange={handleChange}
-                  className={fieldInput}
-                  disabled={isLoading}
-                  autoComplete="username"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  inputMode="email"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-xs font-black text-[#39415C] ml-1">
-                {language === 'en' ? 'Password' : '비밀번호'}
-              </label>
-              <div className={fieldShell}>
-                <Lock size={16} className="text-[#98A0BC] shrink-0" strokeWidth={2.5} />
-                <input
-                  type="password"
-                  name="password"
-                  placeholder={language === 'en' ? 'Enter password' : '비밀번호를 입력해 주세요'}
-                  required
-                  value={formData.password}
-                  onChange={handleChange}
-                  className={fieldInput}
-                  disabled={isLoading}
-                  autoComplete="current-password"
-                />
-              </div>
-              <div className="flex items-center justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowFindAccount(true)}
-                  className="text-[11px] text-[#8B93AE] hover:text-[#2563EB] font-bold transition-colors"
-                >
-                  {language === 'en' ? 'Find ID/Password' : '아이디/비밀번호 찾기'}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-[#2563EB] hover:bg-[#1d4ed8] text-white py-3.5 rounded-full text-sm font-black transition-all shadow-[0_12px_28px_-12px_rgba(37,99,235,0.8)] active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  {language === 'en' ? 'Logging in...' : '로그인 중...'}
-                </>
-              ) : (
-                <>
-                  {t('nav.login', '로그인', 'Log In')}
-                  <ArrowRight size={16} strokeWidth={2.8} />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="relative my-4 flex items-center">
-            <div className="flex-grow border-t border-[#0B0F1A]/[0.08]"></div>
-            <span className="flex-shrink mx-3 text-[#A6ADC6] text-[11px] font-black">
-              {language === 'en' ? 'OR' : '또는'}
-            </span>
-            <div className="flex-grow border-t border-[#0B0F1A]/[0.08]"></div>
-          </div>
-
           <button
             type="button"
             onClick={handleKakaoLogin}
@@ -381,15 +135,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
               이미 자기 "간편로그인 저장"을 제공한다. 우리 화면에 같은 이름을 하나 더
               두면 무엇을 저장하는 건지 알 수 없다. utils/loginPersistence 참고. */}
 
-          <p className="text-center mt-5 text-[#8B93AE] text-[13px] font-bold">
-            {language === 'en' ? "Don't have an account?" : '계정이 없으신가요?'}{' '}
-            <button
-              onClick={onNavigateSignup}
-              className="text-[#2563EB] font-black hover:underline"
-              disabled={isLoading}
-            >
-              {t('nav.signup', '회원가입하기', 'Sign Up')}
-            </button>
+          <p className="text-center mt-4 text-[#8B93AE] text-[12px] font-bold leading-relaxed">
+            {language === 'en'
+              ? 'New here? Starting with Kakao creates your account right away.'
+              : '처음이신가요? 카카오로 시작하면 바로 가입돼요.'}
           </p>
         </div>
 

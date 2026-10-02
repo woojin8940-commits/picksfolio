@@ -4,7 +4,7 @@ import ImageCropper from './ImageCropper';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData, clearLinkCache } from '../services/prefetchService';
 import { apiService, type SaveResult } from '../services/apiService';
-import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, SellerVerification, OpenScheduleItem } from '../types';
+import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, OpenScheduleItem } from '../types';
 import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
@@ -103,7 +103,7 @@ interface LinkManagementProps {
   onNavigateMembership?: () => void;
 }
 
-const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMembership }) => {
+const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const { language, t } = useLanguage();
 
   const [blocks, setBlocks] = useState<Block[]>(() => {
@@ -123,18 +123,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [editForm, setEditForm] = useState<Partial<Block>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const [verification, setVerification] = useState<SellerVerification | null>(
-    () => apiService.getCachedSellerVerification(userName.replace(/^biz\//, ''))
-  );
-  const membershipActive = !!verification?.membership_active;
-
-  useEffect(() => {
-    let cancelled = false;
-    apiService.getSellerVerification(userName.replace(/^biz\//, '')).then((data) => {
-      if (!cancelled) setVerification(data);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [userName]);
 
   // Product Folder (InfoClink-style) state
   const [productFolders, setProductFolders] = useState<ProductFolder[]>(() => {
@@ -446,14 +434,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       setSaveMessage('파일 크기가 20MB를 초과합니다.');
       setToastType('error');
       setShowToast(true);
-      return;
-    }
-
-    if (isVideo && !membershipActive) {
-      setSaveMessage('영상 업로드는 스탠다드 멤버십(월 4,900원)부터 이용할 수 있습니다.');
-      setToastType('error');
-      setShowToast(true);
-      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
@@ -1913,11 +1893,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     >
                       <Camera size={15} /> {coverImage ? '커버 변경' : '커버 업로드'}
                     </button>
-                    {!membershipActive && (
-                      <p className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
-                        <Lock size={10} /> 영상 커버는 멤버십에서 이용할 수 있어요
-                      </p>
-                    )}
                     {coverImage && (
                       <button
                         onClick={() => { setCoverImage(undefined); setCoverPosition(undefined); fullDesignRef.current = { ...fullDesignRef.current, portfolioHeaderImage: undefined, portfolioHeaderImagePosition: undefined }; }}
@@ -2438,15 +2413,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <ImageIcon size={14} />
                     <span>{editForm.coverMedia ? '이미지/영상 변경' : '이미지/영상 업로드'}</span>
                   </button>
-                  {!membershipActive && (
-                    <button
-                      onClick={() => onNavigateMembership?.()}
-                      className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 text-blue-600 rounded-xl text-[11px] font-bold w-full justify-center hover:bg-blue-100 transition-all"
-                    >
-                      <Lock size={12} />
-                      <span>영상 업로드는 멤버십 전용</span>
-                    </button>
-                  )}
                 </div>
                 )}
                 <div className={`w-full ${editForm.displayType !== 'text' ? 'md:w-1/2' : ''} space-y-6`}>

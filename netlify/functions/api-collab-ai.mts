@@ -1,7 +1,5 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
-import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
-import { tierAtLeast } from "./_shared/membership-billing.mts";
 import {
   CLAUDE_MODEL,
   deductionCredits,
@@ -32,10 +30,6 @@ import {
   storagePathOf,
 } from "./_shared/upload-media.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
-import {
-  applyOperatorMembershipGrant,
-  getOperatorMembershipGrant,
-} from "./_shared/operator-membership-grants.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 
 // Collaboration AI assistant.
@@ -798,35 +792,8 @@ export default async (req: Request) => {
       );
     }
   } else {
-    // Gemini membership gate. AI is included only in the AI-enabled tiers:
-    // AI 협업 멤버십 (standard_ai, 6,900), 커머스 (13,900), 프로 (18,700). Legacy
-    // 'live' is treated as commerce. The plain standard (4,900) tier is excluded.
-    //
-    // Business (company) accounts are exempt from this gate — the AI assistant is
-    // part of their collaboration workspace, not an influencer membership add-on.
-    // They are still bounded by the per-user daily quota below.
-    if (userType !== "business") {
-      const sellerStore = getStore("seller-verification");
-      const complimentary = applyComplimentaryMembership(
-        username,
-        (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
-      );
-      const grant = await getOperatorMembershipGrant({ authUserId: auth.userId, username });
-      const record = applyOperatorMembershipGrant(complimentary, grant);
-      // AI 협업 멤버십 이상(커머스·프로 포함)이면 사용할 수 있다.
-      const aiEnabled =
-        !!record?.membership_active && tierAtLeast(record?.membership_plan, "standard_ai");
-      if (!aiEnabled) {
-        return Response.json(
-          {
-            error:
-              "AI 어시스턴트는 AI 협업 멤버십(6,900원) 이상에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
-            code: "MEMBERSHIP_REQUIRED",
-          },
-          { status: 403 },
-        );
-      }
-    }
+    // 캠페인 AI(Gemini)는 모든 계정에 무료로 열려 있다. 멤버십 게이트는 없앴고,
+    // 아래 하루 사용량 한도만 남는다.
 
     // Per-user daily soft quota (Gemini only — Claude is bounded by its wallet).
     usageStore = getStore("ai-usage");

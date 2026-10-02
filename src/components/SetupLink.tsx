@@ -31,11 +31,25 @@ interface SetupLinkProps {
 const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
   const { language } = useLanguage();
   const en = language === 'en';
-  const [username, setUsername] = useState('');
+  // 홈 화면에서 적어 둔 링크가 있으면 이어서 채운다(App 의 Hero → 카카오 로그인 → 여기).
+  const [username, setUsername] = useState(() => {
+    try {
+      return (sessionStorage.getItem('picks_desired_link') || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
+    } catch {
+      return '';
+    }
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   /** 다시 로그인해야 하는 상태. 이때는 "다시 시도" 가 아무 소용이 없다. */
   const [needsLogin, setNeedsLogin] = useState(false);
+  /**
+   * 예전 아이디·비밀번호 계정에서 쓰던 유저네임이라 이전 코드가 필요한 상태.
+   * 카카오 휴대폰 번호가 예전 계정 번호와 같으면 서버가 코드 없이 바로 옮겨 주고,
+   * 다르면 운영자가 본인 확인 후 전달한 코드를 여기서 받는다.
+   */
+  const [needsCode, setNeedsCode] = useState(false);
+  const [transferCode, setTransferCode] = useState('');
 
   const validateUsername = (value: string) => {
     if (value.length < 3) return en ? 'Enter at least 3 characters.' : '3자 이상 입력해 주세요.';
@@ -70,6 +84,10 @@ const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
       setError('');
     }
     setNeedsLogin(false);
+    if (value !== username) {
+      setNeedsCode(false);
+      setTransferCode('');
+    }
 
     setUsername(value);
   };
@@ -97,11 +115,12 @@ const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
     setNeedsLogin(false);
 
     try {
-      const result = await claimUsername(username);
+      const result = await claimUsername(username, needsCode ? transferCode.trim() : '');
 
       if (!result.ok) {
         setError(result.error);
         setNeedsLogin(result.reason === 'auth');
+        setNeedsCode(result.reason === 'legacy_code_required');
         return;
       }
 
@@ -245,6 +264,30 @@ const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
                 </p>
               )}
             </div>
+
+            {needsCode && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-black text-[#39415C] ml-1">
+                  {en ? 'Transfer code' : '이전 코드'}
+                </label>
+                <input
+                  type="text"
+                  value={transferCode}
+                  onChange={(e) => setTransferCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
+                  placeholder={en ? 'Code from PICKS Folio' : '운영자에게 받은 8자리 코드'}
+                  disabled={isLoading}
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-4 py-3 text-sm font-black tracking-[0.2em] text-[#0B0F1A] outline-none focus:border-[#2563EB] focus:bg-white placeholder:tracking-normal placeholder:font-bold placeholder:text-[#C3C9DC]"
+                />
+                <p className="text-[#8B93AE] text-[11px] font-bold ml-1 leading-relaxed">
+                  {en
+                    ? 'This link belonged to a previous ID/password account. Enter the code we sent you to keep it.'
+                    : '예전에 아이디·비밀번호로 가입해 쓰던 링크라면, 안내받은 이전 코드를 넣으면 페이지와 기록이 그대로 이어집니다.'}
+                </p>
+              </div>
+            )}
 
             <button
               type="submit"

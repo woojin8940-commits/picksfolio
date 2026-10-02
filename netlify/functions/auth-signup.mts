@@ -29,9 +29,21 @@ function generateProfileCode(): string {
   return code;
 }
 
+const ALLOW_PASSWORD_SIGNUP = false;
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  // 인플루언서 가입은 카카오 간편로그인으로만 받는다. 아이디·비밀번호 가입 경로는 닫는다
+  // (카카오 가입은 kakao-profile-setup → auth-claim-username 이 처리한다).
+  if (!ALLOW_PASSWORD_SIGNUP) {
+    return Response.json({
+      success: false,
+      code: "KAKAO_ONLY",
+      error: "회원가입은 카카오 간편로그인으로만 할 수 있어요. 로그인 화면에서 카카오로 시작해 주세요.",
+    });
   }
 
   try {

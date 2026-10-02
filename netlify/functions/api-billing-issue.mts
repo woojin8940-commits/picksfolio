@@ -7,6 +7,7 @@ import {
   issueNiceCardBillingKey,
   TIER_PRICE_KRW,
   TIER_RANK,
+  isSellableTier,
   readMembershipCharge,
   verifyMembershipBillingKey,
   type MembershipChargePending,
@@ -18,7 +19,7 @@ import {
   redeemPromoCode,
   releasePromoRedemption,
 } from "./_shared/membership-promo.mts";
-import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { findProfileByUsername, requireAccountOwner } from "./_shared/user-auth.mts";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
@@ -51,6 +52,34 @@ export default async (req: Request) => {
       return Response.json(
         { success: false, error: "유효하지 않은 멤버십 플랜입니다." },
         { status: 400 },
+      );
+    }
+
+    // 지금 새로 구독할 수 있는 플랜은 브랜드 전용 자동 디엠 플랜(월 5,900원)뿐이다.
+    // 멤버십으로 잠겨 있던 다른 기능은 모두 무료가 됐고, 인플루언서의 자동 디엠은 결제가
+    // 아니라 브랜드 매칭받기 등록으로 열린다 — 인플루언서가 결제할 일은 없다.
+    if (!isSellableTier(normalizedTier)) {
+      return Response.json(
+        { success: false, error: "판매가 종료된 플랜입니다. 모든 기능은 무료로 이용할 수 있어요." },
+        { status: 400 },
+      );
+    }
+    // 출시 혜택 코드(프로 플랜 무료 기간)는 판매를 종료한 플랜에 걸린 혜택이다.
+    if (normalizePromoCode(body?.promoCode)) {
+      return Response.json(
+        { success: false, error: "출시 혜택 코드는 종료되었습니다. 코드 없이 구독해 주세요." },
+        { status: 400 },
+      );
+    }
+    const profile = await findProfileByUsername(String(username));
+    const role = String(profile?.role || "").toLowerCase();
+    if (!profile?.found || (role !== "operator" && role !== "admin")) {
+      return Response.json(
+        {
+          success: false,
+          error: "자동 디엠 플랜은 브랜드 계정 전용이에요. 인플루언서는 브랜드 매칭받기를 등록하면 자동 디엠을 무료로 쓸 수 있습니다.",
+        },
+        { status: 403 },
       );
     }
 

@@ -5,6 +5,7 @@ import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
   DM_AUTOMATION_TIER,
   dmAutomationAllowed,
+  dmAutomationStatus,
 } from "./_shared/dm-automation-access.mts";
 import { BAIT_BUTTON_LABEL_MAX, BAIT_TEXT_MAX, normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import { readBaitHealth } from "./_shared/dm-bait.mts";
@@ -644,6 +645,7 @@ export default async (req: Request, context: Context) => {
       await writeDmSendSpeed([data.igUserId, data.igAccountId], sendSpeed)
         .catch((e) => console.warn("[dm-automation] send speed sync failed:", (e as Error)?.message));
     }
+    const dmAccess = await dmAutomationStatus(username, auth.userId, { fresh: true });
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
@@ -669,8 +671,10 @@ export default async (req: Request, context: Context) => {
       externalDm: await readForeignDm(username),
       // 2단계 발송(미끼 → 본 메시지)이 막혀 기존 1통 카드로 자동 전환돼 있는지.
       baitHealth: await readBaitHealth(username).catch(() => null),
-      // 디엠 자동화는 프로 플랜 전용이다. 화면에서 업그레이드 안내를 띄울 수 있게 함께 내려준다.
-      entitled: await dmAutomationAllowed(username, auth.userId),
+      // 자동 디엠 이용 자격. 인플루언서는 브랜드 매칭받기 등록, 브랜드는 자동 디엠 플랜
+      // 구독으로 열린다. 화면이 어떤 안내를 띄울지 고를 수 있게 이유까지 함께 내려준다.
+      entitled: dmAccess.allowed,
+      dmAccess,
       requiredTier: DM_AUTOMATION_TIER,
     });
   }

@@ -45,7 +45,7 @@ const won = (n: number) => (Number(n || 0) < 0 ? formatSignedKRW(n) : formatKRW(
 
 const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview }) => {
   const [membershipRevenue, setMembershipRevenue] = useState<number | null>(null);
-  const [membershipBreakdown, setMembershipBreakdown] = useState<Record<MembershipTier, number>>({ standard: 0, standard_ai: 0, commerce: 0, pro: 0 });
+  const [membershipBreakdown, setMembershipBreakdown] = useState<Record<MembershipTier, number>>({ standard: 0, standard_ai: 0, commerce: 0, pro: 0, brand_dm: 0 });
   // 출시 혜택으로 무료 이용 중인 구독자 수와, 무료 기간이 끝나면 들어올 월 금액.
   const [promoFree, setPromoFree] = useState({ count: 0, upcomingKrw: 0 });
   const [loaded, setLoaded] = useState(false);
@@ -59,7 +59,7 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview
       if (cancelled) return;
 
       const rows = (influencers.influencers || []) as any[];
-      const counts: Record<MembershipTier, number> = { standard: 0, standard_ai: 0, commerce: 0, pro: 0 };
+      const counts: Record<MembershipTier, number> = { standard: 0, standard_ai: 0, commerce: 0, pro: 0, brand_dm: 0 };
       const now = Date.now();
       let freeCount = 0;
       let freeUpcoming = 0;
