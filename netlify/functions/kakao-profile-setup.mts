@@ -145,7 +145,9 @@ export default async (req: Request) => {
       const updates: Record<string, any> = {};
       if (phone && existing.phone !== phone) updates.phone = phone;
       if (fullName && existing.full_name !== fullName) updates.full_name = fullName;
-      if (avatarUrl && existing.avatar_url !== avatarUrl) updates.avatar_url = avatarUrl;
+      // 프로필 사진은 비어 있을 때만 카카오 사진으로 채운다. 예전 계정에서 옮겨 온 사진이나
+      // 직접 고른 사진을 로그인할 때마다 카카오 사진으로 덮으면 안 된다.
+      if (avatarUrl && !existing.avatar_url) updates.avatar_url = avatarUrl;
       if (kakaoId && existing.kakao_id !== kakaoId) updates.kakao_id = kakaoId;
 
       if (Object.keys(updates).length > 0) {

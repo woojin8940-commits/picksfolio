@@ -72,7 +72,7 @@ export default async (req: Request) => {
       return Response.json({
         success: false,
         code: "KAKAO_ONLY",
-        error: "인플루언서 계정은 카카오 간편로그인으로만 로그인할 수 있어요. 카카오로 시작하면 쓰던 링크를 그대로 이어받을 수 있습니다.",
+        error: "인플루언서 계정은 카카오 간편로그인으로만 로그인할 수 있어요. 카카오로 시작한 뒤 쓰던 링크를 입력하면 페이지 · 설정 · 기록을 모두 그대로 이어받을 수 있습니다.",
       });
     }
 
