@@ -12,6 +12,8 @@ import { mutateBlobJSON } from "./blob-write.mts";
  *
  * 그래서 아무나 가져가게 둘 수는 없다. 본인 확인은 두 가지 중 하나다.
  *   1. 카카오에서 받은 휴대폰 번호가 예전 계정 번호(가입 때 SMS 인증한 번호)와 같다.
+ *      이 번호는 kakao-profile-setup 이 Auth app_metadata(kakao_verified_phone)에 남긴
+ *      값만 쓴다. profiles.phone 은 본인이 화면에서 고칠 수 있어 본인 확인이 되지 않는다.
  *   2. 운영자가 연락해 본인을 확인한 뒤 발급한 이전 코드를 넣는다(14일 유효, 한 번만).
  *
  * 이름과 함께 계정 아이디에 묶인 기록(프로필 나머지 값 · 추천 링크 · 운영자 부여 멤버십 ·
@@ -52,28 +54,45 @@ export const isLegacyInfluencerProfile = (profile: { role?: unknown; kakao_id?: 
 
 export type LegacyDecision =
   | { kind: "taken" }
-  | { kind: "code_required"; codeGiven: boolean }
+  | { kind: "code_required"; codeGiven: boolean; phoneUnverified: boolean }
   | { kind: "move"; method: "phone" | "code"; codeId: number | null };
+
+/** 이어받으려는 사람. 값은 모두 Auth 사용자 정보에서 온다(본인이 고칠 수 없는 자리). */
+export type LegacyClaimant = { kakaoId: string; verifiedPhone: string };
+
+/**
+ * 호출한 사람의 카카오 계정 아이디와, 카카오가 확인해 준 휴대폰 번호.
+ * profiles 의 kakao_id · phone 이 아니라 Auth 의 카카오 신원 · app_metadata 를 본다.
+ */
+export async function loadLegacyClaimant(supabase: any, userId: string): Promise<LegacyClaimant | null> {
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  if (error || !data?.user) return null;
+  const user = data.user;
+  const kakao = (user.identities || []).find((i: any) => i.provider === "kakao");
+  const kakaoId = String(kakao?.identity_data?.sub || kakao?.provider_id || "").trim();
+  return { kakaoId, verifiedPhone: digits(user.app_metadata?.kakao_verified_phone) };
+}
 
 /** 이 사람이 예전 계정의 유저네임을 이어받을 수 있는지. */
 export async function legacyTransferDecision(input: {
   username: string;
   owner: { id: string; role?: unknown; kakao_id?: unknown; phone?: unknown };
-  me: { kakao_id?: unknown; phone?: unknown } | null;
+  me: LegacyClaimant | null;
   transferCode?: unknown;
 }): Promise<LegacyDecision> {
   if (!isLegacyInfluencerProfile(input.owner)) return { kind: "taken" };
   // 이어받는 쪽은 카카오로 가입한 계정이어야 한다.
-  if (!input.me || !String(input.me.kakao_id || "").trim()) return { kind: "taken" };
+  if (!input.me || !input.me.kakaoId) return { kind: "taken" };
 
   const ownerPhone = digits(input.owner.phone);
-  const myPhone = digits(input.me.phone);
+  const myPhone = input.me.verifiedPhone;
   if (ownerPhone.length >= 10 && ownerPhone === myPhone) {
     return { kind: "move", method: "phone", codeId: null };
   }
 
+  const phoneUnverified = myPhone.length < 10;
   const code = normalizeTransferCode(input.transferCode);
-  if (!code) return { kind: "code_required", codeGiven: false };
+  if (!code) return { kind: "code_required", codeGiven: false, phoneUnverified };
   try {
     const db = getDatabase();
     const rows = await db.sql`
@@ -82,11 +101,11 @@ export async function legacyTransferDecision(input: {
         AND used_at IS NULL AND expires_at > NOW()
       ORDER BY created_at DESC LIMIT 1
     `;
-    if (rows.length === 0) return { kind: "code_required", codeGiven: true };
+    if (rows.length === 0) return { kind: "code_required", codeGiven: true, phoneUnverified };
     return { kind: "move", method: "code", codeId: Number(rows[0].id) };
   } catch (e) {
     console.error("[legacy-username] code lookup failed:", (e as Error)?.message);
-    return { kind: "code_required", codeGiven: true };
+    return { kind: "code_required", codeGiven: true, phoneUnverified };
   }
 }
 
@@ -167,12 +186,20 @@ async function carryOverAccountData(input: {
       WHERE auth_user_id = ${fromUserId}
         AND NOT EXISTS (SELECT 1 FROM operator_membership_grants WHERE auth_user_id = ${toUserId})
     `;
+  } catch (e) {
+    console.error("[legacy-username] operator grant carry-over failed:", (e as Error)?.message);
+  }
+
+  // 등록 기록은 membership_promo_redemptions 에 있다(membership_promo_codes 는 코드 목록).
+  // 따로 감싼다 — 앞의 부여 이전이 실패해도 이 기록은 옮겨야 한다.
+  try {
+    const db = getDatabase();
     await db.sql`
-      UPDATE membership_promo_codes SET auth_user_id = ${toUserId}
+      UPDATE membership_promo_redemptions SET auth_user_id = ${toUserId}
       WHERE username = ${username} AND auth_user_id = ${fromUserId}
     `;
   } catch (e) {
-    console.error("[legacy-username] membership carry-over failed:", (e as Error)?.message);
+    console.error("[legacy-username] promo redemption carry-over failed:", (e as Error)?.message);
   }
 
   try {
@@ -198,6 +225,8 @@ export async function moveLegacyUsername(input: {
   username: string;
   fromUserId: string;
   toUserId: string;
+  /** 새 계정의 카카오 아이디. 프로필 행이 아직 없어 새로 만들 때 함께 넣는다. */
+  kakaoId: string;
   hasProfile: boolean;
   method: "phone" | "code";
   codeId: number | null;
@@ -211,20 +240,25 @@ export async function moveLegacyUsername(input: {
     supabase.from("profiles").select("*").eq("id", toUserId).maybeSingle(),
   ]);
 
-  const { error: parkError } = await supabase
+  const { data: parkedRows, error: parkError } = await supabase
     .from("profiles")
     .update({ username: parked, updated_at: now })
     .eq("id", fromUserId)
-    .eq("username", username);
-  if (parkError) {
-    console.error("[legacy-username] park failed:", parkError);
+    .eq("username", username)
+    .select("id");
+  // 비켜 둔 행이 없으면 그 사이 다른 요청이 먼저 옮겼거나 이름이 바뀐 것이다. 이어서
+  // 쓰면 고유 제약에 걸린 뒤 되돌리기까지 엉키므로 여기서 멈춘다.
+  if (parkError || !Array.isArray(parkedRows) || parkedRows.length === 0) {
+    console.error("[legacy-username] park failed:", parkError || "no row parked");
     return { ok: false };
   }
 
   const payload = { username, updated_at: now };
   const { error: writeError } = input.hasProfile
     ? await supabase.from("profiles").update(payload).eq("id", toUserId)
-    : await supabase.from("profiles").insert({ id: toUserId, ...payload, role: "user" });
+    : await supabase
+        .from("profiles")
+        .insert({ id: toUserId, ...payload, role: "user", kakao_id: input.kakaoId || null });
   if (writeError) {
     console.error("[legacy-username] claim failed, restoring:", writeError);
     await supabase

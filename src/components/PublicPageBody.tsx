@@ -307,7 +307,7 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
         </a>
       ))}
       {socials?.businessProposal && (
-        <a {...externalLinkProps(proposalHref)} className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-transparent text-[11px] font-black hover:brightness-110 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials?.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials?.businessProposalText) || '#FFFFFF' }}>
+        <a {...externalLinkProps(proposalHref)} className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-transparent text-[11px] font-black hover:brightness-110 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials?.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials?.businessProposalText) || '#FFFFFF' }}>
           <Briefcase size={13} strokeWidth={2.5} />
           {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
         </a>
