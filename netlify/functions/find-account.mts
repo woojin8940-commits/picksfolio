@@ -108,6 +108,9 @@ async function findMatchingAccounts(
   for (const p of profiles || []) {
     // 링크(아이디)를 아직 만들지 않은 계정은 로그인할 아이디가 없다.
     if (!p.username) continue;
+    // 카카오 계정으로 링크를 옮겨 준 예전 계정(_legacy_…)은 더 쓰지 않는 자리 표시다.
+    // 같은 번호로 찾으면 실제로 쓰는 카카오 계정이 따로 나온다.
+    if (p.username.startsWith("_legacy_")) continue;
 
     const { data } = await supabase.auth.admin.getUserById(p.id);
     const user = data?.user;

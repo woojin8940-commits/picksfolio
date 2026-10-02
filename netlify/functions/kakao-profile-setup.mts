@@ -66,6 +66,26 @@ function isRealUsername(username: string | null | undefined): boolean {
   return !!username && !username.startsWith("_kakao_") && !username.startsWith("_kk_");
 }
 
+/**
+ * 카카오가 확인해 준 휴대폰 번호를 Auth 의 app_metadata 에 남긴다.
+ *
+ * 예전 아이디·비밀번호 계정의 링크를 번호로 이어받을 때(auth-claim-username) 이 값만
+ * 본다. profiles.phone 은 로그인한 본인이 화면에서 직접 고칠 수 있는 칸이라, 그 값을
+ * 믿으면 남의 번호를 적어 넣고 남의 링크 · 페이지 · 정산 기록을 가져갈 수 있다.
+ * app_metadata 는 서비스 롤 키로만 쓸 수 있다.
+ */
+async function rememberVerifiedKakaoPhone(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  user: { id: string; app_metadata?: Record<string, any> },
+  phone: string,
+) {
+  if (!phone || user.app_metadata?.kakao_verified_phone === phone) return;
+  const { error } = await supabase.auth.admin.updateUserById(user.id, {
+    app_metadata: { ...(user.app_metadata || {}), kakao_verified_phone: phone },
+  });
+  if (error) console.error("Failed to record verified Kakao phone:", error.message);
+}
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -198,6 +218,10 @@ export default async (req: Request) => {
         }
       }
     }
+
+    // 여기까지의 phone 은 카카오 신원 정보이거나, 같은 카카오 계정임을 확인한 카카오 API
+    // 응답에서만 왔다.
+    await rememberVerifiedKakaoPhone(supabase, verifiedUser, phone);
 
     const newProfile = {
       id: user_id,
