@@ -691,9 +691,15 @@ const App: React.FC = () => {
       const hasCompleteKakaoProfile = !!kakaoProfileUsername
         && !kakaoProfileUsername.startsWith('_kakao_')
         && !kakaoProfileUsername.startsWith('_kk_');
-      const needsKakaoProfileSetup = !hasCompleteKakaoProfile || profileData?._fallback === true;
+      // 링크는 있는데 카카오 전화번호·카카오 아이디가 비어 있는 계정도 방금 카카오로
+      // 로그인해 토큰이 있을 때 한 번 더 보정한다. 프로필 생성이 실패하던 시기에 가입한
+      // 사람은 링크만 저장되고 번호가 빠져 있어서, 다시 로그인해도 채워지지 않았다.
+      const kakaoProfileMissingInfo = !profileData?._fallback
+        && (!String(profileData?.phone || '').trim() || !String(profileData?.kakao_id || '').trim());
+      const needsKakaoProfileSetup = !hasCompleteKakaoProfile || profileData?._fallback === true
+        || (hasKakaoHandoff && kakaoProfileMissingInfo);
 
-      if (isKakaoUser && hasCompleteKakaoProfile && profileData?._fallback !== true) {
+      if (isKakaoUser && !needsKakaoProfileSetup) {
         sessionStorage.removeItem('kakao_provider_token');
         sessionStorage.removeItem('kakao_client_phone');
         sessionStorage.removeItem('kakao_client_name');
@@ -833,7 +839,8 @@ const App: React.FC = () => {
             const sanitizedNameFb = (rawNameFb && rawNameFb.trim() !== '.' && rawNameFb.trim() !== '') ? rawNameFb.trim() : '';
             const profilePayload: Record<string, any> = {
               id: uid,
-              username: '',
+              // NULL: profiles.username 의 고유 제약은 '' 를 한 행에만 허용한다.
+              username: null,
               email: session.user.email || '',
               full_name: sanitizedNameFb,
               avatar_url: meta.avatar_url || meta.picture || idData.avatar_url || '',
@@ -858,7 +865,8 @@ const App: React.FC = () => {
           }
         };
 
-        if (profileData?._fallback && (profileData.username || '').trim()) {
+        if (hasCompleteKakaoProfile) {
+          // 이미 링크가 있으면 대시보드를 막지 않고 뒤에서 보정한다.
           runKakaoProfileSetup()
             .then((setupResult) => {
               const nextProfile = applyKakaoProfile(setupResult);
@@ -907,7 +915,8 @@ const App: React.FC = () => {
           } else {
             const profilePayload: Record<string, any> = {
               id: uid,
-              username: '',
+              // NULL: profiles.username 의 고유 제약은 '' 를 한 행에만 허용한다.
+              username: null,
               email: session.user.email || '',
             };
             const { error: insertError } = await supabase.from('profiles').insert(profilePayload);

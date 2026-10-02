@@ -105,7 +105,10 @@ export default async (req: Request) => {
       return Response.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
 
-    if (isRealUsername(auth.username)) {
+    // 링크가 있는 계정은 보통 더 채울 것이 없다. 다만 방금 카카오로 로그인해 토큰을
+    // 가져온 경우에는 아래로 내려가 비어 있는 전화번호·카카오 아이디를 채운다 —
+    // 프로필 생성이 실패하던 시기에 가입한 계정은 링크만 있고 번호가 없다.
+    if (isRealUsername(auth.username) && !provider_token) {
       return Response.json({
         success: true,
         profile: {
@@ -161,6 +164,36 @@ export default async (req: Request) => {
       .eq("id", user_id)
       .maybeSingle();
 
+    if (provider_token && (!phone || !fullName)) {
+      const kakaoProfile = await fetchKakaoProfile(provider_token);
+      if (kakaoProfile) {
+        if (String(kakaoProfile.id || "") !== kakaoId) {
+          return Response.json({ success: false, error: "Kakao account mismatch" }, { status: 403 });
+        }
+        const account = kakaoProfile.kakao_account || {};
+        if (!phone) {
+          const rawPhone =
+            account.phone_number ||
+            account.mobile_phone_number ||
+            kakaoProfile.phone_number ||
+            "";
+          if (rawPhone) {
+            phone = normalizePhone(rawPhone);
+          }
+        }
+        if (!fullName && (account.name || account.profile?.nickname)) {
+          fullName = account.name || account.profile?.nickname;
+        }
+        if (!avatarUrl && account.profile?.profile_image_url) {
+          avatarUrl = account.profile.profile_image_url;
+        }
+      }
+    }
+
+    // 여기까지의 phone 은 카카오 신원 정보이거나, 같은 카카오 계정임을 확인한 카카오 API
+    // 응답에서만 왔다.
+    await rememberVerifiedKakaoPhone(supabase, verifiedUser, phone);
+
     if (existing && isRealUsername(existing.username)) {
       const updates: Record<string, any> = {};
       if (phone && existing.phone !== phone) updates.phone = phone;
@@ -193,39 +226,14 @@ export default async (req: Request) => {
       });
     }
 
-    if (provider_token && (!phone || !fullName)) {
-      const kakaoProfile = await fetchKakaoProfile(provider_token);
-      if (kakaoProfile) {
-        if (String(kakaoProfile.id || "") !== kakaoId) {
-          return Response.json({ success: false, error: "Kakao account mismatch" }, { status: 403 });
-        }
-        const account = kakaoProfile.kakao_account || {};
-        if (!phone) {
-          const rawPhone =
-            account.phone_number ||
-            account.mobile_phone_number ||
-            kakaoProfile.phone_number ||
-            "";
-          if (rawPhone) {
-            phone = normalizePhone(rawPhone);
-          }
-        }
-        if (!fullName && (account.name || account.profile?.nickname)) {
-          fullName = account.name || account.profile?.nickname;
-        }
-        if (!avatarUrl && account.profile?.profile_image_url) {
-          avatarUrl = account.profile.profile_image_url;
-        }
-      }
-    }
-
-    // 여기까지의 phone 은 카카오 신원 정보이거나, 같은 카카오 계정임을 확인한 카카오 API
-    // 응답에서만 왔다.
-    await rememberVerifiedKakaoPhone(supabase, verifiedUser, phone);
-
+    // 링크(username)를 정하기 전이라 비워 두되 빈 문자열이 아니라 NULL 로 넣는다.
+    // profiles.username 에는 고유 제약(profiles_username_key)이 있어서 '' 는 한 행만
+    // 가질 수 있다 — 링크를 정하지 않고 나간 계정이 하나라도 있으면 그 뒤 모든 카카오
+    // 가입자의 프로필 생성이 중복 키 오류로 실패했고, 카카오에서 받은 전화번호·카카오
+    // 아이디가 저장되지 않았다. NULL 은 서로 겹치지 않는다.
     const newProfile = {
       id: user_id,
-      username: "",
+      username: null,
       email: email || "",
       full_name: fullName,
       phone,
@@ -283,7 +291,11 @@ export default async (req: Request) => {
       });
     }
 
-    return Response.json({ success: true, profile: newProfile, isNewUser: true });
+    return Response.json({
+      success: true,
+      profile: { ...newProfile, username: "" },
+      isNewUser: true,
+    });
   } catch (err: any) {
     return Response.json({
       success: false,
