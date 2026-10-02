@@ -1,4 +1,11 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+
+/**
+ * xl(데스크톱 미리보기)이 그리는 화면의 실제 폭. 휴대폰(390px)과 같은 폭으로 그린 뒤
+ * 프레임 크기에 맞춰 통째로 줄이거나 키운다 — 창 크기가 바뀌어도 글자 · 여백 · 줄바꿈
+ * 비율이 실제 개인페이지와 같게 보인다.
+ */
+const XL_VIEWPORT_WIDTH = 390;
 
 type PhoneFrameSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -33,6 +40,18 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   // 너비는 부모 칼럼 폭(max-w-full)을 넘지 않는다. 여백을 최소화해 기기가 미리보기 영역을 가능한 한
   // 크게 채우도록 하되, 화면이 낮아도 잘리지 않고 통째로 보인다.
   const isXl = size === 'xl';
+  const screenRef = useRef<HTMLDivElement>(null);
+  const [screen, setScreen] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    if (!isXl || !screenRef.current) return;
+    const el = screenRef.current;
+    const measure = () => setScreen({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isXl]);
+  const scale = screen.width > 0 ? screen.width / XL_VIEWPORT_WIDTH : 1;
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
@@ -49,9 +68,31 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
         </div>
 
         {/* Phone Content — flex-1 + min-h-0 으로 남은 공간을 정확히 채워 하단이 잘리지 않게 한다. */}
-        <div className={`flex-1 min-h-0 overflow-y-auto rounded-[2rem] pb-8 ${contentClassName}`} style={contentStyle}>
-          {children}
-        </div>
+        {isXl ? (
+          /* 바깥 칸은 프레임 안 크기만 잰다. 안쪽 칸이 390px 폭으로 그려지고 transform 으로
+             맞춰진다 — transform 이 걸린 칸이 상품 서랍(absolute)의 기준이 되므로 서랍은
+             예전처럼 화면 아래에 붙는다. 스크롤 칸에는 position 을 주지 않는다. */
+          <div ref={screenRef} className={`relative flex-1 min-h-0 overflow-hidden rounded-[2rem] ${contentClassName}`} style={contentStyle}>
+            {screen.width > 0 && (
+              <div
+                className="absolute top-0 left-0 origin-top-left"
+                style={{
+                  width: XL_VIEWPORT_WIDTH,
+                  height: screen.height / scale,
+                  transform: `scale(${scale})`,
+                }}
+              >
+                <div className="h-full overflow-y-auto pb-8">
+                  {children}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className={`flex-1 min-h-0 overflow-y-auto rounded-[2rem] pb-8 ${contentClassName}`} style={contentStyle}>
+            {children}
+          </div>
+        )}
       </div>
       <p className="text-center mt-1 text-slate-400 text-[9px] font-black uppercase tracking-widest leading-none">
         {label}

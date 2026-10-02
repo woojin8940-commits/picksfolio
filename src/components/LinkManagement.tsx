@@ -15,7 +15,6 @@ import { sanitizeLinkValue } from '../utils/externalLink';
 import { renderPortfolioHtml } from './richText';
 import {
   type ThemePreset,
-  type CategoryChipColors,
   THEME_BG_PRESETS,
   categoryChipStyle,
   PRESET_BACKGROUND,
@@ -38,23 +37,6 @@ const cacheLocalItem = (key: string, value: unknown): void => {
 // 텍스트 블록의 글씨색 · 배경색은 프리셋 색동그라미를 늘어놓지 않고 ColorPicker
 // 하나로만 고른다. 프리셋 여덟 개를 담으면 글씨 서식 줄이 두세 줄로 접히면서 편집
 // 화면이 아래로 밀렸고, 어차피 원하는 색은 팔레트에서 직접 고르는 편이 빠르다.
-
-// 테마 프리셋의 기본 포인트 색상 외에, 자주 쓰는 색을 한 번에 고를 수 있게 하는
-// 빠른 선택용 팔레트. 여기 없는 색은 ColorPicker 로 직접 지정한다.
-const ACCENT_COLOR_PRESETS: { value: string; label: string }[] = [
-  { value: '#3B82F6', label: '블루' },
-  { value: '#0f172a', label: '잉크 블랙' },
-  { value: '#6366F1', label: '인디고' },
-  { value: '#8B5CF6', label: '바이올렛' },
-  { value: '#EC4899', label: '핑크' },
-  { value: '#EF4444', label: '레드' },
-  { value: '#F97316', label: '오렌지' },
-  { value: '#F59E0B', label: '앰버' },
-  { value: '#10B981', label: '에메랄드' },
-  { value: '#14B8A6', label: '틸' },
-  { value: '#0EA5E9', label: '스카이' },
-  { value: '#64748B', label: '슬레이트' }
-];
 
 /**
  * 버튼 하나의 배경색 · 글자색을 고르는 줄.
@@ -97,6 +79,33 @@ const ButtonColorRow: React.FC<{
     </div>
   );
 };
+
+/**
+ * 표시 이름 · 소개의 글자색 고르기. 고르지 않으면(undefined) 예전 색 그대로 그린다.
+ */
+const ProfileTextColor: React.FC<{
+  name: string;
+  value?: string;
+  fallback: string;
+  onChange: (hex?: string) => void;
+}> = ({ name, value, fallback, onChange }) => (
+  <div className="flex items-center gap-1.5">
+    <ColorPicker
+      value={value || fallback}
+      onChange={(hex) => onChange(normalizeHexColor(hex) || undefined)}
+      label="글자색"
+      aria-label={`${name} 글자색 선택`}
+    />
+    {value && (
+      <button
+        onClick={() => onChange(undefined)}
+        className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+      >
+        기본색으로
+      </button>
+    )}
+  </div>
+);
 
 interface LinkManagementProps {
   userName: string;
@@ -252,21 +261,33 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     return 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)';
   });
   /**
-   * 카테고리 버튼(상품명 검색바 위 줄)의 색.
+   * 버튼 색상의 글자색. 배경색은 위의 accentColor 다.
    *
-   * 네 칸 모두 비워 둘 수 있고, 비운 칸은 테마가 정한 색으로 그려진다 — 색을 한 번도
-   * 고르지 않은 페이지는 지금까지와 똑같이 나온다.
+   * 비즈니스 제안 버튼 · 포인트 색 · 카테고리 버튼 색을 따로 고르던 칸을 이 두 색
+   * 하나로 합쳤다. 선택된 카테고리 버튼과 비즈니스 제안 버튼은 (배경색, 글자색)으로,
+   * 나머지 카테고리 버튼은 그 반대(배경 = 글자색, 글자 = 배경색)로 그린다.
    */
-  const [categoryColors, setCategoryColors] = useState<CategoryChipColors>(() => {
+  const [buttonTextColor, setButtonTextColor] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
+      if (saved) {
+        const design = JSON.parse(saved);
+        return normalizeHexColor(design.categoryTextColor) || '#FFFFFF';
+      }
+    } catch (e) {
+      console.error('Error parsing design:', e);
+    }
+    return '#FFFFFF';
+  });
+  /** 표시 이름 · 소개 글자색. 비워 두면 예전처럼 테마 글자색 / 포인트 색으로 그린다. */
+  const [profileTextColors, setProfileTextColors] = useState<{ name?: string; bio?: string }>(() => {
     try {
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
       if (saved) {
         const design = JSON.parse(saved);
         return {
-          categoryBgColor: design.categoryBgColor,
-          categoryTextColor: design.categoryTextColor,
-          categoryIdleBgColor: design.categoryIdleBgColor,
-          categoryIdleTextColor: design.categoryIdleTextColor,
+          name: normalizeHexColor(design.profileNameColor) || undefined,
+          bio: normalizeHexColor(design.profileBioColor) || undefined,
         };
       }
     } catch (e) {
@@ -722,11 +743,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
             || DEFAULT_CUSTOM_BACKGROUND,
         );
         setPortfolioFontSize(settings.design.portfolioFontSize || 'medium');
-        setCategoryColors({
-          categoryBgColor: settings.design.categoryBgColor,
-          categoryTextColor: settings.design.categoryTextColor,
-          categoryIdleBgColor: settings.design.categoryIdleBgColor,
-          categoryIdleTextColor: settings.design.categoryIdleTextColor,
+        setButtonTextColor(normalizeHexColor(settings.design.categoryTextColor) || '#FFFFFF');
+        setProfileTextColors({
+          name: normalizeHexColor(settings.design.profileNameColor) || undefined,
+          bio: normalizeHexColor(settings.design.profileBioColor) || undefined,
         });
         if (settings.design.portfolioHeaderImage !== undefined) setCoverImage(settings.design.portfolioHeaderImage);
         if (settings.design.portfolioHeaderImagePosition !== undefined) setCoverPosition(settings.design.portfolioHeaderImagePosition);
@@ -890,11 +910,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     else setBgHexDraft(customBg.replace('#', ''));
   };
 
-  /** 카테고리 버튼 색 한 칸 바꾸기. 같은 색을 다시 누르면 테마 기본색으로 되돌린다. */
-  const setCategoryColor = (key: keyof CategoryChipColors, hex?: string) => {
-    setCategoryColors(prev => ({ ...prev, [key]: hex ? (normalizeHexColor(hex) || undefined) : undefined }));
-  };
-
   const showSuccessFeedback = (message: string) => {
     setIsSaved(true);
     setSaveMessage(message);
@@ -960,10 +975,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     backgroundType: 'solid',
     customGradient: customGradient,
     customBackground: customBg,
-    categoryBgColor: categoryColors.categoryBgColor,
-    categoryTextColor: categoryColors.categoryTextColor,
-    categoryIdleBgColor: categoryColors.categoryIdleBgColor,
-    categoryIdleTextColor: categoryColors.categoryIdleTextColor,
+    // 버튼 색상 하나로 카테고리 버튼 색을 정한다 — 선택된 칸은 그대로, 나머지는 반대.
+    categoryBgColor: accentColor,
+    categoryTextColor: buttonTextColor,
+    categoryIdleBgColor: buttonTextColor,
+    categoryIdleTextColor: accentColor,
+    profileNameColor: profileTextColors.name,
+    profileBioColor: profileTextColors.bio,
     profileLayout: 'center',
     homePriority: homePriority === 'portfolio' ? 'portfolio' : 'curation',
     portfolioFontSize: portfolioFontSize,
@@ -973,6 +991,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   /** 미리보기가 그리는 디자인. 저장 버튼이 올릴 값과 같다. */
   const previewDesign = buildDesignUpdate();
+  /** 비즈니스 제안 버튼도 버튼 색상을 그대로 쓴다. 저장할 때도 같은 값을 넣는다. */
+  const withButtonColors = (base: Record<string, any>) => ({
+    ...base,
+    businessProposalBg: accentColor,
+    businessProposalText: buttonTextColor,
+  });
+  const previewSocials = withButtonColors(socials);
 
   const handleSaveDesign = async () => {
     setIsSaving(true);
@@ -984,7 +1009,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     // 버튼의 이름이 남아 있으면, 나중에 그 버튼을 다시 넣었을 때 예전에 쓰던 이름이
     // 저절로 붙어 나온다.
     const cleanedSocials: Record<string, any> = {
-      ...socials,
+      ...withButtonColors(socials),
       customButtons: (socials.customButtons || [])
         .filter((b: any) => (b.label || '').trim() && (b.url || '').trim())
         // 고르지 않은 글자색은 아예 넣지 않는다 — 값이 없으면 페이지가 흰 글자를 쓴다.
@@ -1051,6 +1076,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       'categoryTextColor',
       'categoryIdleBgColor',
       'categoryIdleTextColor',
+      'profileNameColor',
+      'profileBioColor',
     ] as const).forEach(key => {
       if (designPayload[key] === undefined || designPayload[key] === '') designPayload[key] = null;
     });
@@ -1895,7 +1922,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">표시 이름</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1 text-[10px] font-black text-slate-400 uppercase tracking-widest">표시 이름</label>
+                    <ProfileTextColor
+                      name="표시 이름"
+                      value={profileTextColors.name}
+                      fallback={themeIsLight ? '#0F172A' : '#FFFFFF'}
+                      onChange={(hex) => setProfileTextColors(prev => ({ ...prev, name: hex }))}
+                    />
+                  </div>
                   <input
                     type="text"
                     value={profile.name || ''}
@@ -1905,7 +1940,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">소개</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1 text-[10px] font-black text-slate-400 uppercase tracking-widest">소개</label>
+                    <ProfileTextColor
+                      name="소개"
+                      value={profileTextColors.bio}
+                      fallback={normalizeHexColor(accentColor) || '#2563EB'}
+                      onChange={(hex) => setProfileTextColors(prev => ({ ...prev, bio: hex }))}
+                    />
+                  </div>
                   <textarea
                     value={profile.bio || ''}
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
@@ -2000,20 +2043,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
 
                 {socials.businessProposal && (
-                  <div className="bg-blue-50 rounded-xl px-4 py-3 space-y-2">
+                  <div className="bg-blue-50 rounded-xl px-4 py-3 space-y-1">
                     <div className="flex items-center gap-3">
                       <Briefcase size={16} className="text-blue-600 shrink-0" />
                       <span className="flex-1 font-bold text-sm text-blue-700">비즈니스 제안 버튼</span>
                       <button onClick={() => setSocials({ ...socials, businessProposal: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
                     </div>
-                    <ButtonColorRow
-                      name="비즈니스 제안"
-                      bg={socials.businessProposalBg}
-                      text={socials.businessProposalText}
-                      bgFallback={accentColor}
-                      onBg={(hex) => setSocials((prev: any) => ({ ...prev, businessProposalBg: hex || '' }))}
-                      onText={(hex) => setSocials((prev: any) => ({ ...prev, businessProposalText: hex || '' }))}
-                    />
+                    <p className="text-[10px] font-bold text-blue-400">색은 아래 '버튼 색상'에서 정해요</p>
                   </div>
                 )}
 
@@ -2251,52 +2287,24 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                   </div>
                 </div>
 
-                {/* 프리셋의 기본 포인트 색상을 그대로 쓰거나, 팔레트로 원하는 색을
-                    직접 골라 쓸 수 있다. 프리셋 자체(밝은/어두운 배경)는 유지된다. */}
-                <div className="p-5 rounded-2xl border-2 border-[#E2E8F0] bg-white space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <span className="font-black text-sm block">포인트 색상</span>
-                      <span className="text-xs text-slate-500 font-bold">버튼·강조 요소에 쓰이는 색을 자유롭게 정하세요</span>
-                    </div>
-                    <ColorPicker
-                      value={accentColor}
-                      onChange={setAccentColor}
-                      triggerClassName="w-11 h-11 rounded-2xl flex-shrink-0"
-                      aria-label="포인트 색상 직접 지정"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {ACCENT_COLOR_PRESETS.map(c => (
-                      <button
-                        key={c.value}
-                        onClick={() => setAccentColor(c.value)}
-                        title={c.label}
-                        aria-label={c.label}
-                        className={`w-8 h-8 rounded-xl border-2 transition-all ${accentColor.toLowerCase() === c.value.toLowerCase() ? 'border-blue-600 scale-110 shadow-md' : 'border-slate-200 hover:scale-105'}`}
-                        style={{ backgroundColor: c.value }}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">현재</span>
-                    <span className="text-xs font-black text-slate-600">{accentColor.toUpperCase()}</span>
-                    <button
-                      onClick={() => setAccentColor(defaultAccentFor(themeIsLight))}
-                      className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
-                    >
-                      프리셋 기본색으로
-                    </button>
-                  </div>
-                </div>
-
-                {/* 카테고리 버튼 색 — 개인페이지의 상품명 검색바 위에 놓이는 그 줄이다.
-                    선택된 칸과 나머지 칸의 배경·글자색을 각각 고른다. 비워 두면 테마가
-                    정한 색으로 그려지므로, 손대지 않은 페이지는 지금까지와 똑같다. */}
+                {/* 버튼 색상 — 비즈니스 제안 버튼 · 포인트 색 · 카테고리 버튼 색을 한 번에 정한다.
+                    선택된 카테고리 버튼과 비즈니스 제안 버튼은 고른 배경색 + 글자색으로,
+                    나머지 카테고리 버튼은 그 반대(배경 = 글자색, 글자 = 배경색)로 그린다. */}
                 <div className="p-5 rounded-2xl border-2 border-[#E2E8F0] bg-white space-y-3">
                   <div>
-                    <span className="font-black text-sm block">카테고리 버튼 색</span>
-                    <span className="text-xs text-slate-500 font-bold">상품명 검색바 위의 버튼 줄입니다. 배경색과 글자색을 따로 고를 수 있어요</span>
+                    <span className="font-black text-sm block">버튼 색상</span>
+                    <span className="text-xs text-slate-500 font-bold">비즈니스 제안 버튼 · 포인트 색 · 카테고리 버튼에 함께 쓰여요. 선택되지 않은 카테고리 버튼은 반대 색으로 보여요</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <ColorPicker value={accentColor} onChange={setAccentColor} label="배경색" aria-label="버튼 배경색 선택" />
+                    <ColorPicker value={buttonTextColor} onChange={setButtonTextColor} label="글자색" aria-label="버튼 글자색 선택" />
+                    <button
+                      onClick={() => { setAccentColor(defaultAccentFor(themeIsLight)); setButtonTextColor('#FFFFFF'); }}
+                      className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+                    >
+                      기본색으로
+                    </button>
                   </div>
 
                   {/* 고른 색이 바로 보이는 줄. 배경은 지금 테마 배경색을 깔아 둔다. */}
@@ -2304,17 +2312,19 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     className="flex items-center gap-2 rounded-xl px-3 py-3 border border-slate-200 overflow-x-auto scrollbar-hide"
                     style={{ backgroundColor: themeBackground }}
                   >
+                    {socials.businessProposal && (
+                      <span
+                        className="flex-none inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-black whitespace-nowrap rounded-xl border border-transparent"
+                        style={{ backgroundColor: accentColor, color: buttonTextColor }}
+                      >
+                        <Briefcase size={11} strokeWidth={2.5} /> 비즈니스 제안
+                      </span>
+                    )}
                     {categorySwatchLabels.map((cat, idx) => (
                       <span
                         key={cat}
-                        className={`flex-none px-3 py-1.5 text-[11px] font-black whitespace-nowrap rounded-full border ${
-                          idx === 0
-                            ? 'text-white border-transparent'
-                            : themeIsLight
-                              ? 'bg-white border-slate-200 text-slate-400'
-                              : 'bg-white/10 border-white/20 text-white/50'
-                        }`}
-                        style={categoryChipStyle(categoryColors, idx === 0, accentColor)}
+                        className="flex-none px-3 py-1.5 text-[11px] font-black whitespace-nowrap rounded-full border"
+                        style={categoryChipStyle(previewDesign, idx === 0, accentColor)}
                       >
                         {cat}
                       </span>
@@ -2326,44 +2336,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       아직 카테고리가 없어 예시 이름으로 보여드려요. 카테고리를 만들면 내 페이지의 실제 버튼으로 바뀝니다
                     </p>
                   )}
-
-                  <div className="grid sm:grid-cols-2 gap-2">
-                    {([
-                      { key: 'categoryBgColor', label: '선택된 버튼 배경', fallback: accentColor },
-                      { key: 'categoryTextColor', label: '선택된 버튼 글자', fallback: '#FFFFFF' },
-                      { key: 'categoryIdleBgColor', label: '나머지 버튼 배경', fallback: themeIsLight ? '#FFFFFF' : '#2A2A38' },
-                      { key: 'categoryIdleTextColor', label: '나머지 버튼 글자', fallback: themeIsLight ? '#94A3B8' : '#E2E8F0' },
-                    ] as const).map(row => (
-                      <div key={row.key} className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-                        <span className="flex-1 min-w-0 truncate text-[11px] font-black text-slate-600">{row.label}</span>
-                        <ColorPicker
-                          value={categoryColors[row.key] || row.fallback}
-                          onChange={(c) => setCategoryColor(row.key, c)}
-                          label={categoryColors[row.key] ? String(categoryColors[row.key]).toUpperCase() : '고르기'}
-                          aria-label={`${row.label} 색 고르기`}
-                        />
-                        {categoryColors[row.key] && (
-                          <button
-                            onClick={() => setCategoryColor(row.key, undefined)}
-                            className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                            aria-label={`${row.label} 색 되돌리기`}
-                          >
-                            <X size={13} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold text-slate-400">고르지 않은 칸은 테마 색으로 그려집니다</span>
-                    <button
-                      onClick={() => setCategoryColors({})}
-                      className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
-                    >
-                      테마 기본색으로
-                    </button>
-                  </div>
                 </div>
               </section>
 
@@ -2389,7 +2361,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
             <PagePreview
               design={previewDesign}
               profile={profile}
-              socials={socials}
+              socials={previewSocials}
               blocks={blocks}
               managedCategories={managedCategories}
               openSchedule={previewSchedule}
@@ -2869,7 +2841,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <PagePreview
                 design={previewDesign}
                 profile={profile}
-                socials={socials}
+                socials={previewSocials}
                 blocks={blocks}
                 managedCategories={managedCategories}
                 openSchedule={previewSchedule}

@@ -330,7 +330,7 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
       design.portfolioFontSize === 'small' ? 'text-[8px]' :
       design.portfolioFontSize === 'large' ? 'text-sm' :
       'text-[10px]'
-    }`} style={{ color: design.accentColor }}>{profile?.bio}</p>
+    }`} style={{ color: normalizeHexColor(design.profileBioColor) || design.accentColor }}>{profile?.bio}</p>
   ) : null;
 
   /**
@@ -340,7 +340,7 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
   const coverIdentity = ((profile?.full_name || '').trim() || (profile?.bio || '').trim()) ? (
     <div className="absolute bottom-6 left-6 right-6">
       {(profile?.full_name || '').trim() && (
-        <h3 className={`text-2xl ${w('md:text-3xl')} font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name}</h3>
+        <h3 className={`text-2xl ${w('md:text-3xl')} font-black tracking-tighter mb-1 ${textColor}`} style={normalizeHexColor(design.profileNameColor) ? { color: normalizeHexColor(design.profileNameColor)! } : undefined}>{profile?.full_name}</h3>
       )}
       {bioLine}
     </div>

@@ -72,6 +72,9 @@ export interface DesignSettings {
   categoryTextColor?: string;
   categoryIdleBgColor?: string;
   categoryIdleTextColor?: string;
+  /** 커버 위 표시 이름 · 소개 글자색. 비어 있으면 테마 글자색 / 포인트 색으로 그린다. */
+  profileNameColor?: string;
+  profileBioColor?: string;
   profileLayout: 'center' | 'left';
   homePriority: 'products' | 'portfolio' | 'curation';
   background_image?: string;
