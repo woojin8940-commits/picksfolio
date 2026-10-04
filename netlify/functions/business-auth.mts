@@ -39,8 +39,33 @@ export default async (req: Request) => {
       const cleanUsername = username.trim().toLowerCase();
       const email = `biz_${cleanUsername}@picks.me`;
 
-      const { data: authData, error: authError } =
+      let { data: authData, error: authError } =
         await supabase.auth.signInWithPassword({ email, password });
+
+      // 비즈니스 로그인은 biz_ 형식으로만 찾는다. 예외는 관리자 계정 하나뿐이다 —
+      // 관리자 계정은 biz_ 접두사 없이 만들어져 있으므로, 비즈니스 계정으로 찾지
+      // 못했고 그 아이디가 관리자(role=admin)일 때만 관리자 계정 이메일로 다시
+      // 시도한다. 이 경로로 들어온 계정은 아래에서 관리자인지 한 번 더 확인한다.
+      let viaAdminFallback = false;
+      if (authError && !cleanUsername.includes("@")) {
+        const { data: profileByUsername } = await supabase
+          .from("profiles")
+          .select("email, role")
+          .eq("username", cleanUsername)
+          .maybeSingle();
+        if (String(profileByUsername?.role || "").trim().toLowerCase() === "admin") {
+          viaAdminFallback = true;
+          const adminEmails = [
+            String(profileByUsername?.email || "").trim().toLowerCase(),
+            `${cleanUsername}@picks.me`,
+          ].filter((e, i, arr) => e && arr.indexOf(e) === i);
+          for (const adminEmail of adminEmails) {
+            ({ data: authData, error: authError } =
+              await supabase.auth.signInWithPassword({ email: adminEmail, password }));
+            if (!authError) break;
+          }
+        }
+      }
 
       if (authError) {
         return Response.json({ success: false, error: "존재하지 않는 정보입니다. 아이디 또는 비밀번호를 확인해 주세요." });
@@ -52,7 +77,8 @@ export default async (req: Request) => {
         .eq("id", authData.user.id)
         .maybeSingle();
 
-      if (!profile || !["admin", "operator"].includes(profile.role || "")) {
+      const profileRole = String(profile?.role || "").trim().toLowerCase();
+      if (!profile || !["admin", "operator"].includes(profileRole) || (viaAdminFallback && profileRole !== "admin")) {
         return Response.json({ success: false, error: "비즈니스 계정을 찾을 수 없습니다." });
       }
 
