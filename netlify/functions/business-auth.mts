@@ -86,6 +86,7 @@ export default async (req: Request) => {
         success: true,
         username: profile.username,
         company_name: profile.full_name || "",
+        role: profileRole,
         access_token: authData.session?.access_token || "",
         refresh_token: authData.session?.refresh_token || "",
       });

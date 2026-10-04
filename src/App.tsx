@@ -1933,6 +1933,26 @@ const App: React.FC = () => {
     return <AuthLoadingScreen message="로그아웃 중입니다" />;
   }
 
+  const handleOperatorLoginSuccess = (info?: { username: string; token: string }) => {
+    // 이 탭은 운영자 슬롯이 된다 — 같은 브라우저의 일반 유저 탭과 로그인이
+    // 섞이지 않도록 아래 저장은 모두 운영자 슬롯 키로 들어간다.
+    const slotChanged = setAccountScope('operator');
+    if (info?.username && info?.token) {
+      sessionSet('picks_user_session', info.username);
+      sessionSet('picks_admin_token', info.token);
+      setUserName(info.username);
+      setIsLoggedIn(true);
+      setProfileChecked(true);
+    }
+    if (slotChanged && info?.username && info?.token) {
+      // 슬롯이 바뀐 탭은 한 번 새로 열어야 Supabase 클라이언트도 이 슬롯으로
+      // 다시 만들어진다. 저장은 이미 끝났으므로 그대로 운영 콘솔로 들어간다.
+      window.location.href = window.location.origin + '/operator';
+      return;
+    }
+    navigate('operator');
+  };
+
   // Business views
   if (view === 'business-signup') {
     return (
@@ -1966,6 +1986,7 @@ const App: React.FC = () => {
               navigate('business-admin');
             }
           }}
+          onAdminLoginSuccess={handleOperatorLoginSuccess}
         />
       </LazyRoute>
     );
@@ -1990,25 +2011,7 @@ const App: React.FC = () => {
     );
   }
 
-  if (view === 'operator-login') return <LazyRoute fallback={ROUTE_LOADING_SCREEN}><OperatorLogin onLoginSuccess={(info) => {
-    // 이 탭은 운영자 슬롯이 된다 — 같은 브라우저의 일반 유저 탭과 로그인이
-    // 섞이지 않도록 아래 저장은 모두 운영자 슬롯 키로 들어간다.
-    const slotChanged = setAccountScope('operator');
-    if (info?.username && info?.token) {
-      sessionSet('picks_user_session', info.username);
-      sessionSet('picks_admin_token', info.token);
-      setUserName(info.username);
-      setIsLoggedIn(true);
-      setProfileChecked(true);
-    }
-    if (slotChanged && info?.username && info?.token) {
-      // 슬롯이 바뀐 탭은 한 번 새로 열어야 Supabase 클라이언트도 이 슬롯으로
-      // 다시 만들어진다. 저장은 이미 끝났으므로 그대로 운영 콘솔로 들어간다.
-      window.location.href = window.location.origin + '/operator';
-      return;
-    }
-    navigate('operator');
-  }} /></LazyRoute>;
+  if (view === 'operator-login') return <LazyRoute fallback={ROUTE_LOADING_SCREEN}><OperatorLogin onLoginSuccess={handleOperatorLoginSuccess} /></LazyRoute>;
   if (view === 'operator') {
     if (!isLoggedIn) {
       setTimeout(() => navigate('operator-login'), 0);
