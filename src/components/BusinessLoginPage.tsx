@@ -6,9 +6,11 @@ interface BusinessLoginPageProps {
   onNavigateHome: () => void;
   onNavigateBusinessSignup: () => void;
   onLoginSuccess: (businessUsername: string, companyName: string) => void;
+  // 관리자 계정(role=admin)으로 들어오면 비즈니스 대시보드가 아니라 운영 콘솔로 보낸다.
+  onAdminLoginSuccess?: (info: { username: string; token: string }) => void;
 }
 
-const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, onNavigateBusinessSignup, onLoginSuccess }) => {
+const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, onNavigateBusinessSignup, onLoginSuccess, onAdminLoginSuccess }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
 
@@ -39,7 +41,10 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
         return;
       }
 
-      if (result.success) {
+      if (result.success && onAdminLoginSuccess && String(result.role || '').trim().toLowerCase() === 'admin' && result.access_token) {
+        // 관리자 계정은 비즈니스 세션을 남기지 않고 운영 콘솔(관리자 대시보드)로 들어간다.
+        onAdminLoginSuccess({ username: result.username, token: result.access_token });
+      } else if (result.success) {
         localStorage.setItem('picks_business_session', result.username);
         localStorage.setItem('picks_business_company', result.company_name);
         if (result.access_token) {
