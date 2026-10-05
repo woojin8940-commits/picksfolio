@@ -2,7 +2,13 @@ import type { Config } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { checkUsernameRules, normalizeUsername } from "./_shared/username-rules.mts";
-import { legacyTransferDecision, loadLegacyClaimant, moveLegacyUsername } from "./_shared/legacy-username.mts";
+import {
+  claimOrphanUsername,
+  legacyTransferDecision,
+  loadLegacyClaimant,
+  moveLegacyUsername,
+  orphanTransferDecision,
+} from "./_shared/legacy-username.mts";
 
 /**
  * 가입 직후 "나만의 링크"(= 아이디)를 정하는 요청.
@@ -187,13 +193,50 @@ export default async (req: Request) => {
       return Response.json({ success: true, username, transferred: true });
     }
 
+    let orphanPage = false;
     try {
-      if (await withDeadline(siteDataExists(username), SITE_DATA_LOOKUP_TIMEOUT_MS)) {
-        return fail("taken", TAKEN_MESSAGE);
-      }
+      orphanPage = await withDeadline(siteDataExists(username), SITE_DATA_LOOKUP_TIMEOUT_MS);
     } catch (err) {
       console.error("[auth-claim-username] site_data 조회 실패:", err);
       return fail("lookup", "링크를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+    }
+    if (orphanPage) {
+      // 페이지 내용만 남고 주인 계정이 없는 이름이다(예전 계정이 지워진 경우). 처음
+      // 예전 계정의 번호가 카카오 번호와 같으면 바로, 아니면 운영자가 본인을 확인하고
+      // 발급한 이전 코드로 이어받는다.
+      // 코드 없이 바로 주면 탈퇴한 사람의 페이지가 새 주인의 주소에서 그대로 열린다.
+      const claimant = await loadLegacyClaimant(supabase, auth.userId);
+      const decision = await orphanTransferDecision({
+        supabase,
+        username,
+        me: claimant,
+        transferCode: (body as any)?.transferCode,
+      });
+      if (decision.kind === "taken") return fail("taken", TAKEN_MESSAGE);
+      if (decision.kind === "code_required") {
+        return fail(
+          "legacy_code_required",
+          decision.codeGiven
+            ? "이전 코드가 맞지 않거나 만료되었습니다. 운영자에게 받은 코드를 다시 확인해 주세요."
+            : decision.phoneUnverified
+              ? "예전에 쓰던 페이지 주소입니다. 로그아웃 후 카카오로 다시 로그인하면 휴대폰 번호로 바로 이어받을 수 있어요. 번호가 바뀌었다면 운영자에게 받은 이전 코드를 입력해 주세요."
+              : "예전에 쓰던 페이지 주소입니다. 본인이라면 운영자에게 받은 이전 코드를 입력해 주세요.",
+        );
+      }
+      const claimed = await claimOrphanUsername({
+        supabase,
+        username,
+        toUserId: auth.userId,
+        kakaoId: claimant?.kakaoId || "",
+        hasProfile: !!mine,
+        method: decision.method,
+        codeId: decision.codeId,
+      });
+      if (!claimed.ok) {
+        if (claimed.duplicate) return fail("taken", TAKEN_MESSAGE);
+        return fail("write", "링크를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+      }
+      return Response.json({ success: true, username, transferred: true });
     }
 
     const payload = { username, updated_at: new Date().toISOString() };

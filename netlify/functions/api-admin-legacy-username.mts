@@ -8,6 +8,7 @@ import {
   generateTransferCode,
   hashTransferCode,
   isLegacyInfluencerProfile,
+  isOrphanPage,
 } from "./_shared/legacy-username.mts";
 
 /**
@@ -18,6 +19,9 @@ import {
  * 옮겨지고, 다르면(번호를 바꿨거나 카카오에 번호가 없을 때) 운영자가 연락해 본인을
  * 확인한 뒤 여기서 코드를 발급해 전달한다. 코드는 한 번만 보여 주고 원문은 저장하지
  * 않는다.
+ *
+ * 예전 계정이 지워지고 페이지 내용(site_data)만 남은 이름(orphan)도 같은 코드로 옮긴다 —
+ * 비교할 번호가 없으므로 코드가 유일한 길이다.
  *
  *   GET  /api/admin-legacy-username?username=foo   이 유저네임의 상태(예전 계정인지 · 옮겨졌는지)
  *   POST /api/admin-legacy-username { username }   이전 코드 발급(14일 유효)
@@ -50,6 +54,7 @@ export default async (req: Request) => {
     if (!username) return Response.json({ error: "유저네임을 입력해 주세요." }, { status: 400 });
     try {
       const profile = await lookup(username);
+      const orphan = profile ? false : await isOrphanPage(getSupabaseServer(), username);
       const moves = await db.sql`
         SELECT method, created_at FROM legacy_username_moves
         WHERE username = ${username} ORDER BY created_at DESC LIMIT 1
@@ -61,6 +66,7 @@ export default async (req: Request) => {
       return Response.json({
         username,
         exists: !!profile,
+        orphan,
         legacy: isLegacyInfluencerProfile(profile),
         kakao: !!String(profile?.kakao_id || "").trim(),
         role: String(profile?.role || ""),
@@ -86,10 +92,10 @@ export default async (req: Request) => {
     if (!username) return Response.json({ error: "유저네임을 입력해 주세요." }, { status: 400 });
     try {
       const profile = await lookup(username);
-      if (!profile) {
+      if (!profile && !(await isOrphanPage(getSupabaseServer(), username))) {
         return Response.json({ error: "이 유저네임을 쓰는 계정이 없습니다. 이미 옮겨졌거나 비어 있는 이름이면 카카오 가입 때 바로 쓸 수 있어요." }, { status: 404 });
       }
-      if (!isLegacyInfluencerProfile(profile)) {
+      if (profile && !isLegacyInfluencerProfile(profile)) {
         return Response.json({ error: "예전 아이디·비밀번호 인플루언서 계정이 아닙니다(카카오 · 브랜드 · 운영자 계정은 옮길 수 없습니다)." }, { status: 400 });
       }
       const code = generateTransferCode();

@@ -90,14 +90,18 @@ export async function legacyTransferDecision(input: {
     return { kind: "move", method: "phone", codeId: null };
   }
 
-  const phoneUnverified = myPhone.length < 10;
-  const code = normalizeTransferCode(input.transferCode);
+  return codeDecision(input.username, input.transferCode, myPhone.length < 10);
+}
+
+/** 운영자가 발급한 이전 코드가 이 유저네임에 맞고 아직 쓸 수 있는지. */
+async function codeDecision(username: string, transferCode: unknown, phoneUnverified: boolean): Promise<LegacyDecision> {
+  const code = normalizeTransferCode(transferCode);
   if (!code) return { kind: "code_required", codeGiven: false, phoneUnverified };
   try {
     const db = getDatabase();
     const rows = await db.sql`
       SELECT id FROM legacy_username_transfers
-      WHERE username = ${input.username} AND code_hash = ${hashTransferCode(code)}
+      WHERE username = ${username} AND code_hash = ${hashTransferCode(code)}
         AND used_at IS NULL AND expires_at > NOW()
       ORDER BY created_at DESC LIMIT 1
     `;
@@ -107,6 +111,62 @@ export async function legacyTransferDecision(input: {
     console.error("[legacy-username] code lookup failed:", (e as Error)?.message);
     return { kind: "code_required", codeGiven: true, phoneUnverified };
   }
+}
+
+/** 이름이 site_data 에만 남아 있는지(페이지는 있는데 그 이름을 가진 profiles 행이 없다). */
+export async function isOrphanPage(supabase: any, username: string): Promise<boolean> {
+  const db = getDatabase();
+  const rows = await db.sql`SELECT 1 FROM site_data WHERE username = ${username} LIMIT 1`;
+  if (rows.length === 0) return false;
+  const { data, error } = await supabase.from("profiles").select("id").eq("username", username).limit(1);
+  if (error) throw error;
+  return !Array.isArray(data) || data.length === 0;
+}
+
+/**
+ * 주인 계정이 없는 페이지(site_data 에만 남은 이름)를 이어받을 수 있는지.
+ *
+ * 예전 계정의 Auth 사용자 · profiles 행이 지워지고 페이지 내용만 남은 경우다. 그대로
+ * 두면 링크 만들기에서는 "이미 사용 중인 링크" 로, 운영자 화면에서는 "쓰는 계정이 없다"
+ * 로 보여서 본인이 카카오로 다시 가입해도 자기 페이지를 되찾을 길이 없었다. 비교할
+ * 예전 번호가 없으면 운영자가 본인을 확인한 뒤 발급한 이전 코드로 옮긴다.
+ */
+export async function orphanTransferDecision(input: {
+  supabase: any;
+  username: string;
+  me: LegacyClaimant | null;
+  transferCode?: unknown;
+}): Promise<LegacyDecision> {
+  if (!input.me || !input.me.kakaoId) return { kind: "taken" };
+  // 한 번 카카오 계정으로 옮겨졌다가 그 카카오 계정이 지워진 경우, 맨 처음 예전
+  // 아이디·비밀번호 계정은 `_legacy_…` 로 비켜 둔 채 남아 있다. 그 번호와 카카오가 확인해
+  // 준 번호가 같으면 처음 이전 때와 같은 기준으로 본인이므로 코드 없이 옮긴다.
+  const myPhone = input.me.verifiedPhone;
+  if (myPhone.length >= 10) {
+    try {
+      const db = getDatabase();
+      const moves = await db.sql`
+        SELECT from_user_id FROM legacy_username_moves
+        WHERE username = ${input.username} AND from_user_id <> ''
+        ORDER BY created_at DESC LIMIT 1
+      `;
+      const fromUserId = String(moves[0]?.from_user_id || "");
+      if (fromUserId) {
+        const { data } = await input.supabase
+          .from("profiles")
+          .select("phone, role, kakao_id")
+          .eq("id", fromUserId)
+          .maybeSingle();
+        const ownerPhone = digits(data?.phone);
+        if (isLegacyInfluencerProfile(data) && ownerPhone.length >= 10 && ownerPhone === myPhone) {
+          return { kind: "move", method: "phone", codeId: null };
+        }
+      }
+    } catch (e) {
+      console.error("[legacy-username] orphan origin lookup failed:", (e as Error)?.message);
+    }
+  }
+  return codeDecision(input.username, input.transferCode, myPhone.length < 10);
 }
 
 /** 옮기지 않는 profiles 컬럼. 계정 자체를 가리키거나 카카오 쪽이 주인인 값이다. */
@@ -286,6 +346,87 @@ export async function moveLegacyUsername(input: {
   } catch (e) {
     // 이름은 이미 옮겨졌다. 기록이 빠진 것은 로그로만 남긴다.
     console.error("[legacy-username] move log failed:", (e as Error)?.message);
+  }
+  return { ok: true };
+}
+
+/**
+ * 주인 계정이 없는 페이지의 이름을 카카오 계정에 준다(orphanTransferDecision 참고).
+ *
+ * 비켜 둘 예전 profiles 행이 없으므로 새 계정에 이름만 쓰면 된다. 페이지 내용 · 협업 ·
+ * 정산 · 결제 멤버십 · 디엠 설정 본문은 유저네임에 묶여 있어 그대로 따라온다. 예전
+ * 계정 아이디에 묶여 있던 기록은 그 아이디를 알 수 없으므로 유저네임으로 찾아 넘긴다.
+ */
+export async function claimOrphanUsername(input: {
+  supabase: any;
+  username: string;
+  toUserId: string;
+  kakaoId: string;
+  hasProfile: boolean;
+  method: "phone" | "code";
+  codeId: number | null;
+}): Promise<{ ok: boolean; duplicate?: boolean }> {
+  const { supabase, username, toUserId } = input;
+  const now = new Date().toISOString();
+
+  const payload = { username, updated_at: now };
+  const { error: writeError } = input.hasProfile
+    ? await supabase.from("profiles").update(payload).eq("id", toUserId)
+    : await supabase
+        .from("profiles")
+        .insert({ id: toUserId, ...payload, role: "user", kakao_id: input.kakaoId || null });
+  if (writeError) {
+    const duplicate = writeError.code === "23505" || /duplicate key|already exists/i.test(writeError.message || "");
+    if (!duplicate) console.error("[legacy-username] orphan claim failed:", writeError);
+    return { ok: false, duplicate };
+  }
+
+  try {
+    const db = getDatabase();
+    await db.sql`
+      UPDATE operator_membership_grants
+      SET auth_user_id = ${toUserId}, updated_at = NOW()
+      WHERE username = ${username}
+        AND NOT EXISTS (SELECT 1 FROM operator_membership_grants WHERE auth_user_id = ${toUserId})
+    `;
+  } catch (e) {
+    console.error("[legacy-username] orphan grant carry-over failed:", (e as Error)?.message);
+  }
+
+  try {
+    const db = getDatabase();
+    await db.sql`
+      UPDATE membership_promo_redemptions SET auth_user_id = ${toUserId}
+      WHERE username = ${username}
+    `;
+  } catch (e) {
+    console.error("[legacy-username] orphan promo redemption carry-over failed:", (e as Error)?.message);
+  }
+
+  try {
+    await mutateBlobJSON<Record<string, any>>("dm-automation", `dm_${username}`, (current) => {
+      if (!current) return null;
+      return { ...current, ownerAuthUserId: toUserId };
+    });
+  } catch (e) {
+    console.error("[legacy-username] orphan dm settings carry-over failed:", (e as Error)?.message);
+  }
+
+  try {
+    const db = getDatabase();
+    if (input.codeId != null) {
+      await db.sql`
+        UPDATE legacy_username_transfers SET used_at = NOW(), used_by_user_id = ${toUserId}
+        WHERE id = ${input.codeId}
+      `;
+    }
+    // 예전 계정 아이디를 알 수 없으므로 from_user_id 는 비워 둔다.
+    await db.sql`
+      INSERT INTO legacy_username_moves (username, from_user_id, to_user_id, method)
+      VALUES (${username}, '', ${toUserId}, ${input.method})
+    `;
+  } catch (e) {
+    console.error("[legacy-username] orphan move log failed:", (e as Error)?.message);
   }
   return { ok: true };
 }
