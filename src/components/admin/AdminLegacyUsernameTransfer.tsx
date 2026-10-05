@@ -101,7 +101,20 @@ const AdminLegacyUsernameTransfer: React.FC<Props> = ({ token }) => {
 
       {status && (
         <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs font-bold text-slate-600 space-y-1">
-          {!status.exists ? (
+          {!status.exists && status.orphan ? (
+            <>
+              <p>페이지 내용만 남고 주인 계정이 없는 유저네임입니다(예전 계정이 지워진 경우).</p>
+              <p className="text-slate-400">비교할 번호가 없어 이전 코드로만 옮겨집니다. 본인 확인 후 발급해 주세요.</p>
+              <button
+                type="button"
+                onClick={issue}
+                disabled={busy}
+                className="mt-2 px-4 py-2 rounded-xl text-xs font-black bg-slate-900 text-white disabled:opacity-50"
+              >
+                이전 코드 발급
+              </button>
+            </>
+          ) : !status.exists ? (
             <p>
               {status.movedAt
                 ? `이미 카카오 계정으로 옮겨졌습니다 (${formatDate(status.movedAt)} · ${status.movedBy === 'phone' ? '휴대폰 번호 일치' : '이전 코드'}).`
