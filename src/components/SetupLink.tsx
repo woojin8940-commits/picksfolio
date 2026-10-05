@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ArrowRight, Check, Link2, Sparkles } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { claimUsername } from '../services/apiService';
@@ -50,6 +50,8 @@ const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
    */
   const [needsCode, setNeedsCode] = useState(false);
   const [transferCode, setTransferCode] = useState('');
+  /** Meta 픽셀 CompleteRegistration 을 이미 보냈는지. 연속 제출로 두 번 보내지 않게 한다. */
+  const registrationTrackedRef = useRef(false);
 
   const validateUsername = (value: string) => {
     if (value.length < 3) return en ? 'Enter at least 3 characters.' : '3자 이상 입력해 주세요.';
@@ -122,6 +124,19 @@ const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
         setNeedsLogin(result.reason === 'auth');
         setNeedsCode(result.reason === 'legacy_code_required');
         return;
+      }
+
+      // Meta 픽셀 가입 완료 이벤트. 'already_set' 은 이미 링크가 있던 기존 계정이라
+      // 신규 가입이 아니다. 같은 계정으로 두 번 잡히지 않도록 ref 와 localStorage 로 막는다.
+      if (result.reason !== 'already_set' && !registrationTrackedRef.current) {
+        registrationTrackedRef.current = true;
+        const trackedKey = `picks_fb_complete_registration:${result.username}`;
+        let alreadyTracked = false;
+        try { alreadyTracked = localStorage.getItem(trackedKey) === '1'; } catch { /* 저장 불가 환경 */ }
+        if (!alreadyTracked) {
+          try { localStorage.setItem(trackedKey, '1'); } catch { /* 저장 불가 환경 */ }
+          (window as any).fbq?.('track', 'CompleteRegistration');
+        }
       }
 
       // 링크를 여기서 기억해 둔다. 저장 직후 새로고침하거나 앱이 화면을 다시
