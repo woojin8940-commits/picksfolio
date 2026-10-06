@@ -38,6 +38,7 @@ import {
   writeDmSendSpeed,
 } from "./_shared/dm-send-speed.mts";
 import { clearFeedCache } from "./_shared/instagram-feed.mts";
+import { getSupabaseServer } from "./_shared/supabase.mts";
 
 /**
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
@@ -701,6 +702,51 @@ export default async (req: Request, context: Context) => {
     if (body?.action === "dismissExternalDm") {
       await clearForeignDm(username);
       return Response.json({ success: true, externalDm: null });
+    }
+
+    /**
+     * 발송 현황 — 지금까지 나간 답글·DM 수와 대기열에서 나갈 차례를 기다리는 수.
+     * 발송 속도 위에 보여 주는 읽기 전용 값이라 플랜과 무관하게 응답한다.
+     * 발송 기록(dm_send_attempts)은 8일만 보관하므로 "오늘"과 "최근 1시간"만 센다.
+     */
+    if (body?.action === "sendStats") {
+      const stored = (await store.get(key, { type: "json" })) as DmSettings | null;
+      const ids = [...new Set([stored?.igUserId, stored?.igAccountId].map((v) => String(v || "")).filter(Boolean))];
+      if (ids.length === 0) {
+        return Response.json({ success: true, sentToday: 0, sentHour: 0, pending: 0, scheduled: 0 });
+      }
+      // 한국 시간 자정 기준 "오늘".
+      const kstNow = new Date(Date.now() + 9 * 3600_000);
+      const todayStart = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()) - 9 * 3600_000).toISOString();
+      const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+      const nowIso = new Date().toISOString();
+      const db = getSupabaseServer();
+      const count = async (q: PromiseLike<{ count: number | null; error: unknown }>) => {
+        const { count: n, error } = await q;
+        if (error) throw error;
+        return n || 0;
+      };
+      try {
+        const [sentToday, sentHour, pending, scheduled] = await Promise.all([
+          count(db.from("dm_send_attempts").select("id", { count: "exact", head: true })
+            .in("ig_account_id", ids).eq("status", "sent").gte("created_at", todayStart)),
+          count(db.from("dm_send_attempts").select("id", { count: "exact", head: true })
+            .in("ig_account_id", ids).eq("status", "sent").gte("created_at", hourAgo)),
+          // 발송 시각이 됐지만 속도 제한으로 차례를 기다리는(또는 지금 처리 중인) 건.
+          count(db.from("dm_jobs").select("id", { count: "exact", head: true })
+            .in("ig_account_id", ids).or(`status.eq.processing,and(status.eq.pending,due_at.lte."${nowIso}")`)),
+          // 예약 시각이 아직 오지 않은 건.
+          count(db.from("dm_jobs").select("id", { count: "exact", head: true })
+            .in("ig_account_id", ids).eq("status", "pending").gt("due_at", nowIso)),
+        ]);
+        return Response.json(
+          { success: true, sentToday, sentHour, pending, scheduled },
+          { headers: { "Cache-Control": "private, no-store" } },
+        );
+      } catch (e) {
+        console.warn("[dm-automation] send stats failed:", (e as Error)?.message);
+        return Response.json({ error: "발송 현황을 불러오지 못했습니다." }, { status: 503 });
+      }
     }
 
     /**

@@ -247,7 +247,9 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
               });
               return;
             }
-            await release(job.username, replyKey, true);
+            // 영구 실패한 답글은 처리 끝으로 표시한다. 되돌리면 DM 이 대기열로 돌아갈 때마다
+            // 답글을 다시 시도해 실패하고, DM 은 나가지 못한 채 발송 한도만 쓴다.
+            await confirmSent(job.username, replyKey);
             replyFailure = { error, kind };
           }
         } else if (!(await confirmedSent(job.username, replyKey))) {

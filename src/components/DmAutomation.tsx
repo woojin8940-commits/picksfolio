@@ -16,7 +16,7 @@ import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import ManualDmModal from './ManualDmModal';
 import CollabMatchRegister from './CollabMatchRegister';
 import Toggle from './DmToggle';
-import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmSendStatusSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -2501,14 +2501,20 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
               )}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                 {media.map((m) => (
-                  <div
+                  /* 누르면 이 게시물에만 걸리는 새 자동화를 연다. */
+                  <button
                     key={m.id}
-                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-100"
+                    type="button"
+                    onClick={() => setEditing({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] })}
+                    disabled={!entitled}
+                    title={entitled ? '이 게시물에 자동 DM 설정' : t('common.dmAccessNotice', '자동 디엠 이용 조건을 먼저 확인해 주세요.', 'Check the DM automation requirements first.')}
+                    aria-label="이 게시물에 자동 DM 설정"
+                    className="relative block w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-100 hover:border-pink-400 hover:ring-2 hover:ring-pink-200 active:scale-[0.98] transition-all disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {m.mediaUrl
                       ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
                       : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
-                  </div>
+                  </button>
                 ))}
               </div>
             </>
@@ -2517,6 +2523,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       )}
 
       {/* 스팸 방지 — 답글/DM 발송 속도(시간당 발송량, 계정 전체). 피드 바로 아래에 얇게 둔다. */}
+      {/* 발송 현황 — 오늘 나간 수와 앞으로 나갈 수. 발송 속도 바로 위에 둔다. */}
+      {connected && <DmSendStatusSection userName={userName} sendSpeed={sendSpeed} />}
+
       {connected && (
         <DmSendSpeedSection
           userName={userName}

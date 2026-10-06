@@ -7,10 +7,14 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { completeKakaoSdkLogin, isKakaoSdkCallback } from './utils/kakaoLogin';
 import { purgeRemovedLoginSaveKeys } from './utils/loginPersistence';
+import { installStaleBuildReload } from './utils/staleBuildReload';
 
 // 없어진 "로그인 저장" 옵션들이 브라우저에 남겨 둔 값을 지운다. 기능이 없는데 값이
 // 남아 있으면 안 된다.
 purgeRemovedLoginSaveKeys();
+
+// 백그라운드에 오래 있던 휴대폰 탭·앱이 예전 배포를 계속 실행하지 않게 한다.
+installStaleBuildReload();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

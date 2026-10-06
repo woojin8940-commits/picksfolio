@@ -3936,6 +3936,36 @@ export const apiService = {
     }
   },
 
+  /** 발송 현황 — 오늘/최근 1시간 나간 답글·DM 수와 대기 중·예약된 건수. */
+  async getDmSendStats(
+    username: string,
+  ): Promise<{ ok: boolean; error?: string; sentToday?: number; sentHour?: number; pending?: number; scheduled?: number }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'sendStats' }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.success !== true) {
+        return { ok: false, error: data?.error || `발송 현황을 불러오지 못했습니다. (HTTP ${res.status})` };
+      }
+      return {
+        ok: true,
+        sentToday: Number(data.sentToday) || 0,
+        sentHour: Number(data.sentHour) || 0,
+        pending: Number(data.pending) || 0,
+        scheduled: Number(data.scheduled) || 0,
+      };
+    } catch (e) {
+      console.error('[API] Failed to load DM send stats:', e);
+      return { ok: false, error: '네트워크 오류로 발송 현황을 불러오지 못했습니다.' };
+    }
+  },
+
   /** 답글/DM 발송 속도(시간당 발송량) 저장. 저장 즉시 발송 간격에 반영된다. */
   async saveDmSendSpeed(
     username: string,
