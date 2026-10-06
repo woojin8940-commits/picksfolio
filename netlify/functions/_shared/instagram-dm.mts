@@ -455,17 +455,6 @@ export interface SendDmArgs {
   bestEffortFrom?: number;
   /** 첫 통이 형식 오류로 거부됐을 때 대신 보낼 메시지(`DmPlan.fallback`). */
   fallback?: Record<string, unknown>;
-  /**
-   * 첫 통부터 발송 간격 없이 곧바로 보낼지.
-   *
-   * 발송 간격(기본 약 9초)은 댓글마다 먼저 나가는 발송끼리 벌리려는 것이다. 다음
-   * 두 경우는 이미 시작된 대화에 이어지는 발송이라 간격을 두지 않는다.
-   *  - 1단계(예고) 메시지의 버튼을 누른 사람에게 보내는 본 메시지 — 상대가 방금
-   *    눌렀으니 몇 통이든 바로 도착해야 한다.
-   *  - 방금 거부된 발송을 대신하는 대체 메시지 — 순서를 새로 받으려 하면 간격에
-   *    걸려 throttled 로 끝나고, 대기열은 거부될 원래 메시지를 다시 보내므로 대체
-   *    메시지는 끝내 나가지 않는다.
-   */
   continuation?: boolean;
 }
 
@@ -484,6 +473,8 @@ export type DmErrorKind =
   | "rate_limit"
   | "throttled"
   | "uncertain"
+  | "recipient_unavailable"
+  | "invalid_payload"
   | "other";
 
 export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
@@ -508,11 +499,28 @@ export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
     return "rate_limit";
   }
   if (httpStatus && httpStatus >= 500) return "uncertain";
-  if (/unknown error|temporarily unavailable/.test(message)) return "uncertain";
+  if (code === 1 || code === 2 || /unknown error|unexpected error|temporarily unavailable/.test(message)) return "uncertain";
   if (code === 190 || code === 200 || code === 102 || /permission|access token|expired/.test(message)) {
     return "permission";
   }
+  if (/requested user cannot be found|no matching user found|user not found|recipient.*(?:not found|unavailable)/.test(message)) {
+    return "recipient_unavailable";
+  }
+  if (code === 100 && !/recipient|comment_id|access.token|object with id/.test(message) &&
+    /message|attachment|template|payload|title|subtitle|button|element|image_url/.test(message) &&
+    /invalid|missing|must|required|expect|unsupported|exceed|too long|maximum/.test(message)) {
+    return "invalid_payload";
+  }
   return "other";
+}
+
+function graphErrorMessage(error: any, status: number): string {
+  const details = [`HTTP ${status}`];
+  if (typeof error?.code === "number") details.push(`code ${error.code}`);
+  if (typeof error?.error_subcode === "number") details.push(`subcode ${error.error_subcode}`);
+  const trace = String(error?.fbtrace_id || "");
+  if (/^[a-zA-Z0-9_-]{1,128}$/.test(trace)) details.push(`trace ${trace}`);
+  return `${error?.message || "Graph API 오류"} (${details.join(", ")})`;
 }
 
 /** 분류된 오류를 사용자가 읽을 수 있는 안내로 바꾼다. */
@@ -577,14 +585,6 @@ async function postOneMessage(args: {
   accessToken: string;
   recipient: Record<string, string>;
   message: Record<string, unknown>;
-  /**
-   * 같은 DM 을 이루는 뒤 통(본문 텍스트 뒤의 링크 버튼 카드 등)인지.
-   *
-   * 발송 간격(기본 약 9초)은 "DM 한 건"끼리 벌리려는 것이다. 한 DM 이 여러 통으로
-   * 나뉜 경우 그 뒤 통까지 간격을 적용하면 텍스트만 먼저 오고 버튼 카드는 한참
-   * 뒤에(또는 웹훅이 기다리지 못해 아예) 도착한다. 그래서 첫 통이 예약을 받아
-   * 나갔다면 뒤 통은 예약 없이 짧은 간격만 두고 곧바로 보낸다.
-   */
   followUp?: boolean;
 }): Promise<SendOneResult> {
   const { url, accessToken, recipient, message } = args;
@@ -592,14 +592,13 @@ async function postOneMessage(args: {
   if (args.followUp) {
     // 인스타그램이 순서를 뒤바꾸지 않도록 바로 앞 통과 최소 간격만 둔다.
     await new Promise((resolve) => setTimeout(resolve, FOLLOW_UP_GAP_MS));
-  } else {
-    try {
-      reservation = await reserveDmSend(args.igId, recipient.comment_id ? "private_reply" : "direct");
-    } catch {
-      return { ok: false, error: "발송 대기열에 연결하지 못했습니다.", errorKind: "throttled", retryAfterMs: 60_000 };
-    }
-    if (!reservation.allowed) return { ok: false, errorKind: "throttled", retryAfterMs: reservation.retryAfterMs };
   }
+  try {
+    reservation = await reserveDmSend(args.igId, recipient.comment_id ? "private_reply" : "direct");
+  } catch {
+    return { ok: false, error: "발송 대기열에 연결하지 못했습니다.", errorKind: "throttled", retryAfterMs: 60_000 };
+  }
+  if (!reservation.allowed) return { ok: false, errorKind: "throttled", retryAfterMs: reservation.retryAfterMs };
   const finish = async (result: SendOneResult) => {
     if (reservation?.token) await finishDmSend(args.igId, reservation.token, result);
     return result;
@@ -638,7 +637,7 @@ async function postOneMessage(args: {
     const graphError = result?.error;
     return finish({
       ok: false,
-      error: graphError?.message || `Graph API 오류 (HTTP ${res.status})`,
+      error: graphErrorMessage(graphError, res.status),
       errorKind: classifyGraphError(graphError, res.status),
       retryAfterMs: retryAfterMs(res),
     });
@@ -678,8 +677,12 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
   let usedFallback = false;
 
   for (let i = 0; i < messages.length; i += 1) {
+    if (i > 0 && recipient.comment_id && !followUpRecipient) {
+      return { ok: i >= required, messageId, sent, total, partial: i < required,
+        errorKind: i < required ? "outside_window" : undefined,
+        error: i < required ? "추가 메시지를 보낼 수 있는 대화창이 없습니다." : undefined };
+    }
     const to = i === 0 ? recipient : followUpRecipient || recipient;
-    // 첫 통이 이미 나갔으면 뒤 통은 발송 간격 없이 이어 보낸다(한 DM 의 일부다).
     let attempt = await postOneMessage({
       igId,
       url,
@@ -695,14 +698,11 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
      * 권한 만료·발송 한도·이미 답장함 같은 오류는 대체 메시지로도 똑같이 실패하고,
      * 이미 도착했을 수 있는 메시지를 한 번 더 보낼 위험만 남는다.
      *
-     * 대체 메시지는 거부된 첫 통의 발송 순서를 이어 쓴다(`followUp`). 순서를 새로
-     * 받으려 하면 발송 간격에 걸려 throttled 로 끝나고, 대기열이 다시 시도할 때도
-     * 원래 메시지가 또 거부돼 대체 메시지는 영영 나가지 않았다.
      */
-    if (!attempt.ok && i === 0 && fallback && attempt.errorKind === "other") {
+    if (!attempt.ok && i === 0 && fallback && attempt.errorKind === "invalid_payload") {
       const retried = await postOneMessage({ igId, url, accessToken, recipient: to, message: fallback, followUp: true });
       usedFallback = retried.ok;
-      attempt = retried;
+      if (retried.errorKind !== "throttled") attempt = retried;
     }
 
     if (attempt.ok) {
@@ -794,7 +794,7 @@ export async function postCommentReply(args: {
       const errorKind = classifyGraphError(data?.error, res.status);
       return finish({
         ok: false,
-        error: data?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
+        error: graphErrorMessage(data?.error, res.status),
         uncertain: errorKind === "uncertain",
         errorKind,
         retryAfterMs: retryAfterMs(res),

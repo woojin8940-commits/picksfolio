@@ -13,7 +13,7 @@ import {
   sendDmMessages,
 } from "./instagram-dm.mts";
 import type { DmContent } from "./instagram-dm.mts";
-import { claimIfNew, confirmSent, confirmedSent, contentHashOf, dmContentKey, noteSentText, privateReplyKey, publicReplyKey, release } from "./dm-send-registry.mts";
+import { claimIfNew, confirmFailed, confirmedFailure, confirmSent, confirmedSent, contentHashOf, dmContentKey, noteSentText, privateReplyKey, publicReplyKey, release } from "./dm-send-registry.mts";
 import { linkFeatureOff } from "./instagram-metrics.mts";
 import { completeDmJob, enqueueScheduledJob, pauseDmAccount, retryDmJob } from "./dm-jobs.mts";
 import type { DmJob } from "./dm-jobs.mts";
@@ -249,12 +249,15 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
             }
             // 영구 실패한 답글은 처리 끝으로 표시한다. 되돌리면 DM 이 대기열로 돌아갈 때마다
             // 답글을 다시 시도해 실패하고, DM 은 나가지 못한 채 발송 한도만 쓴다.
-            await confirmSent(job.username, replyKey);
+            await confirmFailed(job.username, replyKey, error, kind);
             replyFailure = { error, kind };
           }
-        } else if (!(await confirmedSent(job.username, replyKey))) {
-          await finishScheduled(key, queued, { ...job, status: "uncertain", errorKind: "uncertain", error: "이 댓글 답글의 이전 발송 결과를 확인해야 합니다." });
-          return;
+        } else {
+          replyFailure = await confirmedFailure(job.username, replyKey);
+          if (!replyFailure && !(await confirmedSent(job.username, replyKey))) {
+            await finishScheduled(key, queued, { ...job, status: "uncertain", errorKind: "uncertain", error: "이 댓글 답글의 이전 발송 결과를 확인해야 합니다." });
+            return;
+          }
         }
       }
 
@@ -359,7 +362,8 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
         ...sendArgs,
         recipient: isPrivateReply ? { comment_id: job.commentId! } : { id: job.recipientId },
         // 비공개 답장은 첫 통만 허용된다. 이어지는 통은 열린 대화창(IGSID)으로.
-        followUpRecipient: isPrivateReply && job.recipientId ? { id: job.recipientId } : undefined,
+        followUpRecipient: isPrivateReply && job.recipientId && plan.messages.length > 1 &&
+          withinDmWindow(await getDmContact(job.username, job.recipientId)) ? { id: job.recipientId } : undefined,
         messages: plan.messages,
         bestEffortFrom: plan.bestEffortFrom,
         fallback: plan.fallback,

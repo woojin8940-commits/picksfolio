@@ -20,6 +20,8 @@ import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
   claimIfNew,
+  confirmFailed,
+  confirmedFailure,
   confirmSent,
   confirmedSent,
   commentDmKey,
@@ -718,11 +720,6 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
   }
   const automation = candidates.find((a) => passesFollowFilter(a, follows));
   const eventId = String(postback?.mid || `${senderId}_${event?.timestamp || ""}`);
-  /**
-   * 버튼을 누른 사람에게 보내는 메시지(본 메시지 · 팔로우 안내 · 대체 메시지)는
-   * 계정 발송 간격을 기다리지 않는다 — 몇 통이든 순서대로 곧바로 나간다.
-   * (통 사이에는 순서가 뒤바뀌지 않도록 0.4초만 둔다.)
-   */
   const send = (messages: Record<string, unknown>[]) =>
     sendDmMessages({
       graphHost: graphHost(settings),
@@ -738,11 +735,39 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
   // 팔로우 조건에 맞지 않음 → 안내 + 재확인 버튼(같은 payload).
   if (!automation) {
     const gateRule = candidates[0];
-    if (!(await claimIfNew(username, baitGateKey(eventId), true))) return;
+    const gateKey = baitGateKey(eventId);
+    if (!(await claimIfNew(username, gateKey, true))) return;
     const text = (gateRule.followGateMessage || "").trim() || DEFAULT_FOLLOW_GATE_MESSAGE;
     const card = postbackCard(text, gateRule.followGateButtonLabel || "", baitPayload(commentId), DEFAULT_FOLLOW_GATE_BUTTON_LABEL);
     const result = await send([card]);
-    if (!result.ok && result.errorKind !== "uncertain") await release(username, baitGateKey(eventId), true);
+    if (result.errorKind === "throttled" || result.errorKind === "rate_limit") {
+      try {
+        await createScheduledJob({
+          id: `bait_gate_${eventId}`,
+          username,
+          igAccountId: igId,
+          recipientId: senderId,
+          sendAt: new Date(Date.now() + Math.max(result.retryAfterMs || 0, 1000)).toISOString(),
+          message: "",
+          buttons: [],
+          payloads: [card],
+          source: "trigger",
+          createdAt: new Date().toISOString(),
+          status: "pending",
+          ruleId: gateRule.id,
+          ruleName: gateRule.name,
+        });
+      } catch (e) {
+        await release(username, gateKey, true);
+        throw e;
+      }
+      await appendLog(username, {
+        kind: "dm", status: "scheduled", trigger: "bait_follow_gate", recipientId: senderId,
+        commentId, ruleId: gateRule.id, ruleName: gateRule.name,
+      });
+      return;
+    }
+    if (!result.ok && result.errorKind !== "uncertain") await release(username, gateKey, true);
     await appendLog(username, {
       kind: "dm",
       status: result.ok ? "sent" : "failed",
@@ -772,17 +797,20 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
   }
 
   try {
-    let result = await send(plan.messages);
+    let resultMessages = plan.messages;
+    let result = await send(resultMessages);
     let usedFallback = false;
 
     // 본 메시지가 형식 오류로 거부됨(카드 이미지 등) → 기존 1통 카드 내용으로 한 번 더.
-    if (!result.ok && !result.partial && result.errorKind === "other") {
+    if (!result.ok && !result.partial && result.errorKind === "invalid_payload") {
       const single = buildCommentPlan(automation);
       const fallbackMessages = single.messages.slice(0, 1);
       if (fallbackMessages.length > 0) {
-        const retried = await send(fallbackMessages);
-        if (!retried.ok && single.fallback) {
-          result = await send([single.fallback]);
+        resultMessages = fallbackMessages;
+        const retried = await send(resultMessages);
+        if (!retried.ok && single.fallback && retried.errorKind === "invalid_payload") {
+          resultMessages = [single.fallback];
+          result = await send(resultMessages);
         } else {
           result = retried;
         }
@@ -802,7 +830,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
         username,
         igAccountId: igId,
         recipientId: senderId,
-        messages: plan.messages,
+        messages: resultMessages,
         result,
         ruleId: automation.id,
         ruleName: automation.name,
@@ -842,7 +870,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
           sendAt: new Date(Date.now() + (result.retryAfterMs || 60_000)).toISOString(),
           message: "",
           buttons: [],
-          payloads: plan.messages,
+          payloads: resultMessages,
           source: "trigger",
           createdAt: new Date().toISOString(),
           status: "pending",
@@ -1441,7 +1469,12 @@ export async function processWebhookPayload(
               ruleId: automation.id,
             });
           } else if (!(await claimIfNew(username, publicReplyKey(commentId), true))) {
-            if (!(await confirmedSent(username, publicReplyKey(commentId)))) {
+            const previousFailure = await confirmedFailure(username, publicReplyKey(commentId));
+            if (previousFailure) {
+              outcome.failed = (outcome.failed || 0) + 1;
+              outcome.error = previousFailure.error;
+              outcome.errorKind = previousFailure.kind;
+            } else if (!(await confirmedSent(username, publicReplyKey(commentId)))) {
               outcome.uncertain = true;
               outcome.error = "이 댓글 답글의 이전 발송 결과를 확인해야 합니다.";
               outcome.errorKind = "uncertain";
@@ -1480,7 +1513,7 @@ export async function processWebhookPayload(
               const transientReply = replyResult.errorKind === "rate_limit" || replyResult.errorKind === "throttled";
               if (!replyResult.uncertain) {
                 if (transientReply) await release(username, publicReplyKey(commentId), true);
-                else await confirmSent(username, publicReplyKey(commentId));
+                else await confirmFailed(username, publicReplyKey(commentId), replyResult.error || "답글 발송 실패", replyResult.errorKind || "other");
               }
               if (replyResult.errorKind === "rate_limit" || replyResult.errorKind === "throttled") {
                 outcome.retryable = true;
@@ -1601,22 +1634,20 @@ export async function processWebhookPayload(
             outcome.errorKind = "uncertain";
             continue;
           }
-          let result = null;
-          if (replyAvailable) {
-            sendAttempted = true;
-            outcome.sideEffectAttempted = true;
-            result = await sendDmMessages({
-                graphHost: graphHost(settings),
-                graphVersion: GRAPH_VERSION,
-                igId,
-                accessToken,
-                recipient: { comment_id: commentId },
-                followUpRecipient: fromId ? { id: fromId } : undefined,
-                messages,
-                bestEffortFrom: plan.bestEffortFrom,
-                fallback: plan.fallback,
-              });
-          }
+          sendAttempted = true;
+          outcome.sideEffectAttempted = true;
+          let result = await sendDmMessages({
+            graphHost: graphHost(settings),
+            graphVersion: GRAPH_VERSION,
+            igId,
+            accessToken,
+            recipient: { comment_id: commentId },
+            followUpRecipient: fromId && messages.length > 1 &&
+              withinDmWindow(await getDmContact(username, fromId)) ? { id: fromId } : undefined,
+            messages,
+            bestEffortFrom: plan.bestEffortFrom,
+            fallback: plan.fallback,
+          });
 
           if (result && !result.ok && !result.partial &&
             result.errorKind !== "already_sent" && result.errorKind !== "uncertain") {

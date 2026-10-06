@@ -158,13 +158,28 @@ export async function alreadyRecorded(username: string, key: string): Promise<bo
   }
 }
 
-export async function confirmSent(username: string, key: string): Promise<void> {
+async function updateRecord(username: string, key: string, values: Record<string, unknown>): Promise<void> {
   const s = store();
   const path = `${prefixFor(username)}${key}`;
   const snapshot = await s.getWithMetadata(path, { type: "json", consistency: "strong" });
   if (!snapshot?.etag) throw new Error("DM send claim missing");
-  const result = await s.set(path, JSON.stringify({ ...(snapshot.data as object), confirmed: true }), { onlyIfMatch: snapshot.etag });
+  const result = await s.set(path, JSON.stringify({ ...(snapshot.data as object), ...values }), { onlyIfMatch: snapshot.etag });
   if (result.modified === false) throw new Error("DM send claim changed");
+}
+
+export async function confirmSent(username: string, key: string): Promise<void> {
+  await updateRecord(username, key, { confirmed: true, failure: null });
+}
+
+export async function confirmFailed(username: string, key: string, error: string, kind: string): Promise<void> {
+  await updateRecord(username, key, { confirmed: false, failure: { error, kind } });
+}
+
+export async function confirmedFailure(username: string, key: string): Promise<{ error: string; kind: string } | null> {
+  const record = await store().get(`${prefixFor(username)}${key}`, { type: "json" }) as
+    { failure?: { error?: unknown; kind?: unknown } } | null;
+  if (typeof record?.failure?.error !== "string" || typeof record.failure.kind !== "string") return null;
+  return { error: record.failure.error, kind: record.failure.kind };
 }
 
 export async function confirmedSent(username: string, key: string): Promise<boolean> {

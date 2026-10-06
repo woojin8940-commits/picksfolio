@@ -26,6 +26,7 @@ export default async (req: Request) => {
       .finally(() => { heartbeat = undefined; });
   }, 20_000);
   const deadline = Date.now() + 12 * 60_000;
+  context.deadline = deadline;
   let failed = false;
   try {
     await workerContext.run(context, async () => {
