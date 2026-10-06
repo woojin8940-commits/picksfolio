@@ -339,7 +339,16 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
       if (isPrivateReply) {
         try {
           privateClaimed = await claimIfNew(job.username, privateReplyKey(job.commentId!), true);
+          if (privateClaimed && bait && plan !== legacyPlan) {
+            await saveBaitPending(job.username, {
+              commentId: job.commentId!,
+              fromId: job.recipientId,
+              automationIds: bait.automationIds?.length ? bait.automationIds : [job.ruleId || ""].filter(Boolean),
+              createdAt: new Date().toISOString(),
+            });
+          }
         } catch (e) {
+          if (privateClaimed) await release(job.username, privateReplyKey(job.commentId!), true);
           await release(job.username, sendKey, true);
           throw e;
         }
@@ -400,13 +409,6 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
           if (await noteBaitFailure(job.username, "1단계(미끼) 카드가 거부돼 1통 카드로 대체 발송했습니다.")) {
             await notifyAdminBaitIssue(job.username, "미끼 카드(postback 버튼)가 연달아 거부돼 24시간 동안 기존 1통 카드 방식으로 전환했습니다.", "suspended");
           }
-        } else if (result.messageId) {
-          await saveBaitPending(job.username, {
-            commentId: job.commentId!,
-            fromId: job.recipientId,
-            automationIds: bait.automationIds?.length ? bait.automationIds : [job.ruleId || ""].filter(Boolean),
-            createdAt: sentAt,
-          });
         }
       }
       // 이 예약도 여러 통이면 뒤 통이 발송 간격에 걸릴 수 있다 — 남은 통을 다시 대기열로.

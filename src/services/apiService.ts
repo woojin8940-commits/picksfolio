@@ -1099,6 +1099,16 @@ export interface DmScheduledJob {
 export const DM_CARD_IMAGE_MAX_MB = 8;
 export const DM_CARD_IMAGE_MAX_BYTES = DM_CARD_IMAGE_MAX_MB * 1024 * 1024;
 
+/** 2단계 본 메시지 뒤에 이어 보낼 추가 메시지 한 통 — 텍스트 / 캐러셀 / 이미지. */
+export interface DmFollowUp {
+  id: string;
+  type: 'text' | 'carousel' | 'image';
+  message?: string;
+  buttons?: DmMessageButton[];
+  cards?: DmCarouselCard[];
+  imageUrl?: string;
+}
+
 export interface DmAutomationItem {
   id: string;
   name: string;
@@ -1142,6 +1152,8 @@ export interface DmAutomationItem {
   baitButtonLabel?: string;
   /** 2단계 본 메시지 앞에 먼저 보낼 텍스트(선택). */
   mainIntro?: string;
+  /** 2단계 본 메시지 뒤에 이어서 보낼 추가 메시지(최대 5통). */
+  followUps?: DmFollowUp[];
   /** 팔로우 조건에 맞지 않는 사람이 버튼을 눌렀을 때 보낼 안내 / 재확인 버튼 라벨. */
   followGateMessage?: string;
   followGateButtonLabel?: string;
