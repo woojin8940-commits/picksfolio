@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  AlertCircle, Check, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, Trash2,
+  AlertCircle, CalendarClock, Check, Clock, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, RefreshCw, Send, Trash2,
 } from 'lucide-react';
 import {
   apiService, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
   DM_FAQ_MAX, DM_FAQ_QUESTION_MAX,
 } from '../services/apiService';
 import Toggle from './DmToggle';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 
 /**
  * 디엠 자동화의 추가 기능 두 가지.
@@ -159,6 +160,83 @@ function useServerDraft<T>(value: T, onResync?: (next: T) => void) {
   const markSynced = () => { editedRef.current = false; sideEditedRef.current = false; };
   return { draft, setDraft, markEdited, markSynced };
 }
+
+/**
+ * 발송 현황 — 오늘 나간 답글·DM 수와 앞으로 나갈 예정인 수.
+ *
+ * 발송 속도를 낮추면 한도를 넘은 발송이 대기열에 쌓이므로, 속도 설정 바로 위에서
+ * 지금 얼마나 나갔고 얼마나 남았는지 함께 보여 준다. 화면이 보이는 동안 30초마다
+ * 새로 읽는다.
+ */
+type SendStats = { sentToday: number; sentHour: number; pending: number; scheduled: number };
+
+export const DmSendStatusSection: React.FC<{ userName: string; sendSpeed: number }> = ({ userName, sendSpeed }) => {
+  const [stats, setStats] = useState<SendStats | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    const r = await apiService.getDmSendStats(userName);
+    setLoading(false);
+    if (!r.ok) {
+      setError(r.error || '발송 현황을 불러오지 못했습니다.');
+      return;
+    }
+    setError('');
+    setStats({ sentToday: r.sentToday || 0, sentHour: r.sentHour || 0, pending: r.pending || 0, scheduled: r.scheduled || 0 });
+  };
+
+  useVisiblePolling(() => load(), 30_000, Boolean(userName), userName);
+
+  // 대기 중인 건이 지금 속도로 모두 나가는 데 걸리는 대략의 시간.
+  const etaMin = stats && stats.pending > 0 ? Math.ceil((stats.pending / Math.max(1, sendSpeed)) * 60) : 0;
+  const eta = etaMin >= 60 ? `약 ${Math.round(etaMin / 6) / 10}시간` : `약 ${etaMin}분`;
+  const items = [
+    { icon: <Send size={13} />, label: '오늘 발송', value: stats?.sentToday, sub: `최근 1시간 ${stats?.sentHour ?? 0}건`, tone: 'text-emerald-600 bg-emerald-50' },
+    { icon: <Clock size={13} />, label: '발송 대기', value: stats?.pending, sub: stats && stats.pending > 0 ? `${eta} 안에 발송` : '대기 없음', tone: 'text-sky-600 bg-sky-50' },
+    { icon: <CalendarClock size={13} />, label: '예약 발송', value: stats?.scheduled, sub: '예약 시각에 발송', tone: 'text-indigo-600 bg-indigo-50' },
+  ];
+
+  return (
+    <section className="bg-white p-4 md:p-5 rounded-3xl border border-slate-100 shadow-sm mb-4">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <p className="text-sm md:text-base font-black text-slate-900">답글/DM 발송 현황</p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          aria-label="발송 현황 새로고침"
+          title="발송 현황 새로고침"
+          className="w-8 h-8 inline-flex items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {items.map((it) => (
+          <div key={it.label} className="rounded-2xl border border-slate-100 bg-slate-50/60 p-3">
+            <span className={`inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[10px] md:text-[11px] font-black ${it.tone}`}>
+              {it.icon} {it.label}
+            </span>
+            <p className="mt-1.5 text-lg md:text-xl font-black text-slate-900">
+              {it.value == null ? '–' : `${it.value.toLocaleString()}건`}
+            </p>
+            <p className="text-[10px] md:text-[11px] font-bold text-slate-400 leading-tight">{stats ? it.sub : '\u00a0'}</p>
+          </div>
+        ))}
+      </div>
+      {error && (
+        <p className="mt-2 flex items-start gap-1.5 text-[11px] font-bold text-amber-700">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" /> {error}
+        </p>
+      )}
+      <p className="mt-2 text-[10px] md:text-[11px] font-medium text-slate-400 leading-relaxed">
+        답글 + DM 합산 · 오늘은 한국 시간 자정부터 · 대기 건수는 발송 속도 한도 때문에 차례를 기다리는 댓글 반응이에요.
+      </p>
+    </section>
+  );
+};
 
 /**
  * 답글/DM 발송 속도 설정(스팸 방지).

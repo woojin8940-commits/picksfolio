@@ -1472,9 +1472,16 @@ export async function processWebhookPayload(
                 messageId: replyResult.replyId,
               });
             } else {
-              // 실패한 답글은 선점을 되돌린다. Meta 가 이벤트를 다시 보내면
-              // 그때 한 번 더 시도할 수 있어야 한다.
-              if (!replyResult.uncertain) await release(username, publicReplyKey(commentId), true);
+              // 일시적인 실패(한도·발송 간격)는 선점을 되돌려 다시 시도할 수 있게 한다.
+              // 인스타그램이 거절한 영구 실패("Object ... does not exist" 등)는 다시 해도
+              // 같은 결과라 처리 끝으로 표시한다. 되돌리면 DM 이 발송 간격 때문에 대기열로
+              // 돌아갈 때마다 답글부터 다시 시도해 실패하고, 그 DM 은 영영 나가지 못한 채
+              // 시간당 발송 한도만 계속 써 버린다.
+              const transientReply = replyResult.errorKind === "rate_limit" || replyResult.errorKind === "throttled";
+              if (!replyResult.uncertain) {
+                if (transientReply) await release(username, publicReplyKey(commentId), true);
+                else await confirmSent(username, publicReplyKey(commentId));
+              }
               if (replyResult.errorKind === "rate_limit" || replyResult.errorKind === "throttled") {
                 outcome.retryable = true;
                 outcome.error = replyResult.error;
