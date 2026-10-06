@@ -7,6 +7,7 @@ import {
   describeDmError,
   postCommentReply,
   sendDmMessages,
+  sentTextsOf,
 } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard, DmErrorKind, DmPlan } from "./_shared/instagram-dm.mts";
 import {
@@ -308,10 +309,7 @@ const handleSend = async (req: Request) => {
 
   // 우리가 보낸 문구로 남긴다. 인스타그램이 돌려주는 발신 에코를 웹훅이
   // "다른 서비스가 보낸 자동 DM"으로 잘못 표시하지 않게 하는 표시다.
-  for (const payload of messages) {
-    const line = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-    if (line) await noteSentText(username, line);
-  }
+  for (const line of sentTextsOf(messages)) await noteSentText(username, line);
 
   // 1) 특정 수신자 ID(recipientId)가 직접 전달된 경우 (단일 발송 레거시 지원)
   if (recipientId) {

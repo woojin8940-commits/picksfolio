@@ -11,6 +11,7 @@ import {
   describeDmError,
   postCommentReply,
   sendDmMessages,
+  sentTextsOf,
 } from "./instagram-dm.mts";
 import type { DmContent } from "./instagram-dm.mts";
 import { claimIfNew, confirmFailed, confirmedFailure, confirmSent, confirmedSent, contentHashOf, dmContentKey, noteSentText, privateReplyKey, publicReplyKey, release } from "./dm-send-registry.mts";
@@ -310,10 +311,7 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
 
       // 우리가 보낸 문구로 남긴다 — 발신 에코를 "외부 서비스가 보낸 DM"으로 잘못
       // 표시하지 않기 위해 발송 전에 남겨야 한다.
-      for (const payload of plan.messages) {
-        const text = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-        if (text) await noteSentText(job.username, text);
-      }
+      for (const text of sentTextsOf(plan.messages)) await noteSentText(job.username, text);
 
       const sendArgs = {
         graphHost: settings!.tokenSource === "instagram_login"
