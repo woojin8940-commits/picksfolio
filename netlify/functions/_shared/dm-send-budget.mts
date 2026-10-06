@@ -7,6 +7,8 @@ type Reservation = { allowed: boolean; token?: string; retryAfterMs?: number };
 /** 답글·DM 을 합산해 세는 계정 단위 발송 줄. */
 const ACCOUNT_LANE: Bucket = "direct";
 const sendDeadline = new AsyncLocalStorage<number>();
+/** 같은 계정의 연이은 발송 사이 최소 간격. DB 함수(dm_reserve_send)의 하한과 같다. */
+const MIN_SEND_SPACING_MS = 400;
 
 export function withDmSendDeadline<T>(run: () => Promise<T>): Promise<T> {
   return sendDeadline.run(Date.now() + 22_000, run);
@@ -40,10 +42,11 @@ export async function reserveDmSend(account: string, bucket: Bucket): Promise<Re
       // 엔드포인트별 한도보다 작으므로 합산 한도만 지키면 종류별 한도도 지켜진다.
       p_bucket: ACCOUNT_LANE,
       p_hour_limit: limit,
-      // 소셜비즈 방식: 한 시간을 한도로 고르게 나눈 간격으로 보낸다(400건이면 9초).
-      // 몰아서 보내지 않는 것이 메타의 스팸 판단을 피하는 핵심이다. 간격이 아직
-      // 안 됐거나 한도에 닿은 발송은 대기열로 돌아가 순서대로 나간다.
-      p_spacing_ms: Math.max(400, Math.ceil(3_600_000 / limit)),
+      // 댓글이 달리는 대로 곧바로 보낸다. 한 시간 한도를 고르게 나눈 간격(400건이면
+      // 9초)을 두면 평소에도 반응이 늦어지는데, 실제로 한도만큼 몰리는 일은 드물다.
+      // 그래서 순서가 뒤바뀌지 않을 만큼의 최소 간격만 두고, 스팸 방지는 시간당
+      // 한도로만 지킨다. 한도에 닿은 발송은 대기열로 돌아가 순서대로 나간다.
+      p_spacing_ms: MIN_SEND_SPACING_MS,
     });
     if (reservation.allowed && reservation.token) return reservation;
     const delay = Math.max(100, Number(reservation.retryAfterMs) || 1000);
