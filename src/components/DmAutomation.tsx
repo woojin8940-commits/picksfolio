@@ -415,42 +415,50 @@ const CarouselPreview: React.FC<{ cards: DmCarouselCard[] }> = ({ cards }) => (
   </div>
 );
 
+/*
+ * 말풍선 크기는 실제 인스타그램 앱 DM 화면 비율을 그대로 옮겼다(글자 크기 기준 em).
+ * 줄바꿈이 실제 도착 화면과 같아지려면 글자 크기 대비 폭이 같아야 한다.
+ *  - 텍스트 말풍선: 내용만큼 줄어들고, 최대 폭은 약 18글자. 한국어도 음절 단위로
+ *    줄을 바꾼다(앱 전체의 keep-all 을 풀어준다).
+ *  - 카드(링크·예고 버튼): 폭이 고정이고 제목은 본문보다 작은 글씨로, 두 줄이 되면
+ *    양쪽 줄 길이를 비슷하게 나눈다(인스타그램 카드 제목의 줄 나눔 방식).
+ */
+const BUBBLE_TEXT = 'text-[14px] [letter-spacing:0]';
+
 /** 일반 텍스트 말풍선. 링크 주소는 인스타그램처럼 파랗게 보인다. */
 const TextBubble: React.FC<{ text: string }> = ({ text }) => (
-  <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+  <div className={`${BUBBLE_TEXT} w-fit max-w-[min(100%,18.2em)] bg-white border border-slate-200 rounded-[1.3em] rounded-bl-md px-[0.8em] py-[0.55em] shadow-sm`}>
     {text
       ? (
-        <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+        <p data-user-content className="text-slate-700 font-medium leading-[1.35] whitespace-pre-wrap [word-break:normal] [overflow-wrap:anywhere]">
           <LinkifiedText text={text} />
         </p>
       )
       : (
-        <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+        <p className="text-slate-700 font-medium leading-[1.35] whitespace-pre-wrap [word-break:normal] [overflow-wrap:anywhere]">
           보낼 메시지를 입력하면 여기에 표시됩니다.
         </p>
       )}
   </div>
 );
 
-/** 본문(또는 카드 제목) + 링크 버튼이 붙은 말풍선 한 통. */
-const ButtonsBubble: React.FC<{ title: string; subtitle?: string; buttons: DmMessageButton[]; bold?: boolean }> = ({ title, subtitle, buttons, bold }) => (
-  <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
-    <div className="px-4 py-3">
-      <p data-user-content className={`text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap break-words ${bold ? 'font-bold' : 'font-medium'}`}>
-        {title}
+/** 본문(또는 카드 제목) + 버튼이 붙은 카드 한 통. 실제 인스타그램 카드처럼 폭이 고정이다. */
+const ButtonsBubble: React.FC<{ title: string; subtitle?: string; buttons: { id: string; label: string }[]; bold?: boolean }> = ({ title, subtitle, buttons }) => (
+  <div className={`${BUBBLE_TEXT} w-[15.3em] max-w-full bg-white border border-slate-200 rounded-[1.3em] rounded-bl-md px-[0.8em] pt-[0.75em] pb-[0.8em] shadow-sm`}>
+    <p data-user-content className="text-[0.78em] text-slate-700 font-medium leading-[1.4] whitespace-pre-wrap [text-wrap:balance]">
+      {title}
+    </p>
+    {subtitle && (
+      <p data-user-content className="mt-0.5 text-[0.72em] text-slate-500 font-medium leading-[1.4] whitespace-pre-wrap [text-wrap:balance]">
+        {subtitle}
       </p>
-      {subtitle && (
-        <p data-user-content className="mt-0.5 text-[12px] text-slate-500 font-medium leading-relaxed whitespace-pre-wrap break-words">
-          {subtitle}
-        </p>
-      )}
-    </div>
-    <div className="border-t border-slate-100">
+    )}
+    <div className="mt-[0.65em] space-y-[0.35em]">
       {buttons.map((b) => (
         <div
           key={b.id}
           data-user-content
-          className="w-full text-center border-b border-slate-100 last:border-b-0 py-2.5 text-[12px] font-bold text-pink-600 truncate px-3"
+          className="w-full text-center bg-slate-100 rounded-[0.6em] py-[0.55em] px-3 text-[0.82em] font-bold text-slate-800 truncate"
         >
           {b.label}
         </div>
@@ -536,15 +544,11 @@ const DmPreview: React.FC<{
           <p className="text-[10px] font-black text-pink-500 mb-1.5">1단계 · 예고 메시지</p>
           <div className="flex items-end gap-2 mb-3">
             {avatar}
-            <div className="max-w-[85%] min-w-0 bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
-              <div className="px-4 py-3">
-                <p data-user-content className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
-                  {bait.message.trim() || DEFAULT_BAIT_MESSAGE}
-                </p>
-              </div>
-              <div data-user-content className="border-t border-slate-100 w-full text-center py-2.5 text-[12px] font-bold text-pink-600 truncate px-3">
-                {bait.buttonLabel.trim() || DEFAULT_BAIT_BUTTON_LABEL}
-              </div>
+            <div className="max-w-[85%] min-w-0">
+              <ButtonsBubble
+                title={bait.message.trim() || DEFAULT_BAIT_MESSAGE}
+                buttons={[{ id: 'bait', label: bait.buttonLabel.trim() || DEFAULT_BAIT_BUTTON_LABEL }]}
+              />
             </div>
           </div>
           <p className="text-[10px] font-black text-pink-500 mb-1.5">2단계 · 버튼을 누르면 도착</p>
@@ -1900,8 +1904,9 @@ const AutomationEditor: React.FC<{
                 <p className="flex items-start gap-1.5 mt-3 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 text-[11px] text-slate-600 font-medium leading-relaxed">
                   <Info size={13} className="shrink-0 mt-px text-slate-400" />
                   <span>
-                    인스타그램 정책상 댓글에 보내는 DM은 <b>댓글 1개당 1통</b>만 보낼 수 있고, 버튼을 넣으면 글자 수도 {CARD_TEXT_MAX}자로 줄어요.
-                    긴 글·여러 버튼·캐러셀을 보내려면 예고 메시지를 켜 주세요. 받는 사람이 예고 메시지의 버튼을 누르면 대화가 열려 본 메시지를 보낼 수 있어요.
+                    여러 개의 메시지를 보내려면 기본 메시지가 필요합니다.
+                    <br />
+                    기본 메시지의 버튼을 클릭하면 아래 "메시지 설정"에서 설정해주신 본문 메시지가 발송됩니다.
                   </span>
                 </p>
                 {baitForced && (
@@ -1984,7 +1989,7 @@ const AutomationEditor: React.FC<{
                     />
                     )}
                     <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
-                      아래에서 텍스트 또는 캐러셀을 골라 본 메시지를 설정해 주세요. 버튼 클릭이 막혀 본 메시지를 보낼 수 없을 때는 자동으로 기존 1통 카드 방식으로 발송됩니다.
+                      DM은 댓글을 남긴 사용자의 요청 폴더로 수신되며, 요청을 '수락'하지 않을 경우 다음 번 댓글을 남겼을 때 메시지를 받지 못할 수 있습니다.
                     </p>
                 </div>
               )}
