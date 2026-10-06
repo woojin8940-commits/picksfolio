@@ -268,42 +268,17 @@ export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
     return [genericTemplate([{ title: message || buttonOnlyTitle(buttons), buttons }])];
   }
 
-  // 긴 본문은 앞부분을 텍스트로 먼저 보내고, 마지막 문단(80자 이내)을 버튼 카드의
-  // 제목으로 이어 보낸다 — 고정 안내 문구를 덧붙이지 않는다.
-  const { body, tail } = splitTrailingCardTitle(message.slice(0, TEXT_MAX));
-  const messages: Record<string, unknown>[] = [];
-  if (body) messages.push({ text: body });
-  messages.push(genericTemplate([{ title: tail, buttons }]));
-  return messages;
+  // 긴 본문은 전부 텍스트로 먼저 보내고, 버튼 카드는 본문을 옮겨 담지 않고
+  // 버튼만 보낸다(카드 제목은 필수라 버튼 이름을 쓴다).
+  return [
+    { text: message.slice(0, TEXT_MAX) },
+    genericTemplate([{ title: buttonOnlyTitle(buttons), buttons }]),
+  ];
 }
 
 /** 본문 없이 버튼만 보낼 때의 카드 제목 — 첫 버튼 이름. */
 function buttonOnlyTitle(buttons: { title: string }[]): string {
   return (buttons[0]?.title || CARD_TITLE_FALLBACK).slice(0, CARD_TEXT_MAX);
-}
-
-/**
- * 긴 본문을 [앞부분 텍스트] + [마지막 부분(카드 제목, 80자 이내)]으로 나눈다.
- * 가능하면 줄바꿈 → 문장 끝 → 공백에서 끊는다.
- */
-export function splitTrailingCardTitle(message: string): { body: string; tail: string } {
-  const text = message.trim();
-  if (text.length <= CARD_TEXT_MAX) return { body: "", tail: text };
-  const start = text.length - CARD_TEXT_MAX;
-  const window = text.slice(start);
-  const pick = (re: RegExp) => {
-    let idx = -1;
-    for (const m of window.matchAll(re)) {
-      const at = (m.index ?? 0) + m[0].length;
-      if (at < window.length) { idx = at; break; }
-    }
-    return idx;
-  };
-  let cut = pick(/\n/g);
-  if (cut < 0) cut = pick(/[.!?。…~]\s/g);
-  if (cut < 0) cut = pick(/\s/g);
-  if (cut < 0) cut = 0;
-  return { body: text.slice(0, start + cut).trim(), tail: window.slice(cut).trim() };
 }
 
 /**

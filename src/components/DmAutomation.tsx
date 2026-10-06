@@ -180,26 +180,6 @@ const splitCardText = (message: string): { title: string; subtitle: string } => 
   return { title, subtitle };
 };
 
-/** 발송기(splitTrailingCardTitle)와 같은 기준으로 긴 본문을 앞부분 텍스트 + 카드 제목으로 나눈다. */
-const splitTrailingCardTitle = (message: string): { body: string; tail: string } => {
-  const text = message.trim();
-  if (text.length <= CARD_TEXT_MAX) return { body: '', tail: text };
-  const start = text.length - CARD_TEXT_MAX;
-  const window = text.slice(start);
-  const pick = (re: RegExp) => {
-    for (const m of window.matchAll(re)) {
-      const at = (m.index ?? 0) + m[0].length;
-      if (at < window.length) return at;
-    }
-    return -1;
-  };
-  let cut = pick(/\n/g);
-  if (cut < 0) cut = pick(/[.!?。…~]\s/g);
-  if (cut < 0) cut = pick(/\s/g);
-  if (cut < 0) cut = 0;
-  return { body: text.slice(0, start + cut).trim(), tail: window.slice(cut).trim() };
-};
-
 /** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
 const CARD_MAX_COUNT = 10;
 
@@ -389,10 +369,10 @@ const DmPreview: React.FC<{
   const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
   // 링크 버튼이 있으면 본문과 버튼이 카드 한 장으로 도착한다(긴 본문은 잘린다).
   // 2단계 본 메시지는 1통 제한이 없어 본문이 잘리지 않는다. 카드 제목 한도를 넘는
-  // 본문은 텍스트로 먼저 가고 버튼 카드가 뒤따른다(발송기 buildDmMessages 와 같은 기준).
+  // 본문은 전부 텍스트로 먼저 가고, 버튼 카드는 본문 없이 버튼만 뒤따른다
+  // (발송기 buildDmMessages 와 같은 기준).
   const longMain = Boolean(bait) && message.trim().length > CARD_TEXT_MAX;
-  const longSplit = longMain ? splitTrailingCardTitle(message.slice(0, 1000)) : null;
-  const cardText = longSplit ? { title: longSplit.tail, subtitle: '' } : bait ? { title: message.trim(), subtitle: '' } : splitCardText(message.trim());
+  const cardText = longMain ? { title: '', subtitle: '' } : bait ? { title: message.trim(), subtitle: '' } : splitCardText(message.trim());
   return (
     <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3 text-slate-400">
@@ -463,12 +443,12 @@ const DmPreview: React.FC<{
           ) : (
             <div className="space-y-1.5">
               {/* 버튼이 없으면 본문은 텍스트 버블로 도착한다. */}
-              {(validButtons.length === 0 || (longSplit && longSplit.body)) && (
+              {(validButtons.length === 0 || longMain) && (
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
                   {message
                     ? (
                       <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                        {longSplit ? longSplit.body : message}
+                        {message}
                       </p>
                     )
                     : (
