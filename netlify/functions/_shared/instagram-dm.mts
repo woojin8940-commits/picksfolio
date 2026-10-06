@@ -1,16 +1,16 @@
 /**
  * 인스타그램 DM 메시지 페이로드 빌더 / 발송기.
  *
- * 인스타그램 메시징은 메신저(페이스북)와 달리 버튼 템플릿
- * (`template_type: "button"`)을 지원하지 않는다. 지원되는 구조화 메시지는
- * 제네릭 템플릿과 상품 템플릿뿐이라, 버튼 템플릿을 보내면 링크 버튼이 빠진
- * 본문만 도착하거나 요청 자체가 거부된다. 그래서 링크 버튼은 항상 제네릭
- * 템플릿 카드에 담아 보낸다.
+ * 링크 버튼은 기본적으로 제네릭 템플릿 카드에 담아 보낸다. 카드의 title/subtitle 은
+ * 각각 80자 제한이라, 긴 본문은 일반 텍스트로 먼저 보내고 링크 버튼만 담은 카드를
+ * 이어서 보낸다(메시지 2건). 짧은 본문은 카드 하나에 본문+버튼을 함께 담는다.
  *
- * 제네릭 템플릿의 title/subtitle 은 각각 80자 제한이라 긴 본문은 카드에 담을
- * 수 없다. 이 경우 본문을 일반 텍스트로 먼저 보내고, 링크 버튼만 담은 카드를
- * 이어서 보낸다(메시지 2건). 짧은 본문은 카드 하나에 본문+버튼을 함께 담아
- * 한 개의 버블로 도착한다.
+ * 예외: 2단계 본 메시지(예고 카드의 버튼을 누른 사람에게 가는 메시지)는 인스타그램
+ * 버튼 템플릿(`template_type: "button"`)으로 보낸다. 본문(최대 640자) 아래에
+ * 버튼(최대 3개)이 붙은 말풍선 **한 통**으로 도착한다(소셜비즈 등과 같은 방식).
+ * 버튼 템플릿이 형식 오류로 거부되면 같은 통을 위 카드 방식(또는 본문 + 링크 주소
+ * 텍스트)으로 한 번 더 보낸다 — 메시지 안의 `FALLBACK_KEY` 참고. 640자를 넘는
+ * 본문만 텍스트 + 버튼 템플릿 2통으로 나뉜다.
  *
  * ── 댓글 비공개 답장은 "한 통"이 전부다 ──
  * 댓글에 대한 자동 DM 은 `recipient: { comment_id }` 로 보내는데, 인스타그램은
@@ -77,6 +77,8 @@ export interface DmContent {
 const CARD_TEXT_MAX = 80;
 /** 텍스트 메시지 길이 제한. */
 const TEXT_MAX = 1000;
+/** 버튼 템플릿 본문 길이 제한. */
+export const BUTTON_TEXT_MAX = 640;
 /** 버튼 라벨 길이 제한. */
 const BUTTON_LABEL_MAX = 20;
 /** 카드 최대 개수. */
@@ -239,10 +241,82 @@ function genericTemplate(elements: unknown[]) {
 }
 
 /**
+ * 메시지 페이로드에 함께 실어 두는 "거부되면 대신 보낼 메시지" 키.
+ *
+ * 발송기가 Graph API 로 보내기 전에 떼어 낸다. 계획(DmPlan.fallback)이 아니라
+ * 메시지 자체에 두는 이유는, 남은 통을 대기열에 저장했다가 나중에 보내는 경로나
+ * 인트로 텍스트 뒤 두 번째 통처럼 첫 통이 아닌 메시지에도 같은 안전장치가
+ * 따라가야 하기 때문이다.
+ */
+const FALLBACK_KEY = "__fallback";
+
+type WebUrlButton = { type: string; url: string; title: string };
+
+/** 본문 + 링크 버튼을 말풍선 한 통으로 — 인스타그램 버튼 템플릿. */
+function buttonTemplate(text: string, buttons: WebUrlButton[]) {
+  return {
+    attachment: {
+      type: "template",
+      payload: { template_type: "button", text, buttons },
+    },
+  };
+}
+
+/** 버튼 템플릿을 쓸 수 없을 때의 대체 메시지 — 카드에 다 들어가면 카드, 아니면 글 + 링크. */
+function textButtonsFallback(message: string, buttons: WebUrlButton[]): Record<string, unknown> {
+  if (message.length <= CARD_TEXT_MAX * 2) {
+    const { title, subtitle } = splitCardText(message);
+    const element: Record<string, unknown> = { title, buttons };
+    if (subtitle) element.subtitle = subtitle;
+    return genericTemplate([element]);
+  }
+  const text = [message, ...buttons.map((b) => `${b.title}: ${b.url}`)].join("\n\n");
+  return { text: text.slice(0, TEXT_MAX) };
+}
+
+/** 본문 + 버튼 한 통(버튼 템플릿), 거부되면 대체 메시지로. */
+function textWithButtons(message: string, buttons: WebUrlButton[]): Record<string, unknown> {
+  const text = message.length > BUTTON_TEXT_MAX
+    ? `${message.slice(0, BUTTON_TEXT_MAX - 1).trimEnd()}…`
+    : message;
+  return { ...buttonTemplate(text, buttons), [FALLBACK_KEY]: textButtonsFallback(message, buttons) };
+}
+
+/**
+ * 메시지들에 실린 본문 글(텍스트 메시지, 버튼 템플릿 본문, 대체 메시지 글).
+ * 발신 에코를 "우리가 보낸 문구"로 알아보려고 발송 전에 남겨 둘 때 쓴다.
+ */
+export function sentTextsOf(messages: Record<string, unknown>[]): string[] {
+  const out: string[] = [];
+  const visit = (m: any) => {
+    if (!m || typeof m !== "object") return;
+    if (typeof m.text === "string" && m.text) out.push(m.text);
+    const payload = m.attachment?.payload;
+    if (payload?.template_type === "button" && typeof payload.text === "string" && payload.text) out.push(payload.text);
+    if (m[FALLBACK_KEY]) visit(m[FALLBACK_KEY]);
+  };
+  for (const m of messages) visit(m);
+  return out;
+}
+
+/** 발송 직전에 내부용 키를 떼어 낸다. */
+function splitFallback(message: Record<string, unknown>): {
+  payload: Record<string, unknown>;
+  fallback?: Record<string, unknown>;
+} {
+  if (!message || !(FALLBACK_KEY in message)) return { payload: message };
+  const { [FALLBACK_KEY]: fallback, ...payload } = message as Record<string, any>;
+  return { payload, fallback: fallback && typeof fallback === "object" ? fallback : undefined };
+}
+
+/**
  * 하나의 DM 설정을 실제로 보낼 메시지 페이로드 배열로 변환한다.
  * 반환된 순서대로 발송해야 한다(본문 → 버튼 카드).
  */
-export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
+export function buildDmMessages(
+  content: DmContent,
+  opts: { buttonTemplate?: boolean } = {},
+): Record<string, unknown>[] {
   let message = (content.message || "").trim();
 
   if (content.messageType === "carousel") {
@@ -262,6 +336,16 @@ export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
     return message ? [{ text: message.slice(0, TEXT_MAX) }] : [];
   }
 
+  // 2단계 본 메시지: 본문 + 버튼을 말풍선 한 통(버튼 템플릿)으로 보낸다.
+  // 버튼 템플릿은 본문이 필수라, 본문이 없으면 아래 카드 방식으로 간다.
+  if (opts.buttonTemplate && message) {
+    if (message.length <= BUTTON_TEXT_MAX) return [textWithButtons(message, buttons)];
+    // 버튼 템플릿 한도(640자)를 넘는 본문만 앞부분을 텍스트로 먼저 보내고,
+    // 마지막 부분을 버튼과 함께 한 통으로 보낸다.
+    const { head, tail } = splitTail(message.slice(0, TEXT_MAX + BUTTON_TEXT_MAX), BUTTON_TEXT_MAX);
+    return [{ text: head.slice(0, TEXT_MAX) }, textWithButtons(tail, buttons)];
+  }
+
   // 본문이 카드 제목 한도에 들어가면 본문+버튼을 카드 하나로 합쳐 보낸다.
   // 본문이 없으면 별도 안내 문구 없이 버튼 이름을 카드 제목으로 쓴다(제목은 필수).
   if (message.length <= CARD_TEXT_MAX) {
@@ -274,6 +358,17 @@ export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
     { text: message.slice(0, TEXT_MAX) },
     genericTemplate([{ title: buttonOnlyTitle(buttons), buttons }]),
   ];
+}
+
+/** 긴 본문을 [앞부분, 마지막 max자 이내]로 나눈다. 가능하면 줄바꿈·공백에서 끊는다. */
+function splitTail(message: string, max: number): { head: string; tail: string } {
+  const start = message.length - max;
+  const window = message.slice(start);
+  const nl = window.indexOf("\n");
+  const sp = window.indexOf(" ");
+  let cut = nl >= 0 && nl < max / 2 ? nl : sp >= 0 && sp < max / 2 ? sp : 0;
+  cut += start;
+  return { head: message.slice(0, cut).trim(), tail: message.slice(cut).trim() };
 }
 
 /** 본문 없이 버튼만 보낼 때의 카드 제목 — 첫 버튼 이름. */
@@ -425,11 +520,11 @@ export function buildBaitCommentPlan(
  * 2단계(본 메시지) 계획 — 버튼 클릭으로 대화창이 열린 상대에게 IGSID 로 보낸다.
  *
  * 창이 열려 있으니 여러 통을 순서대로 보낼 수 있다. 선택 인트로 텍스트 → 본문
- * (긴 텍스트는 텍스트 + 버튼 카드로 나뉘고, 캐러셀은 카드 한 통) 순서다. 모든 통이
+ * (본문 + 링크 버튼은 버튼 템플릿 한 통, 캐러셀은 카드 한 통) 순서다. 모든 통이
  * 도착해야 성공으로 본다.
  */
 export function buildMainDmPlan(content: DmContent, intro?: string): DmPlan {
-  const messages = buildDmMessages(content);
+  const messages = buildDmMessages(content, { buttonTemplate: true });
   const lead = (intro || "").trim();
   if (lead) messages.unshift({ text: lead.slice(0, TEXT_MAX) });
   return { messages, bestEffortFrom: messages.length };
@@ -592,7 +687,8 @@ async function postOneMessage(args: {
   message: Record<string, unknown>;
   followUp?: boolean;
 }): Promise<SendOneResult> {
-  const { url, accessToken, recipient, message } = args;
+  const { url, accessToken, recipient } = args;
+  const message = splitFallback(args.message).payload;
   let reservation: Awaited<ReturnType<typeof reserveDmSend>> | null = null;
   if (args.followUp) {
     // 인스타그램이 순서를 뒤바꾸지 않도록 바로 앞 통과 최소 간격만 둔다.
@@ -659,7 +755,8 @@ async function postOneMessage(args: {
  *   발송 성공으로 보고 이유만 `followUpError` 로 알려준다. 댓글 비공개 답장은 한
  *   통이 전부라서, 두 번째 통의 실패는 정책상 정상이며 실패로 기록하면 활동
  *   기록이 실제와 어긋난다.
- * - 첫 통이 형식 오류로 거부되고 `fallback` 이 있으면 대체 메시지로 한 번 더
+ * - 첫 통이 형식 오류로 거부되고 `fallback` 이 있으면(또는 어느 통이든 메시지에
+ *   `FALLBACK_KEY` 대체 메시지가 실려 있으면) 대체 메시지로 한 번 더
  *   시도한다. 캐러셀은 이미지 주소 하나 때문에도 통째로 거부되는데, 그 한 번의
  *   비공개 답장 기회를 그냥 날리면 상대에게 아무것도 도착하지 않는다.
  *
@@ -698,14 +795,16 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
     });
 
     /**
-     * 첫 통이 "형식" 문제로 거부된 경우에만 대체 메시지를 쓴다.
+     * "형식" 문제로 거부된 경우에만 대체 메시지를 쓴다(첫 통은 계획의 fallback,
+     * 그 밖의 통은 메시지에 실린 대체 메시지 — 버튼 템플릿이 거부될 때 등).
      *
      * 권한 만료·발송 한도·이미 답장함 같은 오류는 대체 메시지로도 똑같이 실패하고,
      * 이미 도착했을 수 있는 메시지를 한 번 더 보낼 위험만 남는다.
      *
      */
-    if (!attempt.ok && i === 0 && fallback && attempt.errorKind === "invalid_payload") {
-      const retried = await postOneMessage({ igId, url, accessToken, recipient: to, message: fallback, followUp: true });
+    const fallbackFor = (i === 0 && fallback) || splitFallback(messages[i]).fallback;
+    if (!attempt.ok && fallbackFor && attempt.errorKind === "invalid_payload") {
+      const retried = await postOneMessage({ igId, url, accessToken, recipient: to, message: fallbackFor, followUp: true });
       usedFallback = retried.ok;
       if (retried.errorKind !== "throttled") attempt = retried;
     }

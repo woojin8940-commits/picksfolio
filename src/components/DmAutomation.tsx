@@ -180,6 +180,13 @@ const splitCardText = (message: string): { title: string; subtitle: string } => 
   return { title, subtitle };
 };
 
+/**
+ * 2단계 본 메시지에서 본문 + 링크 버튼이 말풍선 한 통(버튼 템플릿)으로 갈 때의
+ * 본문 길이 제한. 넘치는 앞부분은 텍스트로 먼저 간다.
+ * (발송 로직: netlify/functions/_shared/instagram-dm.mts 의 buildMainDmPlan)
+ */
+const BUTTON_TEXT_MAX = 640;
+
 /** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
 const CARD_MAX_COUNT = 10;
 
@@ -368,11 +375,14 @@ const DmPreview: React.FC<{
   // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
   const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
   // 링크 버튼이 있으면 본문과 버튼이 카드 한 장으로 도착한다(긴 본문은 잘린다).
-  // 2단계 본 메시지는 1통 제한이 없어 본문이 잘리지 않는다. 카드 제목 한도를 넘는
-  // 본문은 전부 텍스트로 먼저 가고, 버튼 카드는 본문 없이 버튼만 뒤따른다
-  // (발송기 buildDmMessages 와 같은 기준).
-  const longMain = Boolean(bait) && message.trim().length > CARD_TEXT_MAX;
-  const cardText = longMain ? { title: '', subtitle: '' } : bait ? { title: message.trim(), subtitle: '' } : splitCardText(message.trim());
+  // 2단계 본 메시지는 본문 + 버튼이 말풍선 한 통(버튼 템플릿)으로 도착하고,
+  // 640자를 넘는 본문만 앞부분이 텍스트로 먼저 간다(발송기 buildDmMessages 와 같은 기준).
+  const body = message.trim();
+  const longMain = Boolean(bait) && validButtons.length > 0 && body.length > BUTTON_TEXT_MAX;
+  const leadText = longMain ? body.slice(0, body.length - BUTTON_TEXT_MAX) : '';
+  const cardText = bait
+    ? { title: longMain ? body.slice(body.length - BUTTON_TEXT_MAX) : body, subtitle: '' }
+    : splitCardText(body);
   return (
     <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3 text-slate-400">
@@ -448,7 +458,7 @@ const DmPreview: React.FC<{
                   {message
                     ? (
                       <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                        {message}
+                        {longMain ? leadText : message}
                       </p>
                     )
                     : (
@@ -462,7 +472,7 @@ const DmPreview: React.FC<{
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
                   <div className="px-4 py-3">
                     {cardText.title ? (
-                      <p data-user-content className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                      <p data-user-content className={`text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap break-words ${bait ? 'font-medium' : 'font-bold'}`}>
                         {cardText.title}
                       </p>
                     ) : (
@@ -496,7 +506,9 @@ const DmPreview: React.FC<{
       </div>
       {!isCarousel && validButtons.length > 0 && (
         <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
-          링크 버튼은 카드 형태로 전송됩니다. 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
+          {bait
+            ? '2단계 메시지는 본문과 링크 버튼이 메시지 한 통으로 전송됩니다. 링크 버튼은 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않을 수 있습니다.'
+            : '링크 버튼은 카드 형태로 전송됩니다. 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.'}
         </p>
       )}
       {isCarousel && (
@@ -1503,6 +1515,14 @@ const AutomationEditor: React.FC<{
                       {draft.message.trim().length > CARD_TEXT_MAX
                         ? `링크 버튼을 함께 보낼 때는 본문을 ${CARD_TEXT_MAX}자 이내로 작성해 주세요. (현재 ${draft.message.trim().length}자) 인스타그램은 댓글 1건당 DM을 1통만 허용해, 본문과 버튼이 카드 한 장에 담기며 ${CARD_TEXT_MAX}자를 넘는 내용은 작게 표시되거나 잘릴 수 있습니다.`
                         : `링크 버튼을 함께 보낼 때는 본문을 ${CARD_TEXT_MAX}자 이내로 작성해 주세요.`}
+                    </p>
+                  )}
+                  {/* 2단계 본 메시지는 본문 + 링크 버튼이 말풍선 한 통으로 간다(본문 640자까지). */}
+                  {baitOn && draft.buttons.some((b) => b.label.trim() || b.url.trim()) && (
+                    <p className="mt-1 text-[11px] font-bold leading-relaxed text-slate-400">
+                      {draft.message.trim().length > BUTTON_TEXT_MAX
+                        ? `본문이 ${BUTTON_TEXT_MAX}자를 넘어 앞부분은 텍스트로 먼저, 마지막 ${BUTTON_TEXT_MAX}자는 링크 버튼과 함께 한 통으로 발송됩니다. (현재 ${draft.message.trim().length}자)`
+                        : `본문과 링크 버튼이 메시지 한 통으로 발송됩니다. (본문 ${BUTTON_TEXT_MAX}자까지)`}
                     </p>
                   )}
 

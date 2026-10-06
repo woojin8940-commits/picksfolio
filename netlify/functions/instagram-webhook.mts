@@ -12,6 +12,7 @@ import {
   postbackCard,
   postCommentReply,
   sendDmMessages,
+  sentTextsOf,
 } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard, DmPlan } from "./_shared/instagram-dm.mts";
 import { noteWebhookReceived, resolveDmAccountByIgId } from "./_shared/dm-webhook-index.mts";
@@ -506,10 +507,7 @@ async function sendTriggerDm(
 
   // 우리가 보낸 문구로 먼저 남긴다. 발신 에코가 발송 응답보다 먼저 도착해도
   // "외부 서비스가 보낸 DM"으로 잘못 표시되지 않는다.
-  for (const payload of plan.messages) {
-    const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-    if (body) await noteSentText(username, body);
-  }
+  for (const body of sentTextsOf(plan.messages)) await noteSentText(username, body);
 
   try {
     const result = await sendDmMessages({
@@ -791,10 +789,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
   }
 
   const plan = buildMainDmPlan(dmContentOf(automation), mainIntroOf(automation));
-  for (const payload of plan.messages) {
-    const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-    if (body) await noteSentText(username, body);
-  }
+  for (const body of sentTextsOf(plan.messages)) await noteSentText(username, body);
 
   try {
     let resultMessages = plan.messages;
@@ -1580,16 +1575,13 @@ export async function processWebhookPayload(
         // 2단계 발송이면 비공개 답장 한 통은 미끼 카드다(거부되면 기존 1통 카드로 대체).
         const plan = bait ? buildBaitPlan(automation, commentId) : legacyPlan;
         const messages = plan.messages;
-        if (plan.fallback && typeof (plan.fallback as any)?.text === "string") {
-          await noteSentText(username, (plan.fallback as any).text);
+        if (plan.fallback) {
+          for (const body of sentTextsOf([plan.fallback])) await noteSentText(username, body);
         }
         // 우리가 보낸 문구로 남긴다. 발송 직후 인스타그램이 돌려주는 발신 에코를
         // "외부 서비스가 보낸 DM"으로 잘못 표시하지 않으려면 발송 전에 남겨야 한다
         // (에코가 발송 응답보다 먼저 도착할 수 있다).
-        for (const payload of messages) {
-          const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-          if (body) await noteSentText(username, body);
-        }
+        for (const body of sentTextsOf(messages)) await noteSentText(username, body);
         // 어떤 자동화의 어떤 문구가 나갔는지 기록에 남긴다. "예전 메시지가 나갔다"는
         // 신고를 받았을 때 화면의 설정과 실제 발송 내용을 맞춰볼 수 있어야 한다.
         const contentHash = contentHashOf(messages);
