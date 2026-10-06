@@ -10,7 +10,9 @@
  * 버튼(최대 3개)이 붙은 말풍선 **한 통**으로 도착한다(소셜비즈 등과 같은 방식).
  * 버튼 템플릿이 형식 오류로 거부되면 같은 통을 위 카드 방식(또는 본문 + 링크 주소
  * 텍스트)으로 한 번 더 보낸다 — 메시지 안의 `FALLBACK_KEY` 참고. 640자를 넘는
- * 본문만 텍스트 + 버튼 템플릿 2통으로 나뉜다.
+ * 본문만 텍스트 + 버튼 템플릿 2통으로 나뉜다. 본문에 링크 주소가 있으면(버튼 템플릿
+ * 본문의 링크는 눌리지 않는다) 본문 텍스트 + 버튼 카드 2통으로 보낸다. 본 메시지 뒤에는 추가 메시지(텍스트·캐러셀·이미지)를
+ * 이어 붙일 수 있다(`DmFollowUp`).
  *
  * ── 댓글 비공개 답장은 "한 통"이 전부다 ──
  * 댓글에 대한 자동 DM 은 `recipient: { comment_id }` 로 보내는데, 인스타그램은
@@ -72,6 +74,24 @@ export interface DmContent {
   buttons?: DmButton[];
   cards?: DmCard[];
 }
+
+/**
+ * 2단계 본 메시지 뒤에 이어서 보낼 추가 메시지 한 통.
+ *  `text`     — 본문(+ 링크 버튼)
+ *  `carousel` — 이미지 카드 여러 장
+ *  `image`    — 이미지 한 장
+ */
+export interface DmFollowUp {
+  id?: string;
+  type: "text" | "carousel" | "image";
+  message?: string;
+  buttons?: DmButton[];
+  cards?: DmCard[];
+  imageUrl?: string;
+}
+
+/** 2단계 본 메시지 뒤에 붙일 수 있는 추가 메시지 수. */
+export const MAIN_FOLLOW_UP_MAX = 5;
 
 /** 제네릭 템플릿 카드 제목/부제목 길이 제한. */
 const CARD_TEXT_MAX = 80;
@@ -336,6 +356,16 @@ export function buildDmMessages(
     return message ? [{ text: message.slice(0, TEXT_MAX) }] : [];
   }
 
+  // 2단계 본 메시지 본문에 링크 주소가 있으면 버튼 템플릿에 담지 않는다 — 버튼 템플릿
+  // 본문의 링크는 인스타그램이 파란 링크로 바꿔 주지 않아 눌러도 열리지 않는다. 본문은
+  // 일반 텍스트(링크가 파랗게 눌린다)로, 버튼은 카드로 이어서 보낸다.
+  if (opts.buttonTemplate && message && hasLinkInText(message)) {
+    return [
+      { text: message.slice(0, TEXT_MAX) },
+      genericTemplate([{ title: buttonOnlyTitle(buttons), buttons }]),
+    ];
+  }
+
   // 2단계 본 메시지: 본문 + 버튼을 말풍선 한 통(버튼 템플릿)으로 보낸다.
   // 버튼 템플릿은 본문이 필수라, 본문이 없으면 아래 카드 방식으로 간다.
   if (opts.buttonTemplate && message) {
@@ -358,6 +388,14 @@ export function buildDmMessages(
     { text: message.slice(0, TEXT_MAX) },
     genericTemplate([{ title: buttonOnlyTitle(buttons), buttons }]),
   ];
+}
+
+/**
+ * 본문에 링크 주소가 들어 있는지. 일반 텍스트 메시지에서는 인스타그램이 이런 주소를
+ * 파란 링크로 바꿔 주지만, 버튼 템플릿 본문에서는 그냥 글자로 남아 눌리지 않는다.
+ */
+export function hasLinkInText(message: string): boolean {
+  return /(?:https?:\/\/|www\.)[^\s]|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/[^\s]/i.test(message || "");
 }
 
 /** 긴 본문을 [앞부분, 마지막 max자 이내]로 나눈다. 가능하면 줄바꿈·공백에서 끊는다. */
@@ -523,11 +561,44 @@ export function buildBaitCommentPlan(
  * (본문 + 링크 버튼은 버튼 템플릿 한 통, 캐러셀은 카드 한 통) 순서다. 모든 통이
  * 도착해야 성공으로 본다.
  */
-export function buildMainDmPlan(content: DmContent, intro?: string): DmPlan {
+export function buildMainDmPlan(content: DmContent, intro?: string, followUps?: DmFollowUp[]): DmPlan {
   const messages = buildDmMessages(content, { buttonTemplate: true });
   const lead = (intro || "").trim();
   if (lead) messages.unshift({ text: lead.slice(0, TEXT_MAX) });
+  messages.push(...buildFollowUpMessages(followUps));
   return { messages, bestEffortFrom: messages.length };
+}
+
+/**
+ * 본 메시지 뒤에 이어 보낼 추가 메시지들을 페이로드로 바꾼다(설정한 순서 그대로).
+ * 텍스트의 링크 버튼은 본 메시지와 같은 방식(본문 + 버튼 한 통)으로 보낸다.
+ */
+export function buildFollowUpMessages(
+  followUps: DmFollowUp[] | undefined,
+): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const f of (Array.isArray(followUps) ? followUps : []).slice(0, MAIN_FOLLOW_UP_MAX)) {
+    if (!f) continue;
+    if (f.type === "image") {
+      const url = normalizeImageUrl(f.imageUrl || "");
+      if (url) out.push({ attachment: { type: "image", payload: { url } } });
+      continue;
+    }
+    if (f.type === "carousel") {
+      const elements = toCardElements(f.cards);
+      if (elements.length === 0) continue;
+      const fallbackText = cardsFallbackText(f.cards);
+      const card: Record<string, unknown> = genericTemplate(elements);
+      if (fallbackText) card[FALLBACK_KEY] = { text: fallbackText };
+      out.push(card);
+      continue;
+    }
+    out.push(...buildDmMessages(
+      { messageType: "text", message: f.message, buttons: f.buttons },
+      { buttonTemplate: true },
+    ));
+  }
+  return out;
 }
 
 export interface SendDmArgs {
@@ -580,7 +651,6 @@ export type DmErrorKind =
 export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
   const message = String(err?.message || "").toLowerCase();
   const code = Number(err?.code);
-  const subcode = Number(err?.error_subcode);
 
   // 비공개 답장은 댓글 1건당 1회. 이미 썼으면 재시도해도 거부된다.
   // Meta 의 문구가 버전마다 조금씩 다르므로("already been replied to",
@@ -592,7 +662,7 @@ export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
     return "already_sent";
   }
   // 표준 메시징 창(상대의 마지막 상호작용 이후 24시간) 밖.
-  if (subcode === 2534015 || /outside of allowed window|outside the allowed window|messaging window|24 hour/.test(message)) {
+  if (/outside of allowed window|outside the allowed window|messaging window|24 hour/.test(message)) {
     return "outside_window";
   }
   if (httpStatus === 429 || code === 4 || code === 17 || code === 32 || code === 613 || /rate limit|too many/.test(message)) {

@@ -14,7 +14,7 @@ import {
   sendDmMessages,
   sentTextsOf,
 } from "./_shared/instagram-dm.mts";
-import type { DmButton, DmCard, DmPlan } from "./_shared/instagram-dm.mts";
+import type { DmButton, DmCard, DmFollowUp, DmPlan } from "./_shared/instagram-dm.mts";
 import { noteWebhookReceived, resolveDmAccountByIgId } from "./_shared/dm-webhook-index.mts";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
@@ -123,6 +123,8 @@ interface DmAutomationItem {
   baitButtonLabel?: string;
   /** 본 메시지 앞에 먼저 보낼 텍스트(선택). 캐러셀 본 메시지에만 쓴다. */
   mainIntro?: string;
+  /** 본 메시지 뒤에 이어서 보낼 추가 메시지(텍스트·캐러셀·이미지). */
+  followUps?: DmFollowUp[];
   /** 팔로우 조건에 맞지 않는 사람이 버튼을 눌렀을 때 보낼 안내와 재확인 버튼 라벨. */
   followGateMessage?: string;
   followGateButtonLabel?: string;
@@ -188,6 +190,11 @@ function dmContentOf(a: DmAutomationItem) {
   };
 }
 
+/** 2단계 본 메시지 계획 — 인사말 → 본 메시지 → 추가 메시지. */
+function buildMainPlan(a: DmAutomationItem): DmPlan {
+  return buildMainDmPlan(dmContentOf(a), mainIntroOf(a), a.followUps);
+}
+
 /**
  * 댓글 비공개 답장용 계획. 캐러셀이 첫 통에 들어간다.
  *
@@ -206,7 +213,7 @@ function buildCommentPlan(a: DmAutomationItem): DmPlan {
 
 /** 대화창이 열린 상대에게 IGSID 로 직접 보낼 때 쓰는 계획(설정한 순서 그대로). */
 function buildDirectPlan(a: DmAutomationItem): DmPlan {
-  if (usesBait(a)) return buildMainDmPlan(dmContentOf(a), mainIntroOf(a));
+  if (usesBait(a)) return buildMainPlan(a);
   return buildDirectDmPlan(dmContentOf(a));
 }
 
@@ -782,14 +789,15 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
     return;
   }
 
+  const plan = buildMainPlan(automation);
+  if (plan.messages.length === 0) return skip("보낼 수 있는 메시지가 없습니다.");
+  for (const body of sentTextsOf(plan.messages)) await noteSentText(username, body);
+
   const mainKey = baitMainKey(commentId);
   if (!(await claimIfNew(username, mainKey, true))) {
     console.warn("[ig-webhook] bait main message already sent — click ignored", commentId);
     return;
   }
-
-  const plan = buildMainDmPlan(dmContentOf(automation), mainIntroOf(automation));
-  for (const body of sentTextsOf(plan.messages)) await noteSentText(username, body);
 
   try {
     let resultMessages = plan.messages;
@@ -850,7 +858,6 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
     }
 
     const kind = result.errorKind || "other";
-    if (kind !== "uncertain") await release(username, mainKey, true);
 
     if (kind === "rate_limit" || kind === "throttled") {
       // 발송 한도 — 대기열로 넘긴다(대화창은 방금 열렸으므로 24시간 안에 나간다).
@@ -872,13 +879,13 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
           ruleId: automation.id,
           ruleName: automation.name,
         });
-        await claimIfNew(username, mainKey, true);
         await appendLog(username, { kind: "dm", status: "scheduled", trigger: "bait_main", recipientId: senderId, commentId, ruleId: automation.id, ruleName: automation.name });
         return;
       } catch (e) {
         console.error("[ig-webhook] bait main scheduling failed:", (e as Error)?.message);
       }
     }
+    if (kind !== "uncertain") await release(username, mainKey, true);
 
     /**
      * 대화창 밖 / 권한 오류 — 버튼 클릭이 대화 수락으로 인정되지 않았다는 뜻이다.
@@ -1618,13 +1625,22 @@ export async function processWebhookPayload(
         }
 
         let sendAttempted = false;
+        let privateClaimed = false;
         try {
-          const replyAvailable = await claimIfNew(username, replyKey, true);
-          if (!replyAvailable) {
+          privateClaimed = await claimIfNew(username, replyKey, true);
+          if (!privateClaimed) {
             outcome.uncertain = true;
             outcome.error = "이 댓글의 이전 발송 결과를 확인해야 합니다.";
             outcome.errorKind = "uncertain";
             continue;
+          }
+          if (bait) {
+            await saveBaitPending(username, {
+              commentId,
+              fromId,
+              automationIds: baitCandidateIds,
+              createdAt: new Date().toISOString(),
+            });
           }
           sendAttempted = true;
           outcome.sideEffectAttempted = true;
@@ -1699,14 +1715,6 @@ export async function processWebhookPayload(
            * 있어 상태 기록과 운영자 알림을 남긴다.
            */
           const baitFellBack = bait && !retryViaIgsid && Boolean(result?.ok && result.usedFallback);
-          if (bait && !retryViaIgsid && result?.ok && !result.usedFallback) {
-            await saveBaitPending(username, {
-              commentId,
-              fromId,
-              automationIds: baitCandidateIds,
-              createdAt: new Date().toISOString(),
-            });
-          }
           if (baitFellBack) {
             const tripped = await noteBaitFailure(username, "1단계(미끼) 카드가 거부돼 1통 카드로 대체 발송했습니다.");
             if (tripped) {
@@ -1778,6 +1786,7 @@ export async function processWebhookPayload(
           }
         } catch (e: any) {
           if (!sendAttempted) {
+            if (privateClaimed) await release(username, replyKey, true);
             await release(username, contentKey, true);
             await release(username, commentKey, true);
             outcome.retryable = true;

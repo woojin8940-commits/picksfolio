@@ -7,7 +7,7 @@ import {
   dmAutomationAllowed,
   dmAutomationStatus,
 } from "./_shared/dm-automation-access.mts";
-import { BAIT_BUTTON_LABEL_MAX, BAIT_TEXT_MAX, normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
+import { BAIT_BUTTON_LABEL_MAX, BAIT_TEXT_MAX, MAIN_FOLLOW_UP_MAX, normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import { readBaitHealth } from "./_shared/dm-bait.mts";
 import {
   adoptSharedInstagramLink,
@@ -90,6 +90,16 @@ interface DmCarouselCard {
   buttons?: DmMessageButton[];
 }
 
+/** 2단계 본 메시지 뒤에 이어 보낼 추가 메시지 한 통. */
+interface DmFollowUp {
+  id: string;
+  type: "text" | "carousel" | "image";
+  message?: string;
+  buttons?: DmMessageButton[];
+  cards?: DmCarouselCard[];
+  imageUrl?: string;
+}
+
 interface DmAutomationItem {
   id: string;
   name: string;
@@ -130,6 +140,8 @@ interface DmAutomationItem {
   baitMessage: string;
   baitButtonLabel: string;
   mainIntro: string;
+  /** 본 메시지 뒤에 이어 보낼 추가 메시지(최대 5통). */
+  followUps: DmFollowUp[];
   followGateMessage: string;
   followGateButtonLabel: string;
 }
@@ -306,25 +318,10 @@ function sanitizeButtons(raw: any, where: string): DmMessageButton[] {
     .filter((b: DmMessageButton) => b.label || b.url);
 }
 
-function sanitizeAutomation(a: any): DmAutomationItem {
-  const name = String(a?.name || "새 자동화").slice(0, 60);
-
-  const buttons = sanitizeButtons(a?.buttons, `'${name}' 버튼`);
-
-  const keywords: string[] = Array.isArray(a?.keywords)
-    ? a.keywords.map((k: any) => String(k).trim()).filter(Boolean).slice(0, 20)
-    : [];
-
-  const replies: string[] = Array.isArray(a?.replies)
-    ? a.replies.map((r: any) => String(r).slice(0, 300)).filter(Boolean).slice(0, 10)
-    : [];
-
-  const mediaIds: string[] = Array.isArray(a?.mediaIds)
-    ? a.mediaIds.map((m: any) => String(m).trim()).filter(Boolean).slice(0, 50)
-    : [];
-
-  const cards: DmCarouselCard[] = Array.isArray(a?.cards)
-    ? a.cards
+/** 캐러셀 카드 목록을 정리한다(본 메시지·추가 메시지가 같은 규칙을 쓴다). */
+function sanitizeCards(raw: any, name: string): DmCarouselCard[] {
+  return Array.isArray(raw)
+    ? raw
         .slice(0, 10)
         .map((c: any) => {
           // 버튼 목록이 없으면(예전 화면) 단일 버튼 필드를 목록으로 옮긴다.
@@ -351,6 +348,51 @@ function sanitizeAutomation(a: any): DmAutomationItem {
         })
         .filter((c: DmCarouselCard) => c.title || c.imageUrl || c.buttonUrl)
     : [];
+}
+
+/**
+ * 2단계 본 메시지 뒤에 이어 보낼 추가 메시지(텍스트·캐러셀·이미지)를 정리한다.
+ * 보낼 내용이 없는 항목은 저장하지 않는다.
+ */
+function sanitizeFollowUps(raw: any, name: string): DmFollowUp[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DmFollowUp[] = [];
+  for (const f of raw.slice(0, MAIN_FOLLOW_UP_MAX)) {
+    const id = String(f?.id || genId("fu"));
+    const where = `'${name}' 추가 메시지`;
+    if (f?.type === "image") {
+      const imageUrl = requireImage(f?.imageUrl, where);
+      if (imageUrl) out.push({ id, type: "image", imageUrl });
+    } else if (f?.type === "carousel") {
+      const cards = sanitizeCards(f?.cards, name);
+      if (cards.length > 0) out.push({ id, type: "carousel", cards });
+    } else {
+      const message = String(f?.message || "").slice(0, 1000);
+      const buttons = sanitizeButtons(f?.buttons, `${where} 버튼`);
+      if (message.trim()) out.push({ id, type: "text", message, buttons });
+    }
+  }
+  return out;
+}
+
+function sanitizeAutomation(a: any): DmAutomationItem {
+  const name = String(a?.name || "새 자동화").slice(0, 60);
+
+  const buttons = sanitizeButtons(a?.buttons, `'${name}' 버튼`);
+
+  const keywords: string[] = Array.isArray(a?.keywords)
+    ? a.keywords.map((k: any) => String(k).trim()).filter(Boolean).slice(0, 20)
+    : [];
+
+  const replies: string[] = Array.isArray(a?.replies)
+    ? a.replies.map((r: any) => String(r).slice(0, 300)).filter(Boolean).slice(0, 10)
+    : [];
+
+  const mediaIds: string[] = Array.isArray(a?.mediaIds)
+    ? a.mediaIds.map((m: any) => String(m).trim()).filter(Boolean).slice(0, 50)
+    : [];
+
+  const cards = sanitizeCards(a?.cards, name);
 
   const mediaScope = a?.mediaScope === "selected" && mediaIds.length > 0 ? "selected" : "all";
   const messageType = a?.messageType === "carousel" ? "carousel" : "text";
@@ -395,6 +437,7 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     baitMessage: String(a?.baitMessage || "").trim().slice(0, BAIT_TEXT_MAX),
     baitButtonLabel: String(a?.baitButtonLabel || "").trim().slice(0, BAIT_BUTTON_LABEL_MAX),
     mainIntro: String(a?.mainIntro || "").slice(0, 1000),
+    followUps: sanitizeFollowUps(a?.followUps, name),
     followGateMessage: String(a?.followGateMessage || "").slice(0, 1000),
     followGateButtonLabel: String(a?.followGateButtonLabel || "").trim().slice(0, BAIT_BUTTON_LABEL_MAX),
   };

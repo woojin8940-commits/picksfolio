@@ -7,7 +7,7 @@ import {
   ArrowUp, ArrowDown, Images, Clock, CalendarClock, RefreshCw, Info,
 } from 'lucide-react';
 import {
-  apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
+  apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, DmFollowUp,
   DmDirectSettings, DmFaqSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
@@ -65,7 +65,6 @@ const defaultDmMessage = (t: TranslateFn) => t(
   'Hello! Thank you for your interest 😊 Check out more information at the link below.',
 );
 
-const defaultButtonLabel = (t: TranslateFn) => t('dm.defaultButtonLabel', '링크 바로가기', 'Open link');
 
 /**
  * 2단계 발송(미끼 → 본 메시지) 기본 문구. 서버(instagram-dm.mts)의 기본값과 같다 —
@@ -89,7 +88,8 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   mediaIds: [],
   messageType: 'text',
   message: defaultDmMessage(t),
-  buttons: [{ id: genId('btn'), label: defaultButtonLabel(t), url: '' }],
+  // 링크 버튼은 선택이다. 필요하면 '+ 버튼 추가'로 넣는다.
+  buttons: [],
   cards: [],
   sendMode: 'instant',
   scheduledAt: '',
@@ -97,6 +97,7 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   baitMessage: DEFAULT_BAIT_MESSAGE,
   baitButtonLabel: DEFAULT_BAIT_BUTTON_LABEL,
   mainIntro: '',
+  followUps: [],
   followGateMessage: DEFAULT_FOLLOW_GATE_MESSAGE,
   followGateButtonLabel: DEFAULT_FOLLOW_GATE_BUTTON_LABEL,
   createdAt: new Date().toISOString(),
@@ -123,6 +124,15 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   baitMessage: typeof a.baitMessage === 'string' ? a.baitMessage : DEFAULT_BAIT_MESSAGE,
   baitButtonLabel: typeof a.baitButtonLabel === 'string' ? a.baitButtonLabel : DEFAULT_BAIT_BUTTON_LABEL,
   mainIntro: typeof a.mainIntro === 'string' ? a.mainIntro : '',
+  followUps: Array.isArray(a.followUps)
+    ? a.followUps.map((f) => ({
+      ...f,
+      buttons: Array.isArray(f.buttons) ? f.buttons : [],
+      cards: Array.isArray(f.cards) ? f.cards.map((c) => ({ ...c, buttons: cardButtonList(c) })) : [],
+      imageUrl: f.imageUrl || '',
+      message: f.message || '',
+    }))
+    : [],
   followGateMessage: typeof a.followGateMessage === 'string' ? a.followGateMessage : DEFAULT_FOLLOW_GATE_MESSAGE,
   followGateButtonLabel: typeof a.followGateButtonLabel === 'string' ? a.followGateButtonLabel : DEFAULT_FOLLOW_GATE_BUTTON_LABEL,
 });
@@ -189,6 +199,27 @@ const BUTTON_TEXT_MAX = 640;
 
 /** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
 const CARD_MAX_COUNT = 10;
+
+/** 2단계 본 메시지 뒤에 붙일 수 있는 추가 메시지 수. 서버(MAIN_FOLLOW_UP_MAX)와 같다. */
+const FOLLOW_UP_MAX = 5;
+
+/**
+ * 본문에 링크 주소가 있는지. 서버 `_shared/instagram-dm.mts` 의 hasLinkInText 와 같은 규칙.
+ * 본문 + 버튼을 한 통(버튼 템플릿)으로 보내면 본문 속 링크는 눌리지 않아서, 링크가
+ * 있으면 발송기는 본문을 일반 텍스트로 따로 보낸다.
+ */
+const LINK_IN_TEXT = /(?:https?:\/\/|www\.)[^\s]|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/[^\s]/i;
+const hasLinkInText = (message: string): boolean => LINK_IN_TEXT.test(message || '');
+
+/** 미리보기에서 본문 속 링크를 인스타그램처럼 파란색으로 보여준다. */
+const LINK_TOKEN = /((?:https?:\/\/|www\.)[^\s]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/[^\s]*)/gi;
+const LinkifiedText: React.FC<{ text: string }> = ({ text }) => (
+  <>
+    {text.split(LINK_TOKEN).map((part, i) => (i % 2 === 1
+      ? <span key={i} className="text-blue-600 underline-offset-2">{part}</span>
+      : <React.Fragment key={i}>{part}</React.Fragment>))}
+  </>
+);
 
 const cleanLinkInput = (raw: string): string => (raw || '')
   .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
@@ -358,6 +389,113 @@ const AutomationFeedThumbs: React.FC<{
 };
 
 /* ────────────────────────── DM 미리보기 버블 ────────────────────────── */
+/** 캐러셀 카드 미리보기(본 메시지·추가 메시지 공용). */
+const CarouselPreview: React.FC<{ cards: DmCarouselCard[] }> = ({ cards }) => (
+  <div className="flex gap-2 overflow-x-auto pb-1 -mr-2">
+    {cards.map((c) => (
+      <div key={c.id} className="w-40 shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="w-full aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+          {c.imageUrl
+            ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" />
+            : <ImageIcon size={22} className="text-slate-300" />}
+        </div>
+        <div className="p-2.5">
+          {c.title
+            ? <p data-user-content className="text-[12px] font-black text-slate-800 truncate">{c.title}</p>
+            : <p className="text-[12px] font-black text-slate-800 truncate">카드 제목</p>}
+          {c.subtitle && <p data-user-content className="text-[11px] text-slate-500 font-medium truncate">{c.subtitle}</p>}
+          {cardButtonList(c).filter((b) => b.label.trim()).map((b) => (
+            <div key={b.id} data-user-content className="mt-1.5 first:mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
+              {b.label}
+            </div>
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+/** 일반 텍스트 말풍선. 링크 주소는 인스타그램처럼 파랗게 보인다. */
+const TextBubble: React.FC<{ text: string }> = ({ text }) => (
+  <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+    {text
+      ? (
+        <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+          <LinkifiedText text={text} />
+        </p>
+      )
+      : (
+        <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+          보낼 메시지를 입력하면 여기에 표시됩니다.
+        </p>
+      )}
+  </div>
+);
+
+/** 본문(또는 카드 제목) + 링크 버튼이 붙은 말풍선 한 통. */
+const ButtonsBubble: React.FC<{ title: string; subtitle?: string; buttons: DmMessageButton[]; bold?: boolean }> = ({ title, subtitle, buttons, bold }) => (
+  <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
+    <div className="px-4 py-3">
+      <p data-user-content className={`text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap break-words ${bold ? 'font-bold' : 'font-medium'}`}>
+        {title}
+      </p>
+      {subtitle && (
+        <p data-user-content className="mt-0.5 text-[12px] text-slate-500 font-medium leading-relaxed whitespace-pre-wrap break-words">
+          {subtitle}
+        </p>
+      )}
+    </div>
+    <div className="border-t border-slate-100">
+      {buttons.map((b) => (
+        <div
+          key={b.id}
+          data-user-content
+          className="w-full text-center border-b border-slate-100 last:border-b-0 py-2.5 text-[12px] font-bold text-pink-600 truncate px-3"
+        >
+          {b.label}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+/** 2단계 추가 메시지에 실제로 보낼 내용이 있는지(발송기와 같은 기준). */
+const followUpSendable = (f: DmFollowUp): boolean =>
+  f.type === 'image'
+    ? Boolean(normalizeImageUrl(f.imageUrl || ''))
+    : f.type === 'carousel'
+      ? (f.cards || []).some(cardSendable)
+      : Boolean((f.message || '').trim());
+
+/**
+ * 2단계 텍스트 + 링크 버튼이 어떻게 도착하는지(발송기 buildDmMessages 와 같은 기준).
+ * 본문에 링크가 있으면 [텍스트] → [버튼 카드] 2통이다.
+ */
+const mainTextBubbles = (
+  body: string,
+  buttons: DmMessageButton[],
+): React.ReactNode => {
+  if (buttons.length === 0) return <TextBubble text={body} />;
+  if (body && hasLinkInText(body)) {
+    return (
+      <>
+        <TextBubble text={body} />
+        <ButtonsBubble bold title={buttons[0].label.trim().slice(0, CARD_TEXT_MAX)} buttons={buttons} />
+      </>
+    );
+  }
+  if (!body) return <ButtonsBubble bold title={buttons[0].label.trim().slice(0, CARD_TEXT_MAX)} buttons={buttons} />;
+  if (body.length > BUTTON_TEXT_MAX) {
+    return (
+      <>
+        <TextBubble text={body.slice(0, body.length - BUTTON_TEXT_MAX)} />
+        <ButtonsBubble title={body.slice(body.length - BUTTON_TEXT_MAX)} buttons={buttons} />
+      </>
+    );
+  }
+  return <ButtonsBubble title={body} buttons={buttons} />;
+};
+
 const DmPreview: React.FC<{
   igUsername: string;
   messageType: DmAutomationItem['messageType'];
@@ -368,21 +506,25 @@ const DmPreview: React.FC<{
   bait?: { message: string; buttonLabel: string } | null;
   /** 2단계 본 메시지 앞에 먼저 가는 텍스트. */
   intro?: string;
-}> = ({ igUsername, messageType, message, buttons, cards, bait, intro }) => {
+  /** 2단계 본 메시지 뒤에 이어 가는 추가 메시지. */
+  followUps?: DmFollowUp[];
+}> = ({ igUsername, messageType, message, buttons, cards, bait, intro, followUps = [] }) => {
   // 미리보기도 발송기와 같은 기준으로 카드를 고른다(제목 또는 올바른 이미지 주소).
   const validCards = cards.filter(cardSendable);
   const isCarousel = messageType === 'carousel' && validCards.length > 0;
   // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
-  const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
-  // 링크 버튼이 있으면 본문과 버튼이 카드 한 장으로 도착한다(긴 본문은 잘린다).
-  // 2단계 본 메시지는 본문 + 버튼이 말풍선 한 통(버튼 템플릿)으로 도착하고,
-  // 640자를 넘는 본문만 앞부분이 텍스트로 먼저 간다(발송기 buildDmMessages 와 같은 기준).
+  const sendableButtons = (list: DmMessageButton[] = []) => list.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
+  const validButtons = sendableButtons(buttons);
   const body = message.trim();
-  const longMain = Boolean(bait) && validButtons.length > 0 && body.length > BUTTON_TEXT_MAX;
-  const leadText = longMain ? body.slice(0, body.length - BUTTON_TEXT_MAX) : '';
-  const cardText = bait
-    ? { title: longMain ? body.slice(body.length - BUTTON_TEXT_MAX) : body, subtitle: '' }
-    : splitCardText(body);
+  // 댓글 DM(1통)은 링크 버튼이 있으면 본문과 버튼이 카드 한 장으로 도착한다(긴 본문은 잘린다).
+  const cardText = splitCardText(body);
+  const separated = Boolean(bait) && validButtons.length > 0 && Boolean(body) && hasLinkInText(body);
+  const shownFollowUps = bait ? followUps.filter(followUpSendable) : [];
+  const avatar = (
+    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
+      <Instagram size={15} />
+    </div>
+  );
   return (
     <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3 text-slate-400">
@@ -393,9 +535,7 @@ const DmPreview: React.FC<{
         <>
           <p className="text-[10px] font-black text-pink-500 mb-1.5">1단계 · 예고 메시지</p>
           <div className="flex items-end gap-2 mb-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
-              <Instagram size={15} />
-            </div>
+            {avatar}
             <div className="max-w-[85%] min-w-0 bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
               <div className="px-4 py-3">
                 <p data-user-content className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
@@ -411,94 +551,55 @@ const DmPreview: React.FC<{
           {intro?.trim() && (
             <div className="flex items-end gap-2 mb-1.5">
               <div className="w-8 shrink-0" />
-              <div className="max-w-[85%] min-w-0 bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-                <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                  {intro}
-                </p>
+              <div className="max-w-[85%] min-w-0">
+                <TextBubble text={intro} />
               </div>
             </div>
           )}
         </>
       )}
       <div className="flex items-end gap-2">
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
-          <Instagram size={15} />
-        </div>
+        {avatar}
         <div className="max-w-[85%] min-w-0">
           {isCarousel ? (
             <div className="space-y-1.5">
-              <div className="flex gap-2 overflow-x-auto pb-1 -mr-2">
-              {validCards.map((c) => (
-                <div key={c.id} className="w-40 shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                  <div className="w-full aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
-                    {c.imageUrl
-                      ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" />
-                      : <ImageIcon size={22} className="text-slate-300" />}
-                  </div>
-                  <div className="p-2.5">
-                    {c.title
-                      ? <p data-user-content className="text-[12px] font-black text-slate-800 truncate">{c.title}</p>
-                      : <p className="text-[12px] font-black text-slate-800 truncate">카드 제목</p>}
-                    {c.subtitle && <p data-user-content className="text-[11px] text-slate-500 font-medium truncate">{c.subtitle}</p>}
-                    {cardButtonList(c).filter((b) => b.label.trim()).map((b) => (
-                      <div key={b.id} data-user-content className="mt-1.5 first:mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
-                        {b.label}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              </div>
+              <CarouselPreview cards={validCards} />
+            </div>
+          ) : bait ? (
+            <div className="space-y-1.5">
+              {mainTextBubbles(body, validButtons)}
             </div>
           ) : (
             <div className="space-y-1.5">
               {/* 버튼이 없으면 본문은 텍스트 버블로 도착한다. */}
-              {(validButtons.length === 0 || longMain) && (
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-                  {message
-                    ? (
-                      <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                        {longMain ? leadText : message}
-                      </p>
-                    )
-                    : (
-                      <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                        보낼 메시지를 입력하면 여기에 표시됩니다.
-                      </p>
-                    )}
-                </div>
-              )}
+              {validButtons.length === 0 && <TextBubble text={message} />}
               {validButtons.length > 0 && (
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
-                  <div className="px-4 py-3">
-                    {cardText.title ? (
-                      <p data-user-content className={`text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap break-words ${bait ? 'font-medium' : 'font-bold'}`}>
-                        {cardText.title}
-                      </p>
-                    ) : (
-                      <p data-user-content className="text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
-                        {validButtons[0].label.trim().slice(0, CARD_TEXT_MAX)}
-                      </p>
-                    )}
-                    {cardText.subtitle && (
-                      <p data-user-content className="mt-0.5 text-[12px] text-slate-500 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                        {cardText.subtitle}
-                      </p>
-                    )}
-                  </div>
-                  <div className="border-t border-slate-100">
-                    {validButtons.map((b) => (
-                      <div
-                        key={b.id}
-                        data-user-content
-                        className="w-full text-center border-b border-slate-100 last:border-b-0 py-2.5 text-[12px] font-bold text-pink-600 truncate px-3"
-                      >
-                        {b.label}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <ButtonsBubble
+                  bold
+                  title={cardText.title || validButtons[0].label.trim().slice(0, CARD_TEXT_MAX)}
+                  subtitle={cardText.subtitle}
+                  buttons={validButtons}
+                />
               )}
+            </div>
+          )}
+          {shownFollowUps.length > 0 && (
+            <div className="space-y-1.5 mt-1.5">
+              {shownFollowUps.map((f) => (
+                <div key={f.id}>
+                  {f.type === 'image' ? (
+                    <div className="w-48 max-w-full rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm">
+                      <img src={f.imageUrl} alt="" className="w-full h-auto object-cover" />
+                    </div>
+                  ) : f.type === 'carousel' ? (
+                    <CarouselPreview cards={(f.cards || []).filter(cardSendable)} />
+                  ) : (
+                    <div className="space-y-1.5">
+                      {mainTextBubbles((f.message || '').trim(), sendableButtons(f.buttons))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           {igUsername && <span className="text-[10px] text-slate-400 font-bold ml-2 mt-1 inline-block">@{igUsername}</span>}
@@ -506,14 +607,21 @@ const DmPreview: React.FC<{
       </div>
       {!isCarousel && validButtons.length > 0 && (
         <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
-          {bait
-            ? '2단계 메시지는 본문과 링크 버튼이 메시지 한 통으로 전송됩니다. 링크 버튼은 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않을 수 있습니다.'
-            : '링크 버튼은 카드 형태로 전송됩니다. 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.'}
+          {!bait
+            ? '링크 버튼은 카드 형태로 전송됩니다. 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.'
+            : separated
+              ? '본문은 일반 메시지로, 링크 버튼은 카드로 따로 전송됩니다. 본문 속 링크는 파란색으로 표시되고 눌러서 열 수 있어요.'
+              : '2단계 메시지는 본문과 링크 버튼이 메시지 한 통으로 전송됩니다. 링크 버튼은 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않을 수 있습니다.'}
         </p>
       )}
       {isCarousel && (
         <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
           캐러셀 카드 {validCards.length}장이 발송됩니다. 카드는 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
+        </p>
+      )}
+      {shownFollowUps.length > 0 && (
+        <p className="mt-1 text-[10px] text-slate-400 font-bold leading-relaxed">
+          본 메시지 뒤에 추가 메시지 {shownFollowUps.length}통이 순서대로 이어서 발송됩니다.
         </p>
       )}
     </div>
@@ -929,6 +1037,399 @@ const CarouselBuilder: React.FC<{
   );
 };
 
+/* ────────────────────────── 2단계 추가 메시지 ────────────────────────── */
+/** 링크 버튼 목록 편집기(최대 3개) — 추가 메시지의 텍스트에 쓴다. */
+const LinkButtonsEditor: React.FC<{
+  buttons: DmMessageButton[];
+  onChange: (buttons: DmMessageButton[]) => void;
+}> = ({ buttons, onChange }) => {
+  const update = (id: string, p: Partial<DmMessageButton>) =>
+    onChange(buttons.map((b) => (b.id === id ? { ...b, ...p } : b)));
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-black text-slate-500">
+        <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(선택 · 최대 3개)</span>
+      </div>
+      {buttons.map((b) => {
+        const urlInvalid = linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim());
+        return (
+          <div key={b.id} className="bg-white border border-slate-100 rounded-xl p-2">
+            <div className="flex gap-2 items-center">
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  value={b.label}
+                  onChange={(e) => update(b.id, { label: e.target.value })}
+                  placeholder="버튼 이름 (예: 구매하기)"
+                  maxLength={20}
+                  className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                />
+                <input
+                  value={b.url}
+                  onChange={(e) => update(b.id, { url: cleanLinkInput(e.target.value) })}
+                  onBlur={(e) => {
+                    const value = normalizeLinkUrl(e.currentTarget.value);
+                    if (value) update(b.id, { url: value });
+                  }}
+                  placeholder="https://..."
+                  className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
+                    urlInvalid ? 'border-red-300' : 'border-slate-200'
+                  }`}
+                />
+              </div>
+              <button type="button" onClick={() => onChange(buttons.filter((x) => x.id !== b.id))} className="w-8 h-8 shrink-0 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center">
+                <Trash2 size={14} />
+              </button>
+            </div>
+            {urlInvalid && (
+              <p className="flex items-center gap-1 mt-1.5 px-1 text-[10px] font-bold text-red-500">
+                <AlertCircle size={11} />
+                https:// 로 시작하는 주소를 입력해야 버튼이 전송됩니다.
+              </p>
+            )}
+          </div>
+        );
+      })}
+      {buttons.length < 3 && (
+        <button
+          type="button"
+          onClick={() => onChange([...buttons, { id: genId('btn'), label: '', url: '' }])}
+          className="w-full border border-dashed border-slate-300 rounded-xl py-2 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500 bg-white"
+        >
+          + 버튼 추가
+        </button>
+      )}
+    </div>
+  );
+};
+
+/** 이미지 한 장 메시지 편집기 — 파일 올리기 / 피드에서 고르기. */
+const FollowUpImageEditor: React.FC<{
+  userName: string;
+  imageUrl: string;
+  media: InstagramMedia[];
+  mediaLoading: boolean;
+  mediaError: string;
+  onRetryMedia: () => void;
+  onChange: (imageUrl: string) => void;
+}> = ({ userName, imageUrl, media, mediaLoading, mediaError, onRetryMedia, onChange }) => {
+  const [busy, setBusy] = useState<{ ratio: number; label: string } | null>(null);
+  const [error, setError] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const feedPhotos = useMemo(() => media.filter((m) => feedImageOf(m)), [media]);
+
+  const run = async (label: string, task: (onProgress: (ratio: number) => void) => Promise<{ url?: string; error?: string }>) => {
+    setError('');
+    setBusy({ ratio: 0, label });
+    const result = await task((ratio) => setBusy((b) => (b ? { ratio, label } : b)));
+    setBusy(null);
+    if (result.url) onChange(result.url);
+    else setError(result.error || '이미지를 넣지 못했습니다. 다시 시도해 주세요.');
+  };
+
+  const pickFromFeed = (m: InstagramMedia) => {
+    const source = feedImageOf(m);
+    if (!source) {
+      setError('이 게시물에서는 사진을 가져올 수 없어요. 파일로 올려 주세요.');
+      return;
+    }
+    setPickerOpen(false);
+    run('피드에서 가져오는 중', () => apiService.copyDmCardImageFromFeed(userName, source));
+  };
+
+  const imageInvalid = imageUrlBroken(imageUrl);
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-3">
+        <div className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-white border border-slate-200 flex items-center justify-center">
+          {imageUrl && !imageInvalid
+            ? <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+            : <ImageIcon size={20} className="text-slate-300" />}
+          {busy && (
+            <div className="absolute inset-0 bg-white/85 flex flex-col items-center justify-center gap-1">
+              <Loader2 size={16} className="animate-spin text-pink-500" />
+              <span className="text-[10px] font-black text-slate-500">
+                {busy.ratio > 0 ? `${Math.round(busy.ratio * 100)}%` : busy.label}
+              </span>
+            </div>
+          )}
+          {imageUrl && !busy && (
+            <button
+              type="button"
+              onClick={() => { setError(''); onChange(''); }}
+              title="이미지 지우기"
+              aria-label="이미지 지우기"
+              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900"
+            >
+              <X size={11} />
+            </button>
+          )}
+        </div>
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex gap-1">
+            <label
+              className={`flex-1 flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-[10px] font-black text-slate-600 ${
+                busy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-pink-400 hover:text-pink-600'
+              }`}
+            >
+              <Upload size={11} className="flex-shrink-0" /> 이미지 올리기
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                disabled={Boolean(busy)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) run('올리는 중', (onProgress) => apiService.uploadDmCardImage(userName, file, onProgress));
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(!pickerOpen)}
+              disabled={Boolean(busy)}
+              className={`flex-1 flex items-center justify-center gap-1 rounded-lg border py-1.5 text-[10px] font-black transition-colors disabled:opacity-50 ${
+                pickerOpen
+                  ? 'border-pink-500 bg-pink-50 text-pink-600'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-pink-400 hover:text-pink-600'
+              }`}
+            >
+              <Images size={11} className="flex-shrink-0" /> 피드에서 고르기
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+            {DM_CARD_IMAGE_MAX_MB}MB 이하 JPG·PNG·WEBP 이미지 한 장이 사진 메시지로 발송됩니다.
+          </p>
+          {imageInvalid && (
+            <p className="flex items-center gap-1 text-[10px] font-bold text-red-500">
+              <AlertCircle size={11} />
+              이미지 주소를 인스타그램이 받아갈 수 없습니다. 이미지를 다시 올려 주세요.
+            </p>
+          )}
+          {error && (
+            <p className="flex items-start gap-1 text-[10px] font-bold text-red-500">
+              <AlertCircle size={11} className="mt-0.5 shrink-0" />
+              <span className="leading-relaxed">{error}</span>
+            </p>
+          )}
+        </div>
+      </div>
+      {pickerOpen && (
+        <div className="border border-slate-200 bg-white rounded-xl p-2.5">
+          {mediaLoading ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-slate-400">
+              <Loader2 size={14} className="animate-spin" />
+              <span className="text-[11px] font-bold">게시물을 불러오는 중…</span>
+            </div>
+          ) : feedPhotos.length === 0 ? (
+            <div className="text-center py-6">
+              <ImageIcon size={22} className="text-slate-300 mx-auto mb-1.5" />
+              <p className="text-[11px] font-bold text-slate-500">
+                {mediaError ? '피드 사진을 불러오지 못했어요' : '가져올 피드 사진이 없어요'}
+              </p>
+              {mediaError && (
+                <button
+                  type="button"
+                  onClick={onRetryMedia}
+                  className="mt-2 inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-2.5 py-1.5 text-[10px] font-black hover:bg-slate-800"
+                >
+                  <RefreshCw size={10} /> 다시 시도
+                </button>
+              )}
+              <p className="text-[10px] text-slate-400 mt-1.5">파일로 직접 올려도 됩니다.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
+              {feedPhotos.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => pickFromFeed(m)}
+                  title={m.caption?.slice(0, 60) || '피드 사진'}
+                  className="relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-pink-500 transition-all"
+                >
+                  <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FOLLOW_UP_TYPES: { t: DmFollowUp['type']; label: string; icon: React.ReactNode }[] = [
+  { t: 'text', label: '텍스트', icon: <AlignLeft size={14} /> },
+  { t: 'carousel', label: '캐러셀', icon: <GalleryHorizontalEnd size={14} /> },
+  { t: 'image', label: '이미지', icon: <ImageIcon size={14} /> },
+];
+
+const blankFollowUp = (t: DmFollowUp['type']): DmFollowUp => ({
+  id: genId('fu'),
+  type: t,
+  message: '',
+  buttons: [],
+  cards: t === 'carousel' ? [blankCard()] : [],
+  imageUrl: '',
+});
+
+/**
+ * 2단계 본 메시지 뒤에 이어서 보낼 추가 메시지 목록.
+ *
+ * 예고 버튼을 누른 사람과는 대화창이 열려 있어 여러 통을 순서대로 보낼 수 있다.
+ * 텍스트 · 캐러셀 · 이미지를 최대 {FOLLOW_UP_MAX}통까지 본 메시지 뒤에 붙인다.
+ */
+const FollowUpsEditor: React.FC<{
+  userName: string;
+  followUps: DmFollowUp[];
+  media: InstagramMedia[];
+  mediaLoading: boolean;
+  mediaError: string;
+  onRetryMedia: () => void;
+  onChange: (followUps: DmFollowUp[]) => void;
+}> = ({ userName, followUps, media, mediaLoading, mediaError, onRetryMedia, onChange }) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const setItem = (id: string, p: Partial<DmFollowUp>) =>
+    onChange(followUps.map((f) => (f.id === id ? { ...f, ...p } : f)));
+  const move = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= followUps.length) return;
+    const next = [...followUps];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+  const add = (t: DmFollowUp['type']) => {
+    setMenuOpen(false);
+    onChange([...followUps, blankFollowUp(t)]);
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      {followUps.map((f, i) => {
+        const typeInfo = FOLLOW_UP_TYPES.find((x) => x.t === f.type) || FOLLOW_UP_TYPES[0];
+        return (
+          <div key={f.id} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-black text-slate-500">
+                {typeInfo.icon} 추가 메시지 {i + 1} · {typeInfo.label}
+              </span>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  title="위로 옮기기"
+                  aria-label="위로 옮기기"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowUp size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={i === followUps.length - 1}
+                  title="아래로 옮기기"
+                  aria-label="아래로 옮기기"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowDown size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange(followUps.filter((x) => x.id !== f.id))}
+                  title="메시지 삭제"
+                  aria-label="메시지 삭제"
+                  className="w-7 h-7 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+
+            {f.type === 'text' && (
+              <>
+                <div>
+                  <textarea
+                    value={f.message || ''}
+                    onChange={(e) => setItem(f.id, { message: e.target.value })}
+                    rows={3}
+                    maxLength={1000}
+                    placeholder="이어서 보낼 메시지를 입력하세요."
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
+                  />
+                  <p className="text-right text-[10px] text-slate-400 font-bold mt-1">{(f.message || '').length}/1000</p>
+                </div>
+                <LinkButtonsEditor buttons={f.buttons || []} onChange={(buttons) => setItem(f.id, { buttons })} />
+              </>
+            )}
+            {f.type === 'carousel' && (
+              <CarouselBuilder
+                userName={userName}
+                cards={f.cards || []}
+                media={media}
+                mediaLoading={mediaLoading}
+                mediaError={mediaError}
+                onRetryMedia={onRetryMedia}
+                onChange={(cards) => setItem(f.id, { cards })}
+              />
+            )}
+            {f.type === 'image' && (
+              <FollowUpImageEditor
+                userName={userName}
+                imageUrl={f.imageUrl || ''}
+                media={media}
+                mediaLoading={mediaLoading}
+                mediaError={mediaError}
+                onRetryMedia={onRetryMedia}
+                onChange={(imageUrl) => setItem(f.id, { imageUrl })}
+              />
+            )}
+            {!followUpSendable(f) && (
+              <p className="flex items-center gap-1 text-[10px] font-bold text-amber-600">
+                <AlertCircle size={11} /> 내용이 비어 있는 메시지는 발송되지 않습니다.
+              </p>
+            )}
+          </div>
+        );
+      })}
+
+      {followUps.length < FOLLOW_UP_MAX ? (
+        menuOpen ? (
+          <div className="rounded-2xl border border-dashed border-pink-300 bg-pink-50/40 p-3">
+            <p className="text-[11px] font-black text-slate-500 mb-2">추가할 메시지 형식을 골라 주세요</p>
+            <div className="grid grid-cols-3 gap-2">
+              {FOLLOW_UP_TYPES.map((opt) => (
+                <button
+                  key={opt.t}
+                  type="button"
+                  onClick={() => add(opt.t)}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white py-2.5 text-xs font-black text-slate-700 hover:border-pink-500 hover:text-pink-600"
+                >
+                  {opt.icon}{opt.label}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => setMenuOpen(false)} className="mt-2 w-full text-[11px] font-bold text-slate-400 hover:text-slate-600">
+              취소
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            className="w-full flex items-center justify-center gap-1.5 border border-dashed border-slate-300 rounded-2xl py-3 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500 bg-white"
+          >
+            <Plus size={14} /> 메시지 추가 ({followUps.length}/{FOLLOW_UP_MAX})
+          </button>
+        )
+      ) : (
+        <p className="text-center text-[11px] font-bold text-slate-400">추가 메시지는 최대 {FOLLOW_UP_MAX}통까지 넣을 수 있어요.</p>
+      )}
+    </div>
+  );
+};
+
 /* ────────────────────────── 자동화 생성/편집 모달 ────────────────────────── */
 const AutomationEditor: React.FC<{
   initial: DmAutomationItem;
@@ -988,14 +1489,18 @@ const AutomationEditor: React.FC<{
 
   // 링크가 잘못돼 있으면 발송 시점에 그 버튼이 조용히 빠진다. 저장 자체를 막아
   // "설정은 저장됐는데 버튼만 안 보이는" 상황을 없앤다.
+  const buttonBroken = (b: DmMessageButton) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim());
+  const cardBroken = (c: DmCarouselCard) =>
+    cardButtonList(c).some(buttonBroken) ||
+    // 카드 이미지도 인스타그램이 직접 받아가는 주소다. 잘못돼 있으면 서버가 저장을 거절한다.
+    imageUrlBroken(c.imageUrl);
   const brokenLinks =
-    draft.buttons.some((b) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim())) ||
-    draft.cards.some(
-      (c) =>
-        cardButtonList(c).some((b) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim())) ||
-        // 카드 이미지도 인스타그램이 직접 받아가는 주소다. 잘못돼 있으면 서버가 저장을 거절한다.
-        imageUrlBroken(c.imageUrl),
-    );
+    draft.buttons.some(buttonBroken) ||
+    draft.cards.some(cardBroken) ||
+    (draft.followUps || []).some((f) =>
+      (f.type === 'text' && (f.buttons || []).some(buttonBroken)) ||
+      (f.type === 'carousel' && (f.cards || []).some(cardBroken)) ||
+      (f.type === 'image' && imageUrlBroken(f.imageUrl || '')));
 
   /**
    * 예약 발송은 시각이 있어야 성립한다. 시각 없이 저장하면 발송기가 언제 보낼지
@@ -1039,6 +1544,20 @@ const AutomationEditor: React.FC<{
               ? '이미지나 제목이 있는 카드를 한 장 이상 만들어주세요.'
               : '보낼 DM 메시지를 입력해주세요.';
 
+  const cleanCard = (c: DmCarouselCard): DmCarouselCard => {
+    const buttons = cardButtonList(c)
+      .filter((b) => b.label.trim() || b.url.trim())
+      .slice(0, CARD_BUTTON_MAX)
+      .map((b) => ({ ...b, url: normalizeLinkUrl(b.url) }));
+    return {
+      ...c,
+      buttons,
+      buttonLabel: buttons[0]?.label || '',
+      buttonUrl: buttons[0]?.url || '',
+      imageUrl: normalizeImageUrl(c.imageUrl),
+    };
+  };
+
   const handleSave = () => {
     if (!canSave) return;
     // 스킴이 빠진 주소(`example.com`)는 여기서 https:// 를 붙여 저장한다.
@@ -1049,19 +1568,18 @@ const AutomationEditor: React.FC<{
       // 즉시 발송으로 되돌렸다면 예약 시각은 남겨두지 않는다.
       scheduledAt: draft.sendMode === 'scheduled' ? draft.scheduledAt : '',
       buttons: draft.buttons.map((b) => ({ ...b, url: normalizeLinkUrl(b.url) })),
-      cards: draft.cards.map((c) => {
-        const buttons = cardButtonList(c)
-          .filter((b) => b.label.trim() || b.url.trim())
-          .slice(0, CARD_BUTTON_MAX)
-          .map((b) => ({ ...b, url: normalizeLinkUrl(b.url) }));
-        return {
-          ...c,
-          buttons,
-          buttonLabel: buttons[0]?.label || '',
-          buttonUrl: buttons[0]?.url || '',
-          imageUrl: normalizeImageUrl(c.imageUrl),
-        };
-      }),
+      cards: draft.cards.map(cleanCard),
+      // 추가 메시지는 2단계 발송에서만 나간다. 내용이 빈 메시지는 저장하지 않는다.
+      followUps: (draft.followUps || [])
+        .filter(followUpSendable)
+        .map((f) => ({
+          ...f,
+          buttons: (f.buttons || [])
+            .filter((b) => b.label.trim() || b.url.trim())
+            .map((b) => ({ ...b, url: normalizeLinkUrl(b.url) })),
+          cards: (f.cards || []).map(cleanCard),
+          imageUrl: f.imageUrl ? normalizeImageUrl(f.imageUrl) : '',
+        })),
     });
   };
 
@@ -1473,7 +1991,7 @@ const AutomationEditor: React.FC<{
               {/* 메시지 형식 선택 */}
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {([
-                  { t: 'text' as const, icon: <AlignLeft size={15} />, label: '텍스트', desc: '메시지 + 링크 버튼' },
+                  { t: 'text' as const, icon: <AlignLeft size={15} />, label: '텍스트', desc: '메시지 (링크 버튼은 선택)' },
                   { t: 'carousel' as const, icon: <GalleryHorizontalEnd size={15} />, label: '캐러셀', desc: '이미지 카드 여러 장' },
                 ]).map((opt) => (
                   <button
@@ -1519,17 +2037,24 @@ const AutomationEditor: React.FC<{
                   )}
                   {/* 2단계 본 메시지는 본문 + 링크 버튼이 말풍선 한 통으로 간다(본문 640자까지). */}
                   {baitOn && draft.buttons.some((b) => b.label.trim() || b.url.trim()) && (
-                    <p className="mt-1 text-[11px] font-bold leading-relaxed text-slate-400">
-                      {draft.message.trim().length > BUTTON_TEXT_MAX
-                        ? `본문이 ${BUTTON_TEXT_MAX}자를 넘어 앞부분은 텍스트로 먼저, 마지막 ${BUTTON_TEXT_MAX}자는 링크 버튼과 함께 한 통으로 발송됩니다. (현재 ${draft.message.trim().length}자)`
-                        : `본문과 링크 버튼이 메시지 한 통으로 발송됩니다. (본문 ${BUTTON_TEXT_MAX}자까지)`}
-                    </p>
+                    hasLinkInText(draft.message) ? (
+                      <p className="flex items-start gap-1.5 mt-1 text-[11px] font-bold leading-relaxed text-pink-600">
+                        <Info size={12} className="shrink-0 mt-px" />
+                        본문에 링크 주소가 있어 링크가 파란색으로 보이고 눌리도록 본문과 링크 버튼을 따로 보냅니다. (한 통으로 보내면 인스타그램이 본문 속 링크를 눌리지 않는 글자로 표시해요.)
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] font-bold leading-relaxed text-slate-400">
+                        {draft.message.trim().length > BUTTON_TEXT_MAX
+                          ? `본문이 ${BUTTON_TEXT_MAX}자를 넘어 앞부분은 텍스트로 먼저, 마지막 ${BUTTON_TEXT_MAX}자는 링크 버튼과 함께 한 통으로 발송됩니다. (현재 ${draft.message.trim().length}자)`
+                          : `본문과 링크 버튼이 메시지 한 통으로 발송됩니다. (본문 ${BUTTON_TEXT_MAX}자까지) 따로 보내고 싶다면 아래 "메시지 추가"에서 텍스트를 추가해 링크 버튼을 넣어 주세요.`}
+                      </p>
+                    )
                   )}
 
                   {/* 링크 버튼 */}
                   <div className="mt-2 space-y-2">
                     <div className="flex items-center gap-1.5 text-xs font-black text-slate-500">
-                      <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(최대 3개)</span>
+                      <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(선택 · 최대 3개)</span>
                     </div>
                     {draft.buttons.map((b) => {
                       // URL 이 비어 있거나 http/https 로 고칠 수 없으면 저장을 막는다.
@@ -1606,6 +2131,25 @@ const AutomationEditor: React.FC<{
                 </div>
               )}
               </div>
+
+              {/* 2단계 본 메시지 뒤에 이어 보낼 추가 메시지(텍스트 · 캐러셀 · 이미지). */}
+              {baitOn && (
+                <div className="mt-4">
+                  <p className="text-xs font-black text-slate-500">2단계 · 이어서 보낼 메시지 <span className="text-slate-300 font-bold">(선택)</span></p>
+                  <p className="text-[11px] text-slate-400 font-bold leading-relaxed mt-0.5">
+                    본 메시지 다음에 순서대로 발송됩니다. 텍스트 · 캐러셀 · 이미지를 최대 {FOLLOW_UP_MAX}통까지 추가할 수 있어요.
+                  </p>
+                  <FollowUpsEditor
+                    userName={userName}
+                    followUps={draft.followUps || []}
+                    media={media}
+                    mediaLoading={mediaLoading}
+                    mediaError={mediaError}
+                    onRetryMedia={onRetryMedia}
+                    onChange={(followUps) => patch({ followUps })}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
@@ -1620,6 +2164,7 @@ const AutomationEditor: React.FC<{
                 cards={draft.cards}
                 bait={baitOn ? { message: draft.baitMessage || '', buttonLabel: draft.baitButtonLabel || '' } : null}
                 intro={baitOn && draft.messageType === 'carousel' ? draft.mainIntro : ''}
+                followUps={draft.followUps || []}
               />
             </div>
           </div>
@@ -1637,6 +2182,7 @@ const AutomationEditor: React.FC<{
                 cards={draft.cards}
                 bait={baitOn ? { message: draft.baitMessage || '', buttonLabel: draft.baitButtonLabel || '' } : null}
                 intro={baitOn && draft.messageType === 'carousel' ? draft.mainIntro : ''}
+                followUps={draft.followUps || []}
               />
           </div>
         </div>

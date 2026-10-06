@@ -64,6 +64,7 @@ export async function saveBaitPending(username: string, pending: BaitPending): P
     // 기록을 못 남기면 버튼을 눌러도 본 메시지가 나가지 않는다. 발송 자체는 되돌릴
     // 수 없으니 흔적만 남긴다.
     console.error("[dm-bait] pending save failed:", (e as Error)?.message);
+    throw e;
   }
 }
 
