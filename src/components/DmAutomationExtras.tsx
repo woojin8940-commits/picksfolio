@@ -243,8 +243,8 @@ export const DmSendStatusSection: React.FC<{ userName: string; sendSpeed: number
  *
  * 짧은 시간에 답글·DM 이 몰리면 메타가 비정상 활동으로 판단해 기능을 제한할 수
  * 있다(이벤트 댓글 급증, 인기 릴스 댓글 폭주, 자동 DM 동시 발송). 고른 시간당
- * 발송량에 맞춰 발송 간격을 자동으로 벌리고, 한도를 넘은 발송은 다음 시간에
- * 순서대로 보낸다. 저장 즉시 반영된다.
+ * 발송량을 넘지 않게 막는다. 발송은 댓글이 달리는 대로 곧바로 나가고, 한도를 넘은
+ * 발송은 한도에 여유가 생기는 대로 순서대로 보낸다. 저장 즉시 반영된다.
  */
 export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onChange, onNotice }) => {
   const { draft, setDraft, markSynced } = useServerDraft(value);
@@ -252,7 +252,6 @@ export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onCh
 
   const clamp = (v: number) => Math.min(DM_SEND_SPEED_MAX, Math.max(DM_SEND_SPEED_MIN, Math.round(v) || DM_SEND_SPEED_MIN));
   const tier = speedTier(draft);
-  const interval = 3600 / draft;
   const dirty = draft !== value;
 
   const save = async () => {
@@ -292,7 +291,7 @@ export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onCh
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${tier.tone}`}>{tier.label}</span>
             </p>
             <p className="text-[11px] md:text-xs text-slate-500 font-medium leading-relaxed mt-0.5">
-              답글·DM 이 짧은 시간에 몰리면 메타가 스팸으로 판단할 수 있어요. 시간당 발송량에 맞춰 간격을 자동으로 조절합니다.
+              답글·DM 이 짧은 시간에 몰리면 메타가 스팸으로 판단할 수 있어요. 시간당 발송량을 넘지 않도록 자동으로 조절합니다.
             </p>
           </div>
         </div>
@@ -357,7 +356,7 @@ export const DmSendSpeedSection: React.FC<SpeedProps> = ({ userName, value, onCh
 
       <div className={`mt-3 rounded-2xl border px-3.5 py-2.5 text-[11px] md:text-xs font-medium leading-relaxed ${tier.tone}`}>
         <b>{tier.label} ({tier.range})</b> — {tier.desc}
-        <span className="opacity-80"> 약 {interval >= 60 ? `${Math.round(interval / 6) / 10}분` : `${Math.round(interval * 10) / 10}초`}에 한 통씩 고르게 나가요.</span>
+        <span className="opacity-80"> 댓글이 달리는 대로 바로 나가고, 한 시간에 {draft}건을 넘으면 남은 발송은 잠시 기다려요.</span>
       </div>
       <p className="mt-2 text-[10px] md:text-[11px] font-medium text-slate-400 leading-relaxed">
         답글 + DM 합산 기준 · 한도를 넘은 발송은 버려지지 않고 다음 시간에 순서대로 나가요 · 기본값 시간당 {DM_SEND_SPEED_DEFAULT}건

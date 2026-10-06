@@ -3966,7 +3966,7 @@ export const apiService = {
     }
   },
 
-  /** 답글/DM 발송 속도(시간당 발송량) 저장. 저장 즉시 발송 간격에 반영된다. */
+  /** 답글/DM 발송 속도(시간당 발송량) 저장. 저장 즉시 발송 한도에 반영된다. */
   async saveDmSendSpeed(
     username: string,
     sendSpeed: number,

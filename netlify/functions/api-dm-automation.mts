@@ -206,7 +206,7 @@ interface DmSettings {
   rules: unknown[];
   /**
    * 답글/DM 발송 속도 — 시간당 최대 발송량(답글 + DM 합산, 50~700건, 기본 400건).
-   * 발송기는 이 값으로 발송 간격을 고르게 벌린다(dm-send-speed.mts).
+   * 발송기는 지난 한 시간 발송 수가 이 값에 닿으면 남은 발송을 대기열에 둔다(dm-send-speed.mts).
    */
   sendSpeed?: number;
   updatedAt?: string;
