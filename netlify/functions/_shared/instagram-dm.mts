@@ -83,8 +83,6 @@ const BUTTON_LABEL_MAX = 20;
 const CARD_MAX = 10;
 /** 카드당 버튼 최대 개수. */
 const BUTTON_MAX = 3;
-/** 본문이 길어 버튼만 별도 카드로 보낼 때 쓰는 카드 제목. */
-const BUTTON_ONLY_CARD_TITLE = "👇 아래 버튼을 눌러주세요";
 /**
  * 제목을 비워 둔 카드에 쓰는 대체 제목.
  *
@@ -265,15 +263,47 @@ export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
   }
 
   // 본문이 카드 제목 한도에 들어가면 본문+버튼을 카드 하나로 합쳐 보낸다.
+  // 본문이 없으면 별도 안내 문구 없이 버튼 이름을 카드 제목으로 쓴다(제목은 필수).
   if (message.length <= CARD_TEXT_MAX) {
-    return [genericTemplate([{ title: message || BUTTON_ONLY_CARD_TITLE, buttons }])];
+    return [genericTemplate([{ title: message || buttonOnlyTitle(buttons), buttons }])];
   }
 
-  // 긴 본문은 텍스트로 먼저 보내고 버튼 카드를 이어 보낸다.
-  return [
-    { text: message.slice(0, TEXT_MAX) },
-    genericTemplate([{ title: BUTTON_ONLY_CARD_TITLE, buttons }]),
-  ];
+  // 긴 본문은 앞부분을 텍스트로 먼저 보내고, 마지막 문단(80자 이내)을 버튼 카드의
+  // 제목으로 이어 보낸다 — 고정 안내 문구를 덧붙이지 않는다.
+  const { body, tail } = splitTrailingCardTitle(message.slice(0, TEXT_MAX));
+  const messages: Record<string, unknown>[] = [];
+  if (body) messages.push({ text: body });
+  messages.push(genericTemplate([{ title: tail, buttons }]));
+  return messages;
+}
+
+/** 본문 없이 버튼만 보낼 때의 카드 제목 — 첫 버튼 이름. */
+function buttonOnlyTitle(buttons: { title: string }[]): string {
+  return (buttons[0]?.title || CARD_TITLE_FALLBACK).slice(0, CARD_TEXT_MAX);
+}
+
+/**
+ * 긴 본문을 [앞부분 텍스트] + [마지막 부분(카드 제목, 80자 이내)]으로 나눈다.
+ * 가능하면 줄바꿈 → 문장 끝 → 공백에서 끊는다.
+ */
+export function splitTrailingCardTitle(message: string): { body: string; tail: string } {
+  const text = message.trim();
+  if (text.length <= CARD_TEXT_MAX) return { body: "", tail: text };
+  const start = text.length - CARD_TEXT_MAX;
+  const window = text.slice(start);
+  const pick = (re: RegExp) => {
+    let idx = -1;
+    for (const m of window.matchAll(re)) {
+      const at = (m.index ?? 0) + m[0].length;
+      if (at < window.length) { idx = at; break; }
+    }
+    return idx;
+  };
+  let cut = pick(/\n/g);
+  if (cut < 0) cut = pick(/[.!?。…~]\s/g);
+  if (cut < 0) cut = pick(/\s/g);
+  if (cut < 0) cut = 0;
+  return { body: text.slice(0, start + cut).trim(), tail: window.slice(cut).trim() };
 }
 
 /**
@@ -387,10 +417,10 @@ export const DEFAULT_FOLLOW_GATE_BUTTON_LABEL = "팔로우했어요";
  * 않아 대화가 열리지 않는다.
  */
 export function postbackCard(text: string, buttonLabel: string, payload: string, fallbackLabel: string) {
-  const title = (text || "").trim().slice(0, CARD_TEXT_MAX) || BUTTON_ONLY_CARD_TITLE;
+  const title = (text || "").trim().slice(0, CARD_TEXT_MAX);
   const label = (buttonLabel || "").trim().slice(0, BUTTON_LABEL_MAX) || fallbackLabel;
   return genericTemplate([
-    { title, buttons: [{ type: "postback", title: label, payload: payload.slice(0, 1000) }] },
+    { title: title || label, buttons: [{ type: "postback", title: label, payload: payload.slice(0, 1000) }] },
   ]);
 }
 
