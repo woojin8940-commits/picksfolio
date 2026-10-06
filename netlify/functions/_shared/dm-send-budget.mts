@@ -20,11 +20,17 @@ function hourlyBudget(bucket: Bucket): number {
 
 export async function reserveDmSend(account: string, bucket: Bucket): Promise<Reservation> {
   const requestDeadline = sendDeadline.getStore();
-  const deadline = Math.min(Date.now() + (workerContext.getStore() || requestDeadline ? 7_000 : 2_000), requestDeadline ? requestDeadline - 8_500 : Infinity);
+  const worker = workerContext.getStore();
+  const deadline = Math.min(
+    Date.now() + (worker ? 80_000 : requestDeadline ? 13_500 : 2_000),
+    requestDeadline ? requestDeadline - 8_500 : Infinity,
+    worker?.deadline ? worker.deadline - 25_000 : Infinity,
+  );
   // 사용자가 고른 시간당 발송량(답글 + DM 합산). 인스타그램 문서의 엔드포인트별
   // 한도(비공개 답장 750건/시간 등)보다 커지지 않도록 기존 상한과 함께 묶는다.
   const limit = Math.min(await readDmSendSpeed(account), hourlyBudget(bucket));
   while (true) {
+    if (Date.now() >= deadline) return { allowed: false, retryAfterMs: 1000 };
     if (requestDeadline && Date.now() >= requestDeadline - 8_500) return { allowed: false, retryAfterMs: 1000 };
     await checkWorkerLease();
     const reservation = await queueRpc<Reservation>("dm_reserve_send", {
@@ -42,7 +48,11 @@ export async function reserveDmSend(account: string, bucket: Bucket): Promise<Re
     if (reservation.allowed && reservation.token) return reservation;
     const delay = Math.max(100, Number(reservation.retryAfterMs) || 1000);
     if (Date.now() + delay + 50 > deadline) return { allowed: false, retryAfterMs: delay };
-    await new Promise((resolve) => setTimeout(resolve, delay + 25));
+    const resumeAt = Date.now() + delay + 25;
+    while (Date.now() < resumeAt) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(resumeAt - Date.now(), 20_000)));
+      if (worker) await checkWorkerLease();
+    }
   }
 }
 

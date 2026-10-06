@@ -8,6 +8,7 @@ export interface WorkerContext {
   token: string;
   job?: DmJob;
   lost: boolean;
+  deadline?: number;
 }
 
 export const workerContext = new AsyncLocalStorage<WorkerContext>();

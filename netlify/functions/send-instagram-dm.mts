@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   buildCommentDmPlan,
   buildDirectDmPlan,
@@ -32,6 +32,8 @@ import {
 } from "./_shared/dm-send-registry.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { withDmSendDeadline } from "./_shared/dm-send-budget.mts";
+import { getDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
+import { queueRemainingDmMessages } from "./_shared/dm-schedule-store.mts";
 import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 
 /**
@@ -351,13 +353,24 @@ const handleSend = async (req: Request) => {
         );
       }
 
+      const followUpQueued = await queueRemainingDmMessages({
+        id: `manual_rest_${randomUUID()}`,
+        username,
+        igAccountId: igId,
+        recipientId,
+        messages: directPlan.messages,
+        result,
+        ruleId: body.ruleId,
+      });
+      const partial = result.partial && !followUpQueued;
       await appendLog(username, {
         status: "sent",
-        partial: result.partial,
+        partial,
+        followUpQueued: followUpQueued || undefined,
         recipientId,
         ruleId: body.ruleId,
         messageId: result.messageId,
-        error: result.partial ? result.error : undefined,
+        error: partial ? result.error : undefined,
         test: Boolean(body.test),
       });
 
@@ -366,8 +379,9 @@ const handleSend = async (req: Request) => {
         connected: true,
         count: 1,
         messageId: result.messageId,
-        partial: result.partial,
-        message: result.partial
+        partial,
+        followUpQueued: followUpQueued || undefined,
+        message: partial
           ? `첫 메시지는 도착했지만 이어지는 메시지가 전송되지 않았습니다. (${result.error})`
           : undefined,
       });
@@ -757,7 +771,8 @@ const handleSend = async (req: Request) => {
           // 비공개 답장은 댓글당 1통만 허용되고 댓글은 대화창을 열어주지 않는다.
           // 두 번째 통은 상대가 먼저 DM 을 보낸 적이 있을 때만 IGSID 로 도착하므로,
           // 계획상 "부가 메시지"로 두고 실패해도 발송 성공으로 본다.
-          followUpRecipient: c.fromId ? { id: c.fromId } : undefined,
+          followUpRecipient: c.fromId && messages.length > 1 &&
+            withinDmWindow(await getDmContact(username, c.fromId)) ? { id: c.fromId } : undefined,
           messages,
           bestEffortFrom: commentPlan.bestEffortFrom,
           fallback: commentPlan.fallback,
@@ -781,7 +796,7 @@ const handleSend = async (req: Request) => {
       }
 
       // IGSID 기반 직접 발송. 비공개 답장을 못 쓰는 경우의 유일한 경로다.
-      if (mayRetryViaIgsid && c.fromId) {
+      if (mayRetryViaIgsid && c.fromId && withinDmWindow(await getDmContact(username, c.fromId))) {
         sendAttempted = true;
         const direct = await sendDmMessages({
           graphHost,
@@ -795,7 +810,16 @@ const handleSend = async (req: Request) => {
           bestEffortFrom: directPlan.bestEffortFrom,
         });
         if (direct.ok || direct.partial) {
-          return { kind: "sent", partial: direct.partial };
+          const followUpQueued = await queueRemainingDmMessages({
+            id: `manual_rest_${c.commentId}_${contentHash}`,
+            username,
+            igAccountId: senderIgId,
+            recipientId: c.fromId,
+            messages: directPlan.messages.length > 0 ? directPlan.messages : messages,
+            result: direct,
+            ruleId: body.ruleId,
+          });
+          return { kind: "sent", partial: direct.partial && !followUpQueued };
         }
         lastError = direct.error || lastError;
         lastKind = direct.errorKind || lastKind;
