@@ -19,7 +19,6 @@ import {
   faqPayload,
   syncIceBreakers,
 } from "./_shared/instagram-ice-breakers.mts";
-import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { reschedulePendingCommentJobs } from "./_shared/dm-jobs.mts";
 import {
   readSubscribedFields,
@@ -751,9 +750,6 @@ export default async (req: Request, context: Context) => {
        * 판단할 수 있도록 목록 자체는 남겨 둔다.
        */
       webhookFields: String(data.webhookFields || ""),
-      // 이 앱이 보내지 않은 자동 DM(인스타그램 자체 자동 메시지·다른 자동화 서비스)이
-      // 감지됐다면 함께 내려준다. 화면에서 "왜 설정과 다른 문구가 오는지" 안내한다.
-      externalDm: await readForeignDm(username),
       // 2단계 발송(미끼 → 본 메시지)이 막혀 기존 1통 카드로 자동 전환돼 있는지.
       baitHealth: await readBaitHealth(username).catch(() => null),
       // 자동 디엠 이용 자격. 인플루언서는 브랜드 매칭받기 등록, 브랜드는 자동 디엠 플랜
@@ -784,13 +780,6 @@ export default async (req: Request, context: Context) => {
       // 계정으로 다시 연동한 사람이 잠시나마 예전 계정의 게시물을 보게 된다.
       await clearFeedCache(username);
       return Response.json({ success: true, connected: false });
-    }
-
-    // 외부 자동 DM 안내 확인 — 사용자가 안내를 읽고 닫으면 기록을 지운다.
-    // (연동 해제와 마찬가지로 플랜과 무관하게 처리한다.)
-    if (body?.action === "dismissExternalDm") {
-      await clearForeignDm(username);
-      return Response.json({ success: true, externalDm: null });
     }
 
     /**

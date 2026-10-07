@@ -39,9 +39,7 @@ import {
   privateReplyKey,
   publicReplyKey,
   release,
-  wasSentByUs,
 } from "./_shared/dm-send-registry.mts";
-import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { createScheduledJob, queueRemainingDmMessages } from "./_shared/dm-schedule-store.mts";
 import { backupCommentEvents, enqueueCommentEvents, enqueueMessageEvents } from "./_shared/dm-jobs.mts";
 import type { QueuedComment, QueuedMessage } from "./_shared/dm-jobs.mts";
@@ -257,42 +255,6 @@ function scheduledSendAt(a: DmAutomationItem): number | null {
   const at = Date.parse(a.scheduledAt || "");
   if (Number.isNaN(at)) return null;
   return at > Date.now() ? at : null;
-}
-
-/**
- * 계정이 보낸 DM 에코 이벤트를 살펴, 우리가 보내지 않은 자동 DM 이면 기록한다.
- *
- * 인스타그램 계정에는 이 서비스 외에도 댓글에 자동 DM 을 보내는 경로가 있다
- * (인스타그램/메타 자체 자동 메시지, 예전에 연결해 둔 다른 자동화 서비스). 이런
- * 발송은 우리 설정과 무관하므로 화면에서 문구를 바꾸거나 자동 발송을 꺼도 예전
- * 문구가 계속 도착한다. 화면에 단서가 없으면 "앱이 예전 메시지를 보낸다"로 읽히기
- * 때문에, 감지해서 설정 화면에서 알려준다.
- *
- * 오탐을 피하려고 두 조건을 모두 만족할 때만 기록한다.
- *  - 댓글 이벤트를 받은 직후(10분 이내) 그 사람에게 나간 DM 일 것 — 사장님이 손으로
- *    보낸 답장을 자동 발송으로 표시하면 안 된다.
- *  - 우리가 보낸 적 없는 문구일 것.
- *
- * `is_echo` 는 이 계정이 보낸 메시지라는 뜻이다(받은 메시지에는 붙지 않는다).
- */
-async function inspectEcho(username: string, event: any): Promise<void> {
-  const message = event?.message;
-  if (!message || message.is_echo !== true) return;
-  const text = String(message?.text || "").trim();
-  if (!text) return;
-  const recipientId = String(event?.recipient?.id || "");
-  if (!recipientId) return;
-  if (!(await commentSeenRecently(username, recipientId))) return;
-  if (await wasSentByUs(username, text)) return;
-
-  await recordForeignDm(username, text);
-  await appendLog(username, {
-    kind: "dm",
-    status: "external",
-    recipientId,
-    text: text.slice(0, 200),
-  });
-  console.warn("[ig-webhook] auto DM sent by another service detected");
 }
 
 function hasContent(a: DmAutomationItem): boolean {
@@ -1052,7 +1014,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
  */
 async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<void> {
   const message = event?.message;
-  // 에코(우리가 보낸 메시지)는 여기서 다루지 않는다 — inspectEcho 가 따로 본다.
+  // 에코(우리가 보낸 메시지)는 여기서 다루지 않는다.
   if (!message || message.is_echo === true) return;
   const senderId = String(event?.sender?.id || "");
   if (!senderId || ctx.ownIds.has(senderId)) return;
@@ -1364,19 +1326,6 @@ export async function processWebhookPayload(
       );
 
       /**
-       * 발신 메시지 에코 확인은 자동 발송 스위치와 무관하게 수행한다. "자동 발송을
-       * 꺼놨는데도 DM 이 나갔다"가 정확히 이 검사가 필요한 상황이다.
-       *
-       * 댓글 표시를 먼저 남긴다 — 댓글 이벤트와 에코가 같은 요청에 함께 오더라도
-       * "댓글 직후 나간 DM"으로 판별할 수 있어야 한다.
-       */
-      for (const change of entry?.changes || []) {
-        if (change?.field !== "comments") continue;
-        const commenterId = String(change?.value?.from?.id || "");
-        if (commenterId && !ownIds.has(commenterId)) await noteCommentSeen(username, commenterId);
-      }
-
-      /**
        * 메시지 이벤트는 연동 방식에 따라 `entry.messaging` 또는 `entry.changes`
        * (field: messages / message_echoes / messaging_postbacks)로 온다. 양쪽 다 받는다.
        *
@@ -1384,11 +1333,6 @@ export async function processWebhookPayload(
        * 아래에서 각 처리기가 자기 것만 골라낸다.
        */
       const messagingEvents = messagingEventsOf(entry);
-      for (const event of messagingEvents) {
-        await inspectEcho(username, event).catch((e) =>
-          console.warn("[ig-webhook] echo check failed:", (e as Error)?.message),
-        );
-      }
 
       /**
        * 자동 발송이 가능한 상태인지(전체 스위치·연동 토큰·플랜). 막혀 있으면 그
