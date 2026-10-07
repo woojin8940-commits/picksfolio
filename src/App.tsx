@@ -1558,7 +1558,7 @@ const App: React.FC = () => {
         .then((api) => {
           api.getDmAutomation(userName)
             .then((settings) => {
-              if (settings.connected) api.getInstagramMedia(userName).catch(() => undefined);
+              if (settings.connected) api.getInstagramMedia(userName, { limit: 24 }).catch(() => undefined);
             })
             .catch(() => undefined);
         })

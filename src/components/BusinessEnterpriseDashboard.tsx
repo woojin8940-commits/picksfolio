@@ -143,7 +143,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     later(1100, () => {
       apiService.getDmAutomation(cleanUsername)
         .then((settings) => {
-          if (settings.connected) apiService.getInstagramMedia(cleanUsername).catch(() => undefined);
+          if (settings.connected) apiService.getInstagramMedia(cleanUsername, { limit: 24 }).catch(() => undefined);
         })
         .catch(() => undefined);
     });

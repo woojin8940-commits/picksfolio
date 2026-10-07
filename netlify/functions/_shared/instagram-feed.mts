@@ -144,7 +144,12 @@ export async function collectFeed(
   let tokenInvalid = false;
 
   do {
-    const page = await fetchFeedPage(link, { after: cursor });
+    const remainingMs = Math.max(1, deadline - Date.now());
+    const page = await fetchFeedPage(link, {
+      after: cursor,
+      limit: Math.min(FEED_PAGE_SIZE, maxItems - items.length),
+      signal: AbortSignal.timeout(Math.min(PER_REQUEST_TIMEOUT_MS, remainingMs)),
+    });
     if (!page.ok) {
       error = page.error;
       tokenInvalid = page.tokenInvalid;

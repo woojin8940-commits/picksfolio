@@ -48,6 +48,10 @@ export default async (req: Request, context: Context) => {
 
   const url = new URL(req.url);
   const after = url.searchParams.get("after") || "";
+  const requestedLimit = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(50, Math.max(1, Math.floor(requestedLimit)))
+    : FEED_MAX_ITEMS;
   // 화면의 "다시 시도"는 보관된 목록을 건너뛰고 새로 받아야 한다.
   const refresh = url.searchParams.get("refresh") === "1";
 
@@ -71,14 +75,14 @@ export default async (req: Request, context: Context) => {
 
   /** 이어보기 — 보관함을 거치지 않고 그 페이지부터 모은다. */
   if (after) {
-    const more = await collectFeed(link, { after, budgetMs: MORE_BUDGET_MS });
+    const more = await collectFeed(link, { after, budgetMs: MORE_BUDGET_MS, maxItems: limit });
     if (more.tokenInvalid) await markSharedLinkNeedsReauth(username, link);
     return Response.json(
       {
         connected: true,
         media: more.items,
         nextCursor: more.after,
-        error: more.items.length === 0 ? more.error : "",
+        error: more.error,
         needsReauth: more.tokenInvalid,
       },
       { status: 200 },
@@ -89,7 +93,7 @@ export default async (req: Request, context: Context) => {
 
   // 방금 연동하고 돌아온 사람은 여기서 끝난다 — 콜백이 미리 채워 둔 목록이 있으면
   // 그래프 API 왕복 없이 곧바로 게시물이 뜬다.
-  if (!refresh && feedCacheFresh(cached, igId)) {
+  if (!refresh && feedCacheFresh(cached, igId) && cached!.items.length <= limit) {
     return Response.json(
       {
         connected: true,
@@ -103,7 +107,7 @@ export default async (req: Request, context: Context) => {
 
   const collected = await collectFeed(link, {
     budgetMs: FIRST_PAGE_BUDGET_MS,
-    maxItems: FEED_MAX_ITEMS,
+    maxItems: limit,
   });
 
   if (collected.tokenInvalid) await markSharedLinkNeedsReauth(username, link);
