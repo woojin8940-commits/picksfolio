@@ -384,7 +384,10 @@ const PagedMediaGrid: React.FC<{
  */
 const FEED_PREVIEW_COUNT = 7;
 
-/** 피드 전체 게시물 창. 여기서도 한 번에 MEDIA_GRID_STEP 장씩만 그린다. */
+/**
+ * 피드 전체 게시물 창. 여기서도 한 번에 MEDIA_GRID_STEP 장씩만 그린다.
+ * selectedIds 를 주면 여러 장을 골랐다 풀었다 하는 선택 창으로 쓴다(자동 DM 편집 창의 '특정 게시물').
+ */
 const FeedAllMediaModal: React.FC<{
   media: InstagramMedia[];
   pagination: MediaPagination;
@@ -392,11 +395,14 @@ const FeedAllMediaModal: React.FC<{
   disabledTitle: string;
   onPick: (m: InstagramMedia) => void;
   onClose: () => void;
-}> = ({ media, pagination, entitled, disabledTitle, onPick, onClose }) => {
+  selectedIds?: string[];
+  zClass?: string;
+}> = ({ media, pagination, entitled, disabledTitle, onPick, onClose, selectedIds, zClass = 'z-[200]' }) => {
   useCloseOnBack(true, onClose);
+  const selecting = !!selectedIds;
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-0 md:p-6 animate-in fade-in duration-200"
+      className={`fixed inset-0 ${zClass} flex items-end md:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-0 md:p-6 animate-in fade-in duration-200`}
       onClick={onClose}
     >
       <div
@@ -407,6 +413,7 @@ const FeedAllMediaModal: React.FC<{
           <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
             <LayoutGrid size={17} className="text-slate-400" /> 내 피드 게시물 전체
             <span className="text-xs font-black text-slate-400">{media.length}{pagination.hasMore ? '+' : ''}개</span>
+            {selecting && <span className="text-xs font-black text-pink-600">· {selectedIds.length}개 선택됨</span>}
           </h3>
           <button type="button" onClick={onClose} className="shrink-0 w-10 h-10 -mr-1 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
             <X size={20} />
@@ -414,23 +421,41 @@ const FeedAllMediaModal: React.FC<{
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5">
           <PagedMediaGrid media={media} pagination={pagination} className="grid grid-cols-4 gap-2">
-            {(m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => onPick(m)}
-                disabled={!entitled}
-                title={entitled ? '이 게시물에 자동 DM 설정' : disabledTitle}
-                aria-label="이 게시물에 자동 DM 설정"
-                className="relative block w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-100 hover:border-pink-400 hover:ring-2 hover:ring-pink-200 active:scale-[0.98] transition-all disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {feedImageOf(m)
-                  ? <img src={feedImageOf(m)} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" decoding="async" />
-                  : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
-              </button>
-            )}
+            {(m) => {
+              const selected = !!selectedIds?.includes(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onPick(m)}
+                  disabled={!entitled}
+                  title={entitled ? (selecting ? '게시물 선택' : '이 게시물에 자동 DM 설정') : disabledTitle}
+                  aria-label={selecting ? '게시물 선택' : '이 게시물에 자동 DM 설정'}
+                  aria-pressed={selecting ? selected : undefined}
+                  className={`relative block w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border active:scale-[0.98] transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+                    selected ? 'border-pink-500 ring-2 ring-pink-200' : 'border-slate-100 hover:border-pink-400 hover:ring-2 hover:ring-pink-200'
+                  }`}
+                >
+                  {feedImageOf(m)
+                    ? <img src={feedImageOf(m)} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                    : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
+                  {selected && (
+                    <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-pink-500 text-white flex items-center justify-center shadow">
+                      <Check size={12} />
+                    </span>
+                  )}
+                </button>
+              );
+            }}
           </PagedMediaGrid>
         </div>
+        {selecting && (
+          <div className="shrink-0 border-t border-slate-100 px-5 md:px-6 py-3">
+            <button type="button" onClick={onClose} className="w-full rounded-xl bg-slate-900 text-white py-3 text-sm font-black hover:bg-slate-800">
+              선택 완료 ({selectedIds.length}개)
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1900,6 +1925,12 @@ const AutomationEditor: React.FC<{
     const has = draft.mediaIds.includes(id);
     patch({ mediaIds: has ? draft.mediaIds.filter((m) => m !== id) : [...draft.mediaIds, id] });
   };
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // 미리보기 칸 밖에서 고른 게시물 수 — "+" 칸에 적어 보이지 않는 선택도 있음을 알린다.
+  const hiddenSelectedCount = useMemo(() => {
+    const previewIds = new Set(media.slice(0, FEED_PREVIEW_COUNT).map((m) => m.id));
+    return draft.mediaIds.filter((id) => !previewIds.has(id)).length;
+  }, [media, draft.mediaIds]);
 
   // 실제로 발송되는 카드(이미지·설명·버튼 중 하나가 있는 카드)가 한 장이라도 있어야 저장한다.
   const validCards = draft.cards.filter(cardSendable);
@@ -2111,8 +2142,11 @@ const AutomationEditor: React.FC<{
                 ) : (
                   <>
                     <p className="text-[11px] text-slate-500 font-bold mb-2">{draft.mediaIds.length}개 선택됨</p>
-                    <PagedMediaGrid media={media} pagination={pagination} className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1">
-                      {(m) => {
+                    {/* 처음부터 피드 전체를 그리지 않고 FEED_PREVIEW_COUNT 장만 보여 준다.
+                        나머지는 마지막 "+" 칸으로 여는 전체 게시물 창에서 고른다. */}
+                    {!pickerOpen && (
+                    <div className="grid grid-cols-4 gap-2">
+                      {media.slice(0, FEED_PREVIEW_COUNT).map((m) => {
                         const selected = draft.mediaIds.includes(m.id);
                         return (
                           <button
@@ -2134,8 +2168,35 @@ const AutomationEditor: React.FC<{
                             {!selected && <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors" />}
                           </button>
                         );
-                      }}
-                    </PagedMediaGrid>
+                      })}
+                      {(media.length > FEED_PREVIEW_COUNT || pagination.hasMore) && (
+                        <button
+                          type="button"
+                          onClick={() => setPickerOpen(true)}
+                          title="전체 게시물 보기"
+                          aria-label="전체 게시물 보기"
+                          className="relative w-full aspect-square rounded-xl bg-white border-2 border-cyan-300 hover:border-cyan-400 hover:bg-cyan-50/40 active:scale-[0.98] transition-all flex items-center justify-center text-slate-900"
+                        >
+                          <Plus size={28} strokeWidth={3} />
+                          {hiddenSelectedCount > 0 && (
+                            <span className="absolute bottom-1.5 inset-x-0 text-center text-[10px] font-black text-pink-600">+{hiddenSelectedCount}개 선택</span>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    )}
+                    {pickerOpen && (
+                      <FeedAllMediaModal
+                        media={media}
+                        pagination={pagination}
+                        entitled
+                        disabledTitle=""
+                        selectedIds={draft.mediaIds}
+                        zClass="z-[220]"
+                        onPick={(m) => toggleMedia(m.id)}
+                        onClose={() => setPickerOpen(false)}
+                      />
+                    )}
                   </>
                 )
               )}
