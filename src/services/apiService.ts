@@ -1099,6 +1099,9 @@ export interface DmScheduledJob {
 export const DM_CARD_IMAGE_MAX_MB = 8;
 export const DM_CARD_IMAGE_MAX_BYTES = DM_CARD_IMAGE_MAX_MB * 1024 * 1024;
 
+/** 파일 업로드가 이 시간 동안 한 번도 진행되지 않으면 멈춘 것으로 보고 끊는다. */
+const UPLOAD_STALL_MS = 60_000;
+
 /** 2단계 본 메시지 뒤에 이어 보낼 추가 메시지 한 통 — 텍스트 / 캐러셀 / 이미지. */
 export interface DmFollowUp {
   id: string;
@@ -1619,16 +1622,16 @@ export const apiService = {
     try {
       // ① 올릴 자리와 서명된 링크를 받는다. 형식·크기 검사도 이 단계에서 끝난다 —
       //    거절될 파일을 몇 분 동안 올려보내고 나서 알게 되는 일이 없다.
-      const signRes = await fetch('/api/upload-url', {
+      const signRes = await fetchWithTimeout('/api/upload-url', {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
+        headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }, { account: username }),
         body: JSON.stringify({
           username: owner,
           filename: file.name,
           mimeType: file.type,
           size: file.size,
         }),
-      });
+      }, 20_000);
       if (!signRes.ok) return { error: await reasonOf(signRes) };
 
       const sign = await signRes.json();
@@ -1637,8 +1640,27 @@ export const apiService = {
       if (!uploadUrl || !publicUrl) return { error: '업로드를 시작할 수 없습니다.' };
 
       // ② 브라우저 → 스토리지. 우리 함수는 이 구간에 없다.
-      const sent = await new Promise<{ error?: string }>((resolve) => {
+      const sent = await new Promise<{ error?: string }>((resolveSent) => {
         const xhr = new XMLHttpRequest();
+        /**
+         * 진행이 멈춘 채 오래 응답이 없으면 끊는다. 휴대폰에서 네트워크가 바뀌거나 앱이 잠시
+         * 뒤로 가면 요청이 오류도 없이 멈추는 경우가 있어, 화면이 "올리는 중"에 영영 머물고
+         * 저장도 할 수 없었다. 큰 파일도 진행만 되면 끊지 않도록 전체 시간이 아니라 멈춘
+         * 시간을 잰다.
+         */
+        let stalled = false;
+        let watchdog: ReturnType<typeof setTimeout> | undefined;
+        const watch = () => {
+          clearTimeout(watchdog);
+          watchdog = setTimeout(() => {
+            stalled = true;
+            xhr.abort();
+          }, UPLOAD_STALL_MS);
+        };
+        const resolve = (result: { error?: string }) => {
+          clearTimeout(watchdog);
+          resolveSent(result);
+        };
         xhr.open('PUT', uploadUrl, true);
         // 형식은 서버가 확장자를 보고 정한 값을 쓴다. 브라우저가 보낸 file.type 은
         // 비어 있거나 틀릴 수 있고(.mov 등), 그대로 저장되면 재생할 때 형식을 몰라
@@ -1649,6 +1671,7 @@ export const apiService = {
         xhr.setRequestHeader('x-upsert', 'false');
 
         xhr.upload.onprogress = (e) => {
+          watch();
           if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
         };
         xhr.onload = () => {
@@ -1667,7 +1690,12 @@ export const apiService = {
           resolve({ error: message || `업로드에 실패했습니다. (${xhr.status})` });
         };
         xhr.onerror = () => resolve({ error: '업로드 중 연결이 끊겼습니다. 다시 시도해 주세요.' });
-        xhr.onabort = () => resolve({ error: '업로드가 취소됐습니다.' });
+        xhr.onabort = () => resolve({
+          error: stalled
+            ? '업로드가 한동안 진행되지 않아 중단했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.'
+            : '업로드가 취소됐습니다.',
+        });
+        watch();
         xhr.send(file);
       });
       if (sent.error) return { error: sent.error };
@@ -1724,11 +1752,11 @@ export const apiService = {
     sourceUrl: string,
   ): Promise<{ url?: string; error?: string }> {
     try {
-      const res = await fetch(`/api/dm-card-image/${encodeURIComponent(username.toLowerCase())}`, {
+      const res = await fetchWithTimeout(`/api/dm-card-image/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
+        headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }, { account: username }),
         body: JSON.stringify({ sourceUrl }),
-      });
+      }, 30_000);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.url) {
         return { error: String(data?.error || `이미지를 가져오지 못했습니다. (HTTP ${res.status})`) };
@@ -3812,7 +3840,7 @@ export const apiService = {
       id?: string;
     },
   ): Promise<{
-    ok: boolean; error?: string; automations?: DmAutomationItem[]; enabled?: boolean;
+    ok: boolean; error?: string; code?: string; automations?: DmAutomationItem[]; enabled?: boolean;
     faq?: DmFaqSettings; direct?: DmDirectSettings; backfillWarning?: string;
   }> {
     try {
@@ -3848,6 +3876,7 @@ export const apiService = {
       return {
         ok: false,
         error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})`,
+        code: typeof data?.code === 'string' ? data.code : undefined,
         automations: Array.isArray(data?.automations) ? data.automations : undefined,
       };
     } catch (e) {

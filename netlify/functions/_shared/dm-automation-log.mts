@@ -13,8 +13,15 @@ import { getStore } from "@netlify/blobs";
  * ISO 시각은 사전순 정렬이 곧 시간순이라 최신 N건을 뽑기 쉽다.
  */
 
-/** 사용자당 보관할 최대 건수. */
-const KEEP = 50;
+/**
+ * 사용자당 보관할 최대 건수.
+ *
+ * 댓글이 몰리면 50건은 몇 분 만에 밀려나, "버튼을 눌렀는데 안 왔다"는 문의가 들어올
+ * 즈음에는 그 클릭의 기록이 이미 없었다. 읽는 쪽은 최근 건만 가져간다(readDmLog).
+ */
+const KEEP = 300;
+/** 한 번에 읽어 오는 건수. 건마다 블롭을 하나씩 읽으므로 보관 건수보다 작게 둔다. */
+const READ_DEFAULT = 50;
 /** 정리(오래된 항목 삭제)를 시도할 확률. 매 요청마다 목록을 훑지 않기 위한 장치. */
 const PRUNE_CHANCE = 0.15;
 
@@ -46,7 +53,7 @@ export async function appendDmLog(
 }
 
 /** 최신 순으로 로그를 읽는다. */
-export async function readDmLog(username: string, limit = KEEP): Promise<DmLogEntry[]> {
+export async function readDmLog(username: string, limit = READ_DEFAULT): Promise<DmLogEntry[]> {
   const store = getStore("dm-automation-log");
   const { blobs } = await store.list({ prefix: prefixFor(username) });
   const keys = blobs

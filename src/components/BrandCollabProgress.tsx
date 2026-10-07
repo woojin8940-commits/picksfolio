@@ -6,6 +6,7 @@ import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { uploadSchedule } from '../utils/campaignCollabStatus';
+import { csvCell } from '../utils/csv';
 
 /**
  * 협업 진행 현황 — 단계를 가로로 늘어놓은 보드.
@@ -696,7 +697,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   const downloadAddresses = () => {
     const filled = collabs.filter(c => c.status === 'in_progress' && c.shipping?.filled);
     if (filled.length === 0) return;
-    const cell = (v: string) => `"${String(v || '').replace(/"/g, '""')}"`;
+    const cell = csvCell;
     const lines = [
       ['인스타 계정', '받는 분', '연락처', '우편번호', '주소', '상세주소', '요청사항'].map(cell).join(','),
       ...filled.map(c =>

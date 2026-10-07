@@ -12,7 +12,7 @@ import {
 import type { DmButton, DmCard, DmErrorKind, DmPlan } from "./_shared/instagram-dm.mts";
 import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
-  dmAutomationAllowed,
+  dmAutomationStatus,
 } from "./_shared/dm-automation-access.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
@@ -99,6 +99,7 @@ interface DmSettings {
   accessToken?: string;
   tokenSource?: string;
   automations?: any[];
+  ownerAuthUserId?: string;
 }
 
 interface SendBody {
@@ -220,8 +221,20 @@ const handleSend = async (req: Request) => {
   const store = getStore({ name: "dm-automation", consistency: "strong" });
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
 
-  // 디엠 자동화(수동 발송 포함)는 프로 플랜 전용이다.
-  if (!(await dmAutomationAllowed(username, auth.userId))) {
+  // 디엠 자동화(수동 발송 포함)는 프로 플랜 전용이다. 관리자가 대신 보낼 때는 설정
+  // 주인의 ID 로 판정한다 — 관리자 ID 를 넘기면 관리자에게 부여된 멤버십이 이 계정 것으로
+  // 옮겨 적힌다(operator-membership-grants).
+  const access = await dmAutomationStatus(
+    username,
+    auth.isAdmin ? settings?.ownerAuthUserId || null : auth.userId,
+  );
+  if (access.lookupFailed) {
+    return Response.json(
+      { success: false, error: "이용 자격을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", code: "DM_ACCESS_LOOKUP_FAILED" },
+      { status: 503 },
+    );
+  }
+  if (!access.allowed) {
     await appendLog(username, {
       status: "skipped",
       reason: "plan_required",

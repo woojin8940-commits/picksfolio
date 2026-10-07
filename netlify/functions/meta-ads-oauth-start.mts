@@ -101,6 +101,9 @@ export default async (req: Request, _context: Context) => {
     // 메타 쪽 설정에 있어 여기서 알 수 없으므로 비워 보낸다.
     scopes: configId ? [] : metaAdsScopes(),
     redirectUri,
+  }, {
+    // 이 브라우저에만 결속 쿠키를 심는다(oauth-state 의 브라우저 결속).
+    headers: { "Set-Cookie": issued.cookie },
   });
 };
 

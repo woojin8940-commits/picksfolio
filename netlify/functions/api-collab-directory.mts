@@ -1,6 +1,8 @@
 import { getDatabase } from "@picks/netlify-database";
 import { requireAdmin } from "./_shared/admin-auth.mts";
 import { callerIsAnyOf, requireSignedInUser } from "./_shared/user-auth.mts";
+import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
+import { fetchAllowed } from "./_shared/allowed-fetch.mts";
 import type { Config } from "@netlify/functions";
 
 // "1.2M", "12.3K", "1,234", "1234 followers" 같은 표기를 정수로 변환.
@@ -32,9 +34,14 @@ async function crawlFollowers(url: string): Promise<number | null> {
     return null;
   }
   const allowed = ["tiktok.com", "instagram.com"];
+  const allowedUrl = (target: URL) => {
+    const name = target.hostname.toLowerCase();
+    return /^https?:$/.test(target.protocol) && allowed.some((d) => name === d || name.endsWith(`.${d}`));
+  };
   if (!allowed.some((d) => host === d || host.endsWith(`.${d}`))) return null;
   try {
-    const res = await fetch(url, {
+    // 리다이렉트도 같은 호스트 목록 안에서만 따라간다(fetchAllowed).
+    const res = await fetchAllowed(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
@@ -43,7 +50,7 @@ async function crawlFollowers(url: string): Promise<number | null> {
       // 접수 응답을 이 요청이 붙잡고 있다. 남의 사이트가 늦게 답하는 만큼
       // 접수 완료 화면이 늦게 뜨므로, 기다리는 시간을 짧게 끊는다.
       signal: AbortSignal.timeout(3000),
-    });
+    }, allowedUrl);
     if (!res.ok) return null;
     const html = await res.text();
 
@@ -307,6 +314,39 @@ export default async (req: Request) => {
     try {
       const b = await req.json();
       const role = b.role === "brand" ? "brand" : "influencer";
+
+      /**
+       * 계정 이름을 적은 접수는 그 계정으로 로그인한 사람(또는 관리자)만 할 수 있다.
+       *
+       * 인플루언서 등록서는 그 계정의 자동 디엠 이용 자격이 되고, 고른 분야는 그 계정의
+       * 채널 정보(creator_channels)로 옮겨진다. 예전에는 본문의 아이디를 그대로 믿어서,
+       * 로그인 없이 남의 이름으로 접수해 연락처를 바꿔 적거나 그 계정의 분야를 덮어쓸 수
+       * 있었다. 화면은 늘 로그인한 본인 이름으로 보낸다.
+       */
+      const claimedApplicant = norm(b.applicant_username);
+      if (claimedApplicant) {
+        const caller = await requireSignedInUser(req);
+        if (!caller.ok) return caller.response;
+        if (!callerIsAnyOf(caller, [claimedApplicant])) {
+          return Response.json({ error: "본인 계정으로만 등록할 수 있습니다." }, { status: 403 });
+        }
+      }
+
+      /**
+       * 접수 횟수 제한. 로그인한 본인 접수는 계정으로, 이름 없는 접수만 접속 주소(IP)로 센다.
+       *
+       * 휴대폰 회선은 많은 사람이 같은 IP 를 함께 쓴다. IP 하나로 모두를 세면 같은 통신사
+       * 회선의 다른 사람들이 낸 접수 때문에 처음 등록하는 사람이 "요청이 너무 많습니다"에
+       * 막혔다 — 인플루언서에게 이 등록은 자동 디엠을 여는 길이기도 하다.
+       */
+      const limited = await checkRateLimit({
+        bucket: "collab-directory-submit",
+        key: claimedApplicant ? `user:${claimedApplicant}` : clientIp(req),
+        limit: 10,
+        windowSeconds: 3600,
+        message: "등록 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+      });
+      if (!limited.ok) return limited.response;
       const name = (b.name || "").toString().trim();
       const contact = (b.contact || "").toString().trim();
       /**

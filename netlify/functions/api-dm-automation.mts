@@ -4,7 +4,6 @@ import { BlobWriteConflictError, mutateBlobJSON } from "./_shared/blob-write.mts
 import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
   DM_AUTOMATION_TIER,
-  dmAutomationAllowed,
   dmAutomationStatus,
 } from "./_shared/dm-automation-access.mts";
 import { BAIT_BUTTON_LABEL_MAX, BAIT_TEXT_MAX, MAIN_FOLLOW_UP_MAX, normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
@@ -23,6 +22,7 @@ import {
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { reschedulePendingCommentJobs } from "./_shared/dm-jobs.mts";
 import {
+  readSubscribedFields,
   subscribeInstagramWebhooks,
   webhookFieldsSufficient,
   WEBHOOK_FIELDS,
@@ -234,6 +234,8 @@ interface DmSettings {
    * 설정 화면을 열 때마다 같은 실패를 되풀이해 부른다.
    */
   webhookHealedAt?: string;
+  /** 메타에 실제 구독 목록을 물어 확인한 마지막 시각(하루 한 번). */
+  webhookVerifiedAt?: string;
   /**
    * 이 설정을 저장한 로그인 사용자 ID.
    *
@@ -587,6 +589,9 @@ const WEBHOOK_HEAL_COOLDOWN_MS = 10 * 60 * 1000;
  */
 const WEBHOOK_HEAL_SETTLED_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
+/** 기록상 다 걸려 있는 계정의 실제 구독 상태를 다시 읽어 보는 간격. */
+const WEBHOOK_VERIFY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 /**
  * 웹훅 구독은 화면이 알릴 일이 아니라 서버가 끝낼 일이다.
  *
@@ -610,10 +615,35 @@ const WEBHOOK_HEAL_SETTLED_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 async function healWebhookSubscription(
   username: string,
   key: string,
-  data: DmSettings,
+  input: DmSettings,
 ): Promise<DmSettings> {
-  if (!data.accessToken) return data;
-  if (String(data.webhookFields || "") === WEBHOOK_FIELDS) return data;
+  let data = input;
+  const accessToken = data.accessToken;
+  if (!accessToken) return data;
+  if (String(data.webhookFields || "") === WEBHOOK_FIELDS) {
+    /**
+     * 기록상으로는 다 걸려 있어도 실제 구독은 메타 쪽에서 풀릴 수 있다(토큰 재발급·권한
+     * 변경, 웹훅 전달 실패가 이어져 메타가 해제한 경우). 기록만 믿으면 그런 계정은 다시
+     * 손볼 기회가 없어, 화면은 정상인데 자동 DM 만 이유 없이 멈춘 상태로 남는다. 하루에
+     * 한 번 실제 구독 목록을 읽어 보고, 필수 필드가 빠졌으면 아래에서 다시 건다.
+     */
+    const lastVerified = Date.parse(String(data.webhookVerifiedAt || "")) || 0;
+    if (Date.now() - lastVerified < WEBHOOK_VERIFY_INTERVAL_MS) return data;
+    const verifiedAt = new Date().toISOString();
+    const actual = await readSubscribedFields({
+      accessToken,
+      tokenSource: data.tokenSource,
+      igId: data.igUserId || data.igAccountId,
+    }).catch(() => null);
+    if (actual === null || webhookFieldsSufficient(actual)) {
+      await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) =>
+        current ? { ...current, webhookVerifiedAt: verifiedAt } : null,
+      ).catch((e) => console.warn("[dm-automation] webhook verify flag save failed:", (e as Error)?.message));
+      return { ...data, webhookVerifiedAt: verifiedAt };
+    }
+    console.warn("[dm-automation] webhook subscription missing fields — re-subscribing:", actual || "(none)");
+    data = { ...data, webhookFields: actual, webhookHealedAt: "" };
+  }
 
   const lastTry = Date.parse(String(data.webhookHealedAt || "")) || 0;
   const cooldown = webhookFieldsSufficient(data.webhookFields)
@@ -623,7 +653,7 @@ async function healWebhookSubscription(
 
   const healedAt = new Date().toISOString();
   const sub = await subscribeInstagramWebhooks({
-    accessToken: data.accessToken,
+    accessToken,
     tokenSource: data.tokenSource,
     igId: data.igUserId || data.igAccountId,
   }).catch((e) => ({ ok: false as const, error: (e as Error)?.message, fields: "" }));
@@ -631,11 +661,15 @@ async function healWebhookSubscription(
   const patch: Partial<DmSettings> = { webhookHealedAt: healedAt };
   if (sub.ok) {
     patch.webhookSubscribedAt = healedAt;
+    patch.webhookVerifiedAt = healedAt;
     // 시도한 목록이 아니라 실제로 걸린 목록을 남긴다. 거절된 필드까지 성공으로 찍으면
     // 이 계정은 다시 손볼 대상에서 영영 빠진다.
     patch.webhookFields = sub.fields || WEBHOOK_FIELDS;
   } else {
     console.warn("[dm-automation] webhook self-heal failed:", sub.error);
+    // 실제 구독을 읽어 빠진 것을 알아냈다면 그 목록을 남긴다. 그래야 다음 화면 열기부터는
+    // 실패 간격(WEBHOOK_HEAL_COOLDOWN_MS)을 지키며 다시 시도한다.
+    if (data.webhookFields !== input.webhookFields) patch.webhookFields = data.webhookFields;
   }
 
   // 역인덱스도 함께 채운다 — 이벤트가 도착해도 주인을 못 찾으면 그대로 버려진다.
@@ -689,7 +723,14 @@ export default async (req: Request, context: Context) => {
       await writeDmSendSpeed([data.igUserId, data.igAccountId], sendSpeed)
         .catch((e) => console.warn("[dm-automation] send speed sync failed:", (e as Error)?.message));
     }
-    const dmAccess = await dmAutomationStatus(username, auth.userId, { fresh: true });
+    // 관리자가 대신 열었을 때는 관리자 본인 ID 가 아니라 이 설정의 주인 ID 로 판정한다.
+    // 관리자 ID 를 넘기면 관리자에게 부여된 멤버십이 이 계정의 것으로 옮겨 적힌다
+    // (operator-membership-grants 가 조회 때 사용자명을 맞춰 고쳐 쓴다).
+    const dmAccess = await dmAutomationStatus(
+      username,
+      auth.isAdmin ? data.ownerAuthUserId || null : auth.userId,
+      { fresh: true },
+    );
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
@@ -724,7 +765,12 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "POST") {
-    const body = (await req.json()) as any;
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return Response.json({ error: "잘못된 요청입니다." }, { status: 400 });
+    }
     const now = new Date().toISOString();
 
     // 연동 해제
@@ -837,8 +883,20 @@ export default async (req: Request, context: Context) => {
     }
 
     // 자동화 저장/켜기는 프로 플랜에서만 가능하다. (연동 해제는 위에서 이미 처리 — 플랜과
-    // 무관하게 언제든 계정을 끊을 수 있어야 한다.)
-    if (!(await dmAutomationAllowed(username, auth.userId))) {
+    // 무관하게 언제든 계정을 끊을 수 있어야 한다.) 관리자가 대신 저장할 때는 설정 주인의
+    // ID 로 판정한다(위 GET 과 같은 이유).
+    const planOwnerId = auth.isAdmin
+      ? (((await store.get(key, { type: "json" })) as DmSettings | null)?.ownerAuthUserId || null)
+      : auth.userId;
+    const access = await dmAutomationStatus(username, planOwnerId);
+    if (access.lookupFailed) {
+      // 판정 근거를 못 읽은 것을 "플랜 없음"으로 안내하면 이용 중인 사람이 결제 안내를 본다.
+      return Response.json(
+        { error: "이용 자격을 확인하지 못했습니다. 잠시 후 다시 저장해 주세요.", code: "DM_ACCESS_LOOKUP_FAILED" },
+        { status: 503 },
+      );
+    }
+    if (!access.allowed) {
       return Response.json(
         {
           error: DM_AUTOMATION_REQUIRED_MESSAGE,

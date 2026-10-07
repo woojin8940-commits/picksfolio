@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatPhone } from '../../utils/formatters';
+import { csvCell } from '../../utils/csv';
 
 /**
  * 인플루언서 지원자 — 광고로 받은 지원서(/influencer-apply) 목록.
@@ -53,7 +54,7 @@ const instagramHref = (raw: string) => {
 };
 
 const toCsv = (rows: Application[]) => {
-  const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const esc = csvCell;
   const head = ['지원일시', '성함', '연락처', '인스타그램 계정', '프로필 링크', '상태', '메모'];
   const body = rows.map((r) =>
     [new Date(r.created_at).toLocaleString('ko-KR'), r.name, r.phone, instagramHandle(r.instagram), instagramHref(r.instagram), STATUS_LABEL[r.status], r.memo]

@@ -84,3 +84,41 @@ export const hasMembershipPlan = async (
   const plan = normalizeTier(record?.membership_plan)
   return !!record?.membership_active && !!plan && plans.includes(plan)
 }
+
+/**
+ * hasMembershipPlan 과 같은 판정이지만, 조회 실패를 "구독 없음"과 구분해 돌려준다.
+ *
+ * 자동 발송처럼 판정 결과로 이벤트를 버리는 곳이 쓴다. 블롭·DB 가 잠깐 흔들린 것을
+ * "구독 없음"으로 읽으면 그동안 들어온 댓글이 재시도 없이 버려진다 — 호출부는
+ * 'unknown' 을 받으면 막은 채로 나중에 다시 확인해야 한다.
+ */
+export const membershipPlanState = async (
+  username: string | null | undefined,
+  authUserId: string | null | undefined,
+  plans: readonly MembershipTier[],
+): Promise<'yes' | 'no' | 'unknown'> => {
+  if (!username) return 'no'
+  const clean = username.toLowerCase().replace(/^biz\//, '')
+
+  let stored: Record<string, any> | null
+  try {
+    stored = (await getStore('seller-verification').get(`seller_${clean}`, { type: 'json' })) as
+      | Record<string, any>
+      | null
+  } catch {
+    return 'unknown'
+  }
+
+  let grant: Awaited<ReturnType<typeof getOperatorMembershipGrant>> = null
+  try {
+    grant = await getOperatorMembershipGrant({ authUserId, username: clean })
+  } catch (e) {
+    // 운영자 부여 표가 아직 없는 환경(마이그레이션 전)은 "부여 없음"이다. 그 밖의 오류는
+    // 판정할 수 없다.
+    if ((e as { code?: string })?.code !== '42P01') return 'unknown'
+  }
+
+  const record = applyOperatorMembershipGrant(applyComplimentaryMembership(clean, stored), grant)
+  const plan = normalizeTier(record?.membership_plan)
+  return record?.membership_active && plan && plans.includes(plan) ? 'yes' : 'no'
+}

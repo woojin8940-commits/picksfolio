@@ -56,6 +56,7 @@ const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeli
 const ManagerDashboard = lazyWithRetry(() => import('./components/manager/ManagerDashboard'));
 import { openExternalUrl } from './utils/externalLink';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
+import { rememberTab, resumedTab } from './utils/resumeTab';
 
 /**
  * 화면 코드(청크)를 받아오는 동안 띄우는 로딩 화면. 로그인 · 가입 계열은 모두
@@ -99,6 +100,9 @@ const clearAllLinkCacheLazy = () => {
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
+
+/** 다시 뜬 페이지가 되살려도 되는 탭(utils/resumeTab). */
+const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'timeline', 'campaigns', 'my-collabs'];
 
 const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   dashboard: 'dashboard',
@@ -274,7 +278,8 @@ const App: React.FC = () => {
   const launchedIntoDashboardRef = useRef<boolean>(launchViewRef.current !== null);
   const initialPublicUserRef = useRef<string>(launchViewRef.current ? '' : initialPublicProfileUsername());
   const [view, setView] = useState<View>(() => launchViewRef.current ?? (initialPublicUserRef.current ? 'user-page' : 'home'));
-  const [subView, setSubViewState] = useState<SubView>('dashboard');
+  // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
+  const [subView, setSubViewState] = useState<SubView>(() => resumedTab('creator', 'picksSubView', SUBVIEWS) ?? 'dashboard');
   const subViewRef = useRef(subView);
   subViewRef.current = subView;
 
@@ -1257,7 +1262,9 @@ const App: React.FC = () => {
       ownSupabaseKeys().forEach(key => localStorage.removeItem(key));
       clearTabStateKeepScope();
       clearAllLinkCacheLazy();
-      if (supabase) { try { await supabase.auth.signOut(); } catch {} }
+      // 이 기기의 세션만 끝낸다. 기본값(global)은 같은 계정의 다른 기기 세션까지 모두
+      // 끊어, PC 를 두 시간 비워 둔 것만으로 휴대폰 앱에서 편집하던 사람이 로그아웃됐다.
+      if (supabase) { try { await supabase.auth.signOut({ scope: 'local' }); } catch {} }
     };
 
     const checkInactivity = () => {
@@ -1710,16 +1717,11 @@ const App: React.FC = () => {
    * 항목은 navigate() 가 쌓는다(로그인 직후, /membership 진입, 내 페이지에서
    * 돌아오기). 그 항목에는 탭 정보가 없어서, 탭을 몇 번 옮긴 뒤 뒤로가기로
    * 돌아오면 "들어올 때 보던 탭" 이 아니라 아무 탭도 복원되지 않는다. 항목이
-   * 정해진 다음에 한 번 덮어써서 그 구멍을 막는다.
+   * 정해진 다음에 한 번 덮어써서 그 구멍을 막는다. 페이지가 다시 떴을 때 보던 탭으로
+   * 돌아가는 데에도 같은 기록을 쓴다.
    */
   useEffect(() => {
-    const state = (window.history.state || {}) as { picksSubView?: SubView };
-    if (state.picksSubView === subView) return;
-    window.history.replaceState(
-      { ...state, picksSubView: subView },
-      '',
-      window.location.pathname + window.location.search + window.location.hash,
-    );
+    rememberTab('creator', 'picksSubView', subView);
   }, [subView]);
 
   useEffect(() => {
@@ -1857,7 +1859,8 @@ const App: React.FC = () => {
     if (supabase) {
       try {
         await Promise.race([
-          supabase.auth.signOut(),
+          // 이 기기만 로그아웃한다(위 자동 로그아웃과 같은 이유).
+          supabase.auth.signOut({ scope: 'local' }),
           new Promise((resolve) => setTimeout(resolve, 3000)),
         ]);
         console.log('Supabase signout completed (or timed out safely)');

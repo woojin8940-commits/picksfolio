@@ -119,7 +119,8 @@ export default async (req: Request, _context: Context) => {
     (forceReauth ? `&force_reauth=true` : ``) +
     `&state=${encodeURIComponent(issued.state)}`;
 
-  return Response.json({ url: authorizeUrl });
+  // 이 브라우저에만 결속 쿠키를 심는다(oauth-state 의 브라우저 결속).
+  return Response.json({ url: authorizeUrl }, { headers: { "Set-Cookie": issued.cookie } });
 };
 
 export const config: Config = {

@@ -1,3 +1,4 @@
+import { getStore } from '@netlify/blobs'
 import type { Config, Context } from '@netlify/functions'
 import { verifyPortOnePayment as verifyPortOnePaymentWithPortOne } from './_shared/portone-payment.mts'
 import {
@@ -53,6 +54,34 @@ const verifyClaudeCreditPayment = async (
     expectedOwner,
   })
   return verified.ok ? { ok: true } : { ok: false, error: verified.error }
+}
+
+/**
+ * 결제번호 원장 — 결제 한 건은 지갑 하나에 한 번만 적립된다.
+ *
+ * 지갑 안의 지급 기록(최근 100건)만 보고 중복을 막으면 두 구멍이 남는다. 결제자 정보
+ * (customer.id)가 빠진 결제는 결제번호 문자열로 주인을 확인하는데, 그 문자열에 여러
+ * 계정 아이디를 넣어 결제하면 결제 한 건이 여러 지갑에 적립됐다. 또 기록이 100건 밖으로
+ * 밀려난 오래된 결제번호는 같은 지갑에 다시 적립될 수 있었다.
+ */
+const paymentLedger = () => getStore({ name: 'claude-payment-ledger', consistency: 'strong' })
+
+type LedgerClaim = 'new' | 'mine' | 'granted' | 'other'
+
+/** 이 결제번호를 이 계정 몫으로 잡는다. 이미 다른 계정 몫이면 'other'. */
+const claimPayment = async (paymentId: string, username: string): Promise<LedgerClaim> => {
+  const store = paymentLedger()
+  const created = await store.set(
+    paymentId,
+    JSON.stringify({ username, at: new Date().toISOString() }),
+    { onlyIfNew: true },
+  )
+  if (created?.modified !== false) return 'new'
+  const entry = (await store.get(paymentId, { type: 'json' })) as
+    | { username?: string; grantedAt?: string }
+    | null
+  if (!entry || entry.username !== username) return 'other'
+  return entry.grantedAt ? 'granted' : 'mine'
 }
 
 const respond = (credits: ClaudeCredits, extra: Record<string, unknown> = {}) =>
@@ -136,6 +165,14 @@ export default async (req: Request, context: Context) => {
         return Response.json({ error: verified.error }, { status: 400 })
       }
 
+      const claim = await claimPayment(paymentId, username)
+      if (claim === 'other') {
+        return Response.json({ error: '이미 다른 계정에 적립된 결제입니다.' }, { status: 409 })
+      }
+      if (claim === 'granted') {
+        return respond(credits, { alreadyProcessed: true })
+      }
+
       // Payment verified — grant credits. Activation grants the fixed base; a
       // recharge grants credits proportional to the ₩ paid. lifetimeChargedKrw
       // tracks real money; the wallet balance tracks credits.
@@ -175,6 +212,10 @@ export default async (req: Request, context: Context) => {
         }
         return next
       })
+
+      await paymentLedger()
+        .setJSON(paymentId, { username, grantedAt: new Date().toISOString() })
+        .catch((e) => console.error('[claude-credits] ledger update failed:', (e as Error)?.message))
 
       if (duplicated) {
         return respond(saved, { alreadyProcessed: true })

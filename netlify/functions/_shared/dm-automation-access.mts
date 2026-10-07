@@ -19,7 +19,7 @@
  * 쓴다. 조회가 실패하면 막는다(fail-closed).
  */
 
-import { hasMembershipPlan } from './membership-access.mts'
+import { membershipPlanState } from './membership-access.mts'
 import { readInfluencerDmAccess } from './dm-access-control.mts'
 import { findProfileByUsername } from './user-auth.mts'
 import type { MembershipTier } from './membership-billing.mts'
@@ -42,6 +42,25 @@ export type DmAutomationStatus = {
   /** 인플루언서: 담당자가 중단했는지와 그 사유. */
   suspended?: boolean
   suspendedReason?: string
+  /**
+   * 판정 근거를 읽지 못했다(프로필 · 등록서 · 멤버십 조회 실패). 이때 allowed 는 false
+   * 지만 "권한 없음"이 아니라 "지금은 모른다"는 뜻이다.
+   */
+  lookupFailed?: boolean
+}
+
+/**
+ * 자동 발송 직전 판정에서 근거를 읽지 못했을 때 던진다.
+ *
+ * 예전에는 조회 실패를 "플랜 없음"으로 읽고 그 결과를 1분 동안 기억했다. 그 사이 들어온
+ * 댓글과 버튼 클릭은 "플랜 없음"으로 기록된 채 재시도 없이 버려졌다. 발송 경로는 이
+ * 오류를 받으면 막은 채로 대기열에서 다시 시도한다.
+ */
+export class DmAccessLookupError extends Error {
+  constructor() {
+    super('자동 디엠 이용 자격을 확인하지 못했습니다. 잠시 후 다시 확인합니다.')
+    this.name = 'DmAccessLookupError'
+  }
 }
 
 const isBrandRole = (role: string) => role.trim().toLowerCase() === 'operator'
@@ -69,6 +88,9 @@ export const dmAutomationStatus = async (
   if (!options.fresh && cached && Date.now() - cached.at < STATUS_TTL_MS) return cached.status
 
   const status = await computeStatus(clean, authUserId)
+  // 조회에 실패한 판정은 기억하지 않는다. 기억하면 일시적인 오류 한 번이 1분 동안의
+  // "권한 없음"이 된다.
+  if (status.lookupFailed) return status
   if (statusCache.size > 500) statusCache.clear()
   statusCache.set(cacheKey, { at: Date.now(), status })
   return status
@@ -78,20 +100,29 @@ const computeStatus = async (
   clean: string,
   authUserId?: string | null,
 ): Promise<DmAutomationStatus> => {
+  // findProfileByUsername 은 "그런 계정 없음"이면 found:false 를, 조회 실패면 null 을 준다.
   const profile = await findProfileByUsername(clean).catch(() => null)
-  if (!profile) return { allowed: false, accountType: 'influencer' }
+  if (!profile) return { allowed: false, accountType: 'influencer', lookupFailed: true }
 
   if (isBrandRole(profile.role)) {
+    const paid = await membershipPlanState(clean, authUserId, BRAND_DM_PLANS)
     return {
-      allowed: await hasMembershipPlan(clean, authUserId, BRAND_DM_PLANS),
+      allowed: paid === 'yes',
       accountType: 'brand',
+      ...(paid === 'unknown' ? { lookupFailed: true } : {}),
     }
   }
 
   const access = await readInfluencerDmAccess(clean)
   if (isAdminRole(profile.role)) {
-    const paid = await hasMembershipPlan(clean, authUserId, BRAND_DM_PLANS)
-    return { allowed: paid || !!access?.allowed, accountType: 'brand' }
+    if (access?.allowed) return { allowed: true, accountType: 'brand' }
+    const paid = await membershipPlanState(clean, authUserId, BRAND_DM_PLANS)
+    if (paid === 'yes') return { allowed: true, accountType: 'brand' }
+    return {
+      allowed: false,
+      accountType: 'brand',
+      ...(paid === 'unknown' || !access ? { lookupFailed: true } : {}),
+    }
   }
 
   return {
@@ -100,11 +131,25 @@ const computeStatus = async (
     registered: !!access?.registered,
     suspended: !!access?.suspended,
     suspendedReason: access?.reason || '',
+    ...(access ? {} : { lookupFailed: true }),
   }
 }
 
-/** 이 사용자가 디엠 자동화를 이용할 수 있는지. */
+/** 이 사용자가 디엠 자동화를 이용할 수 있는지. 판정 근거를 못 읽으면 false(화면 안내용). */
 export const dmAutomationAllowed = async (
   username: string | null | undefined,
   authUserId?: string | null,
 ): Promise<boolean> => (await dmAutomationStatus(username, authUserId)).allowed
+
+/**
+ * 발송 직전 판정. 판정 근거를 읽지 못하면 DmAccessLookupError 를 던진다 — 호출부는
+ * 이벤트를 버리지 말고 나중에 다시 처리해야 한다.
+ */
+export const dmAutomationAllowedForSend = async (
+  username: string | null | undefined,
+  authUserId?: string | null,
+): Promise<boolean> => {
+  const status = await dmAutomationStatus(username, authUserId)
+  if (status.lookupFailed) throw new DmAccessLookupError()
+  return status.allowed
+}

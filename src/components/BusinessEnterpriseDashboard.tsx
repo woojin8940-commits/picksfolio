@@ -13,6 +13,7 @@ import type { Block } from '../types';
 // 청크를 못 받은 화면이 "로딩 중" 에서 멈추지 않도록, 크리에이터 대시보드와 같은
 // 래퍼(재시도 → 실패 시 오류 경계)를 쓴다.
 import { lazyWithRetry, LazyRoute } from '../utils/lazyRoute';
+import { rememberTab, resumedTab } from '../utils/resumeTab';
 
 const BusinessInbox = lazyWithRetry(() => import('./BusinessInbox'));
 const BusinessEntCalendar = lazyWithRetry(() => import('./BusinessEntCalendar'));
@@ -38,11 +39,18 @@ interface BusinessEnterpriseDashboardProps {
 }
 
 type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status';
+const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'timeline', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status'];
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
-  const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
+  // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
+  const [currentSubView, setCurrentSubView] = useState<BizSubView>(
+    () => resumedTab('business', 'picksBizSubView', BIZ_SUBVIEWS) ?? 'dashboard',
+  );
   const currentSubViewRef = React.useRef(currentSubView);
   currentSubViewRef.current = currentSubView;
+  useEffect(() => {
+    rememberTab('business', 'picksBizSubView', currentSubView);
+  }, [currentSubView]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
   /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */

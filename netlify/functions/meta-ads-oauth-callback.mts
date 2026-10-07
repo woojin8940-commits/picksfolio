@@ -98,7 +98,7 @@ export default async (req: Request, _context: Context) => {
   if (errorParam) return fail(errorParam);
   if (!code) return fail("missing_code");
 
-  const verified = await consumeSignedState(stateRaw);
+  const verified = await consumeSignedState(stateRaw, req.headers.get("cookie"));
   if (!verified.ok) return fail(verified.error);
   // 인스타그램 연동과 서명 키를 함께 쓰므로, 이 콜백은 광고용으로 발급된 state 만 받는다.
   if (verified.payload.p !== "ads") return fail("bad_state_purpose");

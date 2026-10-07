@@ -8,6 +8,7 @@ import {
 } from "./_shared/phone-verification.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { checkUsernameRules } from "./_shared/username-rules.mts";
+import { usernameHasBlobLeftovers } from "./_shared/username-leftovers.mts";
 import { attachAuthPhone } from "./_shared/auth-phone.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -18,6 +19,25 @@ function getSupabaseAdmin() {
   return createClient(SUPABASE_URL, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+}
+
+/**
+ * 계정은 없는데 예전 계정의 기록이 남아 있는 아이디인지(지워진 계정의 이름).
+ *
+ * 페이지(site_data)와, 결제 · 인스타그램 연동 기록(_shared/username-leftovers)을 함께 본다.
+ * 크리에이터 가입도 같은 기준으로 막는다(auth-check-username · auth-claim-username · auth-signup).
+ * 확인하지 못하면 null — 호출부는 가입을 막는다.
+ */
+async function usernameHasLeftovers(username: string): Promise<boolean | null> {
+  try {
+    if (await usernameHasBlobLeftovers(username)) return true;
+    const { getDatabase } = await import("@picks/netlify-database");
+    const rows = await getDatabase().sql`SELECT 1 FROM site_data WHERE username = ${username} LIMIT 1`;
+    return rows.length > 0;
+  } catch (e) {
+    console.error("[business-auth] leftover lookup failed:", (e as Error)?.message);
+    return null;
+  }
 }
 
 export default async (req: Request) => {
@@ -142,6 +162,14 @@ export default async (req: Request) => {
         .maybeSingle();
 
       if (existingProfile) {
+        return Response.json({ success: false, error: "이미 사용 중인 아이디입니다." });
+      }
+
+      const leftovers = await usernameHasLeftovers(cleanUsername);
+      if (leftovers === null) {
+        return Response.json({ success: false, error: "아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+      }
+      if (leftovers) {
         return Response.json({ success: false, error: "이미 사용 중인 아이디입니다." });
       }
 

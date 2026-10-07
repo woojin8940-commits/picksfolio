@@ -42,11 +42,13 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
  * `/api/images/<key>` 주소가 되므로, 저장하는 쪽(협업 제출물)과 보여주는 쪽 코드는
  * 하나도 바뀌지 않는다.
  *
- * 인증 — `/api/upload-image` 와 같은 이유로 로그인을 요구하지 않는다(비로그인 업체가
- * 쓰는 공개 제안서 폼이 같은 업로드를 쓴다). 대신 (1) 저장 키를 서버가 만들고,
- * (2) 허용 목록 밖 형식은 시작 단계에서 거부하고, (3) 조각 수·조각 크기·전체 크기에
- * 상한을 둔다. 클라이언트가 키를 지어 보낼 수는 없다 — 조각 요청은 서버가 발급한
- * 키 모양(`<폴더>/<타임스탬프>-<난수>.<확장자>`)만 받는다.
+ * 인증 — 로그인한 사람만 쓸 수 있다. 저장 키는 서버가 만들고, 시작할 때 그 키의
+ * 주인(시작한 사람)을 업로드 세션으로 남긴다. 조각·완료 요청은 세션의 주인만 보낼 수
+ * 있다. 예전에는 키 모양(`<폴더>/<타임스탬프>-<난수>.<확장자>`)만 확인해서, 로그인한
+ * 누구나 남의 업로드 키(화면에 그대로 드러나는 `/api/images/<key>` 주소)에 조각과
+ * 목록표를 덮어써 그 파일을 다른 내용으로 바꿀 수 있었다. `/api/upload-image` 로
+ * 올린 일반 이미지도 같은 저장소 · 같은 키 모양이라 대상이 됐다. 목록표는 새 키에만
+ * 쓴다(onlyIfNew). 형식 허용 목록과 조각 수·조각 크기·전체 크기 상한은 그대로다.
  *
  *   POST /api/upload-chunk   { action: 'init', username, filename, size }
  *     → { key, partSize, parts }
@@ -63,6 +65,27 @@ const bad = (message: string, status = 400) => Response.json({ error: message },
 
 /** 조각과 목록표는 파일 본체와 같은 저장소에 둔다 — 내려주는 쪽이 한 저장소만 본다. */
 const imagesStore = () => getStore("images");
+
+/** 업로드 세션 — 키를 발급받은 사람과 그때 정한 조각 수 · 전체 크기. */
+interface UploadSession {
+  owner: string;
+  parts: number;
+  size: number;
+  createdAt: number;
+}
+
+const sessionsStore = () => getStore({ name: "upload-chunk-sessions", consistency: "strong" });
+
+/** 시작한 뒤 이 시간이 지난 세션으로는 조각을 받지 않는다. */
+const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** 이 사람이 시작한, 아직 유효한 업로드 세션. 없으면 null. */
+async function ownedSession(key: string, owner: string): Promise<UploadSession | null> {
+  const session = (await sessionsStore().get(key, { type: "json" })) as UploadSession | null;
+  if (!session || session.owner !== owner) return null;
+  if (!(Date.now() - Number(session.createdAt) < SESSION_TTL_MS)) return null;
+  return session;
+}
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -92,7 +115,9 @@ export default async (req: Request) => {
     const chunk = form.get("chunk") as File | null;
 
     if (!isPartedKey(key)) return bad("잘못된 업로드 주소입니다.");
-    if (!Number.isInteger(index) || index < 0 || index >= MAX_PARTS) {
+    const session = await ownedSession(key, caller.userId);
+    if (!session) return bad("이 업로드를 시작한 계정이 아니거나, 업로드가 만료됐습니다. 처음부터 다시 올려 주세요.", 403);
+    if (!Number.isInteger(index) || index < 0 || index >= session.parts) {
       return bad("잘못된 조각 번호입니다.");
     }
     if (!chunk) return bad("조각이 비어 있습니다.");
@@ -127,10 +152,17 @@ export default async (req: Request) => {
 
     const ext = safeExtension(filename) || "bin";
     const key = `${safeKeyPrefix(username)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const parts = Math.ceil(size / PART_SIZE);
+    await sessionsStore().setJSON(key, {
+      owner: caller.userId,
+      parts,
+      size,
+      createdAt: Date.now(),
+    } satisfies UploadSession);
     return Response.json({
       key,
       partSize: PART_SIZE,
-      parts: Math.ceil(size / PART_SIZE),
+      parts,
       maxBytes: MAX_TOTAL_BYTES,
     });
   }
@@ -138,11 +170,14 @@ export default async (req: Request) => {
   // ── 완료: 목록표를 원래 키에 쓴다 ───────────────────────────────────
   if (action === "complete") {
     const key = String(body.key || "");
-    const parts = Number(body.parts || 0);
-    const size = Number(body.size || 0);
     const filename = String(body.filename || "");
 
     if (!isPartedKey(key)) return bad("잘못된 업로드 주소입니다.");
+    const session = await ownedSession(key, caller.userId);
+    if (!session) return bad("이 업로드를 시작한 계정이 아니거나, 업로드가 만료됐습니다. 처음부터 다시 올려 주세요.", 403);
+    // 조각 수와 전체 크기는 시작할 때 정한 값을 쓴다.
+    const { parts, size } = session;
+    if (Number(body.parts) !== parts || Number(body.size) !== size) return bad("조각 수 또는 파일 크기가 시작할 때와 다릅니다.");
     if (!Number.isInteger(parts) || parts <= 0 || parts > MAX_PARTS) return bad("조각 수가 잘못됐습니다.");
     if (!Number.isFinite(size) || size <= 0 || size > MAX_TOTAL_BYTES) return bad("파일 크기가 잘못됐습니다.");
 
@@ -167,7 +202,8 @@ export default async (req: Request) => {
     }
 
     // 목록표 본문은 비워 둔다. 실제 바이트는 조각에 있고, 내려주는 쪽은 메타데이터의
-    // parts 를 보고 조각에서 읽는다.
+    // parts 를 보고 조각에서 읽는다. 이미 있는 키에는 쓰지 않는다 — 완료 요청을 다시
+    // 보낸 경우라면 앞선 완료가 같은 목록표를 이미 썼다.
     await imagesStore().set(key, new ArrayBuffer(0), {
       metadata: {
         contentType: mime,
@@ -176,6 +212,7 @@ export default async (req: Request) => {
         partSize: PART_SIZE,
         size,
       },
+      onlyIfNew: true,
     });
 
     return Response.json({ url: `/api/images/${key}`, key, size, parts });

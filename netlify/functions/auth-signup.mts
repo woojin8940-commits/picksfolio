@@ -7,6 +7,7 @@ import {
   phoneNotVerifiedResponse,
 } from "./_shared/phone-verification.mts";
 import { checkUsernameRules } from "./_shared/username-rules.mts";
+import { usernameHasBlobLeftovers } from "./_shared/username-leftovers.mts";
 import { attachAuthPhone } from "./_shared/auth-phone.mts";
 
 const SUPABASE_URL =
@@ -86,7 +87,19 @@ export default async (req: Request) => {
     const existingSiteData = await db.sql`
       SELECT 1 FROM site_data WHERE username = ${cleanUsername} LIMIT 1
     `;
-    if (existingSiteData.length > 0) {
+    // 페이지가 없어도 지워진 계정의 결제 · 인스타그램 연동 기록이 남은 이름은 내주지 않는다
+    // (_shared/username-leftovers). 확인하지 못하면 가입을 막는다.
+    let blobLeftovers: boolean;
+    try {
+      blobLeftovers = existingSiteData.length > 0 ? false : await usernameHasBlobLeftovers(cleanUsername);
+    } catch (e) {
+      console.error("[auth-signup] leftover lookup failed:", (e as Error)?.message);
+      return Response.json({
+        success: false,
+        error: "아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      });
+    }
+    if (existingSiteData.length > 0 || blobLeftovers) {
       return Response.json({
         success: false,
         error: "이미 사용 중인 아이디입니다.",

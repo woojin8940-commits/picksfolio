@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { requireAdmin } from "./_shared/admin-auth.mts";
+import { readDmLog } from "./_shared/dm-automation-log.mts";
 import { queueRpc } from "./_shared/dm-worker.mts";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 
@@ -11,7 +12,20 @@ export default async (req: Request) => {
   const url = new URL(req.url);
   const offset = Math.max(0, Math.min(100000, Math.floor(Number(url.searchParams.get("offset")) || 0)));
   const account = url.searchParams.get("account");
+  const logsFor = url.searchParams.get("logs");
   try {
+    /**
+     * 계정의 최근 자동 DM 활동 기록(발송 · 건너뜀 · 실패와 그 이유).
+     *
+     * 발송 경로는 "왜 보내지 않았는지"를 이 기록에 남기지만, 지금까지 이 기록을 볼 수 있는
+     * 화면이 없었다. "버튼을 눌렀는데 다음 메시지가 안 왔다" 같은 문의는 이 기록이 있어야
+     * 원인을 가릴 수 있다.
+     */
+    if (logsFor !== null) {
+      const username = logsFor.trim().toLowerCase();
+      if (!/^[a-z0-9._/-]{1,80}$/.test(username)) return Response.json({ error: "잘못된 계정입니다." }, { status: 400, headers });
+      return Response.json({ logs: await readDmLog(username, 100) }, { headers });
+    }
     if (account) {
       if (!/^\d{1,64}$/.test(account)) return Response.json({ error: "잘못된 계정입니다." }, { status: 400, headers });
       const { data, error } = await getSupabaseServer().from("dm_jobs")

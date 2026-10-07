@@ -1,9 +1,11 @@
+import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
   DM_AUTOMATION_TIER,
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
+import { fetchAllowed } from "./_shared/allowed-fetch.mts";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { DIRECT_UPLOAD_BUCKET, directUploadPath } from "./_shared/upload-media.mts";
@@ -85,7 +87,12 @@ export default async (req: Request, context: Context) => {
   if (!auth.ok) return auth.response;
 
   // 디엠 자동화와 같은 자격을 요구한다. 카드 이미지는 그 기능의 일부다.
-  if (!(await dmAutomationAllowed(username, auth.userId))) {
+  // 관리자가 대신 만들 때는 설정 주인의 ID 로 판정한다(관리자 ID 를 넘기면 관리자에게
+  // 부여된 멤버십이 이 계정 것으로 옮겨 적힌다).
+  const planOwnerId = auth.isAdmin
+    ? ((await getStore({ name: "dm-automation", consistency: "strong" }).get(`dm_${username}`, { type: "json" }).catch(() => null)) as { ownerAuthUserId?: string } | null)?.ownerAuthUserId || null
+    : auth.userId;
+  if (!(await dmAutomationAllowed(username, planOwnerId))) {
     return Response.json(
       {
         error: DM_AUTOMATION_REQUIRED_MESSAGE,
@@ -115,10 +122,12 @@ export default async (req: Request, context: Context) => {
   let bytes: ArrayBuffer;
   let contentType: string;
   try {
-    const res = await fetch(source.toString(), {
-      redirect: "follow",
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    // 리다이렉트도 허용 호스트 안에서만 따라간다(fetchAllowed).
+    const res = await fetchAllowed(
+      source.toString(),
+      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+      (target) => allowedSource(target.toString()) !== null,
+    );
     if (!res.ok) {
       // 서명이 이미 만료된 주소(오래된 피드 목록)면 여기로 온다.
       return bad(

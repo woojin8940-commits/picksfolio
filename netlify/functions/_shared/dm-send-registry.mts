@@ -39,6 +39,32 @@ const store = () => getStore({ name: STORE, consistency: "strong" });
 /** 비공개 답장(댓글 1건당 1회)을 이미 썼는지 표시하는 키. */
 export const privateReplyKey = (commentId: string) => `reply_${commentId}`;
 
+/**
+ * 비공개 답장이 결과 불명(인스타그램 5xx · 일시 오류 · 응답 시간 초과)으로 끝나 다시
+ * 시도하는 댓글의 표시. 몇 번 다시 시도했는지를 남긴다.
+ *
+ * 비공개 답장은 댓글 1건당 1회뿐이라, 앞선 시도가 실제로 도착했다면 다시 보내도 "이미
+ * 답장함"으로 거절된다 — 그 거절이 곧 도착했다는 증거다. 이 표시가 있는 댓글은 그
+ * 거절을 받았을 때 IGSID 로 다시 보내지 않는다(같은 내용이 두 번 간다).
+ */
+export const UNCERTAIN_REPLY_RETRIES = 2;
+const uncertainReplyKey = (commentId: string) => `reply_uncertain_${commentId}`;
+
+/** 이 댓글의 비공개 답장을 결과 불명 뒤에 몇 번 다시 시도했는지. */
+export async function uncertainReplyAttempts(username: string, commentId: string): Promise<number> {
+  const record = (await store().get(`${prefixFor(username)}${uncertainReplyKey(commentId)}`, { type: "json" })) as
+    | { attempts?: unknown }
+    | null;
+  return Number(record?.attempts) || 0;
+}
+
+export async function noteUncertainReply(username: string, commentId: string, attempts: number): Promise<void> {
+  await store().setJSON(`${prefixFor(username)}${uncertainReplyKey(commentId)}`, {
+    attempts,
+    at: new Date().toISOString(),
+  });
+}
+
 /** 공개 답글을 이미 달았는지 표시하는 키. */
 export const publicReplyKey = (commentId: string) => `pubreply_${commentId}`;
 
@@ -146,6 +172,64 @@ export async function claimIfNew(username: string, key: string, strict = false):
     if (strict) throw e;
     return true;
   }
+}
+
+/**
+ * 대기열로 넘긴 선점을 대기 중으로 존중하는 최대 시간. 대기열이 결과를 남기지 못한 채
+ * 사라진 예약이 있어도 이 시간이 지나면 같은 버튼으로 다시 보낼 수 있다.
+ */
+const QUEUED_HOLD_MS = 24 * 60 * 60 * 1000;
+
+export type ClaimOutcome =
+  | { claimed: true; retaken: boolean }
+  | { claimed: false; state: "confirmed" | "queued" | "pending" };
+
+/**
+ * 선점하되, 결과가 확인되지 않은 채 오래된 선점이면 다시 가져온다.
+ *
+ * 버튼을 누른 사람에게 가는 본 메시지가 쓴다. 발송 결과가 불확실하게 끝나거나(응답
+ * 시간 초과 등) 대기열로 넘어간 뒤 실패하면 선점만 남는데, 예전에는 그 뒤로 몇 번을
+ * 다시 눌러도 아무것도 나가지 않았다. 다시 누른 것은 "받지 못했다"는 뜻이므로, 확인된
+ * 발송(confirmed)이나 대기열에서 기다리는 중(queued)이 아니고 충분히 시간이 지났다면
+ * 다시 보낸다. 다시 가져올 때도 조건부 쓰기라 두 요청이 동시에 가져가지 못한다.
+ */
+export async function claimOrRetake(
+  username: string,
+  key: string,
+  retakeAfterMs: number,
+): Promise<ClaimOutcome> {
+  const s = store();
+  const path = `${prefixFor(username)}${key}`;
+  const body = () => JSON.stringify({ at: new Date().toISOString() });
+  const created = await s.set(path, body(), { onlyIfNew: true });
+  if (created?.modified !== false) return { claimed: true, retaken: false };
+
+  const snapshot = await s.getWithMetadata(path, { type: "json", consistency: "strong" });
+  if (!snapshot?.etag) {
+    const again = await s.set(path, body(), { onlyIfNew: true });
+    return again?.modified !== false ? { claimed: true, retaken: false } : { claimed: false, state: "pending" };
+  }
+  const data = (snapshot.data || {}) as { at?: string; confirmed?: boolean; queued?: boolean };
+  if (data.confirmed === true) return { claimed: false, state: "confirmed" };
+  const at = Date.parse(String(data.at || ""));
+  const age = Number.isNaN(at) ? Infinity : Date.now() - at;
+  if (data.queued === true && age < QUEUED_HOLD_MS) return { claimed: false, state: "queued" };
+  if (age < retakeAfterMs) return { claimed: false, state: "pending" };
+  const retaken = await s.set(path, body(), { onlyIfMatch: snapshot.etag });
+  return retaken?.modified !== false ? { claimed: true, retaken: true } : { claimed: false, state: "pending" };
+}
+
+/** 선점한 발송이 대기열로 넘어갔다고 표시한다. 대기열이 결과를 확인할 때까지 다시 보내지 않는다. */
+export async function markClaimQueued(username: string, key: string): Promise<void> {
+  await updateRecord(username, key, { queued: true });
+}
+
+/**
+ * 대기열에서 결과가 불확실하게 끝난 선점을 "확인 안 됨"으로 되돌린다. 일정 시간이 지나
+ * 같은 버튼을 다시 누르면 claimOrRetake 가 다시 보낸다.
+ */
+export async function reopenClaim(username: string, key: string): Promise<void> {
+  await updateRecord(username, key, { queued: false, confirmed: false, at: new Date().toISOString() });
 }
 
 export async function alreadyRecorded(username: string, key: string): Promise<boolean> {
