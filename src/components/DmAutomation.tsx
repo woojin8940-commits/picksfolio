@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   Instagram, Check, Plus, Trash2, Send, Loader2, MessageSquare, MessageCircle,
-  Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
+  Zap, Link2, X, ChevronLeft, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
   ArrowUp, ArrowDown, Images, Clock, CalendarClock, RefreshCw, Info,
@@ -289,16 +289,93 @@ function readEditorDraft(username: string): EditorDraft | null {
  */
 const MEDIA_GRID_STEP = 24;
 
-const MoreMediaButton: React.FC<{ shown: number; total: number; onMore: () => void }> = ({ shown, total, onMore }) =>
-  shown < total ? (
-    <button
-      type="button"
-      onClick={onMore}
-      className="col-span-full rounded-xl border border-slate-200 bg-white py-2 text-[11px] font-black text-slate-500 hover:bg-slate-50"
-    >
-      더 보기 ({total - shown}개 남음)
-    </button>
-  ) : null;
+type MediaPagination = {
+  hasMore: boolean;
+  loadingMore: boolean;
+  error: string;
+  loadMore: () => Promise<InstagramMedia[]>;
+};
+
+const PagedMediaGrid: React.FC<{
+  media: InstagramMedia[];
+  pagination: MediaPagination;
+  className: string;
+  imagesOnly?: boolean;
+  children: (m: InstagramMedia) => React.ReactNode;
+}> = ({ media, pagination, className, imagesOnly = false, children }) => {
+  const items = useMemo(() => imagesOnly ? media.filter((m) => feedImageOf(m)) : media, [media, imagesOnly]);
+  const [start, setStart] = useState(0);
+  const [pending, setPending] = useState(false);
+  const grid = useRef<HTMLDivElement>(null);
+  const pendingRef = useRef(false);
+  const mounted = useRef(true);
+  const version = useRef(0);
+  const previous = useRef({ first: items[0]?.id, count: items.length });
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; version.current++; };
+  }, []);
+  useEffect(() => {
+    if (previous.current.first !== items[0]?.id || items.length < previous.current.count) {
+      version.current++;
+      setStart(0);
+    }
+    previous.current = { first: items[0]?.id, count: items.length };
+  }, [items]);
+  useEffect(() => {
+    const node = grid.current;
+    if (!node) return;
+    if (node.scrollHeight > node.clientHeight) node.scrollTop = 0;
+    else if (node.parentElement) node.parentElement.scrollTop = 0;
+  }, [start]);
+  const busy = pending || pagination.loadingMore;
+  const next = async () => {
+    if (pendingRef.current || pagination.loadingMore) return;
+    const nextStart = start + MEDIA_GRID_STEP;
+    const fillingPage = items.length < nextStart;
+    const currentVersion = version.current;
+    pendingRef.current = true;
+    setPending(true);
+    try {
+      if (nextStart >= items.length) {
+        if (!pagination.hasMore) return;
+        let count = media.length;
+        for (let page = 0; page < MAX_FEED_PAGES; page++) {
+          const loaded = await pagination.loadMore();
+          const available = imagesOnly ? loaded.filter((m) => feedImageOf(m)) : loaded;
+          if (available.length > (fillingPage ? items.length : nextStart)) break;
+          if (loaded.length <= count || page === MAX_FEED_PAGES - 1) return;
+          count = loaded.length;
+        }
+      }
+      if (mounted.current && currentVersion === version.current) setStart(fillingPage ? start : nextStart);
+    } finally {
+      pendingRef.current = false;
+      if (mounted.current) setPending(false);
+    }
+  };
+  return (
+    <div ref={grid} className={className}>
+      {items.slice(start, start + MEDIA_GRID_STEP).map(children)}
+      {(start > 0 || start + MEDIA_GRID_STEP < items.length || pagination.hasMore || pagination.error) && (
+        <div className="col-span-full space-y-2 pt-1">
+          <div className="flex items-center justify-between gap-2">
+            <button type="button" onClick={() => setStart((n) => Math.max(0, n - MEDIA_GRID_STEP))} disabled={start === 0 || busy} aria-label="이전 게시물" title="이전 게시물" className="w-9 h-9 shrink-0 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 disabled:opacity-30">
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-[11px] font-bold text-slate-500 tabular-nums">
+              {items.length ? `${start + 1}-${Math.min(start + MEDIA_GRID_STEP, items.length)} / ${items.length}${pagination.hasMore ? '+' : ''}` : '0개'}
+            </span>
+            <button type="button" onClick={() => void next()} disabled={busy || (start + MEDIA_GRID_STEP >= items.length && !pagination.hasMore)} aria-label="다음 게시물" title="다음 게시물" className="w-9 h-9 shrink-0 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 disabled:opacity-30">
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <ChevronRight size={16} />}
+            </button>
+          </div>
+          {pagination.error && <p role="alert" className="text-[11px] font-bold text-amber-700">{pagination.error}</p>}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /**
  * 피드 미리보기 칸 수. 설정 화면에는 게시물을 처음부터 전부 그리지 않고 이만큼만 보여 준 뒤
@@ -310,12 +387,12 @@ const FEED_PREVIEW_COUNT = 7;
 /** 피드 전체 게시물 창. 여기서도 한 번에 MEDIA_GRID_STEP 장씩만 그린다. */
 const FeedAllMediaModal: React.FC<{
   media: InstagramMedia[];
+  pagination: MediaPagination;
   entitled: boolean;
   disabledTitle: string;
   onPick: (m: InstagramMedia) => void;
   onClose: () => void;
-}> = ({ media, entitled, disabledTitle, onPick, onClose }) => {
-  const [shown, setShown] = useState(MEDIA_GRID_STEP);
+}> = ({ media, pagination, entitled, disabledTitle, onPick, onClose }) => {
   useCloseOnBack(true, onClose);
   return (
     <div
@@ -329,15 +406,15 @@ const FeedAllMediaModal: React.FC<{
         <div className="flex items-center justify-between px-5 md:px-6 py-4 border-b border-slate-100 shrink-0">
           <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
             <LayoutGrid size={17} className="text-slate-400" /> 내 피드 게시물 전체
-            <span className="text-xs font-black text-slate-400">{media.length}개</span>
+            <span className="text-xs font-black text-slate-400">{media.length}{pagination.hasMore ? '+' : ''}개</span>
           </h3>
           <button type="button" onClick={onClose} className="shrink-0 w-10 h-10 -mr-1 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
             <X size={20} />
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5">
-          <div className="grid grid-cols-4 gap-2">
-            {media.slice(0, shown).map((m) => (
+          <PagedMediaGrid media={media} pagination={pagination} className="grid grid-cols-4 gap-2">
+            {(m) => (
               <button
                 key={m.id}
                 type="button"
@@ -351,17 +428,8 @@ const FeedAllMediaModal: React.FC<{
                   ? <img src={feedImageOf(m)} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                   : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
               </button>
-            ))}
-            {shown < media.length && (
-              <button
-                type="button"
-                onClick={() => setShown((n) => n + MEDIA_GRID_STEP)}
-                className="col-span-full rounded-xl border border-slate-200 bg-white py-2.5 text-[12px] font-black text-slate-500 hover:bg-slate-50"
-              >
-                더 보기
-              </button>
             )}
-          </div>
+          </PagedMediaGrid>
         </div>
       </div>
     </div>
@@ -856,13 +924,14 @@ const CarouselBuilder: React.FC<{
   userName: string;
   cards: DmCarouselCard[];
   media: InstagramMedia[];
+  pagination: MediaPagination;
   mediaLoading: boolean;
   /** 게시물을 받아오지 못한 이유. 있으면 "사진이 없다" 대신 이 사유를 보여준다. */
   mediaError: string;
   onRetryMedia: () => void;
   onChange: (cards: DmCarouselCard[]) => void;
   onBusyChange?: (busy: boolean) => void;
-}> = ({ userName, cards, media, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
+}> = ({ userName, cards, media, pagination, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
   const latest = useRef({ cards, onChange });
   latest.current = { cards, onChange };
   const imageTasks = useRef<Record<string, number>>({});
@@ -883,7 +952,6 @@ const CarouselBuilder: React.FC<{
   const [imageError, setImageError] = useState<Record<string, string>>({});
   /** 피드 사진 고르기를 펼쳐 둔 카드. */
   const [pickerFor, setPickerFor] = useState<string | null>(null);
-  const [pickerShown, setPickerShown] = useState(MEDIA_GRID_STEP);
 
   const feedPhotos = useMemo(() => media.filter((m) => feedImageOf(m)), [media]);
 
@@ -1133,7 +1201,7 @@ const CarouselBuilder: React.FC<{
                     <Loader2 size={14} className="animate-spin" />
                     <span className="text-[11px] font-bold">게시물을 불러오는 중…</span>
                   </div>
-                ) : feedPhotos.length === 0 && mediaError ? (
+                ) : feedPhotos.length === 0 && mediaError && !pagination.hasMore ? (
                   <div className="text-center py-6">
                     <AlertCircle size={22} className="text-amber-400 mx-auto mb-1.5" />
                     <p className="text-[11px] font-bold text-slate-600">피드 사진을 불러오지 못했어요</p>
@@ -1146,7 +1214,7 @@ const CarouselBuilder: React.FC<{
                     </button>
                     <p className="text-[10px] text-slate-400 mt-1.5">파일로 직접 올려도 됩니다.</p>
                   </div>
-                ) : feedPhotos.length === 0 ? (
+                ) : feedPhotos.length === 0 && !pagination.hasMore ? (
                   <div className="text-center py-6">
                     <ImageIcon size={22} className="text-slate-300 mx-auto mb-1.5" />
                     <p className="text-[11px] font-bold text-slate-500">가져올 피드 사진이 없어요</p>
@@ -1157,8 +1225,8 @@ const CarouselBuilder: React.FC<{
                     <p className="text-[10px] font-bold text-slate-400 mb-2">
                       고른 사진은 카드용으로 복사돼요. 원본 게시물을 지워도 카드 이미지는 남습니다.
                     </p>
-                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
-                      {feedPhotos.slice(0, pickerShown).map((m) => (
+                    <PagedMediaGrid media={media} pagination={pagination} imagesOnly className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                      {(m) => (
                         <button
                           key={m.id}
                           type="button"
@@ -1166,11 +1234,10 @@ const CarouselBuilder: React.FC<{
                           title={m.caption?.slice(0, 60) || '피드 사진'}
                           className="relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-pink-500 transition-all"
                         >
-                          <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                         </button>
-                      ))}
-                      <MoreMediaButton shown={pickerShown} total={feedPhotos.length} onMore={() => setPickerShown((n) => n + MEDIA_GRID_STEP)} />
-                    </div>
+                      )}
+                    </PagedMediaGrid>
                   </>
                 )}
               </div>
@@ -1349,12 +1416,13 @@ const FollowUpImageEditor: React.FC<{
   userName: string;
   imageUrl: string;
   media: InstagramMedia[];
+  pagination: MediaPagination;
   mediaLoading: boolean;
   mediaError: string;
   onRetryMedia: () => void;
   onChange: (imageUrl: string) => void;
   onBusyChange?: (busy: boolean) => void;
-}> = ({ userName, imageUrl, media, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
+}> = ({ userName, imageUrl, media, pagination, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
   const latestChange = useRef(onChange);
   latestChange.current = onChange;
   const taskId = useRef(0);
@@ -1373,7 +1441,6 @@ const FollowUpImageEditor: React.FC<{
   }, [uploading]);
   const [error, setError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerShown, setPickerShown] = useState(MEDIA_GRID_STEP);
   const feedPhotos = useMemo(() => media.filter((m) => feedImageOf(m)), [media]);
 
   const run = async (label: string, task: (onProgress: (ratio: number) => void) => Promise<{ url?: string; error?: string }>) => {
@@ -1488,7 +1555,7 @@ const FollowUpImageEditor: React.FC<{
               <Loader2 size={14} className="animate-spin" />
               <span className="text-[11px] font-bold">게시물을 불러오는 중…</span>
             </div>
-          ) : feedPhotos.length === 0 ? (
+          ) : feedPhotos.length === 0 && !pagination.hasMore ? (
             <div className="text-center py-6">
               <ImageIcon size={22} className="text-slate-300 mx-auto mb-1.5" />
               <p className="text-[11px] font-bold text-slate-500">
@@ -1506,8 +1573,8 @@ const FollowUpImageEditor: React.FC<{
               <p className="text-[10px] text-slate-400 mt-1.5">파일로 직접 올려도 됩니다.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
-              {feedPhotos.slice(0, pickerShown).map((m) => (
+            <PagedMediaGrid media={media} pagination={pagination} imagesOnly className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
+              {(m) => (
                 <button
                   key={m.id}
                   type="button"
@@ -1515,11 +1582,10 @@ const FollowUpImageEditor: React.FC<{
                   title={m.caption?.slice(0, 60) || '피드 사진'}
                   className="relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-pink-500 transition-all"
                 >
-                  <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                 </button>
-              ))}
-              <MoreMediaButton shown={pickerShown} total={feedPhotos.length} onMore={() => setPickerShown((n) => n + MEDIA_GRID_STEP)} />
-            </div>
+              )}
+            </PagedMediaGrid>
           )}
         </div>
       )}
@@ -1552,12 +1618,13 @@ const FollowUpsEditor: React.FC<{
   userName: string;
   followUps: DmFollowUp[];
   media: InstagramMedia[];
+  pagination: MediaPagination;
   mediaLoading: boolean;
   mediaError: string;
   onRetryMedia: () => void;
   onChange: (followUps: DmFollowUp[]) => void;
   onBusyChange: (id: string, busy: boolean) => void;
-}> = ({ userName, followUps, media, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
+}> = ({ userName, followUps, media, pagination, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const setItem = (id: string, p: Partial<DmFollowUp>) =>
     onChange(followUps.map((f) => (f.id === id ? { ...f, ...p } : f)));
@@ -1637,6 +1704,7 @@ const FollowUpsEditor: React.FC<{
                 userName={userName}
                 cards={f.cards || []}
                 media={media}
+                pagination={pagination}
                 mediaLoading={mediaLoading}
                 mediaError={mediaError}
                 onRetryMedia={onRetryMedia}
@@ -1649,6 +1717,7 @@ const FollowUpsEditor: React.FC<{
                 userName={userName}
                 imageUrl={f.imageUrl || ''}
                 media={media}
+                pagination={pagination}
                 mediaLoading={mediaLoading}
                 mediaError={mediaError}
                 onRetryMedia={onRetryMedia}
@@ -1715,6 +1784,7 @@ const AutomationEditor: React.FC<{
   userName: string;
   igUsername: string;
   media: InstagramMedia[];
+  pagination: MediaPagination;
   mediaLoading: boolean;
   /** 게시물을 받아오지 못한 이유. 목록이 비었을 때 무엇을 해야 하는지 가른다. */
   mediaError: string;
@@ -1723,10 +1793,9 @@ const AutomationEditor: React.FC<{
   onSave: (a: DmAutomationItem) => void;
   saving: boolean;
   saveError: string;
-}> = ({ initial, restored, onReopenSaved, userName, igUsername, media, mediaLoading, mediaError, onRetryMedia, onClose, onSave, saving, saveError }) => {
+}> = ({ initial, restored, onReopenSaved, userName, igUsername, media, pagination, mediaLoading, mediaError, onRetryMedia, onClose, onSave, saving, saveError }) => {
   const [draft, setDraft] = useState<DmAutomationItem>(initial);
   const [keywordInput, setKeywordInput] = useState(() => restored?.keywordInput || '');
-  const [mediaShown, setMediaShown] = useState(MEDIA_GRID_STEP);
 
   const initialJson = useMemo(() => JSON.stringify(initial), [initial]);
   const draftJson = useMemo(() => JSON.stringify(draft), [draft]);
@@ -2020,7 +2089,7 @@ const AutomationEditor: React.FC<{
                   <div className="flex items-center justify-center gap-2 py-8 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
                     <Loader2 size={16} className="animate-spin" /> <span className="text-xs font-bold">게시물을 불러오는 중…</span>
                   </div>
-                ) : media.length === 0 && mediaError ? (
+                ) : media.length === 0 && mediaError && !pagination.hasMore ? (
                   <div className="text-center py-8 border border-dashed border-amber-200 rounded-2xl bg-amber-50/60">
                     <AlertCircle size={26} className="text-amber-400 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-700">게시물을 불러오지 못했어요</p>
@@ -2033,7 +2102,7 @@ const AutomationEditor: React.FC<{
                       <RefreshCw size={11} /> 다시 시도
                     </button>
                   </div>
-                ) : media.length === 0 ? (
+                ) : media.length === 0 && !pagination.hasMore ? (
                   <div className="text-center py-8 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
                     <ImageIcon size={26} className="text-slate-300 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-500">불러올 게시물이 없어요</p>
@@ -2042,8 +2111,8 @@ const AutomationEditor: React.FC<{
                 ) : (
                   <>
                     <p className="text-[11px] text-slate-500 font-bold mb-2">{draft.mediaIds.length}개 선택됨</p>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1">
-                      {media.slice(0, mediaShown).map((m) => {
+                    <PagedMediaGrid media={media} pagination={pagination} className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1">
+                      {(m) => {
                         const selected = draft.mediaIds.includes(m.id);
                         return (
                           <button
@@ -2065,9 +2134,8 @@ const AutomationEditor: React.FC<{
                             {!selected && <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors" />}
                           </button>
                         );
-                      })}
-                      <MoreMediaButton shown={mediaShown} total={media.length} onMore={() => setMediaShown((n) => n + MEDIA_GRID_STEP)} />
-                    </div>
+                      }}
+                    </PagedMediaGrid>
                   </>
                 )
               )}
@@ -2498,6 +2566,7 @@ const AutomationEditor: React.FC<{
                     userName={userName}
                     cards={draft.cards}
                     media={media}
+                    pagination={pagination}
                     mediaLoading={mediaLoading}
                     mediaError={mediaError}
                     onRetryMedia={onRetryMedia}
@@ -2519,6 +2588,7 @@ const AutomationEditor: React.FC<{
                     userName={userName}
                     followUps={draft.followUps || []}
                     media={media}
+                    pagination={pagination}
                     mediaLoading={mediaLoading}
                     mediaError={mediaError}
                     onRetryMedia={onRetryMedia}
@@ -2612,8 +2682,19 @@ const DmMatchPolicyNote: React.FC<{ tone?: 'slate' | 'emerald' }> = ({ tone = 's
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = false }) => {
   const { t } = useLanguage();
   const cachedSettings = useMemo(() => readJson<DmAutomationSettings>(dmSettingsCacheKey(userName)), [userName]);
-  const cachedMedia = useMemo(() => readJson<InstagramMedia[]>(dmMediaCacheKey(userName)), [userName]);
+  const cachedMedia = useMemo(() => {
+    const value = readJson<unknown>(dmMediaCacheKey(userName));
+    return {
+      media: normalizeMedia(isRecord(value) ? value.media : value),
+      nextCursor: isRecord(value) ? textValue(value.nextCursor) : '',
+    };
+  }, [userName]);
   const requests = useRef({ settings: 0, media: 0 });
+  const mediaOwner = useRef(userName);
+  mediaOwner.current = userName;
+  const mediaState = useRef(cachedMedia);
+  const firstMediaLoading = useRef(false);
+  const moreMediaRequest = useRef<Promise<InstagramMedia[]> | null>(null);
   const saveLock = useRef(false);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [manualModalRule, setManualModalRule] = useState<DmAutomationItem | null>(null);
@@ -2669,8 +2750,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const [media, setMedia] = useState<InstagramMedia[]>(() => normalizeMedia(cachedMedia));
-  const [mediaLoading, setMediaLoading] = useState(() => Boolean(cachedSettings?.connected && !cachedMedia?.length));
+  const [media, setMedia] = useState<InstagramMedia[]>(() => cachedMedia.media);
+  const [mediaCursor, setMediaCursor] = useState(() => cachedMedia.nextCursor);
+  const [mediaLoading, setMediaLoading] = useState(() => Boolean(cachedSettings?.connected && !cachedMedia.media.length));
+  const [mediaMoreLoading, setMediaMoreLoading] = useState(false);
   /**
    * 게시물을 받아오지 못한 이유.
    *
@@ -2748,40 +2831,88 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
    */
   const loadMedia = async (opts: { refresh?: boolean } = {}) => {
     const request = ++requests.current.media;
+    firstMediaLoading.current = true;
+    moreMediaRequest.current = null;
+    setMediaMoreLoading(false);
     setMediaLoading(true);
     setMediaError('');
     try {
-      const first = await apiService.getInstagramMedia(userName, { refresh: opts.refresh });
-      if (request !== requests.current.media) return;
+      const first = await apiService.getInstagramMedia(userName, { refresh: opts.refresh, limit: MEDIA_GRID_STEP });
+      if (request !== requests.current.media || mediaOwner.current !== userName) return;
 
-      let all = normalizeMedia(first.media);
-      if (all.length > 0 || !first.error) setMedia(all);
+      const all = Array.from(new Map(normalizeMedia(first.media).map((m) => [m.id, m])).values());
+      if (all.length > 0 || !first.error) {
+        mediaState.current = { media: all, nextCursor: textValue(first.nextCursor) };
+        setMedia(all);
+        setMediaCursor(mediaState.current.nextCursor);
+        writeJson(dmMediaCacheKey(userName), mediaState.current);
+      }
       setMediaNeedsReauth(first.needsReauth);
       setMediaError(first.error);
-      if (all.length > 0) writeJson(dmMediaCacheKey(userName), all);
-      setMediaLoading(false);
 
-      // 남은 페이지는 화면을 막지 않고 이어 받는다.
-      let cursor = first.nextCursor;
-      for (let page = 0; page < MAX_FEED_PAGES && cursor; page += 1) {
-        const more = await apiService.getInstagramMedia(userName, { after: cursor });
-        if (request !== requests.current.media) return;
-        if (more.error) setMediaError(more.error);
-        if (more.needsReauth) setMediaNeedsReauth(true);
-        const pageMedia = normalizeMedia(more.media);
-        if (pageMedia.length === 0) break;
-        const seen = new Set(all.map((m) => m.id));
-        all = [...all, ...pageMedia.filter((m) => !seen.has(m.id))];
-        setMedia(all);
-        writeJson(dmMediaCacheKey(userName), all);
-        cursor = more.nextCursor;
-      }
     } catch (e) {
-      if (request !== requests.current.media) return;
+      if (request !== requests.current.media || mediaOwner.current !== userName) return;
       console.error('[DmAutomation] 게시물을 불러오지 못했습니다:', e);
       setMediaError('게시물을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
-      setMediaLoading(false);
+    } finally {
+      if (request === requests.current.media && mediaOwner.current === userName) {
+        firstMediaLoading.current = false;
+        setMediaLoading(false);
+      }
     }
+  };
+
+  const loadMoreMedia = (): Promise<InstagramMedia[]> => {
+    // 남은 페이지는 화면을 막지 않고 이어 받는다.
+    if (moreMediaRequest.current) return moreMediaRequest.current;
+    const cursor = mediaState.current.nextCursor;
+    if (firstMediaLoading.current || !cursor) return Promise.resolve(mediaState.current.media);
+    const request = requests.current.media;
+    setMediaMoreLoading(true);
+    setMediaError('');
+    const pending = (async () => {
+      try {
+        let after = cursor;
+        for (let page = 0; page < MAX_FEED_PAGES; page++) {
+          const more = await apiService.getInstagramMedia(userName, { after, limit: MEDIA_GRID_STEP });
+          if (request !== requests.current.media || mediaOwner.current !== userName) return mediaState.current.media;
+          const previousCount = mediaState.current.media.length;
+          const pageMedia = normalizeMedia(more.media);
+          const all = Array.from(new Map([...mediaState.current.media, ...pageMedia].map((m) => [m.id, m])).values());
+          const nextCursor = more.error && pageMedia.length === 0
+            ? after
+            : textValue(more.nextCursor) === after ? '' : textValue(more.nextCursor);
+          mediaState.current = { media: all, nextCursor };
+          setMedia(all);
+          setMediaCursor(nextCursor);
+          setMediaError(more.error);
+          if (more.needsReauth) setMediaNeedsReauth(true);
+          writeJson(dmMediaCacheKey(userName), mediaState.current);
+          if (more.error || !nextCursor || all.length > previousCount) return all;
+          after = nextCursor;
+        }
+        return mediaState.current.media;
+      } catch {
+        if (request === requests.current.media && mediaOwner.current === userName) {
+          setMediaError('게시물을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        }
+        return mediaState.current.media;
+      } finally {
+        if (request === requests.current.media && mediaOwner.current === userName) setMediaMoreLoading(false);
+      }
+    })();
+    moreMediaRequest.current = pending;
+    void pending.then(() => {
+      if (moreMediaRequest.current === pending) moreMediaRequest.current = null;
+    });
+    return pending;
+  };
+
+  const pagination: MediaPagination = {
+    hasMore: Boolean(mediaCursor),
+    loadingMore: mediaLoading || mediaMoreLoading,
+    error: mediaError,
+    loadMore: loadMoreMedia,
   };
 
   const load = () => {
@@ -2824,6 +2955,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   };
 
   useEffect(() => {
+    mediaState.current = cachedMedia;
+    setMedia(cachedMedia.media);
+    setMediaCursor(cachedMedia.nextCursor);
+    moreMediaRequest.current = null;
+    firstMediaLoading.current = false;
+    setMediaMoreLoading(false);
     load();
     return () => { requests.current.settings++; requests.current.media++; };
     /* eslint-disable-next-line */
@@ -2942,6 +3079,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       requests.current.media++;
       setReloading(false);
       setMediaLoading(false);
+      setMediaMoreLoading(false);
+      firstMediaLoading.current = false;
+      moreMediaRequest.current = null;
+      mediaState.current = { media: [], nextCursor: '' };
+      setMediaCursor('');
       setMediaError('');
       setMediaNeedsReauth(false);
       setConnected(false);
@@ -3432,7 +3574,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
               <LayoutGrid size={17} className="text-slate-400" /> 내 피드 게시물
             </h3>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-black text-slate-400">{media.length}개</span>
+              <span className="text-xs font-black text-slate-400">{media.length}{mediaCursor ? '+' : ''}개</span>
               <button
                 type="button"
                 onClick={() => void loadMedia({ refresh: true })}
@@ -3449,7 +3591,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
             <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
               <Loader2 size={18} className="animate-spin" /> <span className="text-sm font-bold">게시물을 불러오는 중…</span>
             </div>
-          ) : media.length === 0 && mediaError ? (
+          ) : media.length === 0 && mediaError && !mediaCursor ? (
             /* 받아오지 못한 경우. 게시물이 없는 계정과 같은 말을 하면 안 된다 —
                할 일이 "게시물 올리기"가 아니라 "다시 시도"(또는 재연동)이다. */
             <div className="text-center py-10 border border-dashed border-amber-200 rounded-2xl bg-amber-50/60">
@@ -3464,7 +3606,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                 <RefreshCw size={12} /> {mediaNeedsReauth ? '인스타그램 다시 연동하기' : '다시 시도'}
               </button>
             </div>
-          ) : media.length === 0 ? (
+          ) : media.length === 0 && !mediaCursor ? (
             <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
               <ImageIcon size={28} className="text-slate-300 mx-auto mb-2" />
               <p className="text-sm font-bold text-slate-500">불러올 게시물이 없어요</p>
@@ -3497,7 +3639,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
               )}
               {/* 편집 창이 열린 동안에는 뒤에 가려진 이 목록의 이미지를 내려 둔다. 편집 창도 같은
                   게시물 이미지를 그리므로, 두 벌을 함께 들고 있으면 메모리가 두 배로 든다. */}
-              {!editing && (
+              {!editing && !feedAllOpen && (
               <div className="grid grid-cols-4 gap-2">
                 {media.slice(0, FEED_PREVIEW_COUNT).map((m) => (
                   /* 누르면 이 게시물에만 걸리는 새 자동화를 연다. */
@@ -3516,7 +3658,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                   </button>
                 ))}
                 {/* 마지막 칸 — 나머지 게시물은 전체 게시물 창에서 본다. */}
-                {media.length > FEED_PREVIEW_COUNT && (
+                {(media.length > FEED_PREVIEW_COUNT || mediaCursor) && (
                   <button
                     type="button"
                     onClick={() => setFeedAllOpen(true)}
@@ -3532,6 +3674,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
               {feedAllOpen && !editing && (
                 <FeedAllMediaModal
                   media={media}
+                  pagination={pagination}
                   entitled={entitled}
                   disabledTitle={t('common.dmAccessNotice', '자동 디엠 이용 조건을 먼저 확인해 주세요.', 'Check the DM automation requirements first.')}
                   onPick={(m) => {
@@ -3822,6 +3965,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
           userName={userName}
           igUsername={igUsername}
           media={media}
+          pagination={pagination}
           mediaLoading={mediaLoading}
           mediaError={mediaError}
           onRetryMedia={() => void loadMedia({ refresh: true })}

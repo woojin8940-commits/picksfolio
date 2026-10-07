@@ -3759,15 +3759,20 @@ export const apiService = {
    */
   async getInstagramMedia(
     username: string,
-    opts: { after?: string; refresh?: boolean } = {},
+    opts: { after?: string; refresh?: boolean; limit?: number } = {},
   ): Promise<InstagramMediaResult> {
     const key = normalizeAccount(username);
     const after = opts.after || '';
+    const limit = Number.isFinite(opts.limit) && Number(opts.limit) > 0
+      ? Math.min(50, Math.max(1, Math.floor(Number(opts.limit))))
+      : 0;
+    const memoryKey = `instagramMedia:${key}${limit ? `:${limit}` : ''}`;
     const load = async (): Promise<InstagramMediaResult> => {
       const account = { account: username };
       const query = new URLSearchParams();
       if (after) query.set('after', after);
       if (opts.refresh) query.set('refresh', '1');
+      if (limit) query.set('limit', String(limit));
       const path =
         `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}` +
         (query.toString() ? `?${query}` : '');
@@ -3810,10 +3815,10 @@ export const apiService = {
       // 이어보기는 커서마다 다른 응답이라 기억해 둘 이유가 없다. 첫 페이지만
       // 잠깐 기억해 화면 두 곳이 동시에 물어볼 때의 중복 왕복을 막는다.
       if (after) return await load();
-      return await readMemory(`instagramMedia:${key}`, 120_000, load, Boolean(opts.refresh));
+      return await readMemory(memoryKey, 120_000, load, Boolean(opts.refresh));
     } catch (e) {
       console.error('[API] Failed to get Instagram media:', e);
-      clearMemory(`instagramMedia:${key}`);
+      clearMemory(memoryKey);
       return {
         media: [],
         connected: true,
