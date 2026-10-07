@@ -576,6 +576,8 @@ const metaAdsErrorText = (code: string): string => {
     case 'state_expired':
     case 'state_used':
       return '연동 요청이 만료되었습니다. 연동하기를 다시 눌러 주세요.';
+    case 'state_browser_mismatch':
+      return '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았습니다. 연동하기를 누른 곳에서 다시 시도해 주세요.';
     case 'diagnosis_store_failed':
       return '연동 결과를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
     case 'missing_code':

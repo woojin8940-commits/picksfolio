@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { digitsOnly, formatPhoneInput } from '../utils/formatters';
 
@@ -35,6 +35,12 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  /**
+   * 문자 인증을 마쳤을 때 서버가 이 화면에만 준 확인값. 계정 조회와 비밀번호 재설정에
+   * 함께 보낸다 — 서버는 이 값이 있어야 방금 한 인증으로 인정한다. 인증 직후 바로
+   * 조회하므로 상태가 아니라 ref 에 둔다.
+   */
+  const verifyToken = useRef('');
 
   const smsPurpose = step === 'find-id' ? 'find-id' : 'reset-password';
 
@@ -84,6 +90,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         name: name.trim(),
         phone: phone.replace(/\D/g, ''),
         account_type: accountType,
+        verify_token: verifyToken.current,
       }),
     });
     return res.json();
@@ -103,6 +110,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         setSelectedUsername(firstPasswordAccount.username);
       } else {
         if (data.code === 'VERIFICATION_REQUIRED') {
+          verifyToken.current = '';
           setIsVerified(false);
           setShowVerificationInput(false);
           setVerificationCode('');
@@ -135,6 +143,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
       });
       const data = await response.json();
       if (data.success) {
+        verifyToken.current = typeof data.verifyToken === 'string' ? data.verifyToken : '';
         setIsVerified(true);
         setIsVerifying(false);
         await lookupAccounts();
@@ -187,6 +196,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
           account_type: accountType,
           username: selectedUsername,
           new_password: newPassword,
+          verify_token: verifyToken.current,
         }),
       });
       const data = await response.json();
@@ -195,6 +205,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         setResultMessage(isEn ? 'Password reset successfully. Please log in with your new password.' : '비밀번호가 성공적으로 변경되었습니다. 새 비밀번호로 로그인해 주세요.');
       } else {
         if (data.code === 'VERIFICATION_REQUIRED') {
+          verifyToken.current = '';
           setIsVerified(false);
           setShowVerificationInput(false);
           setVerificationCode('');
@@ -210,6 +221,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   };
 
   const resetState = () => {
+    verifyToken.current = '';
     setName('');
     setPhone('');
     setVerificationCode('');

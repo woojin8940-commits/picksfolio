@@ -68,8 +68,14 @@ export async function saveBaitPending(username: string, pending: BaitPending): P
   }
 }
 
+/**
+ * 미끼 카드의 대기 기록. 없거나 오래됐으면 null.
+ *
+ * 읽기 실패는 null 로 바꾸지 않고 그대로 올린다 — "기록 없음(오래된 버튼)"으로 읽으면 그
+ * 클릭이 다시 처리되지 않고 사라진다. 버튼 클릭은 대기열에서 다시 처리된다.
+ */
 export async function getBaitPending(username: string, commentId: string): Promise<BaitPending | null> {
-  const found = (await store().get(pendingKey(username, commentId), { type: "json" }).catch(() => null)) as
+  const found = (await store().get(pendingKey(username, commentId), { type: "json" })) as
     | BaitPending
     | null;
   if (!found) return null;

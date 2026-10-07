@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { checkUsernameRules, normalizeUsername } from "./_shared/username-rules.mts";
+import { usernameHasBlobLeftovers } from "./_shared/username-leftovers.mts";
 import {
   claimOrphanUsername,
   legacyTransferDecision,
@@ -74,6 +75,15 @@ async function siteDataExists(username: string): Promise<boolean> {
   const db = await getDb();
   const rows = await db.sql`SELECT 1 FROM site_data WHERE username = ${username} LIMIT 1`;
   return rows.length > 0;
+}
+
+/**
+ * 지워진 계정이 이 아이디에 남긴 것이 있는지. 페이지가 없어도 결제 · 인스타그램 연동
+ * 기록이 남아 있으면 주인 없는 이름으로 그냥 내주지 않는다(_shared/username-leftovers).
+ */
+async function leftoversExist(username: string): Promise<boolean> {
+  const [page, blobs] = await Promise.all([siteDataExists(username), usernameHasBlobLeftovers(username)]);
+  return page || blobs;
 }
 
 const TAKEN_MESSAGE = "이미 사용 중인 링크입니다. 다른 링크를 입력해 주세요.";
@@ -195,7 +205,7 @@ export default async (req: Request) => {
 
     let orphanPage = false;
     try {
-      orphanPage = await withDeadline(siteDataExists(username), SITE_DATA_LOOKUP_TIMEOUT_MS);
+      orphanPage = await withDeadline(leftoversExist(username), SITE_DATA_LOOKUP_TIMEOUT_MS);
     } catch (err) {
       console.error("[auth-claim-username] site_data 조회 실패:", err);
       return fail("lookup", "링크를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);

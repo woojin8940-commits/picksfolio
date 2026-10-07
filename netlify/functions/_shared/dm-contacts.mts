@@ -192,9 +192,11 @@ export async function fetchContactProfile(args: {
   const { host, graphVersion, igsid, accessToken } = args;
   if (!igsid || !accessToken) return {};
   try {
+    // 이름은 부가 정보라 오래 기다리지 않는다. 받은 DM 처리 경로 안에서 불리므로 여기서
+    // 응답이 늦으면 인사말·키워드 답장까지 함께 늦어진다.
     const res = await fetch(
       `https://${host}/${graphVersion}/${encodeURIComponent(igsid)}?fields=name,username`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(3_000) },
     );
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || data?.error) return {};

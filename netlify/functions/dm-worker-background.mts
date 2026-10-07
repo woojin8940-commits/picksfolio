@@ -1,8 +1,12 @@
 import type { Config } from "@netlify/functions";
+import { nextPendingDueAt } from "./_shared/dm-jobs.mts";
 import type { DmJob } from "./_shared/dm-jobs.mts";
 import { processDmJob } from "./_shared/dm-job-processor.mts";
 import { queueRpc, renewWorker, verifyWorkerRequest, wakeDmWorkers, workerContext } from "./_shared/dm-worker.mts";
 import type { WorkerContext } from "./_shared/dm-worker.mts";
+
+/** 남은 작업이 이 시간 안에 시간이 되면 작업자를 끝내지 않고 기다렸다 이어서 처리한다. */
+const NEAR_DUE_WAIT_MS = 20_000;
 
 export default async (req: Request) => {
   if (req.method !== "POST") return;
@@ -33,7 +37,18 @@ export default async (req: Request) => {
       while (!context.lost && Date.now() < deadline) {
         await renewWorker(context, false);
         const [job] = await queueRpc<DmJob[]>("dm_claim_account_job", { p_account: account, p_token: token });
-        if (!job) break;
+        if (!job) {
+          // 직전 발송과 겹치거나 발송 간격 때문에 몇 초 뒤로 미뤄진 통이 있으면 그때까지
+          // 기다렸다 이어서 보낸다. 여기서 끝내면 그 작업은 1분마다 도는 스케줄러가 다시
+          // 깨울 때까지 남는다 — 버튼을 누른 사람에게는 그만큼 늦게 도착한다.
+          // 이미 시간이 지났는데 집지 못한 작업은 계정이 쿨다운 중이라는 뜻이다. 기다리지
+          // 않고 끝낸다(쿨다운이 풀리면 스케줄러가 다시 깨운다).
+          const dueAt = await nextPendingDueAt(account).catch(() => null);
+          const waitMs = dueAt === null ? -1 : dueAt - Date.now();
+          if (waitMs <= 0 || waitMs > NEAR_DUE_WAIT_MS || Date.now() + waitMs >= deadline) break;
+          await new Promise((resolve) => setTimeout(resolve, waitMs + 50));
+          continue;
+        }
         context.job = job;
         await processDmJob(job);
         context.job = undefined;

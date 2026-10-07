@@ -10,7 +10,10 @@
  * 그래서 오래 숨겨져 있던 화면이 다시 보일 때 서버의 index.html 이 가리키는 진입
  * 스크립트와 지금 실행 중인 것을 비교하고, 다르면 한 번 새로고침한다. 잠깐 다른
  * 앱에 다녀온 경우(링크 복사 등)는 입력 중인 내용을 잃지 않도록 건드리지 않는다.
+ * 저장하지 않은 편집 창이 열려 있으면 오래 다녀왔어도 이번에는 넘긴다.
  */
+
+import { hasUnsavedWork } from './unsavedWork';
 
 const MIN_HIDDEN_MS = 10 * 60 * 1000;
 const ENTRY_RE = /\/assets\/index-[\w-]+\.js/;
@@ -43,7 +46,7 @@ export const installStaleBuildReload = (): void => {
       .then((res) => (res.ok ? res.text() : ''))
       .then((html) => {
         const latest = html.match(ENTRY_RE)?.[0];
-        if (latest && latest !== current) window.location.reload();
+        if (latest && latest !== current && !hasUnsavedWork()) window.location.reload();
       })
       .catch(() => {})
       .finally(() => { checking = false; });

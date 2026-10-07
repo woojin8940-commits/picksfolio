@@ -13,6 +13,7 @@ import {
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { setUnsavedWork } from '../utils/unsavedWork';
 import ManualDmModal from './ManualDmModal';
 import CollabMatchRegister from './CollabMatchRegister';
 import Toggle from './DmToggle';
@@ -106,14 +107,56 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
 /** "예약 발송"을 처음 고를 때 채워 넣는 기본 시각 — 한 시간 뒤. */
 const defaultScheduleAt = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const textValue = (value: unknown): string => typeof value === 'string' ? value : '';
+const normalizeButtons = (value: unknown): DmMessageButton[] => Array.isArray(value)
+  ? value.filter(isRecord).map((b, index) => ({
+    ...b,
+    id: textValue(b.id) || `btn_${index}`,
+    label: textValue(b.label),
+    url: textValue(b.url),
+  }))
+  : [];
+const normalizeCards = (value: unknown): DmCarouselCard[] => Array.isArray(value)
+  ? value.filter(isRecord).map((c, index) => {
+    const card = {
+      ...c,
+      id: textValue(c.id) || `card_${index}`,
+      title: textValue(c.title),
+      subtitle: textValue(c.subtitle),
+      imageUrl: textValue(c.imageUrl),
+      buttonLabel: textValue(c.buttonLabel),
+      buttonUrl: textValue(c.buttonUrl),
+    };
+    return { ...card, buttons: normalizeButtons(Array.isArray(c.buttons) ? c.buttons : cardButtonList(card)) };
+  })
+  : [];
+const normalizeMedia = (value: unknown): InstagramMedia[] => Array.isArray(value)
+  ? value.filter(isRecord).filter((m) => typeof m.id === 'string' && m.id).map((m) => ({
+    ...m,
+    id: textValue(m.id),
+    caption: textValue(m.caption),
+    mediaType: textValue(m.mediaType),
+    mediaUrl: textValue(m.mediaUrl),
+    thumbnailUrl: textValue(m.thumbnailUrl),
+    permalink: textValue(m.permalink),
+    timestamp: textValue(m.timestamp),
+  }))
+  : [];
+
 // 이전에 저장된(신규 필드가 없는) 자동화도 안전하게 다룰 수 있도록 기본값을 채운다.
 const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   ...a,
-  keywords: Array.isArray(a.keywords) ? a.keywords : [],
-  replies: Array.isArray(a.replies) ? a.replies : [],
-  buttons: Array.isArray(a.buttons) ? a.buttons : [],
-  cards: Array.isArray(a.cards) ? a.cards.map((c) => ({ ...c, buttons: cardButtonList(c) })) : [],
-  mediaIds: Array.isArray(a.mediaIds) ? a.mediaIds : [],
+  name: textValue(a.name),
+  message: textValue(a.message),
+  keywords: Array.isArray(a.keywords) ? a.keywords.filter((k) => typeof k === 'string') : [],
+  replies: Array.isArray(a.replies) ? a.replies.filter((r) => typeof r === 'string') : [],
+  buttons: normalizeButtons(a.buttons),
+  cards: normalizeCards(a.cards),
+  mediaIds: Array.isArray(a.mediaIds) ? a.mediaIds.filter((id) => typeof id === 'string') : [],
+  commentMatch: a.commentMatch === 'all' ? 'all' : 'keyword',
+  followFilter: a.followFilter === 'followers' || a.followFilter === 'non_followers' ? a.followFilter : 'all',
   mediaScope: a.mediaScope === 'selected' ? 'selected' : 'all',
   messageType: a.messageType === 'carousel' ? 'carousel' : 'text',
   // 예약 시각이 없는 예약은 성립하지 않는다(발송 시점을 알 수 없다) → 즉시 발송으로 본다.
@@ -125,17 +168,50 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   baitButtonLabel: typeof a.baitButtonLabel === 'string' ? a.baitButtonLabel : DEFAULT_BAIT_BUTTON_LABEL,
   mainIntro: typeof a.mainIntro === 'string' ? a.mainIntro : '',
   followUps: Array.isArray(a.followUps)
-    ? a.followUps.map((f) => ({
+    ? a.followUps.filter((f) => isRecord(f) && ['text', 'carousel', 'image'].includes(f.type)).map((f, index) => ({
       ...f,
-      buttons: Array.isArray(f.buttons) ? f.buttons : [],
-      cards: Array.isArray(f.cards) ? f.cards.map((c) => ({ ...c, buttons: cardButtonList(c) })) : [],
-      imageUrl: f.imageUrl || '',
-      message: f.message || '',
+      id: textValue(f.id) || `followup_${index}`,
+      buttons: normalizeButtons(f.buttons),
+      cards: normalizeCards(f.cards),
+      imageUrl: textValue(f.imageUrl),
+      message: textValue(f.message),
     }))
     : [],
   followGateMessage: typeof a.followGateMessage === 'string' ? a.followGateMessage : DEFAULT_FOLLOW_GATE_MESSAGE,
   followGateButtonLabel: typeof a.followGateButtonLabel === 'string' ? a.followGateButtonLabel : DEFAULT_FOLLOW_GATE_BUTTON_LABEL,
 });
+const normalizeAutomations = (value: unknown): DmAutomationItem[] => Array.isArray(value)
+  ? value.filter((a) => isRecord(a) && typeof a.id === 'string' && a.id).map(normalizeAutomation)
+  : [];
+
+/**
+ * DM 자동 응답(인사말·키워드 답장) 설정. 예전 버전이 남긴 캐시에는 인사말 항목이 빠져
+ * 있을 수 있는데, 그대로 그리면 인사말 영역에서 화면 전체가 멈춘다.
+ */
+const normalizeDirect = (value: unknown): DmDirectSettings => {
+  const v = isRecord(value) ? value : {};
+  const greeting = isRecord(v.greeting) ? v.greeting : {};
+  return {
+    greeting: {
+      enabled: Boolean(greeting.enabled),
+      message: textValue(greeting.message),
+      buttons: normalizeButtons(greeting.buttons),
+      onlyFirstContact: greeting.onlyFirstContact !== false,
+    },
+    replies: Array.isArray(v.replies)
+      ? v.replies.filter((r) => isRecord(r) && typeof r.id === 'string' && r.id).map((r) => ({
+        ...r,
+        id: textValue(r.id),
+        name: textValue(r.name),
+        enabled: r.enabled !== false,
+        keywords: Array.isArray(r.keywords) ? r.keywords.filter((k: unknown) => typeof k === 'string') : [],
+        message: textValue(r.message),
+        buttons: normalizeButtons(r.buttons),
+        createdAt: textValue(r.createdAt),
+      }))
+      : [],
+  };
+};
 
 const dmSettingsCacheKey = (username: string) => `picks_dm_automation_${username.toLowerCase()}`;
 const dmMediaCacheKey = (username: string) => `picks_dm_media_${username.toLowerCase()}`;
@@ -163,6 +239,134 @@ function writeJson<T>(key: string, value: T): void {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {}
 }
+
+/**
+ * 편집 중인 자동화를 이 기기에 적어 둔다.
+ *
+ * 편집 창의 입력은 화면 메모리에만 있어서, 페이지가 새로 고쳐지거나(새 버전 반영 ·
+ * 당겨서 새로고침) 앱이 사진을 고르는 동안 시스템에 정리되면 입력한 내용이 통째로
+ * 사라졌다. 입력이 바뀔 때마다 적어 두고, 다음에 이 화면을 열면 이어서 편집할 수 있게
+ * 한다. 저장하거나 닫기를 확인하면 지운다. 로그아웃하면 다른 `picks_` 기록과 함께
+ * 지워진다.
+ */
+const EDITOR_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+const editorDraftKey = (username: string) => `picks_dm_editor_draft_${username.toLowerCase()}`;
+
+interface EditorDraft {
+  savedAt: number;
+  draft: DmAutomationItem;
+  keywordInput: string;
+}
+
+function clearEditorDraft(username: string): void {
+  try {
+    localStorage.removeItem(editorDraftKey(username));
+  } catch {}
+}
+
+function readEditorDraft(username: string): EditorDraft | null {
+  const stored = readJson<EditorDraft>(editorDraftKey(username));
+  if (!stored || !isRecord(stored.draft) || typeof stored.draft.id !== 'string' || !stored.draft.id) return null;
+  const savedAt = Number(stored.savedAt);
+  if (!(Date.now() - savedAt < EDITOR_DRAFT_TTL_MS)) {
+    clearEditorDraft(username);
+    return null;
+  }
+  return { savedAt, draft: normalizeAutomation(stored.draft), keywordInput: textValue(stored.keywordInput) };
+}
+
+/**
+ * 게시물 그리드에 한 번에 그리는 개수.
+ *
+ * 게시물이 많은 계정(최대 수천 개)을 통째로 그리면 휴대폰 WebView 의 메모리 사용이
+ * 커지고, 편집 창에서는 글자를 칠 때마다 그 전부를 다시 그렸다. 나머지는 "더 보기"로
+ * 이어서 그린다.
+ *
+ * 인스타그램이 주는 게시물 이미지는 작은 크기가 따로 없어 원본(가로 1080px 안팎)이 그대로
+ * 오고, 한 장을 그리는 데 수 MB 의 메모리가 든다. 60장씩이면 목록과 편집 창을 합쳐 수백 MB
+ * 가 되어, 메모리가 빠듯한 인스타그램 앱 안 브라우저에서는 편집 창에서 키보드를 여는 순간
+ * 화면이 꺼지고 페이지가 처음부터 다시 떴다(설정 화면 튕김). 한 번에 24장만 그린다.
+ */
+const MEDIA_GRID_STEP = 24;
+
+const MoreMediaButton: React.FC<{ shown: number; total: number; onMore: () => void }> = ({ shown, total, onMore }) =>
+  shown < total ? (
+    <button
+      type="button"
+      onClick={onMore}
+      className="col-span-full rounded-xl border border-slate-200 bg-white py-2 text-[11px] font-black text-slate-500 hover:bg-slate-50"
+    >
+      더 보기 ({total - shown}개 남음)
+    </button>
+  ) : null;
+
+/**
+ * 피드 미리보기 칸 수. 설정 화면에는 게시물을 처음부터 전부 그리지 않고 이만큼만 보여 준 뒤
+ * 마지막 칸을 "+"로 두어, 누르면 전체 게시물 창을 연다. 처음 화면에서 수백 장을 그리면
+ * 렉이 걸리고 인스타그램 앱 안 브라우저에서는 튕기기도 했다.
+ */
+const FEED_PREVIEW_COUNT = 7;
+
+/** 피드 전체 게시물 창. 여기서도 한 번에 MEDIA_GRID_STEP 장씩만 그린다. */
+const FeedAllMediaModal: React.FC<{
+  media: InstagramMedia[];
+  entitled: boolean;
+  disabledTitle: string;
+  onPick: (m: InstagramMedia) => void;
+  onClose: () => void;
+}> = ({ media, entitled, disabledTitle, onPick, onClose }) => {
+  const [shown, setShown] = useState(MEDIA_GRID_STEP);
+  useCloseOnBack(true, onClose);
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-0 md:p-6 animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full md:max-w-3xl md:rounded-[2rem] rounded-t-[2rem] shadow-2xl max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-300"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 md:px-6 py-4 border-b border-slate-100 shrink-0">
+          <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
+            <LayoutGrid size={17} className="text-slate-400" /> 내 피드 게시물 전체
+            <span className="text-xs font-black text-slate-400">{media.length}개</span>
+          </h3>
+          <button type="button" onClick={onClose} className="shrink-0 w-10 h-10 -mr-1 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5">
+          <div className="grid grid-cols-4 gap-2">
+            {media.slice(0, shown).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onPick(m)}
+                disabled={!entitled}
+                title={entitled ? '이 게시물에 자동 DM 설정' : disabledTitle}
+                aria-label="이 게시물에 자동 DM 설정"
+                className="relative block w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-100 hover:border-pink-400 hover:ring-2 hover:ring-pink-200 active:scale-[0.98] transition-all disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {feedImageOf(m)
+                  ? <img src={feedImageOf(m)} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                  : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
+              </button>
+            ))}
+            {shown < media.length && (
+              <button
+                type="button"
+                onClick={() => setShown((n) => n + MEDIA_GRID_STEP)}
+                className="col-span-full rounded-xl border border-slate-200 bg-white py-2.5 text-[12px] font-black text-slate-500 hover:bg-slate-50"
+              >
+                더 보기
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
   all: '모든 사용자',
@@ -354,7 +558,9 @@ const AutomationFeedThumbs: React.FC<{
           const inner = thumb
             ? <img src={thumb} alt={label} className="w-full h-full object-cover" loading="lazy" />
             : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={22} className="text-slate-300" /></div>;
-          return m?.permalink ? (
+          // 앱에서는 인스타그램으로 나가는 링크를 걸지 않는다. 앱 화면이 인스타그램 웹으로
+          // 바뀌어 버리고, 돌아오면 이 화면이 처음부터 다시 열린다.
+          return m?.permalink && !isNativeApp() ? (
             <a
               key={id}
               href={m.permalink}
@@ -655,19 +861,41 @@ const CarouselBuilder: React.FC<{
   mediaError: string;
   onRetryMedia: () => void;
   onChange: (cards: DmCarouselCard[]) => void;
-}> = ({ userName, cards, media, mediaLoading, mediaError, onRetryMedia, onChange }) => {
+  onBusyChange?: (busy: boolean) => void;
+}> = ({ userName, cards, media, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
+  const latest = useRef({ cards, onChange });
+  latest.current = { cards, onChange };
+  const imageTasks = useRef<Record<string, number>>({});
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   /** 카드별 이미지 작업 상태. 업로드는 몇 초 걸릴 수 있어 진행률을 그대로 보여준다. */
   const [busy, setBusy] = useState<Record<string, { ratio: number; label: string }>>({});
+  const busyNotice = useRef(onBusyChange);
+  busyNotice.current = onBusyChange;
+  const uploading = Object.keys(busy).length > 0;
+  useEffect(() => {
+    busyNotice.current?.(uploading);
+    return () => { busyNotice.current?.(false); };
+  }, [uploading]);
   const [imageError, setImageError] = useState<Record<string, string>>({});
   /** 피드 사진 고르기를 펼쳐 둔 카드. */
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [pickerShown, setPickerShown] = useState(MEDIA_GRID_STEP);
 
   const feedPhotos = useMemo(() => media.filter((m) => feedImageOf(m)), [media]);
 
-  const setCard = (id: string, p: Partial<DmCarouselCard>) =>
-    onChange(cards.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  const setCard = (id: string, p: Partial<DmCarouselCard>) => {
+    if ('imageUrl' in p) clearCardState(id);
+    const current = latest.current;
+    if (!current.cards.some((c) => c.id === id)) return;
+    current.onChange(current.cards.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  };
 
   const clearCardState = (id: string) => {
+    imageTasks.current[id] = (imageTasks.current[id] || 0) + 1;
     setBusy((b) => { const next = { ...b }; delete next[id]; return next; });
     setImageError((e) => { const next = { ...e }; delete next[id]; return next; });
   };
@@ -699,14 +927,23 @@ const CarouselBuilder: React.FC<{
     label: string,
     task: (onProgress: (ratio: number) => void) => Promise<{ url?: string; error?: string }>,
   ) => {
+    const taskId = (imageTasks.current[cardId] || 0) + 1;
+    imageTasks.current[cardId] = taskId;
     setImageError((e) => ({ ...e, [cardId]: '' }));
     setBusy((b) => ({ ...b, [cardId]: { ratio: 0, label } }));
-    const result = await task((ratio) =>
-      setBusy((b) => (b[cardId] ? { ...b, [cardId]: { ratio, label } } : b)),
-    );
-    setBusy((b) => { const next = { ...b }; delete next[cardId]; return next; });
-    if (result.url) setCard(cardId, { imageUrl: result.url });
-    else setImageError((e) => ({ ...e, [cardId]: result.error || '이미지를 넣지 못했습니다. 다시 시도해 주세요.' }));
+    const active = () => mounted.current && imageTasks.current[cardId] === taskId;
+    try {
+      const result = await task((ratio) => {
+        if (active()) setBusy((b) => (b[cardId] ? { ...b, [cardId]: { ratio, label } } : b));
+      });
+      if (!active()) return;
+      if (result.url) setCard(cardId, { imageUrl: result.url });
+      else setImageError((e) => ({ ...e, [cardId]: result.error || '이미지를 넣지 못했습니다. 다시 시도해 주세요.' }));
+    } catch {
+      if (active()) setImageError((e) => ({ ...e, [cardId]: '이미지를 넣지 못했습니다. 다시 시도해 주세요.' }));
+    } finally {
+      if (active()) setBusy((b) => { const next = { ...b }; delete next[cardId]; return next; });
+    }
   };
 
   const uploadImage = (cardId: string, file: File) =>
@@ -921,7 +1158,7 @@ const CarouselBuilder: React.FC<{
                       고른 사진은 카드용으로 복사돼요. 원본 게시물을 지워도 카드 이미지는 남습니다.
                     </p>
                     <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
-                      {feedPhotos.map((m) => (
+                      {feedPhotos.slice(0, pickerShown).map((m) => (
                         <button
                           key={m.id}
                           type="button"
@@ -932,6 +1169,7 @@ const CarouselBuilder: React.FC<{
                           <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" />
                         </button>
                       ))}
+                      <MoreMediaButton shown={pickerShown} total={feedPhotos.length} onMore={() => setPickerShown((n) => n + MEDIA_GRID_STEP)} />
                     </div>
                   </>
                 )}
@@ -1115,19 +1353,44 @@ const FollowUpImageEditor: React.FC<{
   mediaError: string;
   onRetryMedia: () => void;
   onChange: (imageUrl: string) => void;
-}> = ({ userName, imageUrl, media, mediaLoading, mediaError, onRetryMedia, onChange }) => {
+  onBusyChange?: (busy: boolean) => void;
+}> = ({ userName, imageUrl, media, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
+  const latestChange = useRef(onChange);
+  latestChange.current = onChange;
+  const taskId = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; taskId.current++; };
+  }, []);
   const [busy, setBusy] = useState<{ ratio: number; label: string } | null>(null);
+  const busyNotice = useRef(onBusyChange);
+  busyNotice.current = onBusyChange;
+  const uploading = Boolean(busy);
+  useEffect(() => {
+    busyNotice.current?.(uploading);
+    return () => { busyNotice.current?.(false); };
+  }, [uploading]);
   const [error, setError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerShown, setPickerShown] = useState(MEDIA_GRID_STEP);
   const feedPhotos = useMemo(() => media.filter((m) => feedImageOf(m)), [media]);
 
   const run = async (label: string, task: (onProgress: (ratio: number) => void) => Promise<{ url?: string; error?: string }>) => {
+    const currentTask = ++taskId.current;
+    const active = () => mounted.current && taskId.current === currentTask;
     setError('');
     setBusy({ ratio: 0, label });
-    const result = await task((ratio) => setBusy((b) => (b ? { ratio, label } : b)));
-    setBusy(null);
-    if (result.url) onChange(result.url);
-    else setError(result.error || '이미지를 넣지 못했습니다. 다시 시도해 주세요.');
+    try {
+      const result = await task((ratio) => { if (active()) setBusy((b) => (b ? { ratio, label } : b)); });
+      if (!active()) return;
+      if (result.url) latestChange.current(result.url);
+      else setError(result.error || '이미지를 넣지 못했습니다. 다시 시도해 주세요.');
+    } catch {
+      if (active()) setError('이미지를 넣지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (active()) setBusy(null);
+    }
   };
 
   const pickFromFeed = (m: InstagramMedia) => {
@@ -1244,7 +1507,7 @@ const FollowUpImageEditor: React.FC<{
             </div>
           ) : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
-              {feedPhotos.map((m) => (
+              {feedPhotos.slice(0, pickerShown).map((m) => (
                 <button
                   key={m.id}
                   type="button"
@@ -1255,6 +1518,7 @@ const FollowUpImageEditor: React.FC<{
                   <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" />
                 </button>
               ))}
+              <MoreMediaButton shown={pickerShown} total={feedPhotos.length} onMore={() => setPickerShown((n) => n + MEDIA_GRID_STEP)} />
             </div>
           )}
         </div>
@@ -1292,7 +1556,8 @@ const FollowUpsEditor: React.FC<{
   mediaError: string;
   onRetryMedia: () => void;
   onChange: (followUps: DmFollowUp[]) => void;
-}> = ({ userName, followUps, media, mediaLoading, mediaError, onRetryMedia, onChange }) => {
+  onBusyChange: (id: string, busy: boolean) => void;
+}> = ({ userName, followUps, media, mediaLoading, mediaError, onRetryMedia, onChange, onBusyChange }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const setItem = (id: string, p: Partial<DmFollowUp>) =>
     onChange(followUps.map((f) => (f.id === id ? { ...f, ...p } : f)));
@@ -1376,6 +1641,7 @@ const FollowUpsEditor: React.FC<{
                 mediaError={mediaError}
                 onRetryMedia={onRetryMedia}
                 onChange={(cards) => setItem(f.id, { cards })}
+                onBusyChange={(busy) => onBusyChange(f.id, busy)}
               />
             )}
             {f.type === 'image' && (
@@ -1387,6 +1653,7 @@ const FollowUpsEditor: React.FC<{
                 mediaError={mediaError}
                 onRetryMedia={onRetryMedia}
                 onChange={(imageUrl) => setItem(f.id, { imageUrl })}
+                onBusyChange={(busy) => onBusyChange(f.id, busy)}
               />
             )}
             {!followUpSendable(f) && (
@@ -1437,6 +1704,13 @@ const FollowUpsEditor: React.FC<{
 /* ────────────────────────── 자동화 생성/편집 모달 ────────────────────────── */
 const AutomationEditor: React.FC<{
   initial: DmAutomationItem;
+  /**
+   * 이 기기에 보관해 둔 입력을 이어서 여는 경우. 서버에는 아직 없는 내용이므로 처음부터
+   * "저장하지 않은 변경"으로 본다.
+   */
+  restored?: { keywordInput: string } | null;
+  /** 이어서 연 편집을 버리고 저장된 내용으로 다시 연다. 저장된 적 있는 자동화에만 있다. */
+  onReopenSaved?: () => void;
   /** 로그인 계정(업로드 저장 경로에 쓴다). 인스타그램 계정명과 다를 수 있다. */
   userName: string;
   igUsername: string;
@@ -1447,12 +1721,86 @@ const AutomationEditor: React.FC<{
   onRetryMedia: () => void;
   onClose: () => void;
   onSave: (a: DmAutomationItem) => void;
-}> = ({ initial, userName, igUsername, media, mediaLoading, mediaError, onRetryMedia, onClose, onSave }) => {
+  saving: boolean;
+  saveError: string;
+}> = ({ initial, restored, onReopenSaved, userName, igUsername, media, mediaLoading, mediaError, onRetryMedia, onClose, onSave, saving, saveError }) => {
+  const [draft, setDraft] = useState<DmAutomationItem>(initial);
+  const [keywordInput, setKeywordInput] = useState(() => restored?.keywordInput || '');
+  const [mediaShown, setMediaShown] = useState(MEDIA_GRID_STEP);
+
+  const initialJson = useMemo(() => JSON.stringify(initial), [initial]);
+  const draftJson = useMemo(() => JSON.stringify(draft), [draft]);
+  const dirty = Boolean(restored) || keywordInput.trim() !== '' || draftJson !== initialJson;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const savingRef = useRef(saving);
+  savingRef.current = saving;
+
+  /**
+   * 저장하지 않은 입력이 있으면 닫기 전에 묻는다. 가장자리 스와이프 · 앱의 뒤로 버튼 ·
+   * 취소 버튼은 의도하지 않게 눌리기 쉬운데, 예전에는 그 한 번에 입력한 내용이 모두
+   * 사라졌다.
+   */
+  const confirmDiscard = () => {
+    // 저장 응답을 기다리는 동안에는 닫지 않는다. 여기서 닫으면 보관해 둔 입력까지 지워지는데,
+    // 그 저장이 실패하면 입력이 어디에도 남지 않는다. 결과는 곧 이 창에 나온다.
+    if (savingRef.current) return false;
+    if (!dirtyRef.current) return true;
+    if (!window.confirm('저장하지 않은 변경 내용이 있어요. 닫으면 입력한 내용이 사라집니다. 닫을까요?')) return false;
+    clearEditorDraft(userName);
+    return true;
+  };
+  const requestClose = () => {
+    if (confirmDiscard()) onClose();
+  };
   // 이 창은 열릴 때만 그려지므로 늘 열린 상태로 두면 된다. 자동응답 편집은 입력이
   // 많아 휴대폰에서 닫기 버튼이 위로 밀려나므로 뒤로가기로도 닫히게 한다.
-  useCloseOnBack(true, onClose);
-  const [draft, setDraft] = useState<DmAutomationItem>(initial);
-  const [keywordInput, setKeywordInput] = useState('');
+  useCloseOnBack(true, onClose, confirmDiscard);
+
+  // 입력이 바뀔 때마다 이 기기에 적어 둔다(EditorDraft 참고). 처음 상태로 되돌렸으면 지운다.
+  useEffect(() => {
+    if (!dirty) {
+      clearEditorDraft(userName);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      writeJson<EditorDraft>(editorDraftKey(userName), { savedAt: Date.now(), draft, keywordInput });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [dirty, draft, keywordInput, userName]);
+
+  // 화면이 가려지는 순간(사진 고르기 · 다른 앱으로 전환)에는 기다리지 않고 바로 적는다.
+  // 가려진 동안 시스템이 화면을 정리할 수 있다.
+  const latestInput = useRef({ dirty, draft, keywordInput });
+  latestInput.current = { dirty, draft, keywordInput };
+  useEffect(() => {
+    const flush = () => {
+      const current = latestInput.current;
+      if (document.visibilityState !== 'hidden' || !current.dirty) return;
+      writeJson<EditorDraft>(editorDraftKey(userName), {
+        savedAt: Date.now(),
+        draft: current.draft,
+        keywordInput: current.keywordInput,
+      });
+    };
+    document.addEventListener('visibilitychange', flush);
+    return () => document.removeEventListener('visibilitychange', flush);
+  }, [userName]);
+
+  // 저장하지 않은 입력이 있는 동안은 새 배포 반영을 위한 자동 새로고침을 미룬다.
+  useEffect(() => {
+    setUnsavedWork('dm-automation-editor', dirty);
+    return () => setUnsavedWork('dm-automation-editor', false);
+  }, [dirty]);
+  const [uploads, setUploads] = useState<Record<string, boolean>>({});
+  const trackUpload = (id: string, busy: boolean) => setUploads((current) => {
+    if (Boolean(current[id]) === busy) return current;
+    const next = { ...current };
+    if (busy) next[id] = true;
+    else delete next[id];
+    return next;
+  });
+  const uploading = Object.keys(uploads).length > 0;
 
   const patch = (p: Partial<DmAutomationItem>) => setDraft((d) => ({ ...d, ...p }));
 
@@ -1522,6 +1870,7 @@ const AutomationEditor: React.FC<{
   const baitValid = !baitOn || Boolean((draft.baitMessage || '').trim() && (draft.baitButtonLabel || '').trim());
 
   const canSave = messageValid &&
+    !uploading &&
     baitValid &&
     mediaValid &&
     !brokenLinks &&
@@ -1534,7 +1883,9 @@ const AutomationEditor: React.FC<{
    */
   const saveBlockedReason = canSave
     ? ''
-    : !mediaValid
+    : uploading
+      ? '이미지 업로드가 끝날 때까지 기다려 주세요.'
+      : !mediaValid
       ? '적용할 게시물을 한 개 이상 선택해주세요.'
       : draft.commentMatch === 'keyword' && effectiveKeywords.length === 0
         ? '반응할 키워드를 한 개 이상 추가해주세요.'
@@ -1563,7 +1914,7 @@ const AutomationEditor: React.FC<{
   };
 
   const handleSave = () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
     // 스킴이 빠진 주소(`example.com`)는 여기서 https:// 를 붙여 저장한다.
     onSave({
       ...draft,
@@ -1598,7 +1949,7 @@ const AutomationEditor: React.FC<{
             </div>
             <h3 className="text-lg md:text-xl font-black text-slate-900">자동 DM 설정</h3>
           </div>
-          <button onClick={onClose} className="shrink-0 w-11 h-11 md:w-9 md:h-9 -my-1 -mr-1 md:m-0 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
+          <button onClick={requestClose} disabled={saving} className="shrink-0 w-11 h-11 md:w-9 md:h-9 -my-1 -mr-1 md:m-0 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
             <X size={20} />
           </button>
         </div>
@@ -1610,7 +1961,25 @@ const AutomationEditor: React.FC<{
         */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain grid grid-cols-1 lg:grid-cols-[1fr_340px]">
           {/* 좌: 설정 */}
-          <div className="p-5 md:p-8 space-y-7">
+          <fieldset disabled={saving} className="min-w-0 m-0 border-0 p-5 md:p-8 space-y-7">
+            {/* 이 기기에 남아 있던 편집을 이어서 연 경우. 저장된(= 실제로 발송되는) 내용과 다를 수 있다. */}
+            {restored && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <p className="min-w-0 text-xs font-bold text-amber-800 break-words">
+                  저장하지 않고 남아 있던 편집을 이어서 열었어요. 저장하기 전까지는 발송에 반영되지 않아요.
+                </p>
+                {onReopenSaved && (
+                  <button
+                    type="button"
+                    onClick={onReopenSaved}
+                    className="shrink-0 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-black text-amber-800 hover:bg-amber-100"
+                  >
+                    저장된 내용으로 열기
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* 이름 */}
             <div>
               <label className="block text-xs font-black text-slate-500 mb-2">자동화 이름</label>
@@ -1674,7 +2043,7 @@ const AutomationEditor: React.FC<{
                   <>
                     <p className="text-[11px] text-slate-500 font-bold mb-2">{draft.mediaIds.length}개 선택됨</p>
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1">
-                      {media.map((m) => {
+                      {media.slice(0, mediaShown).map((m) => {
                         const selected = draft.mediaIds.includes(m.id);
                         return (
                           <button
@@ -1685,8 +2054,8 @@ const AutomationEditor: React.FC<{
                               selected ? 'border-pink-500 ring-2 ring-pink-200' : 'border-transparent hover:border-slate-300'
                             }`}
                           >
-                            {m.mediaUrl
-                              ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
+                            {feedImageOf(m)
+                              ? <img src={feedImageOf(m)} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                               : <div className="w-full h-full bg-slate-100 flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
                             {selected && (
                               <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-pink-500 text-white flex items-center justify-center shadow">
@@ -1697,6 +2066,7 @@ const AutomationEditor: React.FC<{
                           </button>
                         );
                       })}
+                      <MoreMediaButton shown={mediaShown} total={media.length} onMore={() => setMediaShown((n) => n + MEDIA_GRID_STEP)} />
                     </div>
                   </>
                 )
@@ -2132,6 +2502,7 @@ const AutomationEditor: React.FC<{
                     mediaError={mediaError}
                     onRetryMedia={onRetryMedia}
                     onChange={(cards) => patch({ cards })}
+                    onBusyChange={(busy) => trackUpload('main', busy)}
                   />
                 </div>
               )}
@@ -2152,11 +2523,12 @@ const AutomationEditor: React.FC<{
                     mediaError={mediaError}
                     onRetryMedia={onRetryMedia}
                     onChange={(followUps) => patch({ followUps })}
+                    onBusyChange={(id, busy) => trackUpload(`followup_${id}`, busy)}
                   />
                 </div>
               )}
             </div>
-          </div>
+          </fieldset>
 
           {/* 우: 미리보기 (데스크톱 고정) */}
           <div className="hidden lg:block bg-slate-50/60 border-l border-slate-100 p-6">
@@ -2200,15 +2572,16 @@ const AutomationEditor: React.FC<{
             </p>
           )}
           <div className="flex gap-2">
-            <button onClick={onClose} className="flex-1 md:flex-none md:px-8 py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-black hover:bg-slate-200">취소</button>
+            <button onClick={requestClose} disabled={saving} className="flex-1 md:flex-none md:px-8 py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-black hover:bg-slate-200">취소</button>
             <button
               onClick={handleSave}
-              disabled={!canSave}
+              disabled={!canSave || saving}
               className="flex-1 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-orange-500 text-white text-sm font-black shadow-lg shadow-pink-500/25 disabled:opacity-40 disabled:shadow-none hover:opacity-95"
             >
-              설정 완료
+              {saving ? '저장 중' : '설정 완료'}
             </button>
           </div>
+          {saveError && <p role="alert" className="mt-2 text-xs font-bold text-red-500">{saveError}</p>}
         </div>
       </div>
     </div>
@@ -2241,6 +2614,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   const cachedSettings = useMemo(() => readJson<DmAutomationSettings>(dmSettingsCacheKey(userName)), [userName]);
   const cachedMedia = useMemo(() => readJson<InstagramMedia[]>(dmMediaCacheKey(userName)), [userName]);
   const requests = useRef({ settings: 0, media: 0 });
+  const saveLock = useRef(false);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [manualModalRule, setManualModalRule] = useState<DmAutomationItem | null>(null);
 
@@ -2253,6 +2627,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 저장이 진행 중인 동안에는 토글·삭제를 막는다. 두 번의 저장이 겹치면 나중에 끝난
   // 요청이 앞선 변경을 덮어써 자동화가 되살아나거나 사라진 것처럼 보인다.
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const [enabled, setEnabled] = useState(() => Boolean(cachedSettings?.enabled));
@@ -2265,14 +2640,36 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 만료일이 남아 있어도 DM 은 나가지 않으므로 만료와 같이 재연동을 안내한다.
   const [tokenNeedsReauth, setTokenNeedsReauth] = useState<boolean>(() => Boolean((cachedSettings as any)?.needsReauth));
   const [automations, setAutomations] = useState<DmAutomationItem[]>(() =>
-    Array.isArray(cachedSettings?.automations) ? cachedSettings!.automations.map(normalizeAutomation) : [],
+    normalizeAutomations(cachedSettings?.automations),
   );
 
   const [editing, setEditing] = useState<DmAutomationItem | null>(null);
+  /**
+   * 이 기기에 남아 있는, 저장하지 않은 편집(편집 창이 저장 없이 사라진 경우 — 새로고침 ·
+   * 앱 재시작 등). 목록 위에서 이어서 편집하거나 버릴 수 있게 한다.
+   */
+  const [pendingDraft, setPendingDraft] = useState<EditorDraft | null>(() => readEditorDraft(userName));
+  /** 지금 열린 편집 창이 보관해 둔 입력을 이어받았는지. */
+  const [restoredInput, setRestoredInput] = useState<{ keywordInput: string } | null>(null);
+  /** 같은 자동화를 저장된 내용으로 다시 열 때 편집 창을 새로 그리기 위한 번호. */
+  const [editorKey, setEditorKey] = useState(0);
+  useEffect(() => {
+    setPendingDraft(readEditorDraft(userName));
+  }, [userName]);
+  /**
+   * 다른 곳에서 먼저 저장돼 거절된 자동화의 최신 저장 시각(자동화 ID → updatedAt).
+   *
+   * 저장 응답을 받지 못한 채(시간 초과 등) 다시 저장하면 서버에는 이미 직전 저장이 들어가
+   * 있어 "다른 곳에서 먼저 수정됨"으로 거절된다. 편집 창의 기준 시각은 그대로라 몇 번을
+   * 다시 눌러도 같은 이유로 거절됐다. 거절 때 받은 최신 시각을 기억해 두었다가, 사용자가
+   * 안내를 보고 한 번 더 저장하면 그 시각을 기준으로 저장한다.
+   */
+  const staleBase = useRef<Record<string, string>>({});
+  const [feedAllOpen, setFeedAllOpen] = useState(false);
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const [media, setMedia] = useState<InstagramMedia[]>(() => Array.isArray(cachedMedia) ? cachedMedia : []);
+  const [media, setMedia] = useState<InstagramMedia[]>(() => normalizeMedia(cachedMedia));
   const [mediaLoading, setMediaLoading] = useState(() => Boolean(cachedSettings?.connected && !cachedMedia?.length));
   /**
    * 게시물을 받아오지 못한 이유.
@@ -2320,10 +2717,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
    * 서버가 돌려준 값을 그대로 다시 담아 화면과 실제 상태를 일치시킨다.
    */
   const [faq, setFaq] = useState<DmFaqSettings>(() => cachedSettings?.faq || { enabled: false, items: [] });
-  const [direct, setDirect] = useState<DmDirectSettings>(() => cachedSettings?.direct || {
-    greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
-    replies: [],
-  });
+  const [direct, setDirect] = useState<DmDirectSettings>(() => normalizeDirect(cachedSettings?.direct));
   const [sendSpeed, setSendSpeed] = useState<number>(() => cachedSettings?.sendSpeed || DM_SEND_SPEED_DEFAULT);
 
   /** 추가 기능 섹션들이 쓰는 알림. 상단 배너를 그대로 재사용한다. */
@@ -2370,7 +2764,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       const first = await apiService.getInstagramMedia(userName, { refresh: opts.refresh });
       if (request !== requests.current.media) return;
 
-      let all = first.media;
+      let all = normalizeMedia(first.media);
       if (all.length > 0 || !first.error) setMedia(all);
       setMediaNeedsReauth(first.needsReauth);
       setMediaError(first.error);
@@ -2384,9 +2778,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         if (request !== requests.current.media) return;
         if (more.error) setMediaError(more.error);
         if (more.needsReauth) setMediaNeedsReauth(true);
-        if (more.media.length === 0) break;
+        const pageMedia = normalizeMedia(more.media);
+        if (pageMedia.length === 0) break;
         const seen = new Set(all.map((m) => m.id));
-        all = [...all, ...more.media.filter((m) => m.id && !seen.has(m.id))];
+        all = [...all, ...pageMedia.filter((m) => !seen.has(m.id))];
         setMedia(all);
         writeJson(dmMediaCacheKey(userName), all);
         cursor = more.nextCursor;
@@ -2400,6 +2795,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   };
 
   const load = () => {
+    if (saveLock.current) return;
     const request = ++requests.current.settings;
     setReloading(true);
     apiService.getDmAutomation(userName)
@@ -2415,14 +2811,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         setIgUsername(s.igUsername || '');
         setTokenExpiresAt(s.tokenExpiresAt);
         setTokenNeedsReauth(Boolean((s as any).needsReauth));
-        const nextAutomations = Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : [];
+        const nextAutomations = normalizeAutomations(s.automations);
         setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
         setDmAccess((s as any).dmAccess || null);
         setExternalDm(s.externalDm || null);
         setBaitHealth(s.baitHealth || null);
         if (s.faq) setFaq(s.faq);
-        if (s.direct) setDirect(s.direct);
+        if (s.direct) setDirect(normalizeDirect(s.direct));
         if (s.sendSpeed) setSendSpeed(s.sendSpeed);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
@@ -2460,7 +2856,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       load();
       params.delete('ig_connected');
     } else if (params.get('ig_error')) {
-      setBanner({ type: 'err', text: '연동에 실패했어요. 잠시 후 다시 시도해주세요.' });
+      setBanner({
+        type: 'err',
+        text: params.get('ig_error') === 'state_browser_mismatch'
+          ? '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.'
+          : '연동에 실패했어요. 잠시 후 다시 시도해주세요.',
+      });
       params.delete('ig_error');
     } else return;
     // 콜백이 함께 실어 보내는 지표 — 브랜드 매칭 화면이 카드를 바로 그리는 데
@@ -2486,30 +2887,45 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     automation?: DmAutomationItem;
     id?: string;
   }) => {
+    if (saveLock.current) return { ok: false as const, error: '저장 중입니다. 잠시 기다려 주세요.' };
     if (!entitled) {
-      setBanner({
-        type: 'err',
-        text: isBusiness
-          ? '브랜드 계정의 자동 디엠은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있어요.'
-          : dmAccess?.suspended
-            ? '담당자 판단으로 자동 디엠 이용이 중단되었어요. 유가시딩 캠페인 제안을 수락하면 다시 열립니다.'
-            : '자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요.',
-      });
+      const text = isBusiness
+        ? '브랜드 계정의 자동 디엠은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있어요.'
+        : dmAccess?.suspended
+          ? '담당자 판단으로 자동 디엠 이용이 중단되었어요. 유가시딩 캠페인 제안을 수락하면 다시 열립니다.'
+          : '자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요.';
+      setBanner({ type: 'err', text });
+      // 편집 창이 열려 있으면 위 배너는 창에 가려진다. 창 안에도 같은 이유를 띄워야
+      // '설정 완료'를 눌렀는데 아무 일도 없는 것처럼 보이지 않는다.
+      setSaveError(text);
       return { ok: false as const };
     }
+    saveLock.current = true;
     setSaving(true);
+    setSaveError('');
     requests.current.settings++;
     setReloading(false);
-    const result = await apiService.saveDmAutomation(userName, next);
-    setSaving(false);
-    if (result.ok) {
-      setSavedAt(Date.now());
-      setTimeout(() => setSavedAt(null), 2200);
-      setBanner(result.backfillWarning ? { type: 'err', text: result.backfillWarning } : null);
-    } else {
-      setBanner({ type: 'err', text: result.error || '저장에 실패했습니다. 다시 시도해주세요.' });
+    try {
+      const result = await apiService.saveDmAutomation(userName, next);
+      if (result.ok) {
+        setSavedAt(Date.now());
+        setTimeout(() => setSavedAt(null), 2200);
+        setBanner(result.backfillWarning ? { type: 'err', text: result.backfillWarning } : null);
+      } else {
+        const error = result.error || '저장에 실패했습니다. 다시 시도해주세요.';
+        setSaveError(error);
+        setBanner({ type: 'err', text: error });
+      }
+      return result;
+    } catch {
+      const error = '저장에 실패했습니다. 다시 시도해주세요.';
+      setSaveError(error);
+      setBanner({ type: 'err', text: error });
+      return { ok: false as const, error };
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
     }
-    return result;
   };
 
   const connect = async () => {
@@ -2562,6 +2978,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 하면 변경이 사라진 것처럼 보인다. 낙관적으로 먼저 반영하되 실패하면 직전 값으로
   // 되돌려 화면과 서버 상태가 어긋나지 않게 한다.
   const toggleMaster = async () => {
+    if (saveLock.current) return;
     const prev = enabled;
     const v = !enabled;
     setEnabled(v);
@@ -2596,6 +3013,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
    * 준다. 목록 위의 안내 배너에서 바로 켤 수 있다.
    */
   const commitAutomation = async (automation: DmAutomationItem) => {
+    if (saveLock.current) return { ok: false as const };
     const prev = automations;
     const exists = prev.some((x) => x.id === automation.id);
     const optimistic = exists ? prev.map((x) => (x.id === automation.id ? automation : x)) : [...prev, automation];
@@ -2604,10 +3022,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     // 저장에 실패하면 서버가 최신 목록을 함께 준 경우(다른 곳에서 먼저 수정) 그 값을,
     // 아니면 직전 화면 값을 쓴다. 어느 쪽이든 화면은 실제 저장 상태를 따라간다.
     if (!result.ok) {
-      setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
-      return;
+      setAutomations(result.automations ? normalizeAutomations(result.automations) : prev);
+      return result;
     }
-    const savedAutomations = result.automations ? result.automations.map(normalizeAutomation) : optimistic;
+    const savedAutomations = result.automations ? normalizeAutomations(result.automations) : optimistic;
     if (result.automations) setAutomations(savedAutomations);
     // 서버가 확정한 전체 스위치 상태를 그대로 따른다(저장 요청은 이 값을 바꾸지 않는다).
     const masterOn = typeof result.enabled === 'boolean' ? result.enabled : enabled;
@@ -2619,11 +3037,79 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         text: '저장했어요. 다만 자동 발송 스위치가 꺼져 있어 새 댓글에는 아직 DM이 나가지 않습니다. 발송하려면 위의 자동 발송을 켜주세요.',
       });
     }
+    return result;
   };
 
-  const saveAutomation = (a: DmAutomationItem) => {
+  const saveAutomation = async (a: DmAutomationItem) => {
+    const base = staleBase.current[a.id];
+    const result = await commitAutomation(base ? { ...a, updatedAt: base } : a);
+    if (result.ok) {
+      delete staleBase.current[a.id];
+      if (readEditorDraft(userName)?.draft.id === a.id) clearEditorDraft(userName);
+      setPendingDraft(null);
+      setRestoredInput(null);
+      setEditing((current) => current?.id === a.id ? null : current);
+      return;
+    }
+    if ('code' in result && result.code === 'STALE_AUTOMATION') {
+      const latest = result.automations?.find((x) => x.id === a.id);
+      if (latest?.updatedAt) {
+        staleBase.current[a.id] = latest.updatedAt;
+        setSaveError('이 자동화가 다른 곳(다른 기기·탭, 또는 응답을 받지 못한 직전 저장)에서 먼저 저장됐어요. 지금 화면의 내용으로 저장하려면 \'설정 완료\'를 한 번 더 눌러 주세요.');
+      }
+    }
+  };
+
+  /**
+   * 편집 창을 연다. 이 기기에 저장하지 않은 편집이 남아 있으면 — 같은 자동화면 그 입력을
+   * 이어서 열고, 다른 자동화면 그 입력이 사라진다는 것을 먼저 확인한다(보관 자리는 하나다).
+   */
+  const openEditor = (item: DmAutomationItem) => {
+    const stored = readEditorDraft(userName);
+    // 목록에서 난 저장 실패(스위치 · 삭제)의 문구가 새로 연 창에 남아 있지 않게 한다.
+    setSaveError('');
+    if (stored && stored.draft.id === item.id) {
+      setRestoredInput({ keywordInput: stored.keywordInput });
+      setEditing(stored.draft);
+      return;
+    }
+    if (stored && !window.confirm('저장하지 않은 다른 자동 DM 설정이 있어요. 새로 편집하면 그 내용은 사라집니다. 계속할까요?')) return;
+    if (stored) clearEditorDraft(userName);
+    setPendingDraft(null);
+    setRestoredInput(null);
+    setEditing(item);
+  };
+  /**
+   * 이어서 연 편집을 버리고 저장된 내용으로 다시 연다.
+   *
+   * 목록의 '편집'을 눌러도 이 기기에 남은 편집이 있으면 그 내용이 열린다. 저장된 문구를
+   * 확인하려던 사람에게는 화면의 내용이 실제로 발송되는 내용과 다르다는 것을 알 길이
+   * 없어서, 편집 창이 그 사실을 알리고 여기로 돌아올 길을 준다.
+   */
+  const reopenSaved = () => {
+    const saved = editing ? automations.find((x) => x.id === editing.id) : undefined;
+    if (!saved) return;
+    if (!window.confirm('이어서 연 편집 내용을 버리고 저장된 내용으로 열까요?')) return;
+    clearEditorDraft(userName);
+    setPendingDraft(null);
+    setRestoredInput(null);
+    setSaveError('');
+    setEditorKey((k) => k + 1);
+    setEditing(saved);
+  };
+  const closeEditor = () => {
     setEditing(null);
-    void commitAutomation(a);
+    setSaveError('');
+    setRestoredInput(null);
+    setPendingDraft(readEditorDraft(userName));
+    // '한 번 더 누르면 덮어쓴다'는 그 안내를 본 편집 창 안에서만 유효하다. 창을 닫은
+    // 뒤까지 남기면, 나중에 이어서 연 편집이 그사이 다른 곳에서 저장된 내용을 묻지도
+    // 않고 덮어쓴다.
+    staleBase.current = {};
+  };
+  const discardPendingDraft = () => {
+    clearEditorDraft(userName);
+    setPendingDraft(null);
   };
   const backfillPastComments = async (a: DmAutomationItem) => {
     const result = await apiService.backfillDmComments(userName, a.id);
@@ -2637,15 +3123,16 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     void commitAutomation({ ...target, enabled: !target.enabled });
   };
   const deleteAutomation = async (id: string) => {
+    if (saveLock.current) return;
     if (!window.confirm('이 자동화를 삭제할까요?')) return;
     const prev = automations;
     setAutomations(prev.filter((x) => x.id !== id));
     const result = await persist({ action: 'deleteAutomation', id });
     if (!result.ok) {
-      setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
+      setAutomations(result.automations ? normalizeAutomations(result.automations) : prev);
       return;
     }
-    const savedAutomations = result.automations ? result.automations.map(normalizeAutomation) : automations.filter((x) => x.id !== id);
+    const savedAutomations = result.automations ? normalizeAutomations(result.automations) : automations.filter((x) => x.id !== id);
     if (result.automations) setAutomations(savedAutomations);
     writeSettingsCache({ automations: savedAutomations });
   };
@@ -3071,24 +3558,52 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                   </span>
                 </p>
               )}
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                {media.map((m) => (
+              {/* 편집 창이 열린 동안에는 뒤에 가려진 이 목록의 이미지를 내려 둔다. 편집 창도 같은
+                  게시물 이미지를 그리므로, 두 벌을 함께 들고 있으면 메모리가 두 배로 든다. */}
+              {!editing && (
+              <div className="grid grid-cols-4 gap-2">
+                {media.slice(0, FEED_PREVIEW_COUNT).map((m) => (
                   /* 누르면 이 게시물에만 걸리는 새 자동화를 연다. */
                   <button
                     key={m.id}
                     type="button"
-                    onClick={() => setEditing({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] })}
+                    onClick={() => openEditor({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] })}
                     disabled={!entitled}
                     title={entitled ? '이 게시물에 자동 DM 설정' : t('common.dmAccessNotice', '자동 디엠 이용 조건을 먼저 확인해 주세요.', 'Check the DM automation requirements first.')}
                     aria-label="이 게시물에 자동 DM 설정"
                     className="relative block w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-100 hover:border-pink-400 hover:ring-2 hover:ring-pink-200 active:scale-[0.98] transition-all disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {m.mediaUrl
-                      ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
+                    {feedImageOf(m)
+                      ? <img src={feedImageOf(m)} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                       : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
                   </button>
                 ))}
+                {/* 마지막 칸 — 나머지 게시물은 전체 게시물 창에서 본다. */}
+                {media.length > FEED_PREVIEW_COUNT && (
+                  <button
+                    type="button"
+                    onClick={() => setFeedAllOpen(true)}
+                    title="전체 게시물 보기"
+                    aria-label="전체 게시물 보기"
+                    className="relative w-full aspect-square rounded-xl bg-white border-2 border-cyan-300 hover:border-cyan-400 hover:bg-cyan-50/40 active:scale-[0.98] transition-all flex items-center justify-center text-slate-900"
+                  >
+                    <Plus size={28} strokeWidth={3} />
+                  </button>
+                )}
               </div>
+              )}
+              {feedAllOpen && !editing && (
+                <FeedAllMediaModal
+                  media={media}
+                  entitled={entitled}
+                  disabledTitle={t('common.dmAccessNotice', '자동 디엠 이용 조건을 먼저 확인해 주세요.', 'Check the DM automation requirements first.')}
+                  onPick={(m) => {
+                    setFeedAllOpen(false);
+                    openEditor({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] });
+                  }}
+                  onClose={() => setFeedAllOpen(false)}
+                />
+              )}
             </>
           )}
         </section>
@@ -3121,7 +3636,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setEditing(blankAutomation(t))}
+                onClick={() => openEditor(blankAutomation(t))}
                 disabled={!entitled}
                 title={entitled ? undefined : t('common.dmAccessNotice', '자동 디엠 이용 조건을 먼저 확인해 주세요.', 'Check the DM automation requirements first.')}
                 className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-xs md:text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
@@ -3131,6 +3646,34 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
             </div>
           )}
         </div>
+
+        {/* 저장하지 않고 사라진 편집(새로고침 · 앱 재시작 등)이 이 기기에 남아 있으면 이어서 편집하게 한다. */}
+        {connected && pendingDraft && !editing && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="min-w-0 text-xs md:text-sm font-bold text-amber-800 break-words">
+              저장하지 않은 자동 DM 설정이 있어요
+              {pendingDraft.draft.name.trim() ? ` · ${pendingDraft.draft.name.trim()}` : ''}
+              <span className="ml-1 font-medium text-amber-700">({fmtDateTime(new Date(pendingDraft.savedAt).toISOString())})</span>
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => openEditor(pendingDraft.draft)}
+                disabled={!entitled}
+                className="rounded-xl bg-slate-900 text-white px-3 py-1.5 text-xs font-black hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                이어서 편집
+              </button>
+              <button
+                type="button"
+                onClick={discardPendingDraft}
+                className="rounded-xl border border-amber-200 bg-white text-amber-800 px-3 py-1.5 text-xs font-black hover:bg-amber-100"
+              >
+                버리기
+              </button>
+            </div>
+          </div>
+        )}
 
         {!connected ? (
           <div className="text-center py-14 border border-dashed border-slate-200 rounded-3xl bg-slate-50/60">
@@ -3144,7 +3687,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
             <p className="text-slate-600 font-black text-sm">아직 만든 자동화가 없어요</p>
             <p className="text-slate-400 text-xs mt-1 mb-5">인스타그램 자동화로 팔로워를 고객으로 전환해보세요.</p>
             <button
-              onClick={() => setEditing(blankAutomation(t))}
+              onClick={() => openEditor(blankAutomation(t))}
               className="inline-flex items-center gap-1.5 bg-pink-600 text-white rounded-xl py-2.5 px-5 text-sm font-black hover:bg-pink-700"
             >
               <Plus size={16} /> 첫 자동화 만들기
@@ -3259,7 +3802,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                 </div>
 
                 <div className="flex gap-2">
-                  <button onClick={() => setEditing(a)} className="flex-1 flex items-center justify-center gap-1.5 bg-slate-100 text-slate-700 rounded-xl py-2 text-xs font-black hover:bg-slate-200 transition-colors">
+                  <button onClick={() => openEditor(a)} className="flex-1 flex items-center justify-center gap-1.5 bg-slate-100 text-slate-700 rounded-xl py-2 text-xs font-black hover:bg-slate-200 transition-colors">
                     <Pencil size={13} /> {t('dm.edit', '편집', 'Edit')}
                   </button>
                   <button
@@ -3335,15 +3878,20 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
 
       {editing && (
         <AutomationEditor
+          key={editorKey}
           initial={editing}
+          restored={restoredInput}
+          onReopenSaved={restoredInput && automations.some((x) => x.id === editing.id) ? reopenSaved : undefined}
           userName={userName}
           igUsername={igUsername}
           media={media}
           mediaLoading={mediaLoading}
           mediaError={mediaError}
           onRetryMedia={() => void loadMedia({ refresh: true })}
-          onClose={() => setEditing(null)}
+          onClose={closeEditor}
           onSave={saveAutomation}
+          saving={saving}
+          saveError={saveError}
         />
       )}
 

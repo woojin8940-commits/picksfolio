@@ -128,6 +128,38 @@ export default async (req: Request) => {
       !billingKey && body?.card && typeof body.card === "object" ? body.card : null;
 
     if (cardCredential) {
+      /**
+       * 카드 번호를 받아 PG 에 확인을 요청하는 자리다. 횟수를 묶지 않으면 남의 카드 번호가
+       * 유효한지 하나씩 맞춰 보는 창구로 쓰일 수 있다(카드사·PG 의 가맹점 제재 위험).
+       * 정상 구독은 몇 번 안에 끝나므로 계정 · IP 양쪽으로 넉넉하게 센다.
+       */
+      for (const limit of [
+        { bucket: "billing-card-user", key: auth.userId, limit: 6 },
+        { bucket: "billing-card-ip", key: clientIp(req), limit: 20 },
+      ]) {
+        const limited = await checkRateLimit({
+          ...limit,
+          windowSeconds: 3600,
+          message: "카드 등록을 너무 많이 시도했습니다. 1시간 뒤에 다시 시도해 주세요.",
+        });
+        if (!limited.ok) return limited.response;
+      }
+
+      // 이 요청이 실제로 구독을 시작할 수 있을 때만 카드를 PG 에 보낸다. 이미 같은 플랜
+      // 이상을 쓰는 중이거나 첫 결제가 진행 중이면 아래에서 어차피 거절된다.
+      const before = await mutateBlobJSON<Record<string, any>>(STORE, key, () => null);
+      const activeTier = normalizeTier(before?.membership_plan);
+      if (before?.membership_active && activeTier && TIER_RANK[activeTier] >= TIER_RANK[normalizedTier]) {
+        return Response.json({ success: false, error: "이미 이용 중인 멤버십입니다." }, { status: 409 });
+      }
+      const pendingCharge = before?.membership_charge_pending as MembershipChargePending | null | undefined;
+      if (pendingCharge && Date.now() - Date.parse(pendingCharge.startedAt) < 60_000) {
+        return Response.json(
+          { success: false, error: "결제 처리 중입니다. 잠시 후 다시 시도해 주세요." },
+          { status: 409 },
+        );
+      }
+
       const issued = await issueNiceCardBillingKey(username, {
         number: String(cardCredential.number || "").replace(/[\s-]/g, ""),
         expiryYear: String(cardCredential.expiryYear || "").trim(),

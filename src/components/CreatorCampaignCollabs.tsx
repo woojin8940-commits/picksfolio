@@ -300,12 +300,17 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (!params.get('ig_collabs')) return;
+    const failed = params.get('ig_error');
     setConnectNotice(
-      params.get('ig_error')
+      failed === 'state_browser_mismatch'
         ? isEn
-          ? 'Instagram connection failed. Please try again.'
-          : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.'
-        : '',
+          ? 'The connection was approved in a different browser or app than the one where it started. Please try again from the same place.'
+          : '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.'
+        : failed
+          ? isEn
+            ? 'Instagram connection failed. Please try again.'
+            : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.'
+          : '',
     );
     [
       'ig_collabs',

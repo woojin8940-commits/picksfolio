@@ -5,6 +5,7 @@ import {
   listStoredScheduledJobs,
 } from "./dm-jobs.mts";
 import type { DmButton, DmCard } from "./instagram-dm.mts";
+import { release } from "./dm-send-registry.mts";
 
 /**
  * 예약 DM 대기열.
@@ -101,6 +102,18 @@ export interface DmScheduledJob {
    * 여러 통으로 나뉜 DM 의 "못 보낸 나머지 통"을 이어 보낼 때 쓴다.
    */
   payloads?: Record<string, unknown>[];
+  /**
+   * 이 예약이 이어받은 발송 대장 선점 키(버튼 클릭 뒤 본 메시지 등).
+   * 발송이 끝나면 확인 표시를, 실패하면 선점을 풀어 같은 버튼을 다시 눌렀을 때 다시
+   * 보낼 수 있게 한다.
+   */
+  claimKey?: string;
+  /**
+   * payloads 중 앞에서부터 이만큼이 본 내용이다(인사말 + 본 메시지). 이만큼 도착해야
+   * 선점에 "보냄" 표시를 한다 — 인사말만 가고 카드가 거부된 것을 보냄으로 굳히면 같은
+   * 버튼을 다시 눌러도 다시 보낼 수 없었다.
+   */
+  coreCount?: number;
 }
 
 const pendingPrefix = (username: string) => `job/${username.toLowerCase()}/`;
@@ -148,6 +161,9 @@ export async function queueRemainingDmMessages(args: {
   result: { sent: number; partial: boolean; errorKind?: string; retryAfterMs?: number };
   ruleId?: string;
   ruleName?: string;
+  /** 남은 통에 본 내용이 남아 있으면 그 선점과 남은 본 내용 수를 이어 넘긴다. */
+  claimKey?: string;
+  coreCount?: number;
 }): Promise<boolean> {
   const { result } = args;
   if (!result.partial || !args.recipientId) return false;
@@ -169,6 +185,8 @@ export async function queueRemainingDmMessages(args: {
       status: "pending",
       ruleId: args.ruleId,
       ruleName: args.ruleName,
+      ...(args.claimKey ? { claimKey: args.claimKey } : {}),
+      ...(args.coreCount ? { coreCount: args.coreCount } : {}),
     });
     return true;
   } catch (e) {
@@ -222,19 +240,24 @@ export async function listScheduledJobs(username: string): Promise<DmScheduledJo
 
 /** 아직 보내지 않은 예약 하나를 취소(삭제)한다. 이미 나간 건은 취소할 수 없다. */
 export async function cancelScheduledJob(username: string, id: string): Promise<boolean> {
-  let canceled = false;
+  let canceled: Record<string, any> | null = null;
   try {
     canceled = await cancelStoredScheduledJob(username, id);
   } catch (e) {
     console.warn("[dm-schedule] queue cancel failed:", (e as Error)?.message);
   }
+  // 버튼 클릭 뒤 본 메시지처럼 발송 대장 선점을 이어받은 예약이면 그 선점도 푼다.
+  // 남겨 두면 같은 버튼을 다시 눌러도 "대기열에 있음"으로 막힌다.
+  if (typeof canceled?.claimKey === "string") await release(username, canceled.claimKey);
   const s = store();
   const { blobs } = await s.list({ prefix: pendingPrefix(username) });
   const target = blobs.find((b) => parseKey(b.key)?.id === id);
-  if (!target) return canceled;
+  if (!target) return Boolean(canceled);
+  const stored = (await s.get(target.key, { type: "json" }).catch(() => null)) as DmScheduledJob | null;
   await s.delete(target.key);
   // 선점 표시도 같이 지운다. 남겨 두면 취소된 예약의 흔적이 계속 쌓인다.
   await s.delete(`claim/${target.key}`).catch(() => {});
+  if (stored?.claimKey) await release(username, stored.claimKey);
   return true;
 }
 

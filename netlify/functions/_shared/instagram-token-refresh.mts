@@ -2,6 +2,13 @@ import { getStore } from "@netlify/blobs";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { mutateBlobJSON } from "./blob-write.mts";
 import { mapConcurrent } from "./concurrency.mts";
+import { indexDmAccount } from "./dm-webhook-index.mts";
+import { linkFeatureOff, type MetaLink } from "./instagram-metrics.mts";
+import {
+  readSubscribedFields,
+  subscribeInstagramWebhooks,
+  webhookFieldsSufficient,
+} from "./instagram-webhook-subscribe.mts";
 
 /**
  * 인스타그램 장기 액세스 토큰 자동 갱신 — 계정이 수백 · 수천 개로 늘어도 끝까지 도는 구조.
@@ -68,6 +75,10 @@ interface TokenRecord {
   tokenSource?: string;
   tokenExpiresAt?: string;
   needsReauth?: boolean;
+  igUserId?: string;
+  igAccountId?: string;
+  webhookFields?: string;
+  webhookVerifiedAt?: string;
   [k: string]: unknown;
 }
 
@@ -283,6 +294,65 @@ async function refreshRecord(storeName: string, key: string): Promise<Outcome> {
   }
 }
 
+/** 설정 화면이 이 시간 안에 구독을 확인했으면 밤 작업은 다시 읽지 않는다. */
+const WEBHOOK_RECHECK_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * 자동 디엠 계정의 웹훅 구독을 하루 한 번 실제로 확인하고, 빠졌으면 다시 건다.
+ *
+ * 설정 화면(api-dm-automation)도 화면을 열 때 같은 일을 하지만, 그건 사람이 화면을
+ * 열어야만 돈다. 규칙을 한 번 만들어 두고 화면을 다시 열지 않는 계정은 메타 쪽에서
+ * 구독이 풀리면(토큰 재발급·권한 변경, 전달 실패가 이어져 메타가 해제한 경우) 댓글
+ * 이벤트가 아예 오지 않아 자동 디엠이 조용히 멈추고, 그 상태를 알아챌 길이 없다.
+ *
+ * 사람이 자동 디엠을 끊어 둔 계정과 재연동이 필요한 계정은 건드리지 않는다 — 앞은
+ * 끊은 것을 되돌리는 일이고, 뒤는 어차피 토큰이 거절된다. 실패는 로그로만 남긴다.
+ */
+async function verifyDmWebhook(key: string): Promise<void> {
+  const storeName = "dm-automation";
+  try {
+    const settings = (await getStore({ name: storeName, consistency: "strong" }).get(key, {
+      type: "json",
+    })) as TokenRecord | null;
+    const accessToken = settings?.accessToken;
+    if (!settings || !accessToken || settings.needsReauth) return;
+    if (linkFeatureOff(settings as MetaLink, "dm")) return;
+    const lastVerified = Date.parse(String(settings.webhookVerifiedAt || "")) || 0;
+    if (Date.now() - lastVerified < WEBHOOK_RECHECK_MS) return;
+
+    const igId = settings.igUserId || settings.igAccountId;
+    const actual = await readSubscribedFields({ accessToken, tokenSource: settings.tokenSource, igId });
+    // 읽지 못하면 오늘은 넘긴다. 읽기 권한만 없는 계정도 있어 실패로 단정하지 않는다.
+    if (actual === null) return;
+    const now = new Date().toISOString();
+    if (webhookFieldsSufficient(actual)) {
+      await mutateBlobJSON<TokenRecord>(storeName, key, (latest) =>
+        latest && latest.accessToken === accessToken ? { ...latest, webhookVerifiedAt: now } : null,
+      );
+      return;
+    }
+
+    console.warn(`[ig-token] ${key} webhook subscription missing fields — re-subscribing:`, actual || "(none)");
+    const sub = await subscribeInstagramWebhooks({ accessToken, tokenSource: settings.tokenSource, igId });
+    if (igId) await indexDmAccount(key.slice("dm_".length), [settings.igUserId, settings.igAccountId]);
+    await mutateBlobJSON<TokenRecord>(storeName, key, (latest) => {
+      if (!latest || latest.accessToken !== accessToken) return null;
+      return sub.ok
+        ? {
+            ...latest,
+            webhookFields: sub.fields || actual,
+            webhookSubscribedAt: now,
+            webhookVerifiedAt: now,
+            webhookHealedAt: now,
+          }
+        : { ...latest, webhookFields: actual, webhookHealedAt: now };
+    });
+    if (!sub.ok) console.warn(`[ig-token] ${key} webhook re-subscribe failed:`, sub.error);
+  } catch (e) {
+    console.warn(`[ig-token] ${key} webhook check failed:`, (e as Error)?.message);
+  }
+}
+
 // --- 작업자 한 번 ------------------------------------------------------------
 
 async function listKeys(storeName: string, prefix: string): Promise<string[]> {
@@ -319,7 +389,11 @@ export async function runRefreshWorker(runId: string): Promise<"done" | "continu
       if (!latest || latest.runId !== runId) return "stale";
 
       const batch = keys.slice(offset, offset + BATCH_SIZE);
-      const outcomes = await mapConcurrent(batch, CONCURRENCY, (key) => refreshRecord(source.store, key));
+      const outcomes = await mapConcurrent(batch, CONCURRENCY, async (key) => {
+        const outcome = await refreshRecord(source.store, key);
+        if (source.store === "dm-automation") await verifyDmWebhook(key);
+        return outcome;
+      });
       for (const outcome of outcomes) state.counts[outcome] += 1;
 
       // 묶음마다 위치를 남긴다. 작업자가 여기서 죽어도 이 묶음은 다시 하지 않는다.

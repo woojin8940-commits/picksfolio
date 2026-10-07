@@ -543,7 +543,12 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           : { type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' },
       );
     } else if (params.get('ig_error')) {
-      setNotice({ type: 'err', text: '연동에 실패했어요. 다시 시도해 주세요.' });
+      setNotice({
+        type: 'err',
+        text: params.get('ig_error') === 'state_browser_mismatch'
+          ? '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.'
+          : '연동에 실패했어요. 다시 시도해 주세요.',
+      });
     }
 
     setOpen(true);

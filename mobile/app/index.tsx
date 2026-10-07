@@ -119,8 +119,48 @@ function resolveUrl(path: string): string {
   return /^https?:\/\//i.test(path) ? path : `${config.webUrl}${path}`;
 }
 
+/** Host part of an http(s) url, lower-cased, with a leading `www.` dropped. */
+function hostOf(url: string): string {
+  const match = /^https?:\/\/([^/?#:]+)/i.exec(String(url || ''));
+  return match ? match[1].toLowerCase().replace(/^www\./, '') : '';
+}
+
+const WEB_HOST = hostOf(config.webUrl);
+
+/**
+ * Renderer crashes within this window count towards the crash-loop cap. Past
+ * the cap a remount goes back to the start url instead of the page that keeps
+ * taking the renderer down.
+ */
+const CRASH_WINDOW_MS = 2 * 60 * 1000;
+const CRASH_LOOP_CAP = 3;
+
+/**
+ * Where a fresh WebView resumes after the renderer died: the web app page the
+ * user was on, without its query/hash (those can carry one-shot OAuth codes and
+ * tokens), plus a marker that tells the web app to reopen the dashboard tab it
+ * was showing (src/utils/resumeTab).
+ */
+function resumeUrl(url: string): string {
+  const match = /^(https?:\/\/[^/?#]+)(\/[^?#]*)?/i.exec(url);
+  if (!match) return config.webUrl;
+  return `${match[1]}${match[2] || '/'}?picks_resume=1`;
+}
+
+/**
+ * Whether a bridge message came from the web app itself. Login and checkout
+ * pages of other sites are opened inside the same WebView (and get the injected
+ * bridge too), so their messages must not be able to change which account this
+ * device receives push notifications for.
+ */
+function isOwnPage(url: string): boolean {
+  return Boolean(WEB_HOST) && hostOf(url) === WEB_HOST;
+}
+
 export default function WebAppScreen() {
   const webRef = useRef<WebView>(null);
+  // Bumped to mount a fresh WebView after Android kills its renderer process.
+  const [webKey, setWebKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
   const [sourceUri, setSourceUri] = useState(config.webUrl);
@@ -129,6 +169,14 @@ export default function WebAppScreen() {
   const canGoBack = useRef(false);
   const [showBack, setShowBack] = useState(false);
   const loadedRef = useRef(false);
+  // Last page of the web app itself the WebView showed. A renderer crash
+  // remounts the WebView, and starting over at the start url dropped the user on
+  // the first screen in the middle of whatever they were doing.
+  const lastOwnUrl = useRef(config.webUrl);
+  const crashTimes = useRef<number[]>([]);
+  // The web app reports an open editor with unsaved input; pull-to-refresh is
+  // switched off meanwhile so a downward drag cannot reload the page under it.
+  const [unsavedWork, setUnsavedWork] = useState(false);
 
   // Jump the WebView to a deep-linked path (used when a push is tapped). If the
   // page is already loaded, navigate in place; otherwise point the initial load
@@ -177,6 +225,7 @@ export default function WebAppScreen() {
   const onNavStateChange = useCallback((nav: WebViewNavigation) => {
     canGoBack.current = nav.canGoBack;
     setShowBack(nav.canGoBack);
+    if (nav.url && isOwnPage(nav.url)) lastOwnUrl.current = nav.url;
   }, []);
 
   // Visible back button: navigate the WebView's history back one step. Gives
@@ -249,14 +298,45 @@ export default function WebAppScreen() {
     webRef.current?.reload();
   }, []);
 
-  // Bridge: push registration only. Kakao app hand-off is handled by URL
-  // interception above, without a native Kakao SDK bridge.
+  // The OS may kill the web content process while the app is in the background
+  // (most often while the camera or photo picker is open on top of it). Without
+  // handling, the WebView is left blank and the app looks crashed.
+  //
+  // iOS: the same WebView can simply load the page again.
+  const onContentProcessDidTerminate = useCallback(() => {
+    setLoading(true);
+    webRef.current?.reload();
+  }, []);
+
+  // Android: a WebView whose renderer is gone cannot be reused, so mount a new one
+  // on the page the user was on.
+  const onRenderProcessGone = useCallback(() => {
+    const now = Date.now();
+    crashTimes.current = [...crashTimes.current.filter((t) => now - t < CRASH_WINDOW_MS), now];
+    const looping = crashTimes.current.length >= CRASH_LOOP_CAP;
+    loadedRef.current = false;
+    canGoBack.current = false;
+    setShowBack(false);
+    setErrored(false);
+    setLoading(true);
+    setUnsavedWork(false);
+    setSourceUri(looping ? config.webUrl : resumeUrl(lastOwnUrl.current));
+    setWebKey((key) => key + 1);
+  }, []);
+
+  // Bridge: push registration and the unsaved-work flag. Kakao app hand-off is
+  // handled by URL interception above, without a native Kakao SDK bridge.
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
+      if (!isOwnPage(e.nativeEvent.url)) return;
       let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
       try {
         msg = JSON.parse(e.nativeEvent.data);
       } catch {
+        return;
+      }
+      if (msg?.type === 'UNSAVED_WORK') {
+        setUnsavedWork(msg.payload?.unsaved === true);
         return;
       }
       if (msg?.type === 'REGISTER_PUSH') {
@@ -274,6 +354,7 @@ export default function WebAppScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <WebView
+        key={webKey}
         ref={webRef}
         source={{ uri: sourceUri }}
         style={styles.web}
@@ -297,12 +378,18 @@ export default function WebAppScreen() {
         // Append a recognisable token while keeping a real mobile browser UA so
         // providers don't reject the in-app browser.
         applicationNameForUserAgent="PicksFolioApp"
-        pullToRefreshEnabled
+        pullToRefreshEnabled={!unsavedWork}
         allowsBackForwardNavigationGestures
         onNavigationStateChange={onNavStateChange}
         onShouldStartLoadWithRequest={onShouldStartLoad}
+        onContentProcessDidTerminate={onContentProcessDidTerminate}
+        onRenderProcessGone={onRenderProcessGone}
         onMessage={onMessage}
-        onLoadStart={() => setLoading(true)}
+        onLoadStart={() => {
+          setLoading(true);
+          // A new document starts with no editor open; it reports again if needed.
+          setUnsavedWork(false);
+        }}
         onLoadEnd={() => {
           setLoading(false);
           loadedRef.current = true;

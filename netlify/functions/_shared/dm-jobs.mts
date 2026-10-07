@@ -6,7 +6,7 @@ import { queueRpc, wakeDmWorkers } from "./dm-worker.mts";
 
 export interface DmJob {
   id: string;
-  job_type: "comment_event" | "scheduled";
+  job_type: "comment_event" | "scheduled" | "message_event";
   username: string | null;
   ig_account_id: string | null;
   payload: Record<string, any>;
@@ -28,18 +28,67 @@ export interface QueuedComment {
   change: Record<string, any>;
 }
 
+/**
+ * 버튼 클릭(postback)·받은 DM 한 건.
+ *
+ * 댓글과 달리 상대가 지금 대화창에서 답을 기다리고 있다. 대기열에서는 댓글보다 먼저
+ * 처리된다(dm_claim_account_job).
+ */
+export interface QueuedMessage {
+  igAccountId: string;
+  entryTime?: number;
+  event: Record<string, any>;
+}
+
 export const scheduledJobId = (username: string, id: string) =>
   `schedule:${username.toLowerCase()}:${id}`;
 
-export async function enqueueCommentEvents(events: QueuedComment[]): Promise<void> {
-  if (events.length === 0) return;
-  const client = getSupabaseServer();
+/**
+ * 웹훅의 계정 ID 를 발송기가 쓰는 계정 ID 와 사용자명으로 바꾼다.
+ *
+ * 발송 예약(dm_reserve_send)과 작업자 선점은 settings.igUserId 기준이라, 작업 행도 같은
+ * 값으로 넣어야 같은 줄에서 순서와 발송 간격이 지켜진다.
+ */
+async function resolveJobAccounts(igAccountIds: string[]) {
   const accounts = new Map<string, { id: string; username: string | null }>();
-  for (const id of new Set(events.map((event) => event.igAccountId))) {
+  for (const id of new Set(igAccountIds)) {
     const username = await resolveDmAccountByIgId(id);
     const settings = username ? await getStore({ name: "dm-automation", consistency: "strong" }).get(`dm_${username}`, { type: "json" }) as any : null;
     accounts.set(id, { id: String(settings?.igUserId || settings?.igAccountId || id), username: username || null });
   }
+  return accounts;
+}
+
+/** Meta 가 같은 이벤트를 다시 보내도 같은 값이 나와야 한다(중복 작업 방지). */
+function messageEventId(event: Record<string, any>): string {
+  const mid = String(event?.postback?.mid || event?.message?.mid || "").trim();
+  if (mid) return mid.slice(0, 200);
+  return createHash("sha256").update(JSON.stringify(event ?? null)).digest("hex").slice(0, 40);
+}
+
+export async function enqueueMessageEvents(events: QueuedMessage[]): Promise<void> {
+  if (events.length === 0) return;
+  const accounts = await resolveJobAccounts(events.map((event) => event.igAccountId));
+  const rows = events.map(({ igAccountId, entryTime, event }) => ({
+    id: `message:${igAccountId}:${messageEventId(event)}`,
+    job_type: "message_event",
+    ig_account_id: accounts.get(igAccountId)!.id,
+    username: accounts.get(igAccountId)!.username,
+    priority: 0,
+    payload: { igAccountId, entryTime, event },
+  }));
+  const { error } = await getSupabaseServer().from("dm_jobs").upsert(rows, {
+    onConflict: "id",
+    ignoreDuplicates: true,
+  });
+  if (error) throw error;
+  await wakeDmWorkers([...accounts.values()].map((account) => account.id)).catch((e) => console.error("[dm-queue] wake failed:", (e as Error)?.message));
+}
+
+export async function enqueueCommentEvents(events: QueuedComment[]): Promise<void> {
+  if (events.length === 0) return;
+  const client = getSupabaseServer();
+  const accounts = await resolveJobAccounts(events.map((event) => event.igAccountId));
   for (let offset = 0; offset < events.length; offset += 200) {
     const rows = events.slice(offset, offset + 200).map(({ igAccountId, entryTime, change }) => ({
       id: `comment:${igAccountId}:${String(change.value.id)}`,
@@ -143,6 +192,21 @@ export async function reschedulePendingCommentJobs(
   if (error) throw error;
 }
 
+/** 이 계정에서 다음으로 시간이 되는 대기 작업의 시각(epoch ms). 없으면 null. */
+export async function nextPendingDueAt(igAccountId: string): Promise<number | null> {
+  const { data, error } = await getSupabaseServer()
+    .from("dm_jobs")
+    .select("due_at")
+    .eq("ig_account_id", igAccountId)
+    .eq("status", "pending")
+    .order("due_at", { ascending: true })
+    .limit(1)
+    .abortSignal(AbortSignal.timeout(4_000));
+  if (error) throw error;
+  const due = Date.parse(String(data?.[0]?.due_at || ""));
+  return Number.isNaN(due) ? null : due;
+}
+
 export async function claimDueJobs(limit = 1): Promise<DmJob[]> {
   const { data, error } = await getSupabaseServer().rpc("dm_claim_due_jobs", { p_limit: limit });
   if (error) throw error;
@@ -216,14 +280,15 @@ export async function listStoredScheduledJobs(username: string): Promise<DmJob[]
   return (data || []) as DmJob[];
 }
 
-export async function cancelStoredScheduledJob(username: string, id: string): Promise<boolean> {
+/** 대기 중인 예약을 취소한다. 취소했으면 그 예약의 내용을, 취소할 것이 없었으면 null 을 돌려준다. */
+export async function cancelStoredScheduledJob(username: string, id: string): Promise<Record<string, any> | null> {
   const { data, error } = await getSupabaseServer()
     .from("dm_jobs")
     .update({ status: "canceled", completed_at: new Date().toISOString() })
     .eq("id", scheduledJobId(username, id))
     .eq("status", "pending")
-    .select("id")
+    .select("id,payload")
     .maybeSingle();
   if (error) throw error;
-  return Boolean(data);
+  return data ? ((data.payload || {}) as Record<string, any>) : null;
 }

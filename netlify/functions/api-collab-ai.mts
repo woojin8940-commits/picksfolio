@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import {
@@ -5,6 +6,7 @@ import {
   deductionCredits,
   rawCostKrw,
   mutateClaudeCredits,
+  readClaudeCredits,
   readClaudeCreditsSynced,
   type ClaudeCredits,
 } from "./_shared/claude-credits.mts";
@@ -31,6 +33,7 @@ import {
 } from "./_shared/upload-media.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { isAssignedManager } from "./_shared/manager-auth.mts";
 
 // Collaboration AI assistant.
 //
@@ -482,11 +485,67 @@ const transcriptOf = (comments: CollabComment[], maxMsgs: number, maxChars: numb
 //
 // The image/PDF attachments of the conversation in focus are returned alongside
 // the text — those are where the brand's base guide lives.
+/**
+ * 클로드 요청은 계정당 한 번에 하나만 처리한다.
+ *
+ * 크레딧은 답을 받은 뒤 실제 사용량만큼 깎고, 0 아래로는 내려가지 않는다. 잔액이 조금만
+ * 남은 지갑으로 요청을 한꺼번에 여러 개 보내면 모두 "잔액 있음"을 통과했고, 깎을 잔액이
+ * 없는 사용분은 그대로 우리 비용이 됐다. 잠금은 답을 받고 차감할 때까지 잡는다. 함수가
+ * 중간에 끊겨 풀지 못한 잠금은 일정 시간이 지나면 다음 요청이 가져간다.
+ *
+ * 그 시간은 함수가 살아 있을 수 있는 최대 시간(동기 함수는 기본 30초, 늘려도 60초)보다
+ * 조금만 길게 둔다. 예전 3분은 시간 초과로 끊긴 요청 하나가 그 사람의 클로드를 3분 동안
+ * "앞선 요청을 처리하고 있어요"로 막았다 — 실제로 처리 중인 요청은 이미 없는데도.
+ */
+const CLAUDE_LOCK_STALE_MS = 90 * 1000;
+
+async function acquireClaudeLock(username: string): Promise<(() => Promise<void>) | null> {
+  const store = getStore({ name: "claude-inflight", consistency: "strong" });
+  const key = `lock_${username}`;
+  const token = randomUUID();
+  const body = JSON.stringify({ token, at: Date.now() });
+  const created = await store.set(key, body, { onlyIfNew: true });
+  if (created?.modified === false) {
+    const current = await store.getWithMetadata(key, { type: "json" });
+    const at = Number((current?.data as { at?: number } | null)?.at) || 0;
+    if (current?.etag && Date.now() - at < CLAUDE_LOCK_STALE_MS) return null;
+    const taken = current?.etag
+      ? await store.set(key, body, { onlyIfMatch: current.etag })
+      : await store.set(key, body, { onlyIfNew: true });
+    if (taken?.modified === false) return null;
+  }
+  return async () => {
+    const current = (await store.get(key, { type: "json" }).catch(() => null)) as { token?: string } | null;
+    if (current?.token === token) await store.delete(key).catch(() => {});
+  };
+}
+
+const normParticipant = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
+
+/**
+ * 이 사람이 그 대화의 참여자(인플루언서 · 브랜드 · 담당자)인지.
+ *
+ * 담당자 자리는 지금 담당자로 배정된 계정(`managerAssigned`)에게만 연다. 협업 대화
+ * 화면(_shared/timeline-access)과 같은 기준이다 — 배정이 풀린 담당자가 화면에서는 못 여는
+ * 대화를 AI 답변으로는 읽을 수 있으면 안 된다.
+ */
+function isParticipant(detail: any, username: string, managerAssigned: boolean): boolean {
+  if (
+    [detail?.influencerUsername, detail?.businessUsername]
+      .some((name) => normParticipant(name) !== "" && normParticipant(name) === username)
+  ) {
+    return true;
+  }
+  const manager = normParticipant(detail?.managerUsername);
+  return managerAssigned && manager !== "" && manager === username;
+}
+
 async function buildWorkspaceContext(
   username: string,
   userType: string,
   activeProposalId: string,
   clientTimelines: CollabMeta[],
+  isAdmin: boolean,
 ): Promise<{ text: string | null; guideRefs: GuideRef[] }> {
   const store = getStore("timelines");
   let guideRefs: GuideRef[] = [];
@@ -511,11 +570,27 @@ async function buildWorkspaceContext(
   const totalCount = ordered.length;
   const capped = ordered.slice(0, WORKSPACE_MAX_CONVERSATIONS);
 
-  const details = await Promise.all(
+  const fetched = await Promise.all(
     capped.map((t) =>
       store.get(`detail_${t.proposalId}`, { type: "json" }).catch(() => null),
     ),
   );
+
+  /**
+   * 대화 원문은 그 대화의 참여자에게만 보인다(협업 대화 화면과 같은 기준). 목록은 화면이
+   * 보낸 값을 쓰므로, 남의 협업 ID 를 섞어 보내면 그 대화와 첨부 파일이 프롬프트에 실려
+   * 답변으로 새어 나갔다. 원문이 있는데 참여자가 아니면 그 협업은 통째로 뺀다(원문이
+   * 아직 없는 방은 보여 줄 내용이 없다).
+   */
+  const managerAssigned =
+    !isAdmin && fetched.some((detail: any) => detail && normParticipant(detail.managerUsername) === username)
+      ? await isAssignedManager(username)
+      : false;
+  const visible = capped
+    .map((meta, i) => ({ meta, detail: fetched[i] }))
+    .filter(({ detail }) => !detail || isAdmin || isParticipant(detail, username, managerAssigned));
+  const shown = visible.map(({ meta }) => meta);
+  const details = visible.map(({ detail }) => detail);
 
   let needReplyCount = 0;
   let unreadConvCount = 0;
@@ -523,7 +598,7 @@ async function buildWorkspaceContext(
   const blocks: string[] = [];
   let activeBlock = "";
 
-  capped.forEach((meta, i) => {
+  shown.forEach((meta, i) => {
     const detail = (details[i] || {}) as { comments?: CollabComment[] };
     const comments = Array.isArray(detail.comments) ? detail.comments : [];
     const partner =
@@ -576,7 +651,7 @@ async function buildWorkspaceContext(
 
   const overview =
     `[협업 워크스페이스 현황 — ${userType === "business" ? "비즈니스" : "인플루언서"} 계정: ${username}]\n` +
-    `- 진행 중인 협업(업체) 수: ${totalCount}개${totalCount > capped.length ? ` (아래 목록은 최근 ${capped.length}개)` : ""}\n` +
+    `- 진행 중인 협업(업체) 수: ${totalCount}개${totalCount > shown.length ? ` (아래 목록은 최근 ${shown.length}개)` : ""}\n` +
     `- 상대의 마지막 메시지에 아직 답장하지 않은 협업: ${needReplyCount}개\n` +
     `- 안 읽은 수신 메시지가 있는 협업: ${unreadConvCount}개`;
 
@@ -833,6 +908,7 @@ export default async (req: Request) => {
         userType,
         activeProposalId,
         clientTimelines,
+        auth.isAdmin,
       );
       workspaceContext = built.text;
       discoveredGuideRefs = built.guideRefs;
@@ -1264,143 +1340,168 @@ export default async (req: Request) => {
 
   // ── Claude (premium, credit-metered) ───────────────────────────────────────
   if (useClaude) {
-    // Anthropic message format. The large system instruction (role + workspace
-    // overview) is sent as a cached block, so repeat turns within ~5 minutes are
-    // billed at the discounted cache-read rate — the saving is passed through to
-    // the member's credit deduction, keeping long conversations cheap.
-    const claudeMessages: { role: string; content: any }[] = messages.slice(-MAX_TURNS).map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: String(m.content || ""),
-    }));
-
-    // 첨부한 가이드 파일은 마지막 사용자 메시지에 붙인다. PDF(document)는 텍스트보다
-    // 앞에 두어야 모델이 문서를 먼저 읽고 답한다.
-    if (guideNote) {
-      let lastUser = -1;
-      for (let i = claudeMessages.length - 1; i >= 0; i--) {
-        if (claudeMessages[i].role === "user") {
-          lastUser = i;
-          break;
-        }
-      }
-      if (lastUser >= 0) {
-        claudeMessages[lastUser] = {
-          role: "user",
-          content: [
-            ...guideFiles
-              .filter((f) => f.mediaType === GUIDE_PDF_TYPE)
-              .map((f) => ({
-                type: "document",
-                source: { type: "base64", media_type: f.mediaType, data: f.data },
-              })),
-            ...guideFiles
-              .filter((f) => f.mediaType !== GUIDE_PDF_TYPE)
-              .map((f) => ({
-                type: "image",
-                source: { type: "base64", media_type: f.mediaType, data: f.data },
-              })),
-            { type: "text", text: guideNote + String(claudeMessages[lastUser].content || "") },
-          ],
-        };
-      }
+    const releaseClaude = await acquireClaudeLock(username).catch((e) => {
+      console.error("[collab-ai] claude lock failed", (e as Error)?.message);
+      return null;
+    });
+    if (!releaseClaude) {
+      return Response.json(
+        { error: "앞선 클로드 요청을 처리하고 있어요. 답변을 받은 뒤 다시 보내 주세요.", code: "CLAUDE_BUSY" },
+        { status: 429 },
+      );
     }
-
     try {
-      const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY as string,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL,
-          // 캡션 초안 2~3개나 숏폼 대본은 1,024 토큰에서 문장 중간에 끊긴다.
-          // 기획안(개요+준수사항+컷 구성+캡션)은 그보다도 길어서 더 여유가 필요하다.
-          // 한국어는 토큰이 더 많이 들어간다(크레딧은 실제 사용량으로 차감되므로,
-          // 한도를 올려도 짧은 답변의 비용은 그대로다).
-          max_tokens: maxOutputTokens,
-          temperature: 0.6,
-          system: [
-            { type: "text", text: systemInstruction, cache_control: { type: "ephemeral" } },
-          ],
-          messages: claudeMessages,
-        }),
-      });
-
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        console.error("[collab-ai] Claude error", res.status, detail);
+      // 잠금을 잡은 뒤 잔액을 다시 본다. 앞선 요청이 방금 차감했을 수 있다.
+      if ((await readClaudeCredits(username)).balanceCredits <= 0) {
         return Response.json(
-          { error: "클로드 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요." },
-          { status: 502 },
+          {
+            error:
+              "클로드 크레딧을 모두 사용했어요. 크레딧을 충전하면 계속 이용할 수 있습니다. (제미나이는 그대로 무료로 사용할 수 있어요.)",
+            code: "CLAUDE_CREDITS_EMPTY",
+          },
+          { status: 402 },
         );
       }
-
-      const data = await res.json();
-      const rawReply: string =
-        (data?.content || [])
-          .map((p: any) => (p?.type === "text" ? p.text || "" : ""))
-          .join("")
-          .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
-      // 캠페인 화면이면 답 끝에 붙은 초안 덩어리를 떼어낸다. 사용자에게는 글만 보이고,
-      // 떼어낸 초안은 '수정하기' 버튼이 기획안에 반영할 값이 된다.
-      const extracted = campaignDraftOf(rawReply);
-      const reply = extracted.reply;
-      let draft = extracted.draft;
-      // 표식이 빠졌으면 같은 답을 다시 보여 주며 JSON 만 달라고 한 번 더 묻는다.
-      // 이 호출의 토큰도 이번 요청의 차감에 합친다 — 사용자에게는 한 번의 질문이다.
-      let repairUsage: any = null;
-      if (needsDraftRepair(draft, reply)) {
-        const repaired = await repairDraftWithClaude(draftTarget, reply, maxOutputTokens);
-        draft = repaired.draft;
-        repairUsage = repaired.usage;
-      }
-
-      // Deduct credits based on the tokens actually consumed, then (if opted in
-      // and the balance is now low) auto-recharge for the next request.
-      // 차감은 최신 지갑에 대고 조건부로 쓴다. 요청을 보내는 동안 크레딧 충전이
-      // 들어왔을 수 있는데, 통째로 덮어쓰면 그 충전분이 사라진다.
-      const usage = data?.usage || {};
-      const inputOf = (u: any) =>
-        (Number(u?.input_tokens) || 0) +
-        (Number(u?.cache_creation_input_tokens) || 0) +
-        (Number(u?.cache_read_input_tokens) || 0);
-      const charged = deductionCredits(usage) + (repairUsage ? deductionCredits(repairUsage) : 0);
-      const usageEntry = {
-        at: new Date().toISOString(),
-        model: CLAUDE_MODEL,
-        inputTokens: inputOf(usage) + inputOf(repairUsage),
-        outputTokens:
-          (Number(usage.output_tokens) || 0) + (Number(repairUsage?.output_tokens) || 0),
-        cachedTokens:
-          (Number(usage.cache_read_input_tokens) || 0) +
-          (Number(repairUsage?.cache_read_input_tokens) || 0),
-        costKrw: Math.round(rawCostKrw(usage) + (repairUsage ? rawCostKrw(repairUsage) : 0)),
-        chargedCredits: charged,
-      };
-
-      const saved = await mutateClaudeCredits(username, (latest) => ({
-        ...latest,
-        balanceCredits: Math.max(0, latest.balanceCredits - charged),
-        lifetimeSpentCredits: latest.lifetimeSpentCredits + charged,
-        usage: [usageEntry, ...latest.usage].slice(0, 50),
+      // Anthropic message format. The large system instruction (role + workspace
+      // overview) is sent as a cached block, so repeat turns within ~5 minutes are
+      // billed at the discounted cache-read rate — the saving is passed through to
+      // the member's credit deduction, keeping long conversations cheap.
+      const claudeMessages: { role: string; content: any }[] = messages.slice(-MAX_TURNS).map((m) => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: String(m.content || ""),
       }));
 
-      return Response.json({
-        reply,
-        draft,
-        guide: guideStatus,
-        model: "claude",
-        creditsUsed: charged,
-        balanceCredits: saved.balanceCredits,
-      });
-    } catch (e) {
-      console.error("[collab-ai] claude request failed", e);
-      return Response.json(
-        { error: "AI 응답 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." },
-        { status: 500 },
-      );
+      // 첨부한 가이드 파일은 마지막 사용자 메시지에 붙인다. PDF(document)는 텍스트보다
+      // 앞에 두어야 모델이 문서를 먼저 읽고 답한다.
+      if (guideNote) {
+        let lastUser = -1;
+        for (let i = claudeMessages.length - 1; i >= 0; i--) {
+          if (claudeMessages[i].role === "user") {
+            lastUser = i;
+            break;
+          }
+        }
+        if (lastUser >= 0) {
+          claudeMessages[lastUser] = {
+            role: "user",
+            content: [
+              ...guideFiles
+                .filter((f) => f.mediaType === GUIDE_PDF_TYPE)
+                .map((f) => ({
+                  type: "document",
+                  source: { type: "base64", media_type: f.mediaType, data: f.data },
+                })),
+              ...guideFiles
+                .filter((f) => f.mediaType !== GUIDE_PDF_TYPE)
+                .map((f) => ({
+                  type: "image",
+                  source: { type: "base64", media_type: f.mediaType, data: f.data },
+                })),
+              { type: "text", text: guideNote + String(claudeMessages[lastUser].content || "") },
+            ],
+          };
+        }
+      }
+
+      try {
+        const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": process.env.ANTHROPIC_API_KEY as string,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: CLAUDE_MODEL,
+            // 캡션 초안 2~3개나 숏폼 대본은 1,024 토큰에서 문장 중간에 끊긴다.
+            // 기획안(개요+준수사항+컷 구성+캡션)은 그보다도 길어서 더 여유가 필요하다.
+            // 한국어는 토큰이 더 많이 들어간다(크레딧은 실제 사용량으로 차감되므로,
+            // 한도를 올려도 짧은 답변의 비용은 그대로다).
+            max_tokens: maxOutputTokens,
+            temperature: 0.6,
+            system: [
+              { type: "text", text: systemInstruction, cache_control: { type: "ephemeral" } },
+            ],
+            messages: claudeMessages,
+          }),
+        });
+
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          console.error("[collab-ai] Claude error", res.status, detail);
+          return Response.json(
+            { error: "클로드 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요." },
+            { status: 502 },
+          );
+        }
+
+        const data = await res.json();
+        const rawReply: string =
+          (data?.content || [])
+            .map((p: any) => (p?.type === "text" ? p.text || "" : ""))
+            .join("")
+            .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
+        // 캠페인 화면이면 답 끝에 붙은 초안 덩어리를 떼어낸다. 사용자에게는 글만 보이고,
+        // 떼어낸 초안은 '수정하기' 버튼이 기획안에 반영할 값이 된다.
+        const extracted = campaignDraftOf(rawReply);
+        const reply = extracted.reply;
+        let draft = extracted.draft;
+        // 표식이 빠졌으면 같은 답을 다시 보여 주며 JSON 만 달라고 한 번 더 묻는다.
+        // 이 호출의 토큰도 이번 요청의 차감에 합친다 — 사용자에게는 한 번의 질문이다.
+        let repairUsage: any = null;
+        if (needsDraftRepair(draft, reply)) {
+          const repaired = await repairDraftWithClaude(draftTarget, reply, maxOutputTokens);
+          draft = repaired.draft;
+          repairUsage = repaired.usage;
+        }
+
+        // Deduct credits based on the tokens actually consumed, then (if opted in
+        // and the balance is now low) auto-recharge for the next request.
+        // 차감은 최신 지갑에 대고 조건부로 쓴다. 요청을 보내는 동안 크레딧 충전이
+        // 들어왔을 수 있는데, 통째로 덮어쓰면 그 충전분이 사라진다.
+        const usage = data?.usage || {};
+        const inputOf = (u: any) =>
+          (Number(u?.input_tokens) || 0) +
+          (Number(u?.cache_creation_input_tokens) || 0) +
+          (Number(u?.cache_read_input_tokens) || 0);
+        const charged = deductionCredits(usage) + (repairUsage ? deductionCredits(repairUsage) : 0);
+        const usageEntry = {
+          at: new Date().toISOString(),
+          model: CLAUDE_MODEL,
+          inputTokens: inputOf(usage) + inputOf(repairUsage),
+          outputTokens:
+            (Number(usage.output_tokens) || 0) + (Number(repairUsage?.output_tokens) || 0),
+          cachedTokens:
+            (Number(usage.cache_read_input_tokens) || 0) +
+            (Number(repairUsage?.cache_read_input_tokens) || 0),
+          costKrw: Math.round(rawCostKrw(usage) + (repairUsage ? rawCostKrw(repairUsage) : 0)),
+          chargedCredits: charged,
+        };
+
+        const saved = await mutateClaudeCredits(username, (latest) => ({
+          ...latest,
+          balanceCredits: Math.max(0, latest.balanceCredits - charged),
+          lifetimeSpentCredits: latest.lifetimeSpentCredits + charged,
+          usage: [usageEntry, ...latest.usage].slice(0, 50),
+        }));
+
+        return Response.json({
+          reply,
+          draft,
+          guide: guideStatus,
+          model: "claude",
+          creditsUsed: charged,
+          balanceCredits: saved.balanceCredits,
+        });
+      } catch (e) {
+        console.error("[collab-ai] claude request failed", e);
+        return Response.json(
+          { error: "AI 응답 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." },
+          { status: 500 },
+        );
+      }
+    } finally {
+      await releaseClaude();
     }
   }
 

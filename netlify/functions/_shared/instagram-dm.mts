@@ -344,7 +344,15 @@ export function buildDmMessages(
     // 캐러셀은 카드 한 통이 메시지 전부다. 인스타그램은 메시지 한 통에 텍스트와
     // 첨부를 함께 담지 못하고, 댓글 비공개 답장은 한 통이 전부라서 텍스트를 따로
     // 붙여도 확실히 도착하지 않는다. 그래서 문구는 카드의 제목·설명으로만 나간다.
-    if (elements.length > 0) return [genericTemplate(elements)];
+    if (elements.length > 0) {
+      // 카드가 거부되면(이미지 주소 하나 때문에도 통째로 거부된다) 제목·설명·링크를
+      // 글로 옮겨 대신 보낸다. 2단계 본 메시지처럼 카드가 첫 통이 아닌 경우에도 같은
+      // 안전장치가 따라가야 한다 — 예전에는 인사말 뒤 카드가 거부되면 인사말만 도착했다.
+      const card: Record<string, unknown> = genericTemplate(elements);
+      const fallbackText = cardsFallbackText(content.cards);
+      if (fallbackText) card[FALLBACK_KEY] = { text: fallbackText };
+      return [card];
+    }
     // 보낼 카드가 하나도 없으면 아래 텍스트 처리로 폴백한다 — 카드가 전부 비어
     // 있는데 아무것도 보내지 않으면 그 한 번의 발송 기회를 그냥 날린다.
     if (!message) message = cardsFallbackText(content.cards);
@@ -436,6 +444,11 @@ export interface DmPlan {
    * 캐러셀은 이미지 주소 하나 때문에도 통째로 거부될 수 있어, 그때 글로라도 보낸다.
    */
   fallback?: Record<string, unknown>;
+  /**
+   * 앞에서부터 이만큼 도착해야 본 내용이 전달된 것이다(인사말 + 본 메시지). 그 뒤는
+   * 추가 메시지다. 없으면 전부 본 내용으로 본다.
+   */
+  coreCount?: number;
 }
 
 /**
@@ -565,8 +578,9 @@ export function buildMainDmPlan(content: DmContent, intro?: string, followUps?: 
   const messages = buildDmMessages(content, { buttonTemplate: true });
   const lead = (intro || "").trim();
   if (lead) messages.unshift({ text: lead.slice(0, TEXT_MAX) });
+  const coreCount = messages.length;
   messages.push(...buildFollowUpMessages(followUps));
-  return { messages, bestEffortFrom: messages.length };
+  return { messages, bestEffortFrom: messages.length, coreCount };
 }
 
 /**
@@ -648,9 +662,18 @@ export type DmErrorKind =
   | "invalid_payload"
   | "other";
 
+/**
+ * 받는 사람 쪽 사정으로 보낼 수 없을 때 Graph API 가 주는 하위 코드.
+ *  2534014 — The requested user cannot be found
+ *  2018001 — No matching user found
+ *  1545041 — This person isn't available right now
+ */
+const RECIPIENT_UNAVAILABLE_SUBCODES = new Set([2534014, 2018001, 1545041]);
+
 export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
   const message = String(err?.message || "").toLowerCase();
   const code = Number(err?.code);
+  const subcode = Number(err?.error_subcode);
 
   // 비공개 답장은 댓글 1건당 1회. 이미 썼으면 재시도해도 거부된다.
   // Meta 의 문구가 버전마다 조금씩 다르므로("already been replied to",
@@ -670,15 +693,25 @@ export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
   }
   if (httpStatus && httpStatus >= 500) return "uncertain";
   if (code === 1 || code === 2 || /unknown error|unexpected error|temporarily unavailable/.test(message)) return "uncertain";
+  // 받는 사람 계정이 삭제·비활성화됐거나, 차단·메시지 제한을 걸었거나, 댓글이 지워진
+  // 경우다. 우리 쪽에서 고칠 수 있는 오류가 아니고 다시 보내도 같은 결과다.
+  if (
+    RECIPIENT_UNAVAILABLE_SUBCODES.has(subcode) ||
+    code === 551 ||
+    /requested user cannot be found|no matching user found|user not found|(?:isn't|is not) available right now|recipient.*(?:not found|unavailable)/.test(message)
+  ) {
+    return "recipient_unavailable";
+  }
   if (code === 190 || code === 200 || code === 102 || /permission|access token|expired/.test(message)) {
     return "permission";
   }
-  if (/requested user cannot be found|no matching user found|user not found|recipient.*(?:not found|unavailable)/.test(message)) {
-    return "recipient_unavailable";
-  }
+  // 카드 이미지를 인스타그램이 받아 가지 못한 경우("Upload attachment failure",
+  // "... is not a valid URL")도 형식 문제다. 예전에는 기타 오류로 분류돼 글로 대신 보내는
+  // 안전장치가 돌지 않았다.
+  if (subcode === 2018047 || /upload attachment fail/.test(message)) return "invalid_payload";
   if (code === 100 && !/recipient|comment_id|access.token|object with id/.test(message) &&
     /message|attachment|template|payload|title|subtitle|button|element|image_url/.test(message) &&
-    /invalid|missing|must|required|expect|unsupported|exceed|too long|maximum/.test(message)) {
+    /invalid|not a valid|missing|must|required|expect|unsupported|exceed|too long|maximum/.test(message)) {
     return "invalid_payload";
   }
   return "other";
@@ -708,6 +741,10 @@ export function describeDmError(kind: DmErrorKind, raw?: string): string {
       return "발송 순서를 기다리고 있습니다. 잠시 후 이어서 진행해 주세요.";
     case "uncertain":
       return "발송 결과를 확인하지 못했습니다. 인스타그램 DM 함을 확인해 주세요.";
+    case "recipient_unavailable":
+      // 원문(코드 · 하위 코드 · 추적 번호)을 함께 남긴다. 계정 삭제와 그 밖의 사유를
+      // 가려낼 근거가 원문에만 있다.
+      return `받는 사람 계정이 메시지를 받을 수 없는 상태입니다(계정 삭제·비활성화, 차단, 댓글 삭제, 메시지 수신 제한 등). 인스타그램 쪽 사유라 다시 보내도 같은 결과가 나옵니다.${raw ? ` [${raw}]` : ""}`;
     default:
       return raw || "인스타그램에서 발송을 거부했습니다.";
   }

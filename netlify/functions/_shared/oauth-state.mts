@@ -13,13 +13,33 @@
  *   3) 1회용 nonce — 콜백에서 소비(삭제)하므로 같은 state 를 두 번 쓸 수 없다.
  *   4) 세션 결속 — state 발급은 인증된(POST) 경로에서만 하고, 발급 요청자의
  *      Supabase user id 를 서명 대상에 포함한다.
+ *   5) 브라우저 결속 — 발급한 브라우저에만 비밀값을 쿠키로 심고(state 에는 그 해시만
+ *      싣는다), 콜백에서 같은 쿠키가 있는지 본다. 서명·1회용 nonce 만으로는 "누가 이
+ *      링크를 열었는가"를 가리지 못한다 — 공격자가 자기 계정으로 연동을 시작해 받은
+ *      authorize 링크를 피해자에게 보내고 피해자가 자기 인스타그램으로 동의하면, 피해자의
+ *      토큰이 공격자 계정에 저장됐다. 링크를 받은 다른 브라우저에는 이 쿠키가 없다.
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { getStore } from '@netlify/blobs'
 
 const STATE_TTL_MS = 10 * 60 * 1000
 const NONCE_STORE = 'oauth-state'
+
+/** 브라우저 결속 쿠키 이름. 연동마다 nonce 로 이름을 나눠 두 탭에서 동시에 연동해도 서로 덮지 않는다. */
+const bindingCookieName = (nonce: string) => `picks_oauth_${nonce}`
+
+const hashBinding = (value: string) => createHash('sha256').update(value).digest('base64url')
+
+/** Cookie 요청 헤더에서 값 하나를 꺼낸다. */
+function readCookie(header: string | null | undefined, name: string): string {
+  for (const part of String(header || '').split(';')) {
+    const eq = part.indexOf('=')
+    if (eq < 0) continue
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim()
+  }
+  return ''
+}
 
 /**
  * 서명 키. 전용 키(OAUTH_STATE_SECRET)가 있으면 그걸 쓰고, 없으면 이미 두 함수 모두가
@@ -27,6 +47,18 @@ const NONCE_STORE = 'oauth-state'
  */
 function signingKey(): string | null {
   return process.env.OAUTH_STATE_SECRET || process.env.INSTAGRAM_APP_SECRET || null
+}
+
+/**
+ * 브라우저 결속을 끄는 비상 스위치. 환경 변수 `OAUTH_BROWSER_BINDING=off` 일 때만 꺼진다.
+ *
+ * 기기에 따라 동의 화면이 다른 브라우저로 넘어가 끝나는 경우가 있다(인스타그램 앱이 동의를
+ * 가져간 뒤 콜백을 기본 브라우저로 여는 경우 등). 그런 기기가 많아 연동이 막히면 코드를
+ * 고치지 않고 이 값만 바꿔 다시 배포해 연동을 살린다. 끄면 위 5) 의 방어가 빠지므로 원인을
+ * 확인한 뒤 바로 되돌린다. 서명 · 만료 · 1회용 nonce 검사는 그대로 남는다.
+ */
+function browserBindingEnforced(): boolean {
+  return String(process.env.OAUTH_BROWSER_BINDING || '').trim().toLowerCase() !== 'off'
 }
 
 const sign = (payload: string, key: string) =>
@@ -48,6 +80,8 @@ export interface StatePayload {
   n: string
   /** 만료 시각(epoch ms). */
   e: number
+  /** 발급한 브라우저에 심은 결속 값의 해시(브라우저 결속). */
+  b: string
   /**
    * 연동을 마친 뒤 돌아갈 우리 사이트 내부 경로. 없으면 콜백이 기본값을 쓴다.
    *
@@ -89,21 +123,25 @@ export function sanitizeReturnPath(raw: unknown): string {
 /**
  * 서명된 state 를 발급한다. 반드시 인증을 마친 경로에서만 호출할 것.
  * nonce 를 블롭에 기록해 콜백에서 1회만 소비되게 한다.
+ *
+ * 돌려주는 `cookie` 는 발급 응답의 Set-Cookie 로 그대로 내보내야 한다(브라우저 결속).
  */
 export async function issueSignedState(
   username: string,
   sessionUserId: string,
   returnTo?: string,
   purpose?: string,
-): Promise<{ ok: true; state: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; state: string; cookie: string } | { ok: false; error: string }> {
   const key = signingKey()
   if (!key) return { ok: false, error: 'missing_state_secret' }
 
+  const binding = randomBytes(32).toString('base64url')
   const payload: StatePayload = {
     u: username.toLowerCase().trim(),
     s: sessionUserId,
     n: randomBytes(16).toString('base64url'),
     e: Date.now() + STATE_TTL_MS,
+    b: hashBinding(binding),
   }
   const safeReturn = sanitizeReturnPath(returnTo)
   if (safeReturn) payload.r = safeReturn
@@ -120,14 +158,20 @@ export async function issueSignedState(
     return { ok: false, error: 'state_store_unavailable' }
   }
 
-  return { ok: true, state }
+  // 콜백(/api/... 아래)으로 돌아오는 최상위 이동에서만 쓰인다. 다른 사이트에서 돌아오는
+  // GET 이동이라 SameSite=Lax 여야 실린다.
+  const cookie = `${bindingCookieName(payload.n)}=${binding}; Path=/api/; Max-Age=${Math.floor(STATE_TTL_MS / 1000)}; HttpOnly; Secure; SameSite=Lax`
+
+  return { ok: true, state, cookie }
 }
 
 /**
- * state 를 검증하고 소비한다. 서명 불일치 / 만료 / 이미 사용된 nonce 는 모두 거부.
+ * state 를 검증하고 소비한다. 서명 불일치 / 만료 / 다른 브라우저 / 이미 사용된 nonce 는
+ * 모두 거부. `cookieHeader` 는 콜백 요청의 Cookie 헤더다.
  */
 export async function consumeSignedState(
   raw: string,
+  cookieHeader: string | null | undefined,
 ): Promise<{ ok: true; payload: StatePayload } | { ok: false; error: string }> {
   const key = signingKey()
   if (!key) return { ok: false, error: 'missing_state_secret' }
@@ -147,6 +191,17 @@ export async function consumeSignedState(
   }
   if (!payload?.u || !payload?.n || !payload?.e) return { ok: false, error: 'bad_state' }
   if (Date.now() > payload.e) return { ok: false, error: 'state_expired' }
+
+  // 연동을 시작한 브라우저인지. nonce 를 소비하기 전에 본다 — 링크만 받은 다른 브라우저의
+  // 시도가 본인의 연동을 못 쓰게 만들지 않도록.
+  const binding = readCookie(cookieHeader, bindingCookieName(String(payload.n)))
+  if (!binding || typeof payload.b !== 'string' || !safeEqual(hashBinding(binding), payload.b)) {
+    if (!browserBindingEnforced()) {
+      console.warn('[oauth-state] browser binding mismatch ignored (OAUTH_BROWSER_BINDING=off)')
+    } else {
+      return { ok: false, error: 'state_browser_mismatch' }
+    }
+  }
 
   // 1회용 nonce 소비 — 없으면 이미 쓴 state 이거나 우리가 발급하지 않은 것.
   try {

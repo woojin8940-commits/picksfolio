@@ -2,8 +2,14 @@ import { useEffect, useRef } from 'react';
 
 type OverlayState = { picksOverlay?: number } | null;
 
-/** 겹쳐 열린 창을 구분하기 위한 번호. 열릴 때마다 하나씩 올라간다. */
-let overlaySeq = 0;
+/**
+ * 겹쳐 열린 창을 구분하기 위한 번호. 열릴 때마다 하나씩 올라간다.
+ *
+ * 0 이 아니라 지금 시각에서 시작한다. 새로고침해도 브라우저는 히스토리 항목에 적어 둔
+ * 번호를 그대로 들고 있는데, 번호가 다시 1 부터 매겨지면 새로 연 창이 새로고침 전 항목과
+ * 같은 번호를 받는다. 그러면 뒤로가기 한 번을 "내 위의 창이 닫혔다"로 읽어 창이 닫히지 않는다.
+ */
+let overlaySeq = Date.now();
 
 /**
  * 버튼으로 닫힌 창이 방금 놓아 준 히스토리 항목.
@@ -36,10 +42,17 @@ let releasedEntry: { id: number } | null = null;
  *
  * onClose 는 ref 에 담아 둔다. 대부분 렌더마다 새로 만들어지는 화살표 함수가
  * 들어오는데, 그게 의존성에 들어가면 창이 열린 채로 항목을 다시 쌓는다.
+ *
+ * confirmClose 를 주면 뒤로가기로 닫기 전에 그 결과를 본다. 저장하지 않은 입력이 있는
+ * 편집 창이 쓴다 — 가장자리 스와이프나 앱의 뒤로 버튼은 의도하지 않게 눌리기 쉬운데,
+ * 그 한 번에 입력한 내용이 모두 사라졌다. false 면 방금 사라진 항목을 다시 쌓고 창을
+ * 그대로 둔다.
  */
-export function useCloseOnBack(open: boolean, onClose: () => void): void {
+export function useCloseOnBack(open: boolean, onClose: () => void, confirmClose?: () => boolean): void {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const confirmCloseRef = useRef(confirmClose);
+  confirmCloseRef.current = confirmClose;
 
   useEffect(() => {
     if (!open) return;
@@ -65,6 +78,10 @@ export function useCloseOnBack(open: boolean, onClose: () => void): void {
       // 창이 겹쳐 열렸을 때 뒤로가기 한 번은 맨 위 창만 닫아야 한다. 아직 내
       // 항목이 맨 위에 남아 있다면 지금 사라진 것은 내 위에 쌓인 창이다.
       if ((window.history.state as OverlayState)?.picksOverlay === id) return;
+      if (confirmCloseRef.current && !confirmCloseRef.current()) {
+        window.history.pushState({ ...(window.history.state || {}), picksOverlay: id }, '', url);
+        return;
+      }
       closedByBack = true;
       onCloseRef.current();
     };

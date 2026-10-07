@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { checkUsernameRules, normalizeUsername } from "./_shared/username-rules.mts";
+import { usernameHasBlobLeftovers } from "./_shared/username-leftovers.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -76,6 +77,12 @@ async function siteDataExists(username: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** 지워진 계정이 이 아이디에 남긴 것(페이지 · 결제 · 인스타그램 연동)이 있는지. */
+async function leftoversExist(username: string): Promise<boolean> {
+  const [page, blobs] = await Promise.all([siteDataExists(username), usernameHasBlobLeftovers(username)]);
+  return page || blobs;
+}
+
 const takenResponse = (username: string) =>
   Response.json({
     success: true,
@@ -148,7 +155,7 @@ export default async (req: Request) => {
       .then((taken) => ({ taken, failed: false }))
       .catch(() => ({ taken: false, failed: true }));
 
-    const siteDataLookup = withDeadline(siteDataExists(username), SITE_DATA_LOOKUP_TIMEOUT_MS)
+    const siteDataLookup = withDeadline(leftoversExist(username), SITE_DATA_LOOKUP_TIMEOUT_MS)
       .then((taken) => ({ taken, failed: false }))
       .catch(() => ({ taken: false, failed: true }));
 

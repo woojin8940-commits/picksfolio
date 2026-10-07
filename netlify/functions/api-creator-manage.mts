@@ -13,6 +13,11 @@ export default async (req: Request) => {
       return Response.json({ error: "Missing username" }, { status: 400 });
     }
 
+    // 비공개로 돌린 페이지의 정보(표시 이름 · 소개 · SNS · 프로필 코드)는 본인(또는
+    // 관리자)에게만 준다. 공개 페이지가 보여 주는 내용만 누구에게나 연다.
+    const hiddenFromCaller = async (isPublic: unknown) =>
+      isPublic === false && !(await requireAccountOwner(req, username)).ok;
+
     try {
       const result = await db.sql`
         SELECT username, data, profile_code, is_public, created_at, updated_at
@@ -30,6 +35,7 @@ export default async (req: Request) => {
           `;
           if (restored.length > 0) {
             const row = restored[0];
+            if (await hiddenFromCaller(row.is_public)) return Response.json({ profile: null });
             const d = row.data || {};
             return Response.json({
               profile: {
@@ -55,6 +61,7 @@ export default async (req: Request) => {
       }
 
       const row = result[0];
+      if (await hiddenFromCaller(row.is_public)) return Response.json({ profile: null });
       let d = row.data || {};
       if (!hasConnectedSiteContent(d)) {
         d = await recoverSiteDataFromBlob(db, username) || d;

@@ -1,4 +1,5 @@
 import { requireAdmin } from "./admin-auth.mts";
+import { isAssignedManager } from "./manager-auth.mts";
 import { requireSignedInUser } from "./user-auth.mts";
 
 /**
@@ -75,8 +76,10 @@ export async function resolveTimelineAccess(
     return { ok: true, username: me, authorType: "business", isManager: false };
   }
   // manager_username 이 일반 계정으로 기록된 경우(관리자 권한이 없는 운영 계정)도
-  // 자기 방은 열 수 있어야 한다.
-  if (norm(participants.manager) === me) {
+  // 자기 방은 열 수 있어야 한다. 단, 운영자가 담당자로 배정한 계정(platform_managers)일
+  // 때만이다. 담당자 아이디에는 운영 콘솔 이메일의 앞부분도 들어가는데, 이름만 보면 그
+  // 이름으로 가입한 일반 사용자가 담당자 대화방을 열고 담당자로 글을 쓸 수 있었다.
+  if (norm(participants.manager) === me && (await isAssignedManager(me))) {
     return { ok: true, username: me, authorType: "manager", isManager: false };
   }
 

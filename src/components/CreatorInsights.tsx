@@ -482,9 +482,13 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
     if (!params.get('ig_insights')) return;
     const failed = params.get('ig_error');
     setNotice(
-      failed
-        ? (isEn ? 'Instagram connection failed. Please try again.' : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.')
-        : '',
+      failed === 'state_browser_mismatch'
+        ? (isEn
+          ? 'The connection was approved in a different browser or app than the one where it started. Please try again from the same place.'
+          : '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.')
+        : failed
+          ? (isEn ? 'Instagram connection failed. Please try again.' : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.')
+          : '',
     );
     // 콜백은 방금 받은 팔로워·조회수도 함께 실어 보낸다(브랜드 매칭 화면이 카드를
     // 바로 그리는 데 쓴다). 이 화면은 자기 인사이트를 따로 불러오므로 쓰지 않고,

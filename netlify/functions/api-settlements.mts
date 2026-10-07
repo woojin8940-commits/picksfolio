@@ -138,6 +138,9 @@ export type SettlementSource = "campaign" | "proposal";
 const CAMPAIGN_PROPOSAL_PREFIX = "campaign_";
 const DERIVED_ID_PREFIX = "stl_derived_";
 
+/** 정산 항목이 가질 수 있는 상태(src/types.ts 의 SettlementStatus). */
+const SETTLEMENT_STATUSES = new Set(["scheduled", "pending", "completed"]);
+
 /** 정산 항목(또는 그 식별자)이 담당자 관리 캠페인에서 온 것인가. */
 function sourceOfProposalId(proposalId: unknown): SettlementSource {
   return String(proposalId || "").startsWith(CAMPAIGN_PROPOSAL_PREFIX) ? "campaign" : "proposal";
@@ -319,7 +322,8 @@ async function openDatabase(): Promise<any> {
 function shapeSettlement(
   row: any,
   rewardByProposalId: Map<string, { mode: string; rate: number }>,
-  brandAmountByProposalId?: Map<string, { amount: number; pending: boolean }>,
+  brandAmountByProposalId: Map<string, { amount: number; pending: boolean }> | undefined,
+  role: string,
 ): any {
   const proposalId = String(row?.proposal_id || "");
   const reward = rewardByProposalId.get(proposalId) || null;
@@ -337,8 +341,15 @@ function shapeSettlement(
    * 비즈니스 제안 협업(source = 'proposal')은 브랜드가 인플루언서에게 직접 보내는
    * 건이라 덮지 않는다 — 그 금액이 곧 브랜드가 보낼 금액이다.
    */
-  const brandAmount =
-    source === "campaign" ? brandAmountByProposalId?.get(proposalId) || null : null;
+  /*
+   * 광고비를 찾지 못했으면(DB 조회 실패 · 명단에 없는 협업) 금액을 "확인 중"으로 감춘다.
+   * 예전에는 덮을 값이 없으면 저장된 인플루언서 보수와 원천징수 메모가 그대로 브랜드
+   * 화면에 나갔다.
+   */
+  const brandView = role === "business" && source === "campaign";
+  const brandAmount = brandView
+    ? brandAmountByProposalId?.get(proposalId) || { amount: 0, pending: true }
+    : null;
 
   return {
     ...row,
@@ -408,7 +419,7 @@ export default async (req: Request) => {
       // 남아 "지웠는데 아직 있다"가 된다.
       const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements]
         .filter((s: any) => isProposalAlive(deletedIds, s?.proposal_id))
-        .map((s: any) => shapeSettlement(s, rewardByProposalId, brandAmountByProposalId));
+        .map((s: any) => shapeSettlement(s, rewardByProposalId, brandAmountByProposalId, role));
 
       /**
        * 브랜드에게는 "내가 보낸 일괄 정산금이 접수됐는가"를 함께 내려보낸다.
@@ -461,6 +472,11 @@ export default async (req: Request) => {
     }
 
     if (req.method === "POST" && role === "business") {
+      // 정산 항목을 직접 만드는 화면은 없다(담당자 도구와 협업 진행이 만든다). 본문의
+      // 인플루언서 아이디로 아무의 정산 목록에나 항목을 넣을 수 있었으므로 관리자만 쓴다.
+      if (!auth.isAdmin) {
+        return Response.json({ error: "정산 항목은 담당자만 만들 수 있습니다." }, { status: 403 });
+      }
       const body = await req.json();
       const id = `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const now = new Date().toISOString();
@@ -516,14 +532,36 @@ export default async (req: Request) => {
       const existing = existingRecords.find((s: any) => s.id === settlementId) || null;
 
       /**
-       * 대상의 출처. 명시 항목은 저장된 식별자로, 아직 저장되지 않은 파생 항목은
-       * 자기 id 로 판단한다(`stl_derived_campaign_...`).
+       * 아직 저장되지 않은 파생 정산을 고치는 경우의 바탕값.
+       *
+       * 예전에는 요청 본문만 보고 새 줄을 만들었다. 그런데 화면은 상태 하나만 보내므로
+       * (`{status:'completed'}`) 금액 0원 · 업체명 없음 · 제목 '협업 정산' 인 줄이
+       * 생기고, 그 줄이 파생 행을 덮어써서 정산 완료를 누른 순간 금액이 사라졌다.
+       * 파생 목록을 다시 만들어 같은 id 를 찾아 바탕으로 쓴다.
+       *
+       * 내 목록에도 없고 내 협업에서 나온 파생 정산도 아니면 고칠 대상이 없다. 예전에는
+       * 아무 ID 로나 새 줄을 만들고 본문의 상대방 아이디로 미러링해서, 남의 정산 목록에
+       * 항목을 넣거나 같은 ID 의 남의 항목을 덮어쓸 수 있었다.
        */
-      const targetProposalId =
-        existing?.proposal_id ||
-        (settlementId.startsWith(DERIVED_ID_PREFIX)
-          ? settlementId.slice(DERIVED_ID_PREFIX.length)
-          : body.proposal_id || "");
+      let derivedBase: any = null;
+      if (!existing) {
+        const { derived } = await loadDerivedSettlements(
+          await openDatabase(),
+          username,
+          role,
+          todayInSeoul(),
+        );
+        derivedBase = derived.find((d: any) => d.id === settlementId) || null;
+      }
+      if (!existing && !derivedBase) {
+        return Response.json({ error: "정산 항목을 찾을 수 없습니다." }, { status: 404 });
+      }
+
+      /**
+       * 대상의 출처. 명시 항목은 저장된 식별자로, 아직 저장되지 않은 파생 항목은
+       * 파생 행의 식별자로 판단한다(`campaign_...`).
+       */
+      const targetProposalId = String(existing?.proposal_id || derivedBase?.proposal_id || "");
       if (sourceOfProposalId(targetProposalId) === "campaign") {
         if (body.status !== undefined) {
           return Response.json(
@@ -546,37 +584,27 @@ export default async (req: Request) => {
         }
       }
 
-      // Influencers are limited to the status and amount fields — they cannot
-      // rewrite the schedule or other business-owned fields.
-      let patch: any;
-      if (role === "business") {
-        patch = { ...body };
-        if (patch.amount !== undefined) patch.amount = parseAmount(patch.amount);
-      } else {
-        patch = {};
-        if (body.status) patch.status = body.status;
-        if (body.amount !== undefined && body.amount !== null && body.amount !== "") {
-          patch.amount = parseAmount(body.amount);
-        }
-      }
-
       /**
-       * 아직 저장되지 않은 파생 정산을 고치는 경우의 바탕값.
-       *
-       * 예전에는 요청 본문만 보고 새 줄을 만들었다. 그런데 화면은 상태 하나만 보내므로
-       * (`{status:'completed'}`) 금액 0원 · 업체명 없음 · 제목 '협업 정산' 인 줄이
-       * 생기고, 그 줄이 파생 행을 덮어써서 정산 완료를 누른 순간 금액이 사라졌다.
-       * 파생 목록을 다시 만들어 같은 id 를 찾아 바탕으로 쓴다.
+       * 고칠 수 있는 칸만 받는다. 인플루언서는 상태와 금액, 브랜드는 여기에 일정 · 메모 ·
+       * 제목 · 업체명까지. 상대방 아이디 · 출처 · 식별자는 저장된 값을 따른다 — 예전에는
+       * 브랜드가 보낸 본문을 통째로 덮어써서, 상대방 아이디를 바꿔 이 항목을 남의 정산
+       * 목록으로 미러링할 수 있었다.
        */
-      let derivedBase: any = null;
-      if (!existing) {
-        const { derived } = await loadDerivedSettlements(
-          await openDatabase(),
-          username,
-          role,
-          todayInSeoul(),
-        );
-        derivedBase = derived.find((d: any) => d.id === settlementId) || null;
+      if (body.status !== undefined && !SETTLEMENT_STATUSES.has(String(body.status))) {
+        return Response.json({ error: "잘못된 정산 상태입니다." }, { status: 400 });
+      }
+      const patch: Record<string, unknown> = {};
+      if (body.status) patch.status = String(body.status);
+      if (body.amount !== undefined && body.amount !== null && body.amount !== "") {
+        patch.amount = parseAmount(body.amount);
+      }
+      if (role === "business") {
+        if (typeof body.scheduled_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.scheduled_date)) {
+          patch.scheduled_date = body.scheduled_date;
+        }
+        for (const field of ["memo", "title", "company_name"] as const) {
+          if (typeof body[field] === "string") patch[field] = body[field].slice(0, 500);
+        }
       }
 
       let updated: any = null;
@@ -594,20 +622,13 @@ export default async (req: Request) => {
           next[idx] = updated;
           return next;
         } else {
-          // Derived settlement being patched for the first time
+          // 파생 정산을 처음 고치는 경우. 바탕은 위에서 찾은 파생 행이다(없으면 이미 404).
+          if (!derivedBase) {
+            notFound = true;
+            return null;
+          }
           notFound = false;
-          const base = derivedBase || {
-            id: settlementId,
-            proposal_id: targetProposalId,
-            influencer_username: (body.influencer_username || (role === "influencer" ? username : "")).toLowerCase(),
-            business_username: (body.business_username || (role === "business" ? username : "")).toLowerCase(),
-            company_name: body.company_name || "",
-            title: body.title || "협업 정산",
-            amount: parseAmount(body.amount),
-            scheduled_date: body.scheduled_date || now.split("T")[0],
-            status: body.status || "scheduled",
-            memo: body.memo || "",
-          };
+          const base = derivedBase;
           updated = {
             ...base,
             id: settlementId,
@@ -626,7 +647,7 @@ export default async (req: Request) => {
         return Response.json({ error: "Not found" }, { status: 404 });
       }
 
-      // Mirror the change to the counterpart's record.
+      // 상대방 목록에도 같은 값을 남긴다. 상대방은 저장된(또는 파생된) 항목의 값이다.
       const rawCounterpart = role === "business" ? updated.influencer_username : updated.business_username;
       const counterpartUsername = rawCounterpart ? String(rawCounterpart).toLowerCase() : "";
       if (counterpartUsername) {
@@ -641,10 +662,19 @@ export default async (req: Request) => {
         });
       }
 
-      return Response.json({ success: true, settlement: updated });
+      // 브랜드에게 돌려주는 줄도 목록과 같은 규칙으로 금액을 맞춘다(인플루언서 보수를 감춘다).
+      return Response.json({
+        success: true,
+        settlement: role === "business" ? shapeSettlement(updated, new Map(), undefined, role) : updated,
+      });
     }
 
     if (req.method === "DELETE" && role === "business" && settlementId) {
+      // 지우는 화면은 없다. 브랜드 목록에 넣은 항목의 ID 로 인플루언서 목록의 같은 ID
+      // 항목까지 지울 수 있었으므로 관리자만 쓴다.
+      if (!auth.isAdmin) {
+        return Response.json({ error: "정산 항목은 담당자만 지울 수 있습니다." }, { status: 403 });
+      }
       let target: any = null;
 
       await mutateRecords(SETTLEMENTS_STORE, bizKey, (records) => {

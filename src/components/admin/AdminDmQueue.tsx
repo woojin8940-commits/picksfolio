@@ -25,7 +25,35 @@ interface Job {
   completed_at: string | null;
 }
 
+interface ActivityLog {
+  at: string;
+  kind?: string;
+  status?: string;
+  trigger?: string;
+  ruleName?: string;
+  reason?: string;
+  error?: string;
+  errorKind?: string;
+  commentId?: string;
+}
+
 const time = (value: string | null) => value ? new Date(value).toLocaleString('ko-KR') : '-';
+
+/** 실패 내역의 제목. 받는 사람 쪽 사정으로 끝난 건은 우리 쪽 실패와 구분해 보여 준다. */
+const jobTitle = (job: Job) =>
+  job.outcome === 'partial' ? '일부 발송'
+    : job.status === 'uncertain' ? '결과 확인 필요'
+      : job.error_kind === 'recipient_unavailable' ? '수신 불가(상대 계정 사유)'
+        : '실패';
+
+const LOG_STATUS: Record<string, string> = { sent: '발송', failed: '실패', skipped: '건너뜀', scheduled: '대기열', external: '외부 발송 감지' };
+const LOG_TRIGGER: Record<string, string> = {
+  bait_main: '버튼 클릭 → 본 메시지', bait_click: '버튼 클릭', bait_follow_gate: '팔로우 안내',
+  greeting: '첫 인사말', keyword: '키워드 답장', faq: '자주 묻는 질문', scheduled: '대기열 발송',
+};
+const logLabel = (log: ActivityLog) =>
+  [LOG_TRIGGER[log.trigger || ''] || (log.kind === 'reply' ? '공개 답글' : '댓글 DM'), LOG_STATUS[log.status || ''] || log.status || '']
+    .filter(Boolean).join(' · ');
 const iconButton = 'h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40';
 
 export default function AdminDmQueue({ token }: { token: string }) {
@@ -38,6 +66,8 @@ export default function AdminDmQueue({ token }: { token: string }) {
   const [jobOffset, setJobOffset] = useState(0);
   const [jobError, setJobError] = useState('');
   const [jobsLoading, setJobsLoading] = useState(false);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [logsError, setLogsError] = useState('');
   const request = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -90,6 +120,26 @@ export default function AdminDmQueue({ token }: { token: string }) {
     return () => controller.abort();
   }, [selected, jobOffset, token]);
 
+  useEffect(() => {
+    setLogs([]);
+    setLogsError('');
+    if (!selected?.username) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/admin/dm-queue?logs=${encodeURIComponent(selected.username || '')}`, {
+          headers: { Authorization: `Bearer ${token}` }, credentials: 'same-origin', signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('활동 기록을 불러오지 못했습니다.');
+        const result = await response.json();
+        if (!controller.signal.aborted) setLogs(Array.isArray(result.logs) ? result.logs : []);
+      } catch (e) {
+        if (!controller.signal.aborted) setLogsError((e as Error).message);
+      }
+    })();
+    return () => controller.abort();
+  }, [selected, token]);
+
   const now = data ? Date.parse(data.generatedAt) : Date.now();
   return (
     <section className="space-y-4 text-slate-900">
@@ -122,9 +172,15 @@ export default function AdminDmQueue({ token }: { token: string }) {
       {selected && <section className="border-t border-slate-200 pt-4 space-y-3">
         <div className="flex items-center justify-between gap-3"><h3 className="text-base font-semibold break-all">{selected.username || selected.ig_account_id} 발송 내역</h3><button type="button" title="내역 닫기" aria-label="내역 닫기" className={iconButton} onClick={() => setSelected(null)}><X size={16} /></button></div>
         {jobError && <p role="alert" className="text-sm text-red-600">{jobError}</p>}
-        <div className="divide-y divide-slate-100">{jobs.map((job) => <div key={job.id} className="py-3 text-sm space-y-1"><p className="font-semibold">{job.outcome === 'partial' ? '일부 발송' : job.status === 'uncertain' ? '결과 확인 필요' : '실패'} <span className="font-normal text-xs text-slate-500">{time(job.completed_at || job.due_at)}</span></p><p className="break-words text-slate-600">{job.last_error || job.error_kind || '-'}</p><p className="text-xs text-slate-400 break-all">{job.id}</p></div>)}</div>
+        <div className="divide-y divide-slate-100">{jobs.map((job) => <div key={job.id} className="py-3 text-sm space-y-1"><p className="font-semibold">{jobTitle(job)} <span className="font-normal text-xs text-slate-500">{time(job.completed_at || job.due_at)}</span></p><p className="break-words text-slate-600">{job.last_error || job.error_kind || '-'}</p><p className="text-xs text-slate-400 break-all">{job.id}</p></div>)}</div>
         {!jobs.length && !jobError && <p className="text-sm text-slate-500">{jobsLoading ? '불러오는 중...' : '해당 내역이 없습니다.'}</p>}
         <div className="flex items-center justify-end gap-3"><button type="button" className={iconButton} title="이전 내역" aria-label="이전 내역" disabled={jobOffset === 0 || jobsLoading} onClick={() => setJobOffset(Math.max(0, jobOffset - 50))}><ArrowLeft size={16} /></button><span className="text-sm">{jobOffset / 50 + 1}</span><button type="button" className={iconButton} title="다음 내역" aria-label="다음 내역" disabled={jobs.length < 50 || jobsLoading} onClick={() => setJobOffset(jobOffset + 50)}><ArrowRight size={16} /></button></div>
+        {selected.username && <div className="border-t border-slate-100 pt-3 space-y-2">
+          <h4 className="text-sm font-semibold">최근 활동 기록 <span className="font-normal text-xs text-slate-500">발송·건너뜀·실패와 그 이유</span></h4>
+          {logsError && <p role="alert" className="text-sm text-red-600">{logsError}</p>}
+          <div className="divide-y divide-slate-100">{logs.map((log, index) => <div key={`${log.at}-${index}`} className="py-2 text-sm space-y-0.5"><p className="font-semibold">{logLabel(log)} <span className="font-normal text-xs text-slate-500">{time(log.at)}</span></p>{log.ruleName && <p className="text-xs text-slate-500 break-all">{log.ruleName}</p>}{(log.reason || log.error) && <p className="break-words text-slate-600">{log.reason || log.error}</p>}</div>)}</div>
+          {!logs.length && !logsError && <p className="text-sm text-slate-500">기록이 없습니다.</p>}
+        </div>}
       </section>}
     </section>
   );

@@ -81,7 +81,7 @@ export default async (req: Request, _context: Context) => {
   // state 는 인증된 발급 경로(instagram-oauth-start, POST)에서만 만들어진 HMAC 서명값이다.
   // 서명·만료·1회용 nonce 를 모두 통과해야 어떤 계정에 저장할지 신뢰할 수 있다. 서명 없는
   // state 를 받아주면 임의의 사용자명으로 연동을 강제하는 CSRF 가 다시 열린다.
-  const verified = await consumeSignedState(stateRaw);
+  const verified = await consumeSignedState(stateRaw, req.headers.get("cookie"));
   if (!verified.ok) return fail(verified.error);
   username = verified.payload.u;
   if (!username) return fail("bad_state");
@@ -114,10 +114,13 @@ export default async (req: Request, _context: Context) => {
       return fail("token_exchange_failed");
     }
     const shortToken: string = shortData.access_token;
-    const userId: string = String(shortData.user_id || "");
 
     // 2) 단기 → 장기 토큰(60일)
-    let longToken = shortToken;
+    //
+    // 장기 토큰을 받지 못하면 연동을 실패로 돌려 다시 시도하게 한다. 예전에는 1시간짜리
+    // 단기 토큰을 예전 만료일과 함께 저장해서, 화면은 "연동됨"인데 한 시간 뒤부터 발송이
+    // 전부 실패했고, 만료일이 멀어 보여 자동 갱신도 건너뛰었다(단기 토큰은 갱신도 안 된다).
+    let longToken = "";
     let expiresIn = 0;
     try {
       const longRes = await fetch(
@@ -129,14 +132,21 @@ export default async (req: Request, _context: Context) => {
       if (longRes.ok && longData?.access_token) {
         longToken = longData.access_token;
         expiresIn = Number(longData.expires_in || 0);
+      } else {
+        console.error("[ig-oauth] long token exchange failed:", longData?.error?.message || longRes.status);
       }
     } catch (e) {
-      console.warn("[ig-oauth] long token exchange failed, using short token:", e);
+      console.error("[ig-oauth] long token exchange failed:", (e as Error)?.message);
     }
+    if (!longToken) return fail("token_exchange_failed");
 
-    // 3) 프로필 조회 (username)
+    // 3) 프로필 조회 (username · 웹훅이 쓰는 계정 ID)
+    //
+    // 계정 ID 는 반드시 이 조회의 user_id 여야 한다. 토큰 교환 응답의 user_id 는 앱 범위
+    // ID 라 웹훅의 계정 ID 와 달라서, 그 값으로 저장하면 댓글·메시지 이벤트가 이 계정을
+    // 찾지 못해 조용히 버려진다. 조회하지 못하면 연동을 실패로 돌려 다시 시도하게 한다.
     let igUsername = "";
-    let igUserId = userId;
+    let igUserId = "";
     try {
       const meRes = await fetch(
         `https://graph.instagram.com/me?fields=user_id,username&access_token=${encodeURIComponent(longToken)}`,
@@ -144,11 +154,14 @@ export default async (req: Request, _context: Context) => {
       const meData = (await meRes.json().catch(() => ({}))) as any;
       if (meRes.ok) {
         igUsername = String(meData?.username || "");
-        igUserId = String(meData?.user_id || userId);
+        igUserId = String(meData?.user_id || "");
+      } else {
+        console.error("[ig-oauth] profile fetch failed:", meData?.error?.message || meRes.status);
       }
     } catch (e) {
-      console.warn("[ig-oauth] profile fetch failed:", e);
+      console.error("[ig-oauth] profile fetch failed:", (e as Error)?.message);
     }
+    if (!igUserId) return fail("profile_fetch_failed");
 
     // 4) 보관함에 저장
     //
@@ -217,7 +230,10 @@ export default async (req: Request, _context: Context) => {
             return {
               ...current,
               webhookSubscribedAt: new Date().toISOString(),
-              webhookFields: WEBHOOK_FIELDS,
+              // 요청한 목록이 아니라 실제로 걸린 목록을 남긴다. 버튼 클릭(postback) 같은
+              // 필드가 거절됐는데 전체 목록으로 적어 두면, 설정 화면의 자기 수리가 이 계정을
+              // 다시 손보지 않아 버튼을 눌러도 아무 일도 일어나지 않는 상태로 남는다.
+              webhookFields: sub.fields || WEBHOOK_FIELDS,
             };
           });
         } catch (e) {

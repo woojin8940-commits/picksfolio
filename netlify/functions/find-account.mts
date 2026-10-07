@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
+import { dropVerifyToken, readVerifyToken } from "./_shared/sms-verify-token.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -18,7 +19,11 @@ function normalizeName(value: string | null | undefined): string {
 }
 
 /**
- * 이 번호가 방금 인증을 통과했는지 확인하고, 그 인증 줄의 id 를 돌려준다.
+ * 이 요청이 가져온 인증(확인값이 가리키는 줄)이 아직 쓸 수 있는지 확인하고, 그 줄의
+ * id 를 돌려준다.
+ *
+ * 인증은 번호가 아니라 확인값으로 찾는다. 번호로 찾으면 인증을 마친 사람이 아니어도
+ * 같은 창 안에서 번호와 이름을 아는 사람이면 그 인증을 쓸 수 있었다(sms-verify-token).
  *
  * 판정 기준을 verified 플래그 하나에서 세 가지로 좁혔다.
  *   - verified_at 이 채워져 있어야 한다. 이 값은 verify-sms 가 코드를 실제로 맞췄을
@@ -33,11 +38,16 @@ function normalizeName(value: string | null | undefined): string {
  *
  * 반환값이 null 이면 인증되지 않았다는 뜻이다.
  */
-async function findUsableVerification(phone: string, purposes: string[]): Promise<number | null> {
+async function findUsableVerification(
+  id: number,
+  phone: string,
+  purposes: string[],
+): Promise<number | null> {
   const db = getDatabase();
   const results = await db.sql`
     SELECT id FROM sms_verifications
-    WHERE phone = ${phone}
+    WHERE id = ${id}
+      AND phone = ${phone}
       AND purpose IN (${purposes[0]}, ${purposes[purposes.length - 1]})
       AND verified = TRUE
       AND verified_at IS NOT NULL
@@ -168,7 +178,10 @@ export default async (req: Request) => {
     const preferred: AccountType = account_type === "business" ? "business" : "user";
 
     const purposes = action === "find-id" ? ["find-id"] : ["reset-password", "find-id"];
-    const verificationId = await findUsableVerification(cleanPhone, purposes);
+    const binding = await readVerifyToken(body.verify_token);
+    const verificationId = binding && binding.phone === cleanPhone
+      ? await findUsableVerification(binding.id, cleanPhone, purposes)
+      : null;
     if (verificationId === null) {
       return Response.json({
         success: false,
@@ -239,6 +252,7 @@ export default async (req: Request) => {
       // 비밀번호가 실제로 바뀐 뒤에 인증을 소진시킨다. 같은 문자 한 통으로
       // 계정을 몇 번이고 다시 잠글 수 없게 한다.
       await consumeVerification(verificationId);
+      await dropVerifyToken(body.verify_token);
 
       return Response.json({
         success: true,

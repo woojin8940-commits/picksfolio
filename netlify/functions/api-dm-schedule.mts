@@ -54,6 +54,7 @@ interface DmSettingsPeek {
   accessToken?: string;
   igUserId?: string;
   igAccountId?: string;
+  ownerAuthUserId?: string;
 }
 
 async function readDmSettings(username: string): Promise<DmSettingsPeek | null> {
@@ -91,7 +92,9 @@ export default async (req: Request, context: Context) => {
       windowHours: DM_WINDOW_MS / 3_600_000,
       connected: Boolean(settings?.accessToken),
       masterEnabled: Boolean(settings?.enabled),
-      entitled: await dmAutomationAllowed(username, auth.userId),
+      // 관리자가 대신 열었을 때는 설정 주인의 ID 로 판정한다. 관리자 ID 를 넘기면 관리자에게
+      // 부여된 멤버십이 이 계정 것으로 옮겨 적힌다(operator-membership-grants).
+      entitled: await dmAutomationAllowed(username, auth.isAdmin ? settings?.ownerAuthUserId || null : auth.userId),
       requiredTier: DM_AUTOMATION_TIER,
     });
   }
@@ -100,7 +103,8 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  if (!(await dmAutomationAllowed(username, auth.userId))) {
+  const planOwnerId = auth.isAdmin ? (await readDmSettings(username))?.ownerAuthUserId || null : auth.userId;
+  if (!(await dmAutomationAllowed(username, planOwnerId))) {
     return Response.json(
       {
         error: DM_AUTOMATION_REQUIRED_MESSAGE,

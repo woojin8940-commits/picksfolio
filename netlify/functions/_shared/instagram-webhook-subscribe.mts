@@ -13,6 +13,12 @@
 const GRAPH_VERSION = "v21.0";
 
 /**
+ * 구독 요청 한 번에 기다리는 시간. 설정 화면을 여는 길(api-dm-automation GET)과 저장
+ * 길에서도 불리므로, 메타 응답이 늦을 때 그 시간이 그대로 화면의 로딩이 되지 않게 끊는다.
+ */
+const GRAPH_TIMEOUT_MS = 6_000;
+
+/**
  * 구독할 웹훅 필드.
  *
  * - `comments`            : 댓글 → 자동 답글·자동 DM 트리거.
@@ -83,6 +89,7 @@ async function subscribeFields(args: {
           Authorization: `Bearer ${accessToken}`,
         },
         body: new URLSearchParams({ subscribed_fields: fields }),
+        signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
       },
     );
     const data = (await res.json().catch(() => ({}))) as any;
@@ -114,11 +121,23 @@ async function readGrantedFields(args: {
   target: string;
   accessToken: string;
 }): Promise<string | null> {
+  return (await fetchSubscribedFields(args)) || null;
+}
+
+/**
+ * 지금 실제로 구독된 우리 필드 목록(`WEBHOOK_FIELDS` 순서). 하나도 없으면 빈 문자열,
+ * 읽지 못하면 null.
+ */
+async function fetchSubscribedFields(args: {
+  host: string;
+  target: string;
+  accessToken: string;
+}): Promise<string | null> {
   const { host, target, accessToken } = args;
   try {
     const res = await fetch(
       `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(target)}/subscribed_apps`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) },
     );
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || data?.error) return null;
@@ -131,11 +150,29 @@ async function readGrantedFields(args: {
         if (name) granted.add(name);
       }
     }
-    const ours = WEBHOOK_FIELDS.split(",").filter((f) => granted.has(f));
-    return ours.length > 0 ? ours.join(",") : null;
+    return WEBHOOK_FIELDS.split(",").filter((f) => granted.has(f)).join(",");
   } catch {
     return null;
   }
+}
+
+/**
+ * 계정의 실제 구독 상태를 읽는다(설정 화면의 자기 수리가 쓴다).
+ *
+ * 저장해 둔 구독 기록만 믿으면, 메타 쪽에서 구독이 풀린 계정(토큰 재발급·권한 변경,
+ * 웹훅 전달 실패가 이어져 메타가 해제한 경우)을 알아챌 방법이 없다. 빈 문자열은
+ * "구독된 필드가 하나도 없다", null 은 "읽지 못했다"이다.
+ */
+export async function readSubscribedFields(args: {
+  accessToken: string;
+  tokenSource?: string;
+  igId?: string;
+}): Promise<string | null> {
+  const { accessToken, tokenSource, igId } = args;
+  if (!accessToken) return null;
+  const host = tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
+  const target = tokenSource === "instagram_login" ? "me" : igId || "me";
+  return fetchSubscribedFields({ host, target, accessToken });
 }
 
 export async function subscribeInstagramWebhooks(args: {
@@ -197,7 +234,7 @@ export async function unsubscribeInstagramWebhooks(args: {
   try {
     const res = await fetch(
       `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(target)}/subscribed_apps`,
-      { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+      { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) },
     );
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || data?.error) {
