@@ -32,7 +32,7 @@ import { REQUIRED_SCOPES } from "./_shared/instagram-scopes.mts";
  * 보안: 예전에는 GET 으로 `?username=` 만 받아 서명 없는 state 를 만들어 곧장
  * 리다이렉트했다. 그러면 누구나 임의의 사용자명이 박힌 authorize 링크를 만들어
  * 계정 연동 CSRF 가 성립한다. 지금은 **인증된 POST** 로만 state 를 발급하고
- * (본인 계정 확인 + HMAC 서명 + 10분 TTL + 1회용 nonce), 클라이언트가 응답받은
+ * (본인 계정 확인 + HMAC 서명 + 30분 TTL + 1회용 nonce), 클라이언트가 응답받은
  * URL 로 스스로 이동한다. GET 은 더 이상 지원하지 않는다.
  */
 
@@ -103,8 +103,14 @@ export default async (req: Request, _context: Context) => {
   }
 
   const redirectUri = `${url.origin}/api/instagram/oauth/callback`;
+  // 경로 끝의 `/` 를 지우지 말 것. iOS 는 인스타그램 앱이 설치돼 있으면 instagram.com
+  // 링크를 앱으로 넘기는데, 인스타그램의 apple-app-site-association 은 `/oauth/authorize/*`
+  // 만 앱 열기에서 제외하고 나머지(`/*`)는 전부 앱으로 연다. 슬래시가 없으면 제외 규칙에
+  // 걸리지 않아 앱이 열리고, 앱은 "oauth" 를 사용자 이름으로 읽어 프로필을 불러오다
+  // "문제가 발생했습니다"로 끝난다. 슬래시가 있으면 Safari 에 남아 동의 화면이 뜬다.
+  // 두 경로 모두 인스타그램 서버에서 같은 동의 화면(/oauth/authorize/third_party/)으로 간다.
   const authorizeUrl =
-    `https://www.instagram.com/oauth/authorize` +
+    `https://www.instagram.com/oauth/authorize/` +
     `?client_id=${encodeURIComponent(appId)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&response_type=code` +

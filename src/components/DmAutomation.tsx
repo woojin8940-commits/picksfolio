@@ -2740,6 +2740,30 @@ const DmMatchPolicyNote: React.FC<{ tone?: 'slate' | 'emerald' }> = ({ tone = 's
   </ul>
 );
 
+/** 인스타그램 연동을 떠난 시각. 동의를 마치지 않고 돌아왔는지 가려내는 데 쓴다. */
+const CONNECT_PENDING_KEY = 'picks_ig_connect_pending';
+/** 연동 서명(state)의 유효 시간과 맞춘다. 이보다 오래된 기록은 다른 방문으로 본다. */
+const CONNECT_PENDING_TTL_MS = 30 * 60 * 1000;
+
+function markConnectPending() {
+  try { sessionStorage.setItem(CONNECT_PENDING_KEY, String(Date.now())); } catch { /* 사생활 보호 모드 */ }
+}
+
+function clearConnectPending() {
+  try { sessionStorage.removeItem(CONNECT_PENDING_KEY); } catch { /* 사생활 보호 모드 */ }
+}
+
+/** 남아 있던 연동 기록을 꺼내고 지운다. 유효 시간 안이면 true. */
+function takeConnectPending(): boolean {
+  try {
+    const at = Number(sessionStorage.getItem(CONNECT_PENDING_KEY) || 0);
+    sessionStorage.removeItem(CONNECT_PENDING_KEY);
+    return at > 0 && Date.now() - at < CONNECT_PENDING_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = false }) => {
   const { t } = useLanguage();
   const cachedSettings = useMemo(() => readJson<DmAutomationSettings>(dmSettingsCacheKey(userName)), [userName]);
@@ -3036,6 +3060,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       load();
       return;
     }
+    if (params.get('ig_connected') || params.get('ig_error')) clearConnectPending();
     if (params.get('ig_connected')) {
       setBanner({ type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' });
       // 연동 직후 바로 연동된 화면을 보여주고, 최신 정보를 다시 불러온다.
@@ -3047,6 +3072,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         type: 'err',
         text: params.get('ig_error') === 'state_browser_mismatch'
           ? '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.'
+          : params.get('ig_error') === 'state_expired' || params.get('ig_error') === 'state_used'
+            ? '연동 시간이 지나 연동하지 않았어요. 연동하기를 다시 눌러 처음부터 진행해 주세요.'
+          : ['access_denied', 'user_denied'].includes(params.get('ig_error') || '')
+            ? '인스타그램 동의 화면에서 취소해 연동하지 않았어요. 다시 연동하면서 마지막 화면의 "허용"까지 눌러 주세요.'
           : params.get('ig_error') === 'missing_permissions'
             ? '인스타그램 동의 화면에서 일부 권한이 꺼진 채로 진행돼 연동하지 않았어요. 다시 연동하면서 메시지·댓글 관리 등 모든 항목을 허용해 주세요.'
             : params.get('ig_error') === 'permissions_unverified'
@@ -3116,13 +3145,40 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   const connect = async () => {
     // 연동은 기능을 가리지 않는다. 여기서 계정을 붙이면 자동 디엠 · 인사이트 ·
     // 브랜드 매칭받기가 함께 살아난다(서버가 꺼 둔 기능 표시를 지운다).
-    const result = await apiService.instagramConnectUrl(userName);
+    // 동의를 마치면 연동을 시작한 화면으로 돌아온다. 콜백의 기본 복귀 경로(/admin)는
+    // 인플루언서 대시보드라, 브랜드(/business-admin)가 거기로 떨어지면 자동 DM 화면이
+    // 아닌 곳에서 연동 결과를 잃는다.
+    const result = await apiService.instagramConnectUrl(
+      userName,
+      isBusiness ? '/business-admin?tab=dm' : undefined,
+    );
     if (!result.url) {
       setBanner({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
       return;
     }
+    markConnectPending();
     window.location.href = result.url;
   };
+
+  // 인스타그램 웹 로그인·동의를 끝내지 않고 돌아온 경우(뒤로 가기, 창 닫고 다시 열기).
+  // 콜백을 거치지 않았으니 ?ig_connected/?ig_error 가 없고, 화면은 아무 일도 없었던 것처럼
+  // 보인다. "허용"까지 눌러야 픽스폴리오로 돌아온다는 걸 알려 다시 시도하게 한다.
+  // 뒤로 가기는 페이지를 새로 그리지 않고 bfcache 에서 되살릴 수 있어 pageshow 도 본다.
+  useEffect(() => {
+    const check = () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('ig_connected') || params.get('ig_error') || params.get('collab_match')) return;
+      if (!takeConnectPending()) return;
+      setBanner({
+        type: 'err',
+        text: '인스타그램 연동이 끝나지 않았어요. 인스타그램에 로그인한 뒤 마지막 화면에서 "허용"을 눌러야 픽스폴리오로 돌아와 연동이 완료돼요. 다시 연동해 주세요.',
+      });
+    };
+    check();
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) check(); };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
 
   const disconnect = async () => {
     // 해제는 토큰을 지우지 않고 기능 표시만 끈다. 그래서 무엇이 멈추고 무엇이
@@ -3540,6 +3596,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
               <ChevronRight size={18} />
             </button>
             <p className="text-white/60 text-[11px] font-medium mt-3">
+              인스타그램 웹 로그인 화면이 열려요. 연동할 계정의 아이디·비밀번호로 로그인한 뒤 모든 권한을 허용해 주세요.
+              <br />
               연동 시 DM·댓글 관리 권한이 필요하며, 언제든지 해제할 수 있어요.
             </p>
           </div>
