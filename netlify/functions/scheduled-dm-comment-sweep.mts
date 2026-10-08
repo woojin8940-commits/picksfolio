@@ -4,6 +4,8 @@ import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { enqueueCommentEvents, type QueuedComment } from "./_shared/dm-jobs.mts";
 import { graphHostFor, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { getSupabaseServer } from "./_shared/supabase.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { randomUUID } from "node:crypto";
 
 /**
  * 웹훅으로 오지 않은 댓글을 직접 찾아 자동 DM 대기열에 넣는다.
@@ -24,9 +26,9 @@ import { getSupabaseServer } from "./_shared/supabase.mts";
  *  - 지난번에 본 시점 이후의 댓글만 읽는다(보통 첫 페이지 한 번이면 끝난다).
  *  - 여러 계정을 동시에 본다.
  *
- * 처음 보는 게시물(이 작업이 배포된 직후, 또는 자동화에 새로 추가된 게시물)은 그 시점을
- * 기준으로만 기록하고 기존 댓글에는 보내지 않는다. 지난 댓글에 뒤늦게 DM 을 몰아 보내지
- * 않고, 기준 이후에 달린 새 댓글만 챙긴다. 기준을 잡은 뒤 한동안은 매분 본다 — 웹훅이
+ * 처음 보는 게시물은 자동화 생성 시각 이후의 최근 댓글부터 확인한다. 자동화 생성 전의
+ * 댓글은 제외하고, 이미 대기열에 있는 댓글은 다시 등록하지 않는다. 확인을 시작한 뒤
+ * 한동안은 매분 본다 — 웹훅이
  * 오지 않는 게시물을 10분 간격까지 기다리지 않고 바로 찾아내기 위해서다.
  * 게시물별 확인 기록은 계정마다 블롭 하나(`acct_<IG ID>`)에 남긴다.
  */
@@ -60,14 +62,35 @@ const OVERLAP_MS = 3 * 60 * 1000;
 const MISS_GRACE_MS = 2 * 60 * 1000;
 /** 동시에 확인하는 계정 수. */
 const CONCURRENCY = 8;
+const INVENTORY_REFRESH_MS = 10 * 60 * 1000;
+const LEASE_MS = 90_000;
 
 const STATE_STORE = "dm-comment-sweep";
 
-type MediaState = { checkedAt?: number; missedAt?: number; probeUntil?: number; baselineAt?: number };
+type MediaState = {
+  checkedAt?: number;
+  missedAt?: number;
+  probeUntil?: number;
+  baselineAt?: number;
+  after?: string;
+  scanFrom?: number;
+  scanAt?: number;
+};
 type SweepState = {
+  version?: number;
   media?: Record<string, MediaState>;
   recent?: { ids: string[]; at: number };
   allowedAt?: number;
+  nextMedia?: string;
+};
+type SchedulerState = {
+  keys?: string[];
+  refreshedAt?: number;
+  refreshVersion?: number;
+  cachedVersion?: number;
+  lastKey?: string;
+  owner?: string;
+  leaseUntil?: number;
 };
 
 type Rule = {
@@ -125,11 +148,12 @@ async function targetMedia(
     }
     state.recent.ids.forEach((id) => ids.add(id));
   }
-  return [...ids].slice(0, MAX_MEDIA_PER_ACCOUNT);
+  return [...ids];
 }
 
 /** 이번 실행에서 이 게시물을 볼 차례인지. 처음 보는 게시물은 바로 기준을 잡는다. */
 function mediaDue(media: MediaState | undefined, now: number): boolean {
+  if (media?.scanAt) return true;
   if (!media?.checkedAt) return true;
   if (media.missedAt && now - media.missedAt < SILENT_HOLD_MS) return true;
   if (media.probeUntil && now < media.probeUntil) return true;
@@ -159,7 +183,13 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
 
   const stateStore = getStore({ name: STATE_STORE, consistency: "strong" });
   const stateKey = `acct_${igId}`;
-  const state = ((await stateStore.get(stateKey, { type: "json" }).catch(() => null)) || {}) as SweepState;
+  const snapshot = await stateStore.getWithMetadata(stateKey, { type: "json" });
+  const state = (snapshot?.data || {}) as SweepState;
+  if (state.version !== 2) {
+    state.media = {};
+    delete state.nextMedia;
+    state.version = 2;
+  }
   const now = Date.now();
   // 자격은 발송 직전에 처리기가 다시 확인하므로 여기서는 10분에 한 번만 본다.
   if (!state.allowedAt || now - state.allowedAt >= ACCOUNT_REFRESH_MS) {
@@ -170,34 +200,39 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
   const host = graphHostFor(settings.tokenSource);
   const ownName = String(settings.igUsername || "").toLowerCase();
   // 자동화를 만들기 전에 달린 댓글에는 보내지 않는다(웹훅도 그런 댓글은 받지 않는다).
-  const earliestRule = Math.min(
-    ...rules.map((rule) => {
-      const ms = Date.parse(rule.createdAt || "");
-      return Number.isNaN(ms) ? 0 : ms;
-    }),
-  );
-  const since = Math.max(Date.now() - LOOKBACK_MS, earliestRule);
-
   const targets = await targetMedia(host, igId, token, rules, state, deadline);
   const mediaState: Record<string, MediaState> = {};
   for (const id of targets) mediaState[id] = state.media?.[id] || {};
+  const start = Math.max(0, targets.indexOf(state.nextMedia || ""));
+  const ordered = [...targets.slice(start), ...targets.slice(0, start)].slice(0, MAX_MEDIA_PER_ACCOUNT);
 
   const events: QueuedComment[] = [];
-  for (const mediaId of targets) {
+  let pagesRead = 0;
+  for (const mediaId of ordered) {
+    if (Date.now() >= deadline || pagesRead >= MAX_COMMENT_PAGES) break;
     const media = mediaState[mediaId];
+    state.nextMedia = targets[(targets.indexOf(mediaId) + 1) % targets.length];
     if (!mediaDue(media, now)) continue;
-    if (!media.checkedAt) {
-      // 처음 보는 게시물 — 기존 댓글은 건드리지 않고 지금을 기준으로 삼는다.
-      media.checkedAt = now;
-      media.baselineAt = now;
+    const created = rules
+      .filter((rule) => rule.mediaScope !== "selected" || rule.mediaIds?.includes(mediaId))
+      .map((rule) => Date.parse(rule.createdAt || ""))
+      .filter(Number.isFinite);
+    const since = Math.max(now - LOOKBACK_MS, created.length ? Math.min(...created) : media.baselineAt || now);
+    if (media.baselineAt === undefined) {
+      // 처음 보는 게시물 — 자동화 생성 시각 이후의 최근 댓글부터 확인한다.
+      media.baselineAt = since;
       media.probeUntil = now + PROBE_MS;
-      continue;
     }
     // 기준 시각보다 앞선 댓글은 겹쳐 읽는 구간에 들어와도 보내지 않는다.
-    const from = Math.max(since, media.baselineAt || 0, media.checkedAt - OVERLAP_MS);
+    if (media.scanAt === undefined) {
+      media.scanAt = now;
+      media.scanFrom = Math.max(since, (media.checkedAt ?? since) - OVERLAP_MS);
+      media.after = "";
+    }
+    const from = Math.max(now - LOOKBACK_MS, media.scanFrom ?? since);
     let complete = false;
-    let after = "";
-    for (let pages = 0; pages < MAX_COMMENT_PAGES && Date.now() < deadline; pages++) {
+    let after = media.after || "";
+    while (pagesRead < MAX_COMMENT_PAGES && Date.now() < deadline) {
       const params = new URLSearchParams({ fields: "id,text,from,username,timestamp", limit: "50" });
       if (after) params.set("after", after);
       const page = await graphGet(host, `${encodeURIComponent(mediaId)}/comments`, token, params, deadline)
@@ -205,18 +240,18 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
           console.warn("[dm-sweep] comments read failed:", (e as Error)?.message);
           return null;
         });
-      if (!page) break;
-      let reachedOld = false;
+      if (!page) {
+        media.after = "";
+        break;
+      }
+      pagesRead += 1;
       for (const comment of page.data) {
         const commentId = String(comment?.id || "");
         const commentAt = Date.parse(String(comment?.timestamp || ""));
         const authorId = String(comment?.from?.id || "");
         const authorName = String(comment?.from?.username || comment?.username || "");
         if (!commentId || Number.isNaN(commentAt)) continue;
-        if (commentAt < from) {
-          reachedOld = true;
-          continue;
-        }
+        if (commentAt < from || commentAt > now) continue;
         // 방금 달린 댓글도 바로 넣는다. 웹훅과 동시에 들어와도 작업 ID 가 같아 한 번만 처리된다.
         if (authorId === igId || (ownName && authorName.toLowerCase() === ownName)) continue;
         events.push({
@@ -235,51 +270,88 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
         });
       }
       const next = page?.paging?.next ? String(page?.paging?.cursors?.after || "") : "";
-      if (reachedOld || !next || next === after) {
+      if (!next) {
         complete = true;
         break;
       }
+      if (next === after) {
+        media.after = "";
+        break;
+      }
       after = next;
+      media.after = after;
     }
-    // 끝까지 못 읽었으면 확인 시각을 남기지 않는다 — 다음 실행이 같은 구간부터 다시 읽는다.
-    if (complete) media.checkedAt = now;
+    // 끝까지 못 읽었으면 확인 시각을 남기지 않는다 — 다음 실행이 저장된 페이지부터 이어 읽는다.
+    if (complete) {
+      media.checkedAt = media.scanAt;
+      delete media.after;
+      delete media.scanFrom;
+      delete media.scanAt;
+    }
     if (Date.now() >= deadline) break;
   }
 
   const missed = events.length > 0 ? await notYetQueued(events) : [];
   for (const event of missed) {
-    if (Number(event.entryTime) * 1000 > now - MISS_GRACE_MS) continue;
     const media = mediaState[String(event.change.value.media.id)];
-    if (media) media.missedAt = now;
+    if (!media) continue;
+    if (Number(event.entryTime) * 1000 <= now - MISS_GRACE_MS) media.missedAt = now;
+    else media.probeUntil = Math.max(media.probeUntil || 0, now + PROBE_MS);
   }
   if (missed.length > 0) await enqueueCommentEvents(missed);
 
   // 자동화에서 빠진 게시물의 기록은 버린다.
-  await stateStore.setJSON(stateKey, { ...state, media: mediaState });
+  await stateStore.set(stateKey, JSON.stringify({ ...state, media: mediaState }),
+    snapshot?.etag ? { onlyIfMatch: snapshot.etag } : { onlyIfNew: true });
   return missed.length;
 }
 
 export default async () => {
   const deadline = Date.now() + RUN_BUDGET_MS;
+  const owner = randomUUID();
+  const acquired = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) => {
+    if ((current?.leaseUntil || 0) > Date.now()) return null;
+    return { ...current, owner, leaseUntil: Date.now() + LEASE_MS };
+  });
+  if (acquired?.owner !== owner) return;
   const store = getStore({ name: "dm-automation", consistency: "strong" });
-  const { blobs } = await store.list({ prefix: "dm_" });
-  // 시간이 모자라 뒤쪽 계정이 매번 밀리지 않도록 순서를 섞는다.
-  const keys = blobs.map((blob) => blob.key).sort(() => Math.random() - 0.5);
-
-  let next = 0;
-  const worker = async () => {
-    while (next < keys.length && Date.now() < deadline) {
-      const key = keys[next++];
-      try {
-        const settings = await store.get(key, { type: "json" }) as Settings | null;
-        if (!settings) continue;
-        await sweepAccount(key.slice(3), settings, deadline);
-      } catch (e) {
-        console.warn("[dm-sweep] account sweep failed:", (e as Error)?.message);
+  try {
+    let keys = acquired.keys || [];
+    if (!acquired.refreshedAt || acquired.cachedVersion !== acquired.refreshVersion ||
+      Date.now() - acquired.refreshedAt >= INVENTORY_REFRESH_MS) {
+      const cachedVersion = acquired.refreshVersion;
+      const inventory: string[] = [];
+      for await (const page of store.list({ prefix: "dm_", paginate: true })) {
+        inventory.push(...page.blobs.map((blob) => blob.key));
+        if (Date.now() >= deadline) return;
       }
+      keys = [...new Set(inventory)].sort();
+      await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
+        current?.owner === owner ? { ...current, keys, refreshedAt: Date.now(), cachedVersion } : null);
     }
-  };
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    const start = acquired.lastKey ? keys.findIndex((key) => key > acquired.lastKey!) : 0;
+    const offset = start < 0 ? 0 : start;
+    // 시간이 모자라 뒤쪽 계정이 매번 밀리지 않도록 마지막 확인 위치부터 순회한다.
+    const ordered = [...keys.slice(offset), ...keys.slice(0, offset)];
+    for (let next = 0; next < ordered.length && Date.now() < deadline; next += CONCURRENCY) {
+      const batch = ordered.slice(next, next + CONCURRENCY);
+      const checkpoint = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
+        current?.owner === owner && (current.leaseUntil || 0) > Date.now()
+          ? { ...current, lastKey: batch[batch.length - 1] } : null);
+      if (checkpoint?.owner !== owner || (checkpoint.leaseUntil || 0) <= Date.now()) return;
+      await Promise.all(batch.map(async (key) => {
+        try {
+          const settings = await store.get(key, { type: "json" }) as Settings | null;
+          if (settings && Date.now() < deadline) await sweepAccount(key.slice(3), settings, deadline);
+        } catch (e) {
+          console.warn("[dm-sweep] account sweep failed:", (e as Error)?.message);
+        }
+      }));
+    }
+  } finally {
+    await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
+      current?.owner === owner ? { ...current, owner: "", leaseUntil: 0 } : null);
+  }
 };
 
 export const config: Config = { schedule: "* * * * *" };
