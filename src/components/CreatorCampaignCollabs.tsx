@@ -310,6 +310,10 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
           ? isEn
             ? "Some permissions were turned off on Instagram's consent screen, so the account wasn't connected. Please connect again and allow every item, including messages and comments."
             : '인스타그램 동의 화면에서 일부 권한이 꺼진 채로 진행돼 연동하지 않았어요. 다시 연동하면서 메시지·댓글 관리 등 모든 항목을 허용해 주세요.'
+        : failed === 'permissions_unverified'
+          ? isEn
+            ? 'Instagram did not provide a verifiable permission list. Please try connecting again shortly.'
+            : '인스타그램에서 허용 권한을 확인하지 못했습니다. 잠시 후 다시 연동해 주세요.'
         : failed
           ? isEn
             ? 'Instagram connection failed. Please try again.'

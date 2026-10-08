@@ -2,7 +2,7 @@ import type { Config, Context } from "@netlify/functions";
 import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
 import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
-import { REQUIRED_SCOPES } from "./_shared/instagram-scopes.mts";
+import { REQUIRED_SCOPES, parseInstagramTokenResponse } from "./_shared/instagram-scopes.mts";
 import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
 import { warmFeedCache } from "./_shared/instagram-feed.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
@@ -110,11 +110,11 @@ export default async (req: Request, _context: Context) => {
       }),
     });
     const shortData = (await shortRes.json().catch(() => ({}))) as any;
-    if (!shortRes.ok || !shortData?.access_token) {
-      console.error("[ig-oauth] short token error:", shortData);
+    const { token: shortToken, permissions: granted } = parseInstagramTokenResponse(shortData);
+    if (!shortRes.ok || !shortToken) {
+      console.error("[ig-oauth] short token error:", shortData?.error?.message || shortRes.status);
       return fail("token_exchange_failed");
     }
-    const shortToken: string = shortData.access_token;
 
     // 동의 화면에서 사용자가 일부 권한을 끄고 진행할 수 있다. 그래도 토큰은 발급되고
     // 기본 정보·댓글 읽기는 되기 때문에 "연동됨"으로 보이지만, DM·댓글 답글·인사이트가
@@ -122,19 +122,12 @@ export default async (req: Request, _context: Context) => {
     // 계정에서 "자동 DM 이 안 된다"는 문의가 들어왔다. 응답에 허용된 권한 목록이 있으면
     // 확인해서, 빠진 것이 있으면 연동하지 않고 다시 모두 허용하도록 안내한다.
     // 문서에는 `data` 배열로 감싼 예시와 평평한 응답이 함께 나오고, 목록도 배열 또는
-    // 쉼표 문자열로 온다. 어느 쪽이든 읽는다. 목록이 아예 없으면 막지 않는다.
-    const rawPermissions = shortData.permissions ?? shortData.data?.[0]?.permissions;
-    const granted = Array.isArray(rawPermissions)
-      ? rawPermissions.map((p: unknown) => String(p).trim())
-      : typeof rawPermissions === "string"
-        ? rawPermissions.split(",").map((p: string) => p.trim())
-        : null;
-    if (granted) {
-      const missing = REQUIRED_SCOPES.filter((scope) => !granted.includes(scope));
-      if (missing.length > 0) {
-        console.warn("[ig-oauth] permissions declined:", missing.join(","));
-        return fail("missing_permissions");
-      }
+    // 쉼표 문자열로 온다. 어느 쪽이든 읽는다. 목록이 없으면 권한 확인 실패로 안내한다.
+    if (granted === null) return fail("permissions_unverified");
+    const missing = REQUIRED_SCOPES.filter((scope) => !granted.includes(scope));
+    if (missing.length > 0) {
+      console.warn("[ig-oauth] permissions declined:", missing.join(","));
+      return fail("missing_permissions");
     }
 
     // 2) 단기 → 장기 토큰(60일)
@@ -214,6 +207,11 @@ export default async (req: Request, _context: Context) => {
       delete (next as any).featuresOff;
       return next;
     });
+    if (!isCollab) {
+      await mutateBlobJSON<{ refreshVersion?: number }>("dm-comment-sweep", "scheduler", (current) =>
+        current ? { ...current, refreshVersion: (current.refreshVersion || 0) + 1 } : null)
+        .catch(() => null);
+    }
     // 끊어 뒀던 기능을 전부 되살린다. 어느 화면에서 시작한 연동인지는 보지 않는다.
     //
     // 연동 화면에서 사람이 하는 일은 "이 계정을 붙인다" 하나다. 그런데 예전에는
