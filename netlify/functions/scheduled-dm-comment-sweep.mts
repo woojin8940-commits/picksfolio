@@ -23,6 +23,11 @@ import { getSupabaseServer } from "./_shared/supabase.mts";
  *    대부분이라, 이런 게시물은 10분에 한 번 안전망으로만 본다.
  *  - 지난번에 본 시점 이후의 댓글만 읽는다(보통 첫 페이지 한 번이면 끝난다).
  *  - 여러 계정을 동시에 본다.
+ *
+ * 처음 보는 게시물(이 작업이 배포된 직후, 또는 자동화에 새로 추가된 게시물)은 그 시점을
+ * 기준으로만 기록하고 기존 댓글에는 보내지 않는다. 지난 댓글에 뒤늦게 DM 을 몰아 보내지
+ * 않고, 기준 이후에 달린 새 댓글만 챙긴다. 기준을 잡은 뒤 한동안은 매분 본다 — 웹훅이
+ * 오지 않는 게시물을 10분 간격까지 기다리지 않고 바로 찾아내기 위해서다.
  * 게시물별 확인 기록은 계정마다 블롭 하나(`acct_<IG ID>`)에 남긴다.
  */
 
@@ -38,6 +43,8 @@ const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const RECENT_MEDIA = 6;
 const MAX_MEDIA_PER_ACCOUNT = 20;
 const MAX_COMMENT_PAGES = 4;
+/** 처음 기준을 잡은 게시물을 매분 보는 기간. 그 사이 누락이 없으면 10분 간격으로 바뀐다. */
+const PROBE_MS = 30 * 60 * 1000;
 /** 웹훅이 잘 오는 게시물을 안전망으로 다시 보는 간격. */
 const HEALTHY_INTERVAL_MS = 10 * 60 * 1000;
 /** 웹훅이 댓글을 빠뜨린 게시물은 이 시간 동안 매분 본다. 그 뒤로도 빠지면 다시 연장된다. */
@@ -56,7 +63,7 @@ const CONCURRENCY = 8;
 
 const STATE_STORE = "dm-comment-sweep";
 
-type MediaState = { checkedAt?: number; missedAt?: number };
+type MediaState = { checkedAt?: number; missedAt?: number; probeUntil?: number; baselineAt?: number };
 type SweepState = {
   media?: Record<string, MediaState>;
   recent?: { ids: string[]; at: number };
@@ -121,10 +128,11 @@ async function targetMedia(
   return [...ids].slice(0, MAX_MEDIA_PER_ACCOUNT);
 }
 
-/** 이번 실행에서 이 게시물을 볼 차례인지. 처음 보는 게시물은 바로 본다. */
+/** 이번 실행에서 이 게시물을 볼 차례인지. 처음 보는 게시물은 바로 기준을 잡는다. */
 function mediaDue(media: MediaState | undefined, now: number): boolean {
   if (!media?.checkedAt) return true;
   if (media.missedAt && now - media.missedAt < SILENT_HOLD_MS) return true;
+  if (media.probeUntil && now < media.probeUntil) return true;
   return now - media.checkedAt >= HEALTHY_INTERVAL_MS;
 }
 
@@ -178,7 +186,15 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
   for (const mediaId of targets) {
     const media = mediaState[mediaId];
     if (!mediaDue(media, now)) continue;
-    const from = Math.max(since, media.checkedAt ? media.checkedAt - OVERLAP_MS : 0);
+    if (!media.checkedAt) {
+      // 처음 보는 게시물 — 기존 댓글은 건드리지 않고 지금을 기준으로 삼는다.
+      media.checkedAt = now;
+      media.baselineAt = now;
+      media.probeUntil = now + PROBE_MS;
+      continue;
+    }
+    // 기준 시각보다 앞선 댓글은 겹쳐 읽는 구간에 들어와도 보내지 않는다.
+    const from = Math.max(since, media.baselineAt || 0, media.checkedAt - OVERLAP_MS);
     let complete = false;
     let after = "";
     for (let pages = 0; pages < MAX_COMMENT_PAGES && Date.now() < deadline; pages++) {
