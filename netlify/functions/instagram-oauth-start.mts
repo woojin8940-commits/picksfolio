@@ -1,6 +1,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
+import { REQUIRED_SCOPES } from "./_shared/instagram-scopes.mts";
 
 /**
  * 인스타그램 계정 연동 시작 (OAuth authorize URL 발급).
@@ -52,12 +53,7 @@ import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts"
  * 갱신으로도 범위는 늘어나지 않는다. 그 계정들은 사람이 이 동의 화면을 한 번 더
  * 지나야 한다(인사이트 화면이 그 경우를 감지해 재연동을 권한다).
  */
-const SCOPES = [
-  "instagram_business_basic",
-  "instagram_business_manage_messages",
-  "instagram_business_manage_comments",
-  "instagram_business_manage_insights",
-].join(",");
+const SCOPES = REQUIRED_SCOPES.join(",");
 
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);

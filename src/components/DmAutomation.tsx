@@ -3047,7 +3047,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         type: 'err',
         text: params.get('ig_error') === 'state_browser_mismatch'
           ? '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.'
-          : '연동에 실패했어요. 잠시 후 다시 시도해주세요.',
+          : params.get('ig_error') === 'missing_permissions'
+            ? '인스타그램 동의 화면에서 일부 권한이 꺼진 채로 진행돼 연동하지 않았어요. 다시 연동하면서 메시지·댓글 관리 등 모든 항목을 허용해 주세요.'
+            : '연동에 실패했어요. 잠시 후 다시 시도해주세요.',
       });
       params.delete('ig_error');
     } else return;

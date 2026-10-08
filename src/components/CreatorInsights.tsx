@@ -486,6 +486,10 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
         ? (isEn
           ? 'The connection was approved in a different browser or app than the one where it started. Please try again from the same place.'
           : '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.')
+        : failed === 'missing_permissions'
+          ? (isEn
+            ? "Some permissions were turned off on Instagram's consent screen, so the account wasn't connected. Please connect again and allow every item, including messages and comments."
+            : '인스타그램 동의 화면에서 일부 권한이 꺼진 채로 진행돼 연동하지 않았어요. 다시 연동하면서 메시지·댓글 관리 등 모든 항목을 허용해 주세요.')
         : failed
           ? (isEn ? 'Instagram connection failed. Please try again.' : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.')
           : '',

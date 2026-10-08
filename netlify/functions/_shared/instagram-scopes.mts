@@ -1,0 +1,11 @@
+/**
+ * 인스타그램 연동(Instagram API with Instagram Login) 동의 화면에서 요청하는 권한.
+ * 연동 시작(instagram-oauth-start)이 요청하고, 콜백이 모두 허용됐는지 확인한다.
+ * 각 권한의 쓰임새는 instagram-oauth-start 의 설명을 본다.
+ */
+export const REQUIRED_SCOPES = [
+  "instagram_business_basic",
+  "instagram_business_manage_messages",
+  "instagram_business_manage_comments",
+  "instagram_business_manage_insights",
+] as const;
