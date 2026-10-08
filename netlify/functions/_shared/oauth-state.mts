@@ -9,7 +9,7 @@
  *
  * 방어:
  *   1) HMAC-SHA256 서명 — 서버만 state 를 만들 수 있다.
- *   2) TTL(10분) — 유출된 state 의 재사용 창을 좁힌다.
+ *   2) TTL(30분) — 유출된 state 의 재사용 창을 좁힌다.
  *   3) 1회용 nonce — 콜백에서 소비(삭제)하므로 같은 state 를 두 번 쓸 수 없다.
  *   4) 세션 결속 — state 발급은 인증된(POST) 경로에서만 하고, 발급 요청자의
  *      Supabase user id 를 서명 대상에 포함한다.
@@ -23,7 +23,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { getStore } from '@netlify/blobs'
 
-const STATE_TTL_MS = 10 * 60 * 1000
+// 인스타그램 웹 로그인(2단계 인증·비밀번호 찾기 포함)을 거쳐 돌아올 시간을 넉넉히 준다.
+// 1회용 nonce 와 브라우저 결속은 그대로라 길어져도 재사용·탈취 위험은 늘지 않는다.
+const STATE_TTL_MS = 30 * 60 * 1000
 const NONCE_STORE = 'oauth-state'
 
 /** 브라우저 결속 쿠키 이름. 연동마다 nonce 로 이름을 나눠 두 탭에서 동시에 연동해도 서로 덮지 않는다. */
