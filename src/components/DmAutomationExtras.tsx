@@ -108,7 +108,7 @@ const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).sl
 
 export const DM_SEND_SPEED_MIN = 50;
 export const DM_SEND_SPEED_MAX = 700;
-export const DM_SEND_SPEED_DEFAULT = 400;
+export const DM_SEND_SPEED_DEFAULT = 500;
 
 /** 시간당 발송량 구간 — 안전 / 기본(권장) / 주의. */
 const speedTier = (v: number) =>

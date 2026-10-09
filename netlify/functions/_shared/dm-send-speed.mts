@@ -8,7 +8,7 @@ import { getStore } from "@netlify/blobs";
  * 0.4초), 지난 한 시간 동안 고른 발송량에 닿으면 남은 발송은 대기열에 남아
  * 한도에 여유가 생기는 대로 들어온 순서대로 나간다.
  *
- *  · 안전 50~200건 · 기본 201~500건 · 주의 501~700건 (기본값 400건)
+ *  · 안전 50~200건 · 기본 201~500건 · 주의 501~700건 (기본값 500건)
  *
  * 설정 문서(dm-automation)는 사용자명으로 저장되지만 발송기는 인스타그램 계정 ID 만
  * 안다. 그래서 값을 계정 ID 별로 한 번 더 적어 두고, 발송기는 그쪽을 읽는다.
@@ -16,7 +16,7 @@ import { getStore } from "@netlify/blobs";
 
 export const DM_SEND_SPEED_MIN = 50;
 export const DM_SEND_SPEED_MAX = 700;
-export const DM_SEND_SPEED_DEFAULT = 400;
+export const DM_SEND_SPEED_DEFAULT = 500;
 
 const STORE_NAME = "dm-send-speed";
 /** 바꾼 값이 곧바로 반영되도록 짧게만 기억한다. */
