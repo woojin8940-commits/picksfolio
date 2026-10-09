@@ -99,13 +99,39 @@ const HANDLE_HOME: Record<DefaultButtonKey, (handle: string) => string> = {
 
 /**
  * 메일 버튼 주소. 주소창에 적는 것은 메일 주소 하나뿐이라, 앞에 mailto: 를 붙여
- * 누르면 메일 앱이 받는 사람이 채워진 채로 열리게 한다. 이미 mailto: 로 적었으면
- * 그대로 둔다. @ 가 없으면 메일 주소가 아니므로 버튼을 그리지 않는다.
+ * 둔다. 이미 mailto: 로 적었으면 그대로 둔다. @ 가 없으면 메일 주소가 아니므로
+ * 버튼을 그리지 않는다.
+ *
+ * "메일: me@naver.com" 처럼 앞뒤에 글자를 붙여 적은 값도 있어서, 메일 주소 꼴인
+ * 부분만 골라 낸다 — 통째로 붙이면 "mailto:메일: me@naver.com" 이 되어 복사해도
+ * 쓸 수 없는 주소가 된다.
  */
 const normalizeMailUrl = (value: string): string => {
   const address = value.replace(/^mailto:/i, '').trim();
   if (!address.includes('@')) return '';
-  return `mailto:${address}`;
+  const found = address.match(/[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[^\s@<>()"',;:]+/);
+  return `mailto:${found ? found[0] : address}`;
+};
+
+/** 메일 버튼 주소(mailto:…)에서 메일 주소만. 복사할 때 쓴다. */
+export const mailAddressOf = (url: string): string =>
+  decodeURIComponent(url.replace(/^mailto:/i, '').split('?')[0]).trim();
+
+/**
+ * 주소 앞뒤에 붙은 글자를 걷어 낸다.
+ *
+ * 앱의 "공유하기 → 복사"로 가져온 값에는 주소 앞에 제목이 붙어 온다
+ * ("'공구방' 오픈채팅방에 참여해 보세요! https://open.kakao.com/o/…"). 그대로 두면
+ * 앞에 https:// 가 붙어 "https://'공구방' 오픈…" 같은 열리지 않는 주소가 되고,
+ * 버튼은 눌러도 아무 데로도 가지 않았다. 글 안에 http(s) 주소가 있으면 그것만,
+ * 없으면 도메인처럼 보이는(점이 있는) 첫 덩어리만 쓴다.
+ */
+const extractLink = (value: string): string => {
+  const embedded = value.match(/https?:\/\/[^\s<>"'`]+/i);
+  if (embedded) return embedded[0];
+  if (!/\s/.test(value)) return value;
+  const domainLike = value.split(/\s+/).find(part => /^[^.\s]+\.[^\s]+$/.test(part));
+  return domainLike || value.replace(/\s+/g, '');
 };
 
 /**
@@ -143,12 +169,13 @@ export const normalizeButtonUrl = (key: DefaultButtonKey, raw: string): string =
   const value = (raw || '').trim();
   if (!value) return '';
   if (key === 'mail') return normalizeMailUrl(value);
+  const link = extractLink(value);
   const finish = (url: string) => (key === 'kakao' ? repairKakaoUrl(url) : url);
-  if (/^https?:\/\//i.test(value)) return finish(value);
-  if (!value.includes('.') && !value.includes('/')) {
-    return HANDLE_HOME[key](value);
+  if (/^https?:\/\//i.test(link)) return finish(link);
+  if (!link.includes('.') && !link.includes('/')) {
+    return HANDLE_HOME[key](link);
   }
-  return finish(`https://${value.replace(/^\/+/, '')}`);
+  return finish(`https://${link.replace(/^\/+/, '')}`);
 };
 
 /**
