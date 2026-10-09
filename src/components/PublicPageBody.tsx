@@ -1,7 +1,8 @@
 import React from 'react';
 import { ExternalLink, Briefcase, Search, Hash } from 'lucide-react';
 import { Block, BlockDisplayType, DesignSettings, TemplateType, OpenScheduleItem } from '../types';
-import { enabledDefaultButtons } from '../utils/pageButtons';
+import { enabledDefaultButtons, mailAddressOf } from '../utils/pageButtons';
+import { copyText } from '../utils/clipboard';
 import { PlatformMark } from './PlatformLogo';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
@@ -305,11 +306,47 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
     'flex items-center justify-center p-1 transition-all duration-200 shrink-0 cursor-pointer hover:-translate-y-0.5 hover:opacity-70 active:translate-y-0 active:scale-90',
     isDark ? 'text-white/70' : 'text-[#39415C]',
   ].join(' ');
+  /**
+   * 메일 버튼은 메일 앱을 여는 대신 주소를 복사한다.
+   *
+   * mailto: 링크는 기본 메일 앱이 정해져 있을 때만 열린다. 데스크톱 브라우저 대부분과
+   * 네이버 메일·지메일 앱만 쓰는 휴대폰, 인앱 브라우저에서는 눌러도 아무 일이 없어서
+   * "메일 버튼이 안 눌린다"로 보였다. 브랜드가 실제로 필요한 것은 주소이므로 복사하고
+   * 복사했다고 알려 준다.
+   */
+  const [mailToast, setMailToast] = React.useState<string | null>(null);
+  const mailToastTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  React.useEffect(() => () => clearTimeout(mailToastTimer.current), []);
+  const copyMailAddress = async (url: string) => {
+    const address = mailAddressOf(url);
+    const ok = await copyText(address);
+    setMailToast(ok
+      ? (language === 'en' ? `Email copied: ${address}` : `메일 주소가 복사되었어요\n${address}`)
+      : (language === 'en' ? `Email: ${address}` : `메일 주소: ${address}`));
+    clearTimeout(mailToastTimer.current);
+    mailToastTimer.current = setTimeout(() => setMailToast(null), 2500);
+  };
+
   const actionButtons = (
     <>
       {/* 기본 버튼 · 비즈니스 제안 · 커스텀 버튼은 모두 한 줄에 나란히 놓인다(좁으면
           다음 줄로 넘어간다). 기본 버튼은 단색 플랫폼 마크 + 이름. */}
-      {defaultButtons.map(btn => (
+      {defaultButtons.map(btn => btn.key === 'mail' ? (
+        // 다른 기본 버튼과 같은 <a> 로 그린다 — 공개 페이지 CSS 가 데스크톱에서
+        // button 에만 여백과 아이콘 크기를 덧씌워서, button 이면 메일만 달라 보인다.
+        <a
+          key={btn.key}
+          href={btn.url}
+          role="button"
+          onClick={(e) => { e.preventDefault(); copyMailAddress(btn.url); }}
+          aria-label={btn.label}
+          title={btn.label}
+          className={logoButtonClass}
+          style={idleChipText ? { color: idleChipText } : undefined}
+        >
+          <PlatformMark platform={btn.key} size={22} />
+        </a>
+      ) : (
         <a
           key={btn.key}
           {...externalLinkProps(btn.url)}
@@ -849,6 +886,15 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
         )}
 
         {children}
+
+        {mailToast && (
+          <div
+            role="status"
+            className={`fixed left-1/2 -translate-x-1/2 bottom-8 z-[400] pointer-events-none px-5 py-3 rounded-2xl bg-slate-900/90 text-white text-xs font-black text-center whitespace-pre-line shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200`}
+          >
+            {mailToast}
+          </div>
+        )}
 
         </div>
       </div>
