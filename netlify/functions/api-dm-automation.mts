@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { randomUUID } from "node:crypto";
 import type { Config, Context } from "@netlify/functions";
 import { BlobWriteConflictError, mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
@@ -1428,10 +1429,12 @@ const handle = async (req: Request, context: Context) => {
  * 자동화가 순회 목록 갱신(10분)을 기다리지 않고, 끈 계정은 바로 빠진다.
  */
 async function markSweepDirty(key: string): Promise<void> {
-  await mutateBlobJSON<{ dirty?: string[] }>("dm-comment-sweep", "scheduler", (current) =>
-    current && !current.dirty?.includes(key)
-      ? { ...current, dirty: [...(current.dirty || []), key].slice(-500) }
-      : null)
+  const token = randomUUID();
+  await mutateBlobJSON<{ dirty?: string[]; dirtyTokens?: Record<string, string> }>("dm-comment-sweep", "scheduler", (current) => ({
+    ...current,
+    dirty: current?.dirty?.includes(key) ? current.dirty : [...(current?.dirty || []), key],
+    dirtyTokens: { ...current?.dirtyTokens, [key]: token },
+  }))
     .catch((e) => console.warn("[dm-automation] sweep refresh mark failed:", (e as Error)?.message));
 }
 
