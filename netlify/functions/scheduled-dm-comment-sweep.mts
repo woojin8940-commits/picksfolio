@@ -84,6 +84,8 @@ const MISS_GRACE_MS = 2 * 60 * 1000;
 /** 동시에 확인하는 계정 수. */
 const CONCURRENCY = 8;
 const INVENTORY_REFRESH_MS = 10 * 60 * 1000;
+const INVENTORY_BUDGET_MS = 4_000;
+const INVENTORY_BATCH_SIZE = 20;
 /** 순회 목록 형식. 바뀌면 목록을 처음부터 다시 만든다(2: 자동화를 켠 계정만). */
 const INVENTORY_VERSION = 2;
 const LEASE_MS = 90_000;
@@ -118,6 +120,8 @@ type SchedulerState = {
   inventoryVersion?: number;
   /** 자동화 설정이 바뀌어 다시 판정할 계정 키(api-dm-automation 이 적는다). */
   dirty?: string[];
+  dirtyTokens?: Record<string, string>;
+  inventoryScan?: { keys: string[]; offset: number; version?: number };
   lastKey?: string;
   owner?: string;
   leaseUntil?: number;
@@ -390,55 +394,110 @@ export default async () => {
   const store = getStore({ name: "dm-automation", consistency: "strong" });
   try {
     let keys = acquired.keys || [];
-    const handled = new Set(acquired.dirty || []);
-    const clearHandled = (current: SchedulerState) => (current.dirty || []).filter((key) => !handled.has(key));
-    if (acquired.inventoryVersion !== INVENTORY_VERSION || !acquired.refreshedAt ||
-      acquired.cachedVersion !== acquired.refreshVersion ||
-      Date.now() - acquired.refreshedAt >= INVENTORY_REFRESH_MS) {
-      const cachedVersion = acquired.refreshVersion;
-      const inventory: string[] = [];
-      for await (const page of store.list({ prefix: "dm_", paginate: true })) {
-        inventory.push(...page.blobs.map((blob) => blob.key));
-        if (Date.now() >= deadline) return;
-      }
-      const active = await activeKeys(store, [...new Set(inventory)], deadline);
-      if (!active) return;
-      keys = active.sort();
-      await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
-        current?.owner === owner ? {
-          ...current, keys, refreshedAt: Date.now(), cachedVersion, inventoryVersion: INVENTORY_VERSION,
-          dirty: clearHandled(current),
-        } : null);
-    } else if (handled.size > 0) {
+    const ownsLease = (current: SchedulerState | null): current is SchedulerState =>
+      current?.owner === owner && (current.leaseUntil || 0) > Date.now();
+    const handled = new Set((acquired.dirty || []).slice(0, INVENTORY_BATCH_SIZE));
+    if (handled.size > 0) {
       // 설정이 바뀐 계정만 다시 판정한다 — 방금 켠 자동화가 10분을 기다리지 않게.
       const active = await activeKeys(store, [...handled], deadline);
       if (active) {
-        const next = new Set(keys);
-        handled.forEach((key) => next.delete(key));
-        active.forEach((key) => next.add(key));
-        keys = [...next].sort();
-        await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
-          current?.owner === owner ? { ...current, keys, dirty: clearHandled(current) } : null);
+        const checkpoint = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) => {
+          if (!ownsLease(current)) return null;
+          const completed = new Set([...handled].filter((key) =>
+            current.dirty?.includes(key) && current.dirtyTokens?.[key] === acquired.dirtyTokens?.[key]));
+          const next = new Set(current.keys || []);
+          completed.forEach((key) => next.delete(key));
+          active.forEach((key) => { if (completed.has(key)) next.add(key); });
+          const dirty = (current.dirty || []).filter((key) => !completed.has(key));
+          const dirtyTokens = Object.fromEntries(Object.entries(current.dirtyTokens || {})
+            .filter(([key]) => !completed.has(key)));
+          return { ...current, keys: [...next].sort(), dirty, dirtyTokens };
+        });
+        if (!ownsLease(checkpoint)) return;
+        keys = checkpoint.keys || [];
       }
     }
-    const start = acquired.lastKey ? keys.findIndex((key) => key > acquired.lastKey!) : 0;
-    const offset = start < 0 ? 0 : start;
-    // 시간이 모자라 뒤쪽 계정이 매번 밀리지 않도록 마지막 확인 위치부터 순회한다.
-    const ordered = [...keys.slice(offset), ...keys.slice(0, offset)];
-    for (let next = 0; next < ordered.length && Date.now() < deadline; next += CONCURRENCY) {
-      const batch = ordered.slice(next, next + CONCURRENCY);
-      const checkpoint = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
-        current?.owner === owner && (current.leaseUntil || 0) > Date.now()
-          ? { ...current, lastKey: batch[batch.length - 1] } : null);
-      if (checkpoint?.owner !== owner || (checkpoint.leaseUntil || 0) <= Date.now()) return;
-      await Promise.all(batch.map(async (key) => {
-        try {
-          const settings = await store.get(key, { type: "json" }) as Settings | null;
-          if (settings && Date.now() < deadline) await sweepAccount(key.slice(3), settings, deadline);
-        } catch (e) {
-          console.warn("[dm-sweep] account sweep failed:", (e as Error)?.message);
+
+    const refreshInventory = async (refreshDeadline: number) => {
+      let progress = acquired.inventoryScan;
+      if (!progress) {
+        if (acquired.inventoryVersion === INVENTORY_VERSION && acquired.refreshedAt &&
+          acquired.cachedVersion === acquired.refreshVersion &&
+          Date.now() - acquired.refreshedAt < INVENTORY_REFRESH_MS) return;
+        if (Date.now() >= refreshDeadline) return;
+        const inventory: string[] = [];
+        for await (const page of store.list({ prefix: "dm_", paginate: true })) {
+          inventory.push(...page.blobs.map((blob) => blob.key));
+          if (Date.now() >= refreshDeadline) return;
         }
-      }));
+        const checkpoint = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
+          ownsLease(current) ? {
+            ...current,
+            inventoryScan: {
+              keys: [...new Set([...inventory, ...(current.keys || [])])].sort(),
+              offset: 0,
+              version: acquired.refreshVersion,
+            },
+          } : null);
+        if (!ownsLease(checkpoint)) return;
+        progress = checkpoint.inventoryScan;
+      }
+      while (progress && Date.now() < refreshDeadline) {
+        const batch = progress.keys.slice(progress.offset, progress.offset + INVENTORY_BATCH_SIZE);
+        const active = await activeKeys(store, batch, refreshDeadline);
+        if (!active) return;
+        const offset = progress.offset + batch.length;
+        const scan = progress;
+        const checkpoint = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) => {
+          if (!ownsLease(current) || current.inventoryScan?.offset !== scan.offset) return null;
+          const next = new Set(current.keys || []);
+          const dirty = new Set(current.dirty || []);
+          batch.forEach((key) => { if (!dirty.has(key)) next.delete(key); });
+          active.forEach((key) => { if (!dirty.has(key)) next.add(key); });
+          const result: SchedulerState = { ...current, keys: [...next].sort() };
+          if (offset >= scan.keys.length) {
+            delete result.inventoryScan;
+            result.refreshedAt = Date.now();
+            result.cachedVersion = scan.version;
+            result.inventoryVersion = INVENTORY_VERSION;
+          } else {
+            result.inventoryScan = { ...scan, offset };
+          }
+          return result;
+        });
+        if (!ownsLease(checkpoint)) return;
+        keys = checkpoint.keys || [];
+        progress = checkpoint.inventoryScan;
+      }
+    };
+
+    const sweepKeys = async (sweepDeadline: number) => {
+      const start = acquired.lastKey ? keys.findIndex((key) => key > acquired.lastKey!) : 0;
+      const offset = start < 0 ? 0 : start;
+      // 시간이 모자라 뒤쪽 계정이 매번 밀리지 않도록 마지막 확인 위치부터 순회한다.
+      const ordered = [...keys.slice(offset), ...keys.slice(0, offset)];
+      for (let next = 0; next < ordered.length && Date.now() < sweepDeadline; next += CONCURRENCY) {
+        const batch = ordered.slice(next, next + CONCURRENCY);
+        const checkpoint = await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
+          ownsLease(current) ? { ...current, lastKey: batch[batch.length - 1] } : null);
+        if (!ownsLease(checkpoint)) return;
+        await Promise.all(batch.map(async (key) => {
+          try {
+            const settings = await store.get(key, { type: "json" }) as Settings | null;
+            if (settings && Date.now() < sweepDeadline) await sweepAccount(key.slice(3), settings, sweepDeadline);
+          } catch (e) {
+            console.warn("[dm-sweep] account sweep failed:", (e as Error)?.message);
+          }
+        }));
+      }
+    };
+
+    if (keys.length > 0) {
+      await sweepKeys(deadline - INVENTORY_BUDGET_MS);
+      await refreshInventory(deadline);
+    } else {
+      await refreshInventory(Math.min(deadline, Date.now() + INVENTORY_BUDGET_MS));
+      await sweepKeys(deadline);
     }
   } finally {
     await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
