@@ -683,7 +683,7 @@ async function healWebhookSubscription(
   return { ...data, ...patch };
 }
 
-export default async (req: Request, context: Context) => {
+const handle = async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
     return Response.json({ error: "Missing username" }, { status: 400 });
@@ -1420,6 +1420,31 @@ export default async (req: Request, context: Context) => {
   }
 
   return Response.json({ error: "Method not allowed" }, { status: 405 });
+};
+
+/**
+ * 웹훅 누락 댓글 확인(scheduled-dm-comment-sweep)은 자동화를 켠 계정만 순회한다.
+ * 설정을 저장한 계정을 표시해 두면 다음 실행(1분 안)에서 다시 판정한다 — 방금 켠
+ * 자동화가 순회 목록 갱신(10분)을 기다리지 않고, 끈 계정은 바로 빠진다.
+ */
+async function markSweepDirty(key: string): Promise<void> {
+  await mutateBlobJSON<{ dirty?: string[] }>("dm-comment-sweep", "scheduler", (current) =>
+    current && !current.dirty?.includes(key)
+      ? { ...current, dirty: [...(current.dirty || []), key].slice(-500) }
+      : null)
+    .catch((e) => console.warn("[dm-automation] sweep refresh mark failed:", (e as Error)?.message));
+}
+
+export default async (req: Request, context: Context) => {
+  const action = req.method === "POST"
+    ? await req.clone().json().then((body) => body?.action).catch(() => undefined)
+    : undefined;
+  const response = await handle(req, context);
+  const username = context.params.username?.toLowerCase();
+  if (req.method === "POST" && action !== "sendStats" && response.ok && username) {
+    await markSweepDirty(`dm_${username}`);
+  }
+  return response;
 };
 
 export const config: Config = {
