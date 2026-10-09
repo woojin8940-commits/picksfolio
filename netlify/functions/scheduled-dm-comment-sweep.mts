@@ -21,9 +21,15 @@ import { randomUUID } from "node:crypto";
  * 조건 판정(게시물·키워드·팔로우)과 발송은 웹훅 댓글과 똑같은 경로를 탄다.
  *
  * 계정이 늘어도 버티도록 확인량을 줄인다.
- *  - 웹훅이 빠뜨린 댓글이 실제로 나온 게시물만 1분마다 본다. 웹훅이 잘 오는 게시물은
- *    대부분이라, 이런 게시물은 10분에 한 번 안전망으로만 본다.
- *  - 지난번에 본 시점 이후의 댓글만 읽는다(보통 첫 페이지 한 번이면 끝난다).
+ *  - 웹훅이 빠뜨린 댓글이 실제로 나온 게시물만 자주 본다. 웹훅이 잘 오는 게시물은
+ *    대부분이라, 이런 게시물은 30분에 한 번 안전망으로만 본다.
+ *  - 웹훅이 빠뜨리는 게시물도 댓글이 뜸해지면 확인 간격을 1분 → 2분 → 5분 → 10분으로
+ *    늘린다. 새 댓글이 보이면 바로 매분으로 돌아간다.
+ *  - 지난번에 본 시점 이후의 댓글만 읽는다. 그래프 API 는 댓글을 최신순으로 주므로
+ *    (2026-10 운영 계정 게시물로 확인) 이미 본 시각보다 오래된 댓글이 나오면 그 뒤
+ *    페이지는 넘기지 않는다. 순서가 어긋난 응답이면 예전처럼 끝까지 읽는다.
+ *  - 자동화를 켠 계정만 순회한다. 목록은 10분마다, 그리고 자동화 설정이 바뀐 계정은
+ *    다음 실행에서 다시 판정한다(api-dm-automation 이 `dirty` 에 계정을 적는다).
  *  - 여러 계정을 동시에 본다.
  *
  * 처음 보는 게시물은 자동화 생성 시각 이후의 최근 댓글부터 확인한다. 자동화 생성 전의
@@ -48,9 +54,24 @@ const MAX_COMMENT_PAGES = 4;
 /** 처음 기준을 잡은 게시물을 매분 보는 기간. 그 사이 누락이 없으면 10분 간격으로 바뀐다. */
 const PROBE_MS = 30 * 60 * 1000;
 /** 웹훅이 잘 오는 게시물을 안전망으로 다시 보는 간격. */
-const HEALTHY_INTERVAL_MS = 10 * 60 * 1000;
-/** 웹훅이 댓글을 빠뜨린 게시물은 이 시간 동안 매분 본다. 그 뒤로도 빠지면 다시 연장된다. */
-const SILENT_HOLD_MS = 24 * 60 * 60 * 1000;
+const HEALTHY_INTERVAL_MS = 30 * 60 * 1000;
+/**
+ * 웹훅이 댓글을 빠뜨린 게시물을 '웹훅이 오지 않는 게시물'로 기억하는 기간. 그 뒤로도
+ * 빠지면 다시 연장된다. 이 기간에는 아래 QUIET_STEPS 간격으로 본다.
+ */
+const SILENT_HOLD_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * 웹훅이 오지 않는 게시물의 확인 간격. [마지막 댓글 이후 지난 시간 이내, 확인 간격].
+ * 댓글이 달리는 동안은 매분 보고, 조용해질수록 덜 본다.
+ */
+const QUIET_STEPS: [number, number][] = [
+  [10 * 60 * 1000, 60 * 1000],
+  [30 * 60 * 1000, 2 * 60 * 1000],
+  [2 * 60 * 60 * 1000, 5 * 60 * 1000],
+  [Infinity, 10 * 60 * 1000],
+];
+/** 예약 실행 시각이 몇 초씩 어긋나도 차례를 건너뛰지 않도록 간격에서 빼 주는 여유. */
+const SCHEDULE_SLACK_MS = 15_000;
 /** '모든 게시물' 목록과 이용 자격 판정을 다시 확인하는 간격. */
 const ACCOUNT_REFRESH_MS = 10 * 60 * 1000;
 /** 지난번 확인 시각보다 이만큼 앞부터 읽는다(댓글 시각과 서버 시각의 어긋남 대비). */
@@ -63,6 +84,8 @@ const MISS_GRACE_MS = 2 * 60 * 1000;
 /** 동시에 확인하는 계정 수. */
 const CONCURRENCY = 8;
 const INVENTORY_REFRESH_MS = 10 * 60 * 1000;
+/** 순회 목록 형식. 바뀌면 목록을 처음부터 다시 만든다(2: 자동화를 켠 계정만). */
+const INVENTORY_VERSION = 2;
 const LEASE_MS = 90_000;
 
 const STATE_STORE = "dm-comment-sweep";
@@ -75,12 +98,16 @@ type MediaState = {
   after?: string;
   scanFrom?: number;
   scanAt?: number;
+  /** 이 게시물에서 마지막으로 본 댓글의 시각. 확인 간격을 정할 때 쓴다. */
+  activeAt?: number;
 };
 type SweepState = {
   version?: number;
   media?: Record<string, MediaState>;
   recent?: { ids: string[]; at: number };
   allowedAt?: number;
+  /** allowedAt 에 판정한 이용 자격. 자격이 없던 계정도 10분 동안 다시 묻지 않는다. */
+  allowed?: boolean;
   nextMedia?: string;
 };
 type SchedulerState = {
@@ -88,6 +115,9 @@ type SchedulerState = {
   refreshedAt?: number;
   refreshVersion?: number;
   cachedVersion?: number;
+  inventoryVersion?: number;
+  /** 자동화 설정이 바뀌어 다시 판정할 계정 키(api-dm-automation 이 적는다). */
+  dirty?: string[];
   lastKey?: string;
   owner?: string;
   leaseUntil?: number;
@@ -155,9 +185,34 @@ async function targetMedia(
 function mediaDue(media: MediaState | undefined, now: number): boolean {
   if (media?.scanAt) return true;
   if (!media?.checkedAt) return true;
-  if (media.missedAt && now - media.missedAt < SILENT_HOLD_MS) return true;
   if (media.probeUntil && now < media.probeUntil) return true;
-  return now - media.checkedAt >= HEALTHY_INTERVAL_MS;
+  const elapsed = now - media.checkedAt + SCHEDULE_SLACK_MS;
+  if (media.missedAt && now - media.missedAt < SILENT_HOLD_MS) {
+    const quiet = now - Math.max(media.activeAt || 0, media.missedAt);
+    return elapsed >= QUIET_STEPS.find(([within]) => quiet < within)![1];
+  }
+  return elapsed >= HEALTHY_INTERVAL_MS;
+}
+
+/** 순회할 계정인지 — 자동 DM 스위치와 켜진 자동화가 모두 있어야 한다. */
+function sweepable(settings: Settings | null): boolean {
+  return Boolean(settings?.enabled && settings.accessToken && (settings.igUserId || settings.igAccountId) &&
+    !linkFeatureOff(settings, "dm") && (settings.automations || []).some((rule) => rule?.enabled));
+}
+
+/** 키 중 순회할 계정만 고른다. 설정을 못 읽은 계정은 남긴다. 시간이 모자라면 null. */
+async function activeKeys(store: ReturnType<typeof getStore>, keys: string[], deadline: number) {
+  const active: string[] = [];
+  for (let offset = 0; offset < keys.length; offset += 20) {
+    if (Date.now() >= deadline) return null;
+    const batch = keys.slice(offset, offset + 20);
+    const docs = await Promise.all(batch.map((key) =>
+      (store.get(key, { type: "json" }) as Promise<Settings | null>).catch(() => undefined)));
+    batch.forEach((key, i) => {
+      if (docs[i] === undefined || sweepable(docs[i]!)) active.push(key);
+    });
+  }
+  return active;
 }
 
 /** 아직 대기열에 없는 댓글만 고른다(= 웹훅이 오지 않은 댓글). */
@@ -191,10 +246,19 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
     state.version = 2;
   }
   const now = Date.now();
+  const save = (media: Record<string, MediaState> | undefined) =>
+    stateStore.set(stateKey, JSON.stringify({ ...state, media }),
+      snapshot?.etag ? { onlyIfMatch: snapshot.etag } : { onlyIfNew: true });
   // 자격은 발송 직전에 처리기가 다시 확인하므로 여기서는 10분에 한 번만 본다.
   if (!state.allowedAt || now - state.allowedAt >= ACCOUNT_REFRESH_MS) {
-    if (!(await dmAutomationAllowed(username, settings.ownerAuthUserId))) return 0;
+    state.allowed = await dmAutomationAllowed(username, settings.ownerAuthUserId);
     state.allowedAt = now;
+    if (!state.allowed) {
+      await save(state.media);
+      return 0;
+    }
+  } else if (state.allowed === false) {
+    return 0;
   }
 
   const host = graphHostFor(settings.tokenSource);
@@ -232,6 +296,9 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
     const from = Math.max(now - LOOKBACK_MS, media.scanFrom ?? since);
     let complete = false;
     let after = media.after || "";
+    // 지금까지 받은 댓글이 최신순인지. 한 번이라도 어긋나면 일찍 멈추지 않는다.
+    let newestFirst = true;
+    let previousAt = Infinity;
     while (pagesRead < MAX_COMMENT_PAGES && Date.now() < deadline) {
       const params = new URLSearchParams({ fields: "id,text,from,username,timestamp", limit: "50" });
       if (after) params.set("after", after);
@@ -251,7 +318,13 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
         const authorId = String(comment?.from?.id || "");
         const authorName = String(comment?.from?.username || comment?.username || "");
         if (!commentId || Number.isNaN(commentAt)) continue;
-        if (commentAt < from || commentAt > now) continue;
+        if (commentAt > previousAt) newestFirst = false;
+        previousAt = commentAt;
+        if (commentAt > now) continue;
+        if (!(authorId === igId || (ownName && authorName.toLowerCase() === ownName))) {
+          media.activeAt = Math.max(media.activeAt || 0, commentAt);
+        }
+        if (commentAt < from) continue;
         // 방금 달린 댓글도 바로 넣는다. 웹훅과 동시에 들어와도 작업 ID 가 같아 한 번만 처리된다.
         if (authorId === igId || (ownName && authorName.toLowerCase() === ownName)) continue;
         events.push({
@@ -270,7 +343,8 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
         });
       }
       const next = page?.paging?.next ? String(page?.paging?.cursors?.after || "") : "";
-      if (!next) {
+      // 최신순이면 이미 본 시각보다 오래된 댓글이 나온 뒤로는 새 댓글이 없다.
+      if (!next || (newestFirst && previousAt < from)) {
         complete = true;
         break;
       }
@@ -301,8 +375,7 @@ async function sweepAccount(username: string, settings: Settings, deadline: numb
   if (missed.length > 0) await enqueueCommentEvents(missed);
 
   // 자동화에서 빠진 게시물의 기록은 버린다.
-  await stateStore.set(stateKey, JSON.stringify({ ...state, media: mediaState }),
-    snapshot?.etag ? { onlyIfMatch: snapshot.etag } : { onlyIfNew: true });
+  await save(mediaState);
   return missed.length;
 }
 
@@ -317,7 +390,10 @@ export default async () => {
   const store = getStore({ name: "dm-automation", consistency: "strong" });
   try {
     let keys = acquired.keys || [];
-    if (!acquired.refreshedAt || acquired.cachedVersion !== acquired.refreshVersion ||
+    const handled = new Set(acquired.dirty || []);
+    const clearHandled = (current: SchedulerState) => (current.dirty || []).filter((key) => !handled.has(key));
+    if (acquired.inventoryVersion !== INVENTORY_VERSION || !acquired.refreshedAt ||
+      acquired.cachedVersion !== acquired.refreshVersion ||
       Date.now() - acquired.refreshedAt >= INVENTORY_REFRESH_MS) {
       const cachedVersion = acquired.refreshVersion;
       const inventory: string[] = [];
@@ -325,9 +401,25 @@ export default async () => {
         inventory.push(...page.blobs.map((blob) => blob.key));
         if (Date.now() >= deadline) return;
       }
-      keys = [...new Set(inventory)].sort();
+      const active = await activeKeys(store, [...new Set(inventory)], deadline);
+      if (!active) return;
+      keys = active.sort();
       await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
-        current?.owner === owner ? { ...current, keys, refreshedAt: Date.now(), cachedVersion } : null);
+        current?.owner === owner ? {
+          ...current, keys, refreshedAt: Date.now(), cachedVersion, inventoryVersion: INVENTORY_VERSION,
+          dirty: clearHandled(current),
+        } : null);
+    } else if (handled.size > 0) {
+      // 설정이 바뀐 계정만 다시 판정한다 — 방금 켠 자동화가 10분을 기다리지 않게.
+      const active = await activeKeys(store, [...handled], deadline);
+      if (active) {
+        const next = new Set(keys);
+        handled.forEach((key) => next.delete(key));
+        active.forEach((key) => next.add(key));
+        keys = [...next].sort();
+        await mutateBlobJSON<SchedulerState>(STATE_STORE, "scheduler", (current) =>
+          current?.owner === owner ? { ...current, keys, dirty: clearHandled(current) } : null);
+      }
     }
     const start = acquired.lastKey ? keys.findIndex((key) => key > acquired.lastKey!) : 0;
     const offset = start < 0 ? 0 : start;
