@@ -28,7 +28,6 @@ import {
   confirmFailed,
   confirmedFailure,
   confirmSent,
-  reopenClaim,
   confirmedSent,
   commentDmKey,
   contentHashOf,
@@ -53,7 +52,6 @@ import {
   commentIdFromBaitPayload,
   getBaitPending,
   noteBaitFailure,
-  noteBaitSuccess,
   notifyAdminBaitIssue,
   saveBaitPending,
 } from "./_shared/dm-bait.mts";
@@ -680,14 +678,10 @@ async function handleFaqPostback(ctx: DmTriggerContext, event: any): Promise<voi
  *  2) 후보 자동화 중 팔로우 조건이 있으면 지금(대화창이 열린 뒤) 팔로우 여부를 조회해
  *     맞는 자동화를 고른다. 맞는 게 없으면 "팔로우 후 다시 눌러 주세요" 안내와 같은
  *     payload 의 재확인 버튼을 보낸다 — 다시 누르면 이 함수가 처음부터 다시 판정한다.
- *  3) 본 메시지는 댓글당 1회만 보낸다(여러 번 눌러도 한 번).
- *
- * 본 메시지가 "대화창 밖"으로 거부되면 Meta 가 버튼 클릭을 더 이상 대화 수락으로
- * 인정하지 않는다는 신호다. 연달아 그러면 2단계 발송을 멈추고(dm-bait 서킷 브레이커)
- * 이후 댓글에는 기존 1통 카드가 나가게 하며, 운영자에게 알린다. 형식 오류로 거부되면
- * 이 사람에게는 기존 1통 카드 내용으로 한 번 더 보낸다.
+ *  3) 본 메시지 계획과 클릭 시각을 대기열에 저장한다.
+ *     발송 결과와 미발송 내용은 작업자가 같은 댓글의 발송 기록에 이어서 남긴다.
  */
-async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<void> {
+async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<WebhookProcessResult | void> {
   const postback = event?.postback;
   if (!postback) return;
   const senderId = String(event?.sender?.id || "");
@@ -765,7 +759,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
         kind: "dm", status: "scheduled", trigger: "bait_follow_gate", recipientId: senderId,
         commentId, ruleId: gateRule.id, ruleName: gateRule.name,
       });
-      return;
+      return { retryable: false, queued: true };
     }
     if (!result.ok && result.errorKind !== "uncertain") await release(username, gateKey, true);
     await appendLog(username, {
@@ -781,228 +775,70 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<vo
       error: result.ok ? undefined : describeDmError(result.errorKind || "other", result.error),
       errorKind: result.ok ? undefined : result.errorKind,
     });
-    return;
+    return {
+      retryable: false, sent: result.ok ? 1 : 0, failed: result.ok ? 0 : 1,
+      uncertain: result.errorKind === "uncertain", sideEffectAttempted: true,
+      error: result.error, errorKind: result.errorKind,
+    };
   }
 
   const plan = buildMainPlan(automation);
   if (plan.messages.length === 0) return skip("보낼 수 있는 메시지가 없습니다.");
-  for (const body of sentTextsOf(plan.messages)) await noteSentText(username, body);
 
-  /**
-   * 본 메시지는 댓글당 한 번이 원칙이지만, 다시 누른 것은 "받지 못했다"는 뜻일 수 있다.
-   * 발송이 확인됐거나 대기열에서 기다리는 중이면 다시 보내지 않고, 결과가 확인되지 않은
-   * 채 시간이 지났으면 다시 보낸다. 어느 쪽이든 왜 그렇게 했는지 활동 기록에 남긴다 —
-   * 예전에는 서버 로그에만 남아 "눌렀는데 아무 일도 없다"의 이유를 화면에서 알 수 없었다.
-   */
   const mainKey = baitMainKey(commentId);
-  const claim = await claimOrRetake(username, mainKey, BAIT_MAIN_RETAKE_MS);
-  if (!claim.claimed) {
-    return skip(
-      claim.state === "confirmed"
-        ? "이미 본 메시지를 보낸 댓글입니다(같은 버튼을 다시 누름)."
-        : claim.state === "queued"
-          ? "본 메시지가 발송 대기열에 있어 곧 나갑니다(같은 버튼을 다시 누름)."
-          : "직전 클릭의 본 메시지를 보내는 중입니다(같은 버튼을 다시 누름).",
-    );
-  }
-  // 같은 댓글이라도 클릭마다 대기열 작업 ID 가 달라야 한다. 이전 클릭의 작업이 끝난 뒤
-  // 다시 누른 경우 같은 ID 로 넣으면 이미 있는 행 때문에 조용히 무시된다.
   const attemptTag = contentHashOf(eventId).slice(0, 10);
+  const jobId = `bait_${commentId}_${attemptTag}`;
+  const claim = await claimOrRetake(username, mainKey, BAIT_MAIN_RETAKE_MS);
+  if (!claim.claimed && !(claim.state === "queued" && claim.queuedJobId === jobId)) {
+    const reason = claim.state === "confirmed"
+      ? "이미 본 메시지를 보낸 댓글입니다(같은 버튼을 다시 누름)."
+      : claim.state === "queued"
+        ? "본 메시지가 발송 대기열에 있어 곧 나갑니다(같은 버튼을 다시 누름)."
+        : "직전 클릭의 본 메시지 발송 결과를 확인 중입니다.";
+    await skip(reason);
+    return {
+      retryable: claim.state === "pending",
+      ...(claim.state === "confirmed" ? { sent: 1 } : claim.state === "queued"
+        ? { queued: true }
+        : { retryAfterMs: BAIT_MAIN_RETAKE_MS, error: reason, errorKind: "throttled" }),
+    };
+  }
 
+  const rawAt = Number(event?.timestamp);
+  const eventAt = Number.isFinite(rawAt) && rawAt > 0 ? (rawAt < 1e12 ? rawAt * 1000 : rawAt) : Date.now();
+  const contactLastAt = new Date(Math.min(eventAt, Date.now())).toISOString();
+
+  // Persist the complete plan before sending. Retries reuse the click ID and
+  // continuations retain a shared delivery cursor across repeated clicks.
   try {
-    let resultMessages = plan.messages;
-    // 앞에서부터 이만큼 도착해야 본 내용이 전달된 것이다(인사말 + 본 메시지).
-    let coreTotal = plan.coreCount ?? plan.messages.length;
-    let result = await send(resultMessages);
-    let usedFallback = false;
-
-    // 본 메시지가 형식 오류로 거부됨(카드 이미지 등) → 기존 1통 카드 내용으로 한 번 더.
-    if (!result.ok && !result.partial && result.errorKind === "invalid_payload") {
-      const single = buildCommentPlan(automation);
-      const fallbackMessages = single.messages.slice(0, 1);
-      if (fallbackMessages.length > 0) {
-        resultMessages = fallbackMessages;
-        coreTotal = fallbackMessages.length;
-        const retried = await send(resultMessages);
-        if (!retried.ok && single.fallback && retried.errorKind === "invalid_payload") {
-          resultMessages = [single.fallback];
-          result = await send(resultMessages);
-        } else {
-          result = retried;
-        }
-        usedFallback = result.ok;
-      }
-    }
-
-    const stoppedByBudget = result.errorKind === "throttled" || result.errorKind === "rate_limit";
-    // 본 내용 중 아직 도착하지 않은 통 수. 인사말만 가고 카드가 막힌 경우 등.
-    const coreLeft = result.ok ? 0 : Math.max(0, coreTotal - result.sent);
-
-    /**
-     * 인사말은 갔는데 본 내용(카드 등)이 거부됐다. 받는 사람은 인사말만 받았다.
-     *
-     * 예전에는 일부 발송을 성공으로 보고 "보냄"으로 굳혀서, 같은 버튼을 몇 번 다시 눌러도
-     * "이미 보낸 댓글"로 무시됐다. 보냄으로 굳히지 않고 실패로 남긴다 — 결과가 확실한
-     * 실패면 바로, 불확실하면 잠시 뒤에 같은 버튼으로 다시 받을 수 있다.
-     */
-    if (result.partial && coreLeft > 0 && !stoppedByBudget) {
-      await noteBaitSuccess(username);
-      const kind = result.errorKind || "other";
-      if (kind === "uncertain") {
-        await reopenClaim(username, mainKey).catch((e) =>
-          console.warn("[ig-webhook] bait main reopen failed:", (e as Error)?.message),
-        );
-      } else {
-        await release(username, mainKey, true);
-      }
-      await appendLog(username, {
-        kind: "dm",
-        status: "failed",
-        trigger: "bait_main",
-        stage: "main",
-        partial: true,
-        recipientId: senderId,
-        commentId,
-        ruleId: automation.id,
-        ruleName: automation.name,
-        error: `인사말만 도착하고 본 내용은 보내지 못했습니다. ${describeDmError(kind, result.error)}`,
-        errorKind: kind,
-      });
-      return;
-    }
-
-    if (result.ok || result.partial) {
-      await noteBaitSuccess(username);
-      /**
-       * 긴 본문 + 링크 버튼은 [텍스트] → [버튼 카드] 2통이다. 계정 발송 간격(기본 약
-       * 9초) 때문에 두 번째 통이 `throttled` 로 끝나면 예전에는 그대로 버려져 텍스트만
-       * 도착했다. 남은 통은 대기열이 간격에 맞춰 이어 보낸다.
-       *
-       * 남은 통에 본 내용이 남아 있으면 선점을 "대기 중"으로 표시하고 그 작업에 넘긴다 —
-       * 그 작업이 결과를 보고 보냄 표시를 하거나 선점을 푼다. 표시는 작업을 넣기 전에 한다.
-       */
-      if (coreLeft > 0) {
-        await markClaimQueued(username, mainKey).catch((e) =>
-          console.warn("[ig-webhook] bait main queue mark failed:", (e as Error)?.message),
-        );
-      }
-      const followUpQueued = await queueRemainingDmMessages({
-        id: `bait_rest_${commentId}_${attemptTag}`,
-        username,
-        igAccountId: igId,
-        recipientId: senderId,
-        messages: resultMessages,
-        result,
-        ruleId: automation.id,
-        ruleName: automation.name,
-        ...(coreLeft > 0 ? { claimKey: mainKey, coreCount: coreLeft } : {}),
-      });
-      if (coreLeft > 0 && !followUpQueued) {
-        // 본 내용을 이어 보낼 작업을 넣지 못했다. 같은 버튼으로 다시 받을 수 있게 푼다.
-        await release(username, mainKey, true);
-      } else if (coreLeft === 0) {
-        await confirmSent(username, mainKey).catch((e) =>
-          console.warn("[ig-webhook] bait main confirm failed:", (e as Error)?.message),
-        );
-      }
-      await appendLog(username, {
-        kind: "dm",
-        status: "sent",
-        trigger: "bait_main",
-        stage: "main",
-        partial: result.partial && !followUpQueued,
-        followUpQueued: followUpQueued || undefined,
-        recipientId: senderId,
-        commentId,
-        ruleId: automation.id,
-        ruleName: automation.name,
-        ruleUpdatedAt: automation.updatedAt,
-        messageId: result.messageId,
-        usedFallback: usedFallback || undefined,
-        error: result.partial ? result.error : undefined,
-      });
-      return;
-    }
-
-    const kind = result.errorKind || "other";
-
-    if (kind === "rate_limit" || kind === "throttled") {
-      // 발송 한도 — 대기열로 넘긴다(대화창은 방금 열렸으므로 24시간 안에 나간다).
-      // 만들어 둔 본 메시지 페이로드를 그대로 싣는다. 문구·버튼·카드로 다시 조립하면
-      // 캐러셀 앞 인사말이 빠진다(캐러셀 설정은 카드 한 통만 만든다).
-      try {
-        // 작업을 넣기 전에 표시한다. 작업이 먼저 끝나 결과를 남긴 뒤에 이 표시가 덮어쓰면
-        // 선점이 "대기 중"으로 영영 남는다. 작업을 넣지 못하면 아래에서 선점을 푼다.
-        await markClaimQueued(username, mainKey).catch((e) =>
-          console.warn("[ig-webhook] bait main queue mark failed:", (e as Error)?.message),
-        );
-        await createScheduledJob({
-          id: `bait_${commentId}_${attemptTag}`,
-          username,
-          igAccountId: igId,
-          recipientId: senderId,
-          sendAt: new Date(Date.now() + (result.retryAfterMs || 60_000)).toISOString(),
-          message: "",
-          buttons: [],
-          payloads: resultMessages,
-          source: "trigger",
-          createdAt: new Date().toISOString(),
-          status: "pending",
-          ruleId: automation.id,
-          ruleName: automation.name,
-          // 대기열이 결과를 확인하면 이 선점에 확인 표시를 하거나 풀어 준다.
-          claimKey: mainKey,
-          coreCount: coreTotal,
-        });
-        await appendLog(username, { kind: "dm", status: "scheduled", trigger: "bait_main", recipientId: senderId, commentId, ruleId: automation.id, ruleName: automation.name });
-        return;
-      } catch (e) {
-        console.error("[ig-webhook] bait main scheduling failed:", (e as Error)?.message);
-      }
-    }
-    if (kind !== "uncertain") await release(username, mainKey, true);
-
-    /**
-     * 대화창 밖 — 버튼 클릭이 대화 수락으로 인정되지 않았다는 뜻이다. 이 사람에게는 더
-     * 보낼 방법이 없다(비공개 답장 1통은 이미 미끼로 썼다).
-     *
-     * 2단계 발송을 멈출지 세는 것은 이 경우뿐이다. 예전에는 권한·기타 오류도 함께 셌는데,
-     * 그 안에는 "상대 계정을 찾을 수 없음"처럼 받는 사람 한 명의 사정으로 생기는 오류가
-     * 섞여 있다. 그런 사람이 연달아 세 명 나오면 2단계 발송 전체가 24시간 꺼졌다.
-     */
-    if (kind === "outside_window") {
-      const tripped = await noteBaitFailure(username, describeDmError(kind, result.error));
-      if (tripped) {
-        await notifyAdminBaitIssue(
-          username,
-          `버튼 클릭 뒤 본 메시지가 연달아 거부돼(${kind}) 24시간 동안 기존 1통 카드 방식으로 전환했습니다. Meta 정책 변경 여부를 확인하세요.`,
-          "suspended",
-        );
-      }
-    }
-    await appendLog(username, {
-      kind: "dm",
-      status: "failed",
-      trigger: "bait_main",
-      stage: "main",
+    if (claim.claimed) await markClaimQueued(username, mainKey, jobId);
+    await createScheduledJob({
+      id: jobId,
+      username,
+      igAccountId: igId,
       recipientId: senderId,
-      commentId,
+      sendAt: new Date().toISOString(),
+      message: "",
+      buttons: [],
+      payloads: plan.messages,
+      source: "trigger",
+      createdAt: new Date().toISOString(),
+      status: "pending",
       ruleId: automation.id,
       ruleName: automation.name,
-      error: describeDmError(kind, result.error),
-      errorKind: kind,
+      claimKey: mainKey,
+      coreCount: plan.coreCount ?? plan.messages.length,
+      contactLastAt,
     });
-  } catch (e: any) {
-    await appendLog(username, {
-      kind: "dm",
-      status: "failed",
-      trigger: "bait_main",
-      recipientId: senderId,
-      commentId,
-      ruleId: automation.id,
-      error: e?.message || "send error",
-    });
+  } catch (e) {
+    if (claim.claimed) await release(username, mainKey, true);
+    throw e;
   }
+  await appendLog(username, {
+    kind: "dm", status: "scheduled", trigger: "bait_main", stage: "main",
+    recipientId: senderId, commentId, ruleId: automation.id, ruleName: automation.name,
+  });
+  return { retryable: false, queued: true };
 }
 
 /**
@@ -1266,6 +1102,7 @@ function isConversationEvent(event: any): boolean {
 
 export interface WebhookProcessResult {
   retryable: boolean;
+  queued?: boolean;
   retryAfterMs?: number;
   sent?: number;
   failed?: number;
@@ -1379,9 +1216,21 @@ export async function processWebhookPayload(
        * 온 이벤트는 나중에 다시 처리한다. 같은 이벤트의 발송은 선점 기록이 한 번으로
        * 묶는다. 예전에는 기록 저장소가 잠깐 흔들린 것만으로 그 클릭이 조용히 사라졌다.
        */
-      const runTrigger = async (label: string, run: () => Promise<void>) => {
+      const runTrigger = async (label: string, run: () => Promise<WebhookProcessResult | void>) => {
         try {
-          await run();
+          const result = await run();
+          if (result) {
+            outcome.retryable ||= result.retryable;
+            outcome.queued ||= result.queued;
+            outcome.uncertain ||= result.uncertain;
+            outcome.partial ||= result.partial;
+            outcome.sideEffectAttempted ||= result.sideEffectAttempted;
+            outcome.sent = (outcome.sent || 0) + (result.sent || 0);
+            outcome.failed = (outcome.failed || 0) + (result.failed || 0);
+            if (result.error) outcome.error = result.error;
+            if (result.errorKind) outcome.errorKind = result.errorKind;
+            if (result.retryAfterMs) outcome.retryAfterMs = Math.max(outcome.retryAfterMs || 0, result.retryAfterMs);
+          }
         } catch (e) {
           outcome.retryable = true;
           if (e instanceof DmAccessLookupError) {

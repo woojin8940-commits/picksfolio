@@ -253,9 +253,11 @@ export async function retryDmJob(
   delayMs: number,
   error: string,
   errorKind: string,
+  payload?: Record<string, any>,
 ): Promise<void> {
   await updateClaimedJob(job, {
     status: "pending",
+    ...(payload ? { payload } : {}),
     due_at: new Date(Date.now() + delayMs).toISOString(),
     last_error: error.slice(0, 1000),
     error_kind: errorKind,

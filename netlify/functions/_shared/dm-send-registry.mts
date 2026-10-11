@@ -182,7 +182,7 @@ const QUEUED_HOLD_MS = 24 * 60 * 60 * 1000;
 
 export type ClaimOutcome =
   | { claimed: true; retaken: boolean }
-  | { claimed: false; state: "confirmed" | "queued" | "pending" };
+  | { claimed: false; state: "confirmed" | "queued" | "pending"; queuedJobId?: string };
 
 /**
  * 선점하되, 결과가 확인되지 않은 채 오래된 선점이면 다시 가져온다.
@@ -209,19 +209,19 @@ export async function claimOrRetake(
     const again = await s.set(path, body(), { onlyIfNew: true });
     return again?.modified !== false ? { claimed: true, retaken: false } : { claimed: false, state: "pending" };
   }
-  const data = (snapshot.data || {}) as { at?: string; confirmed?: boolean; queued?: boolean };
+  const data = (snapshot.data || {}) as { at?: string; confirmed?: boolean; queued?: boolean; queuedJobId?: string };
   if (data.confirmed === true) return { claimed: false, state: "confirmed" };
   const at = Date.parse(String(data.at || ""));
   const age = Number.isNaN(at) ? Infinity : Date.now() - at;
-  if (data.queued === true && age < QUEUED_HOLD_MS) return { claimed: false, state: "queued" };
+  if (data.queued === true && age < QUEUED_HOLD_MS) return { claimed: false, state: "queued", queuedJobId: data.queuedJobId };
   if (age < retakeAfterMs) return { claimed: false, state: "pending" };
   const retaken = await s.set(path, body(), { onlyIfMatch: snapshot.etag });
   return retaken?.modified !== false ? { claimed: true, retaken: true } : { claimed: false, state: "pending" };
 }
 
 /** 선점한 발송이 대기열로 넘어갔다고 표시한다. 대기열이 결과를 확인할 때까지 다시 보내지 않는다. */
-export async function markClaimQueued(username: string, key: string): Promise<void> {
-  await updateRecord(username, key, { queued: true });
+export async function markClaimQueued(username: string, key: string, queuedJobId?: string): Promise<void> {
+  await updateRecord(username, key, { queued: true, ...(queuedJobId ? { queuedJobId } : {}) });
 }
 
 /**

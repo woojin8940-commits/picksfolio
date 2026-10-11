@@ -114,6 +114,8 @@ export interface DmScheduledJob {
    * 버튼을 다시 눌러도 다시 보낼 수 없었다.
    */
   coreCount?: number;
+  /** Number of payloads already delivered by this continuation. */
+  sentOffset?: number;
 }
 
 const pendingPrefix = (username: string) => `job/${username.toLowerCase()}/`;
