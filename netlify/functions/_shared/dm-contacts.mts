@@ -136,11 +136,12 @@ export async function noteDmContact(args: {
   }
 }
 
-export async function getDmContact(username: string, igsid: string): Promise<DmContact | null> {
+export async function getDmContact(username: string, igsid: string, strict = false): Promise<DmContact | null> {
   if (!username || !igsid) return null;
   try {
     return ((await store().get(keyFor(username, igsid), { type: "json" })) as DmContact) || null;
-  } catch {
+  } catch (e) {
+    if (strict) throw e;
     return null;
   }
 }

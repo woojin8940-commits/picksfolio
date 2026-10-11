@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { dmAutomationAllowedForSend } from "./dm-automation-access.mts";
 import { appendDmLog } from "./dm-automation-log.mts";
 import { getDmContact, withinDmWindow } from "./dm-contacts.mts";
-import { claimJob, finishJob, queueRemainingDmMessages, releaseJobClaim } from "./dm-schedule-store.mts";
+import { claimJob, createScheduledJob, finishJob, queueRemainingDmMessages, releaseJobClaim } from "./dm-schedule-store.mts";
 import type { DmScheduledJob } from "./dm-schedule-store.mts";
 import {
   buildBaitCommentPlan,
@@ -19,7 +19,7 @@ import { linkFeatureOff } from "./instagram-metrics.mts";
 import { completeDmJob, enqueueScheduledJob, pauseDmAccount, retryDmJob } from "./dm-jobs.mts";
 import type { DmJob } from "./dm-jobs.mts";
 import { processWebhookPayload } from "../instagram-webhook.mts";
-import { baitPayload, baitSuspended, noteBaitFailure, notifyAdminBaitIssue, saveBaitPending } from "./dm-bait.mts";
+import { baitPayload, baitSuspended, noteBaitFailure, noteBaitSuccess, notifyAdminBaitIssue, saveBaitPending } from "./dm-bait.mts";
 
 /**
  * 예약 DM 발송기(1분 주기).
@@ -79,7 +79,7 @@ async function blockReason(job: DmScheduledJob, settings: DmSettings | null): Pr
   }
   if (linkFeatureOff(settings as any, "dm")) return "자동 DM 기능이 비활성화되어 있습니다.";
   if (job.igAccountId && ![settings.igUserId, settings.igAccountId].includes(job.igAccountId)) return "예약한 인스타그램 계정의 연결이 변경되었습니다.";
-  if (job.source === "comment" && job.ruleId && !settings.automations?.some((rule) => rule.id === job.ruleId && rule.enabled)) return "예약한 자동화가 삭제되었거나 비활성화되었습니다.";
+  if ((job.source === "comment" || (job.source === "trigger" && job.claimKey)) && job.ruleId && !settings.automations?.some((rule) => rule.id === job.ruleId && rule.enabled)) return "예약한 자동화가 삭제되었거나 비활성화되었습니다.";
   if (job.commentId) {
     // 비공개 답장 — 24시간 창이 아니라 댓글 기준 7일 창을 본다.
     const commentMs = Date.parse(job.commentAt || job.createdAt || "");
@@ -91,7 +91,10 @@ async function blockReason(job: DmScheduledJob, settings: DmSettings | null): Pr
     }
     return null;
   }
-  const contact = await getDmContact(job.username, job.recipientId);
+  const clickAt = Date.parse(job.contactLastAt || "");
+  if (job.source === "trigger" && job.claimKey && Number.isFinite(clickAt) &&
+      clickAt <= Date.now() && Date.now() - clickAt < 24 * 60 * 60 * 1000) return null;
+  const contact = await getDmContact(job.username, job.recipientId, true);
   if (!withinDmWindow(contact)) {
     return (
       "상대가 마지막으로 메시지를 보낸 뒤 24시간이 지나 발송하지 못했습니다. " +
@@ -163,7 +166,144 @@ async function settleClaim(job: DmScheduledJob, outcome: "sent" | "uncertain" | 
   await settle.catch((e) => console.warn("[scheduled-dm] claim settle failed:", (e as Error)?.message));
 }
 
+async function processPreparedMain(key: string, job: DmScheduledJob, queued?: DmJob) {
+  const messages = job.payloads!;
+  const offset = Math.max(0, job.sentOffset || 0);
+  const sendKey = `schedule_${job.claimKey}_${offset}`;
+  let claimed = false;
+  let attempted = false;
+  let committed = false;
+  let resume: DmScheduledJob | undefined;
+  let result: Awaited<ReturnType<typeof sendDmMessages>> | undefined;
+  const log = (entry: Record<string, any>) => appendDmLog(job.username, {
+    kind: "dm", trigger: "bait_main", recipientId: job.recipientId,
+    ruleId: job.ruleId || job.id, ruleName: job.ruleName, ...entry,
+  }, "scheduled-dm").catch((e) => console.warn("[scheduled-dm] activity write failed:", (e as Error)?.message));
+  const defer = async (next: DmScheduledJob, delay: number, error: string, kind: string) => {
+    if (queued) {
+      await retryDmJob(queued, delay, error, kind, next);
+    } else {
+      const pending = { ...next, sendAt: new Date(Date.now() + delay).toISOString() };
+      // A different fallback key must not be deleted when the old job finishes.
+      pending.id = `${job.id}_cursor${pending.sentOffset || 0}_${Date.now()}`;
+      await createScheduledJob(pending);
+      await finishJob(key, { ...job, status: "canceled", error, errorKind: kind });
+    }
+    committed = true;
+  };
+  try {
+    if (!queued && !(await claimJob(key))) return;
+    if ((job.coreCount ?? messages.length) > 0 && await confirmedSent(job.username, job.claimKey!)) {
+      await completePrepared("canceled", undefined, undefined, "already_sent");
+      return;
+    }
+    const settings = await readSettings(job.username);
+    const blocked = await blockReason(job, settings);
+    if (blocked) {
+      await completePrepared("failed", blocked, "blocked");
+      await settleClaim(job, "failed");
+      await log({ status: "failed", error: blocked, errorKind: "blocked" });
+      return;
+    }
+    for (const text of sentTextsOf(messages)) await noteSentText(job.username, text);
+    claimed = await claimIfNew(job.username, sendKey, true);
+    if (!claimed) {
+      const delivered = await confirmedSent(job.username, sendKey);
+      const error = delivered ? undefined : "이 본 메시지의 이전 발송 결과를 확인해야 합니다.";
+      await completePrepared(delivered ? "sent" : "uncertain", error, delivered ? undefined : "uncertain");
+      await settleClaim(job, delivered ? "sent" : "uncertain");
+      return;
+    }
+    attempted = true;
+    result = await sendDmMessages({
+      graphHost: settings!.tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com",
+      graphVersion: GRAPH_VERSION,
+      igId: settings!.igUserId || settings!.igAccountId || "",
+      accessToken: settings!.accessToken!,
+      recipient: { id: job.recipientId },
+      messages,
+      bestEffortFrom: messages.length,
+      continuation: true,
+    });
+    const kind = result.errorKind || "other";
+    const error = describeDmError(kind, result.error);
+    const coreLeft = Math.max(0, (job.coreCount ?? messages.length) - result.sent);
+    if (!result.ok && (kind === "throttled" || kind === "rate_limit") &&
+        (kind === "throttled" || (queued?.attempts ?? job.attempts ?? 0) < 12)) {
+      resume = {
+        ...job, payloads: messages.slice(result.sent), sentOffset: offset + result.sent,
+        coreCount: coreLeft, status: "pending",
+        attempts: (job.attempts || 0) + (kind === "throttled" ? 0 : 1),
+      };
+      const delay = kind === "throttled" ? Math.max(1000, result.retryAfterMs || 0)
+        : Math.max(result.retryAfterMs || 0, retryDelay(queued?.attempts || job.attempts || 1));
+      if (result.sent === 0) await release(job.username, sendKey, true);
+      await defer(resume, delay, error, kind);
+      if (kind === "rate_limit") await pauseDmAccount(job.igAccountId || "", delay)
+        .catch((e) => console.warn("[scheduled-dm] account pause failed:", (e as Error)?.message));
+      if (coreLeft === 0) await settleClaim(job, "sent");
+      await log({ status: result.sent ? "sent" : "scheduled", partial: result.partial,
+        followUpQueued: true, messageId: result.messageId, error, errorKind: kind });
+      return;
+    }
+    if (result.ok) {
+      await confirmSent(job.username, sendKey).catch((e) =>
+        console.warn("[scheduled-dm] delivery mark failed:", (e as Error)?.message));
+      await settleClaim(job, "sent");
+      await completePrepared("sent", undefined, undefined, "sent");
+      await noteBaitSuccess(job.username).catch(() => undefined);
+      await log({ status: "sent", messageId: result.messageId });
+      return;
+    }
+    // Only a definite zero-send rejection can reopen the same delivery cursor.
+    if (result.sent === 0 && kind !== "uncertain") await release(job.username, sendKey, true);
+    await completePrepared(kind === "uncertain" ? "uncertain" : "failed", error, kind, result.partial ? "partial" : undefined);
+    await settleClaim(job, coreLeft === 0 ? "sent" : kind === "uncertain" ? "uncertain" : "failed");
+    if (kind === "outside_window" && await noteBaitFailure(job.username, error).catch(() => false)) {
+      await notifyAdminBaitIssue(job.username, "버튼 클릭 뒤 본 메시지 발송이 반복해서 거부됐습니다.", "suspended")
+        .catch(() => undefined);
+    }
+    await log({ status: "failed", partial: result.partial, messageId: result.messageId, error, errorKind: kind });
+  } catch (e) {
+    const error = (e as Error)?.message || "발송 오류";
+    if (!committed) {
+      try {
+        if (resume) {
+          // Persist the known unsent tail, never replay the original payloads.
+          await defer(resume, retryDelay(queued?.attempts || job.attempts || 1), error, result?.errorKind || "other");
+        } else if (attempted) {
+          const delivered = result?.ok === true;
+          await completePrepared(delivered ? "sent" : "uncertain", error, delivered ? "storage" : "uncertain",
+            result?.partial ? "partial" : undefined);
+          await settleClaim(job, delivered ? "sent" : "uncertain");
+        } else {
+          if (claimed) await release(job.username, sendKey, true);
+          if ((queued?.attempts ?? job.attempts ?? 0) >= 12) {
+            await completePrepared("failed", error, "storage");
+            await settleClaim(job, "failed");
+          } else {
+            await defer(job, retryDelay(queued?.attempts || job.attempts || 1), error, "storage");
+          }
+        }
+      } catch (persistError) {
+        console.error("[scheduled-dm] main result write failed:", (persistError as Error)?.message);
+      }
+    }
+    console.error("[scheduled-dm] main processing failed:", error);
+  }
+
+  async function completePrepared(status: "sent" | "failed" | "uncertain" | "canceled", error?: string, kind?: string, outcome?: string) {
+    if (queued) await completeDmJob(queued, status, error, kind, result?.messageId, outcome);
+    else await finishJob(key, { ...job, status, sentAt: new Date().toISOString(), error, errorKind: kind, partial: result?.partial });
+    committed = true;
+  }
+}
+
 async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob) {
+    if (job.claimKey && !job.commentId && job.source === "trigger" && job.payloads?.length) {
+      await processPreparedMain(key, job, queued);
+      return;
+    }
     try {
       // 실행이 1분을 넘겨 다음 실행과 겹쳐도 같은 예약을 두 번 보내지 않는다.
       if (!queued && !(await claimJob(key))) return;
@@ -648,17 +788,27 @@ async function processQueuedMessage(job: DmJob): Promise<void> {
       { entry: [{ id: igAccountId, time: payload.entryTime, messaging: [event] }] },
       true,
     );
+    if (result.uncertain) {
+      await completeDmJob(job, "uncertain", result.error, result.errorKind || "uncertain");
+      return;
+    }
     if (result.retryable) {
       if (result.errorKind === "account_lookup" && job.attempts >= ACCOUNT_LOOKUP_ATTEMPTS) {
         await completeDmJob(job, "canceled", result.error, result.errorKind, undefined, "unlinked");
       } else if (job.attempts >= 12) {
         await completeDmJob(job, "failed", result.error || "재시도 횟수를 초과했습니다.", result.errorKind);
       } else {
-        await retryDmJob(job, retryDelay(job.attempts), result.error || "일시적인 처리 오류", result.errorKind || "other");
+        await retryDmJob(job, Math.max(result.retryAfterMs || 0, retryDelay(job.attempts)), result.error || "일시적인 처리 오류", result.errorKind || "other");
       }
       return;
     }
-    await completeDmJob(job, "sent", undefined, undefined, undefined, "processed");
+    if (result.queued) {
+      await completeDmJob(job, "canceled", undefined, undefined, undefined, "queued");
+    } else {
+      const failed = Boolean(result.failed && !result.sent);
+      await completeDmJob(job, failed ? "failed" : "sent", result.error, result.errorKind, undefined,
+        failed ? "failed" : result.failed || result.partial ? "partial" : result.sent ? "sent" : "processed");
+    }
   } catch (e) {
     const error = (e as Error)?.message || "처리 오류";
     if (job.attempts >= 12) await completeDmJob(job, "failed", error, "other");
