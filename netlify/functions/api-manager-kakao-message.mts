@@ -2,18 +2,21 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { loadManagerContacts } from "./_shared/campaign-listup.mts";
-import {
-  KAKAO_CHANNEL_MESSAGE_MAX,
-  phoneForUsername,
-  sendKakaoChannelMessage,
-} from "./_shared/kakao-message.mts";
+import { phoneForUsername, sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
+import { contactRequestAlimtalk, contactRequestEnabled } from "./_shared/alimtalk-templates.mts";
 import { checkRateLimit } from "./_shared/rate-limit.mts";
 
 /**
- * 담당자 → 인플루언서 카카오톡 메시지. 픽스폴리오 카카오톡 채널 이름으로 나간다.
+ * 담당자 → 인플루언서 연락 요청 알림톡. 픽스폴리오 카카오톡 채널 이름으로 나간다.
  *
- *   GET  ?username=..   보낼 수 있는 사람인지 확인. 창을 열 때 쓴다.
- *   POST { username, message }   보내기
+ *   GET                 연락 요청을 쓸 수 있는지(템플릿 승인 여부). 버튼을 그릴지 정한다.
+ *   GET  ?username=..   보낼 수 있는 사람인지 확인.
+ *   POST { username }   보내기
+ *
+ * 처음에는 담당자가 쓴 자유 문장을 브랜드 메시지로 보냈다. 그런데 브랜드 메시지는
+ * 채널 친구에게만 닿아서 대부분 문자로 떨어졌다. 그래서 정해진 문구의 알림톡
+ * ("메시지를 보내 주세요")만 보내고, 인플루언서가 그 채팅방에 먼저 말을 걸면
+ * 담당자는 채널 관리자센터에서 자유롭게 이어 간다.
  *
  * 인플루언서 로그인이 카카오로만 되면서 담당자 화면의 "카톡 아이디 미등록"은 뜻이
  * 없어졌다 — 연락은 아이디를 찾아 친구 추가하는 방식이 아니라 채널에서 바로 보내는
@@ -26,12 +29,14 @@ import { checkRateLimit } from "./_shared/rate-limit.mts";
 
 const norm = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^@/, "");
 
-async function recipientOf(username: string): Promise<{ phone: string }> {
+async function recipientOf(username: string): Promise<{ phone: string; name: string }> {
   const fromAccount = String(await phoneForUsername(username)).replace(/\D/g, "");
   let phone = /^\d{10,11}$/.test(fromAccount) ? fromAccount : "";
+  let name = "";
   try {
     const contacts = await loadManagerContacts(getDatabase(), [username]);
     const card = contacts.get(username);
+    name = String(card?.name || "").trim();
     if (!phone) {
       const entry = (card?.entries || []).find((e: any) => e?.kind === "phone");
       const digits = String(entry?.value || "").replace(/\D/g, "");
@@ -40,7 +45,7 @@ async function recipientOf(username: string): Promise<{ phone: string }> {
   } catch (e) {
     console.error("[manager-kakao-message] contact lookup failed:", e);
   }
-  return { phone };
+  return { phone, name };
 }
 
 export default async (req: Request) => {
@@ -49,14 +54,12 @@ export default async (req: Request) => {
 
   if (req.method === "GET") {
     const username = norm(new URL(req.url).searchParams.get("username"));
-    if (!username) {
-      return Response.json({ error: "받는 사람을 지정해 주세요." }, { status: 400 });
-    }
+    if (!username) return Response.json({ enabled: contactRequestEnabled() });
     const { phone } = await recipientOf(username);
     return Response.json({
       username,
+      enabled: contactRequestEnabled(),
       available: !!phone,
-      maxLength: KAKAO_CHANNEL_MESSAGE_MAX,
     });
   }
 
@@ -64,20 +67,17 @@ export default async (req: Request) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  if (!contactRequestEnabled()) {
+    return Response.json(
+      { error: "연락 요청 알림톡 템플릿이 아직 승인되지 않았습니다." },
+      { status: 503 },
+    );
+  }
+
   const body = (await req.json().catch(() => ({}))) as any;
   const username = norm(body?.username);
-  const message = String(body?.message || "").trim();
   if (!username) {
     return Response.json({ error: "받는 사람을 지정해 주세요." }, { status: 400 });
-  }
-  if (!message) {
-    return Response.json({ error: "보낼 내용을 적어 주세요." }, { status: 400 });
-  }
-  if (message.length > KAKAO_CHANNEL_MESSAGE_MAX) {
-    return Response.json(
-      { error: `메시지는 ${KAKAO_CHANNEL_MESSAGE_MAX}자까지 보낼 수 있습니다.` },
-      { status: 400 },
-    );
   }
 
   // 발송은 건마다 요금이 나간다. 담당자 한 명이 실수로 같은 창에서 여러 번 누르거나
@@ -91,7 +91,7 @@ export default async (req: Request) => {
   });
   if (!limited.ok) return limited.response;
 
-  const { phone } = await recipientOf(username);
+  const { phone, name } = await recipientOf(username);
   if (!phone) {
     return Response.json(
       { error: "이 인플루언서의 휴대폰 번호가 없어 메시지를 보낼 수 없습니다." },
@@ -99,7 +99,24 @@ export default async (req: Request) => {
     );
   }
 
-  const result = await sendKakaoChannelMessage({ phone, message });
+  // 같은 사람에게 연달아 누르면 같은 알림톡이 여러 통 쌓인다.
+  const repeated = await checkRateLimit({
+    bucket: "manager-kakao-contact-request",
+    key: `${manager.managerUsername || "manager"}:${username}`,
+    limit: 1,
+    windowSeconds: 10 * 60,
+    message: "이 인플루언서에게는 방금 연락 요청을 보냈습니다. 잠시 후 다시 시도해 주세요.",
+  });
+  if (!repeated.ok) return repeated.response;
+
+  const template = contactRequestAlimtalk({ influencer: name || username });
+  const result = await sendKakaoAlimtalk({ phone, ...template });
+  if (result.success && result.paused) {
+    return Response.json(
+      { error: "지금은 알림톡 발송이 잠시 중지되어 있습니다." },
+      { status: 503 },
+    );
+  }
   if (!result.success) {
     const error =
       result.error === "notification service not configured"
@@ -109,7 +126,7 @@ export default async (req: Request) => {
   }
 
   console.log(
-    `[manager-kakao-message] ${manager.managerUsername} → ${username} (${result.type}, ${message.length}자)`,
+    `[manager-kakao-message] ${manager.managerUsername} → ${username} 연락 요청 (${result.type})`,
   );
   return Response.json({ success: true, type: result.type });
 };
