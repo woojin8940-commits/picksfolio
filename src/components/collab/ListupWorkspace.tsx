@@ -7,6 +7,7 @@ import InfluencerCandidateCard, {
   metricsFrom,
   registeredPriceOf,
 } from './InfluencerCandidateCard';
+import KakaoMessageButton from './KakaoMessageButton';
 import { CONTENT_FORMATS } from '../../utils/campaignBrief';
 import { parseCategoryList } from '../../utils/creatorCategories';
 
@@ -372,11 +373,15 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
    */
   const [poolCategory, setPoolCategory] = useState('');
   /**
-   * 줄 보기 · 카드 보기. 기본은 줄 보기다 — 카드는 한 명을 판단하는 데는 좋지만
-   * 한 화면에 두세 명밖에 들어가지 않아, 여러 명을 견주는 첫 단계에는 맞지 않는다.
-   * 줄에서 눈에 걸린 사람만 눌러 카드를 펼친다.
+   * 카드 보기 · 줄 보기. 기본은 카드 보기다.
+   *
+   * 예전에는 줄 보기가 기본이었다. 후보 풀이 명단과 화면을 반씩 나눠 써서 카드가
+   * 한 줄에 한 장밖에 안 들어갔기 때문이다. 그런데 줄에는 최근 콘텐츠와 편당 조회수가
+   * 없어서, 담당자는 사람마다 줄을 눌러 펼쳐 봐야 했다. 이제 후보 풀이 폭 전체를 쓰고
+   * 카드를 여러 장 나란히 놓으므로, 펼치지 않고 눈으로만 훑을 수 있게 카드부터 보인다.
+   * 줄 보기는 연락처만 빠르게 훑을 때를 위해 남겨 둔다.
    */
-  const [poolRows, setPoolRows] = useState(true);
+  const [poolRows, setPoolRows] = useState(false);
   const [poolOpen, setPoolOpen] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   const [addNote, setAddNote] = useState('');
@@ -661,9 +666,9 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
         </div>
       )}
 
-      <div
-        className={`grid grid-cols-1 gap-4 ${listupAllowed ? 'xl:grid-cols-2' : ''}`}
-      >
+      {/* 후보 풀과 명단을 위아래로 둔다. 둘을 반씩 나누면 후보 카드가 한 줄에 한 장만
+          들어가 여러 명을 견줄 수 없었다 — 사람을 고르는 자리가 폭을 다 써야 한다. */}
+      <div className="grid grid-cols-1 gap-4">
         {/* 후보 풀 */}
         {listupAllowed && (
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
@@ -681,7 +686,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                   onClick={() => setPoolRows((v) => !v)}
                   className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-black hover:bg-slate-200"
                 >
-                  {poolRows ? '카드로 보기' : '줄로 보기'}
+                  {poolRows ? '카드로 보기' : '연락처 줄로 보기'}
                 </button>
               </div>
             </div>
@@ -812,9 +817,15 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
             </div>
           )}
 
-          <div className="p-3 space-y-2 max-h-[720px] overflow-y-auto bg-slate-50/60">
+          <div
+            className={`p-3 max-h-[85vh] overflow-y-auto bg-slate-50/60 ${
+              poolRows
+                ? 'space-y-2'
+                : 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 items-start'
+            }`}
+          >
             {poolView.length === 0 ? (
-              <p className="text-[11px] text-slate-400 font-bold text-center py-8">
+              <p className="text-[11px] text-slate-400 font-bold text-center py-8 col-span-full">
                 {pool.length > 0
                   ? '고른 조건에 맞는 후보가 없습니다. 조건을 지워 보세요.'
                   : '조건에 맞는 후보가 없습니다. 검색어를 바꿔 보세요.'}
@@ -838,6 +849,14 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                   >
                     {on ? '선택 해제' : '명단 후보'}
                   </button>
+                );
+                const kakaoButton = (
+                  <KakaoMessageButton
+                    username={p.username}
+                    label={`@${metricsFrom(p).instagramHandle || p.username}`}
+                    token={token}
+                    onNotify={notify}
+                  />
                 );
                 const applicantBadge = p.isApplicant ? (
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-600 flex-shrink-0">
@@ -872,7 +891,6 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                     String(contactEntries.find((e) => e?.kind === kind)?.value || '').trim();
                   const contactName = String(contact?.name || m.name || '').trim();
                   const contactPhone = valueOfKind('phone');
-                  const contactKakao = valueOfKind('kakao');
                   return (
                     <button
                       key={p.username}
@@ -933,13 +951,9 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                           >
                             {contactPhone || '연락처 미등록'}
                           </span>
-                          <span
-                            className={`text-[10px] font-bold ${
-                              contactKakao ? 'text-slate-500' : 'text-slate-300'
-                            }`}
-                          >
-                            카톡 {contactKakao || '미등록'}
-                          </span>
+                          {/* 인플루언서는 카카오로만 로그인하므로 "카톡 아이디 미등록"은 뜻이
+                              없다. 아이디 대신 채널에서 바로 보내는 버튼을 둔다. */}
+                          {kakaoButton}
                         </div>
                       )}
                     </button>
@@ -965,7 +979,10 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                         {selectButton}
                       </>
                     }
-                  />
+                  >
+                    {/* 카드에서도 바로 연락할 수 있게 카카오톡 버튼을 겉에 둔다. */}
+                    <div className="flex justify-end">{kakaoButton}</div>
+                  </InfluencerCandidateCard>
                 );
               })
             )}
@@ -982,11 +999,11 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
             </p>
           </div>
 
-          <div className="p-3 space-y-2.5 max-h-[720px] overflow-y-auto bg-slate-50/60">
+          <div className="p-3 max-h-[85vh] overflow-y-auto bg-slate-50/60 grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3 items-start">
             {candidates.length === 0 ? (
-              <p className="text-[11px] text-slate-400 font-bold text-center py-8">
+              <p className="text-[11px] text-slate-400 font-bold text-center py-8 col-span-full">
                 {listupAllowed
-                  ? '아직 명단이 비어 있습니다. 왼쪽에서 후보를 골라 올려 주세요.'
+                  ? '아직 명단이 비어 있습니다. 위의 후보 풀에서 후보를 골라 올려 주세요.'
                   : '지원자만 받는 캠페인입니다. 명단은 만들지 않습니다.'}
               </p>
             ) : (
@@ -1021,6 +1038,14 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${outreach.cls}`}>
                           {outreach.label}
                         </span>
+                        {c.influencerUsername && (
+                          <KakaoMessageButton
+                            username={c.influencerUsername}
+                            label={`@${metricsFrom(c).instagramHandle || c.influencerUsername}`}
+                            token={token}
+                            onNotify={notify}
+                          />
+                        )}
                       </>
                     }
                   >
