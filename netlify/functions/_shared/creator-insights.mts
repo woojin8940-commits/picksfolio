@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { clipText } from "./clip-text.mts";
 import {
   intOf,
   isTokenInvalidError,
@@ -420,7 +421,7 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
       permalink: String(m?.permalink || ""),
       // 영상은 media_url 이 동영상 파일이라 썸네일을 먼저 쓴다.
       thumbnailUrl: String(m?.thumbnail_url || m?.media_url || ""),
-      caption: String(m?.caption || "").slice(0, 200),
+      caption: clipText(m?.caption, 200),
       timestamp: String(m?.timestamp || ""),
       views: intOf(row.views ?? 0),
       reach: hasReach ? intOf(row.reach) : null,

@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { clipText } from "./clip-text.mts";
 import { safeKeyPrefix } from "./upload-media.mts";
 
 /**
@@ -814,7 +815,7 @@ export async function fetchInstagramMetrics(
         ? String(m?.thumbnail_url || m?.media_url || "")
         : String(m?.media_url || m?.thumbnail_url || ""),
     mediaType: String(m?.media_type || ""),
-    caption: String(m?.caption || "").slice(0, 200),
+    caption: clipText(m?.caption, 200),
     likes: intOf(m?.like_count),
     comments: intOf(m?.comments_count),
     timestamp: String(m?.timestamp || ""),
@@ -867,7 +868,7 @@ export async function fetchInstagramMetrics(
         id: String(m?.id || ""),
         permalink: String(m?.permalink || ""),
         thumbnailUrl: String(m?.thumbnail_url || m?.media_url || ""),
-        caption: String(m?.caption || "").slice(0, 200),
+        caption: clipText(m?.caption, 200),
         views: reelViews[i] || 0,
         likes: intOf(m?.like_count),
         comments: intOf(m?.comments_count),

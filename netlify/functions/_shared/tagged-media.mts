@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { clipText } from "./clip-text.mts";
 import {
   fetchMediaViews,
   intOf,
@@ -643,7 +644,7 @@ export async function fetchBrandOwnMedia(
         String(m?.media_type || "").toUpperCase() === "VIDEO"
           ? String(m?.thumbnail_url || m?.media_url || "")
           : String(m?.media_url || m?.thumbnail_url || ""),
-      caption: String(m?.caption || "").slice(0, 200),
+      caption: clipText(m?.caption, 200),
       timestamp: String(m?.timestamp || ""),
       authorHandle: handle,
       authorUsername: "",
