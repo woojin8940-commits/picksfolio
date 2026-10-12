@@ -1,4 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
+import { clipText } from "./_shared/clip-text.mts";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
@@ -128,7 +129,7 @@ export default async (req: Request) => {
               id: String(r?.id || r?.permalink || ""),
               permalink: String(r?.permalink || ""),
               thumbnailUrl: String(r?.thumbnailUrl || ""),
-              caption: String(r?.caption || "").slice(0, 200),
+              caption: clipText(r?.caption, 200),
               views: intOf(r?.views),
               likes: intOf(r?.likes),
               timestamp: String(r?.timestamp || ""),
@@ -282,7 +283,8 @@ export default async (req: Request) => {
     } catch (err: any) {
       // 여기까지 온 오류는 데이터베이스·본문 파싱 쪽이다. 원문은 영문이라 화면에
       // 그대로 올리면 읽는 사람이 할 수 있는 일이 없다. 로그로만 남긴다.
-      console.error("[creator-channel] sync 실패:", err?.message || err);
+      // 드리즐 오류의 message 는 "Failed query: <쿼리 전문>" 뿐이고 진짜 이유는 cause 에 있다.
+      console.error("[creator-channel] sync 실패:", err?.cause?.message || "", err?.message || err);
       return Response.json(
         { error: "정보를 갱신하지 못했습니다. 잠시 후 다시 시도해 주세요.", code: "SYNC_FAILED" },
         { status: 500 },
