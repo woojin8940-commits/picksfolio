@@ -374,6 +374,7 @@ const PickedQuoteCard: React.FC<{
             alt=""
             className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0"
             referrerPolicy="no-referrer"
+            onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
           />
         ) : (
           <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0" />

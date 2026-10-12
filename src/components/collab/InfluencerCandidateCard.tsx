@@ -599,6 +599,8 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               src={m.profileImage}
               alt={`${idLine} 프로필`}
               loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
               className="w-9 h-9 rounded-full object-cover bg-slate-100 flex-shrink-0"
             />
           ) : (
