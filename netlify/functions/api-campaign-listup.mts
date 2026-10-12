@@ -253,6 +253,7 @@ export default async (req: Request, context: Context) => {
             pool.set(key, {
               username: key,
               name: "",
+              profileImage: "",
               source: "manager",
               isApplicant: false,
               adPrice: "",
@@ -299,6 +300,7 @@ export default async (req: Request, context: Context) => {
           if (!item) continue;
           const shaped = shapeChannel(ch);
           // 본인이 등록한 지표가 지원서의 수기 입력보다 우선한다.
+          item.profileImage = shaped.profileImage;
           item.instagramHandle = shaped.instagramHandle;
           item.instagramUrl = shaped.instagramUrl || item.instagramUrl;
           item.followers = shaped.followers || item.followers;
@@ -342,6 +344,22 @@ export default async (req: Request, context: Context) => {
             return (b.followers || 0) - (a.followers || 0);
           })
           .slice(0, 60);
+
+        // 인스타 사진이 없는 사람(연동 전, 지원서만 낸 사람)은 픽스폴리오 페이지의
+        // 아바타로 채운다. 명단에 올릴 때 굳는 스냅샷과 같은 규칙(mergeSnapshot)이라,
+        // 후보 풀에서 본 얼굴과 명단 카드의 얼굴이 어긋나지 않는다.
+        const noImage = (payload.pool as any[]).filter((p) => !p.profileImage).map((p) => p.username);
+        if (noImage.length) {
+          const siteRows = (await db.sql`
+            SELECT username, data->'profile'->>'avatar_url' AS avatar_url
+            FROM site_data WHERE username = ANY(${noImage})
+          `) as any[];
+          const avatarBy = new Map<string, string>();
+          for (const r of siteRows || []) if (r?.avatar_url) avatarBy.set(norm(r.username), String(r.avatar_url));
+          for (const p of payload.pool as any[]) {
+            if (!p.profileImage) p.profileImage = avatarBy.get(p.username) || "";
+          }
+        }
       }
 
       // 담당자 카드에는 성함과 연락처를 함께 내려보낸다. 명단을 보다가 마음에 드는
