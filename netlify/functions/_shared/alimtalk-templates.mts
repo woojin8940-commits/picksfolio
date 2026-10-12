@@ -233,6 +233,40 @@ export function timelineMessageAlimtalk(input: {
 // 진단
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 담당자 연락 요청 (인플루언서 수신)
+// ---------------------------------------------------------------------------
+
+/**
+ * 연락 요청 템플릿 ID. 솔라피에서 심사가 끝나면 여기에 적는다.
+ *
+ * 채널 친구가 아닌 사람에게 자유 문장 카카오톡은 닿지 않는다. 그래서 담당자는
+ * 정해진 문구의 알림톡("메시지를 보내 주세요")만 먼저 보내고, 인플루언서가 그
+ * 알림톡이 온 채널 채팅방에 아무 말이나 남기면 그때부터 채널 관리자센터에서
+ * 자유롭게 대화한다.
+ *
+ * 비어 있는 동안은 후보 풀의 카카오톡 버튼이 보이지 않는다 — 심사 전에 누르면
+ * 전부 대체 문자로 나가기 때문이다. 템플릿 문구의 변수는 `#{인플루언서명}` 하나만 쓴다.
+ */
+export const CONTACT_REQUEST_TEMPLATE_ID = "";
+
+export const contactRequestEnabled = () => !!CONTACT_REQUEST_TEMPLATE_ID;
+
+/** 연락 요청 · 담당자가 후보 풀에서 카카오톡 버튼을 눌렀을 때. */
+export function contactRequestAlimtalk(input: { influencer: string }): AlimtalkTemplate {
+  const influencer = person(input.influencer);
+  return {
+    templateId: CONTACT_REQUEST_TEMPLATE_ID,
+    variables: {
+      "#{인플루언서명}": influencer,
+    },
+    message:
+      `[픽스폴리오] ${influencer}님, 픽스폴리오 담당자가 연락을 기다리고 있어요.\n\n` +
+      `아래 카카오톡 채널로 메시지를 남겨 주시면 담당자가 바로 답드릴게요.\n` +
+      `https://pf.kakao.com/_ziZxhX/chat`,
+  };
+}
+
 /**
  * 코드가 실제로 쓰는 템플릿 목록.
  *
@@ -262,5 +296,8 @@ export const ALIMTALK_TEMPLATE_CATALOG: { label: string; template: AlimtalkTempl
       label: "협업 타임라인 새 메시지 (양쪽)",
       template: timelineMessageAlimtalk({ recipient: "예시", senderName: "예시업체", projectName: "예시 협업" }),
     },
+    ...(contactRequestEnabled()
+      ? [{ label: "담당자 연락 요청 (인플루언서)", template: contactRequestAlimtalk({ influencer: "예시" }) }]
+      : []),
   ];
 })();

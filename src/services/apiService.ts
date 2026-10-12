@@ -2773,14 +2773,28 @@ export const apiService = {
     }
   },
 
-  /** 픽스폴리오 카카오톡 채널 이름으로 인플루언서에게 메시지를 보낸다. 담당자 전용. */
-  async sendKakaoMessage(username: string, message: string, token?: string): Promise<any> {
+  /** 연락 요청 알림톡 템플릿이 승인돼 쓸 수 있는지. 담당자 전용. */
+  async getKakaoContactEnabled(token?: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/manager-kakao-message', {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      return res.ok && !!json?.enabled;
+    } catch {
+      return false;
+    }
+  },
+
+  /** 인플루언서에게 연락 요청 알림톡(정해진 템플릿)을 보낸다. 담당자 전용. */
+  async sendKakaoMessage(username: string, token?: string): Promise<any> {
     try {
       const res = await fetch('/api/manager-kakao-message', {
         method: 'POST',
         credentials: 'same-origin',
         headers: await collabHeaders(token),
-        body: JSON.stringify({ username, message }),
+        body: JSON.stringify({ username }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '메시지를 보내지 못했습니다.' };

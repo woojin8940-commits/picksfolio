@@ -340,6 +340,118 @@ const QuoteFields: React.FC<{
   );
 };
 
+/**
+ * 고른 후보 한 명의 단가 카드.
+ *
+ * 여러 명을 한 번에 올릴 때 입력 폼이 하나뿐이었다. 그 폼의 값이 고른 사람 전원에게
+ * 똑같이 들어가서, 담당자는 누구에게 얼마를 적는지 알 수 없었다. 이제 고른 사람마다
+ * 카드를 하나씩 펼쳐 두고 브랜드에게 보일 제시가만 적는다.
+ *
+ * 지급 단가는 여기서 받지 않는다. 비워 보내면 서버가 그 사람의 등록 단가로 채운다.
+ * 등록 단가는 담당자 화면에만 참고로 적고, 브랜드 응답에서는 서버가 뺀다
+ * (withoutRegisteredPrices) — 제시가 칸 옆에 둔다고 브랜드에게 가는 것이 아니다.
+ */
+const PickedQuoteCard: React.FC<{
+  data: any;
+  value: QuoteForm;
+  onChange: (next: QuoteForm) => void;
+  onRemove: () => void;
+  contentFormat?: string;
+  formatName: string;
+}> = ({ data, value, onChange, onRemove, contentFormat, formatName }) => {
+  const m = metricsFrom(data);
+  const registered = registeredPriceOf(data, contentFormat);
+  const brandAmount = Number(value.fee || 0);
+  const margin = brandAmount > 0 && registered > 0 ? brandAmount - registered : null;
+  const rate = margin !== null ? Math.round((margin / brandAmount) * 100) : 0;
+
+  return (
+    <div className="bg-white rounded-xl border border-blue-200 p-3 space-y-2.5">
+      <div className="flex items-center gap-2.5">
+        {m.profileImage ? (
+          <img
+            src={m.profileImage}
+            alt=""
+            className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-black text-slate-900 truncate">
+            @{m.instagramHandle || m.username}
+          </p>
+          <p className="text-[10px] font-bold text-slate-400 truncate">
+            {[m.name, m.categories].filter(Boolean).join(' · ') || '\u00a0'}
+          </p>
+        </div>
+        <button
+          onClick={onRemove}
+          className="text-slate-300 hover:text-red-500 text-lg font-black leading-none flex-shrink-0"
+          aria-label="선택 해제"
+          title="선택 해제"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5">
+        <span className="text-[10px] font-black text-slate-400">
+          팔로워 <span className="text-slate-700">{formatCountKo(m.followers || 0)}</span>
+        </span>
+        {(m.avgViews || 0) > 0 && (
+          <span className="text-[10px] font-black text-slate-400">
+            평균 조회수 <span className="text-slate-700">{formatCountKo(m.avgViews || 0)}</span>
+          </span>
+        )}
+        {registered > 0 ? (
+          <span className="text-[10px] font-black text-slate-500">
+            {formatName ? `${formatName} ` : ''}등록 단가 {formatNumberWithCommas(registered)}원
+            <span className="text-slate-300 font-bold"> · 브랜드 비공개</span>
+          </span>
+        ) : (
+          <span className="text-[10px] font-black text-amber-600">
+            {formatName ? `${formatName} ` : ''}단가 미등록
+          </span>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-blue-600 font-black mb-1">
+          브랜드에게 보일 단가(원)
+        </label>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={formatNumberWithCommas(value.fee)}
+          onChange={(e) => onChange({ ...value, fee: digitsOnly(e.target.value) })}
+          placeholder="비워 두면 협의"
+          className="w-full text-[13px] font-black text-slate-800 text-right border border-blue-200 rounded-lg px-2.5 py-2 focus:outline-none focus:border-blue-500"
+        />
+      </div>
+
+      <div
+        className={`rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2 ${
+          margin === null ? 'bg-slate-50' : margin > 0 ? 'bg-emerald-50' : 'bg-red-50'
+        }`}
+      >
+        <span className="text-[10px] font-black text-slate-500">우리 수익 (등록 단가 기준)</span>
+        {margin === null ? (
+          <span className="text-[10px] font-bold text-slate-400">
+            {registered > 0 ? '단가를 적으면 계산됩니다' : '등록 단가가 없어 계산할 수 없습니다'}
+          </span>
+        ) : (
+          <span className={`text-[12px] font-black ${margin > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+            {formatSignedKRW(margin)}
+            <span className="text-[10px] font-bold ml-1 opacity-70">{rate}%</span>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, onNotify }) => {
   const [candidates, setCandidates] = useState<any[]>([]);
   // 캠페인 한 건. 진행 방식에 따라 리스트업 자리 자체가 사라지므로 화면이 이 값을 읽는다.
@@ -384,8 +496,11 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
   const [poolRows, setPoolRows] = useState(false);
   const [poolOpen, setPoolOpen] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
+  // 고른 사람의 카드 정보와 사람마다 적는 단가. 검색을 바꿔 풀에서 빠져도 고른 카드는
+  // 남아 있어야 하므로, 고를 때의 정보를 따로 들고 있는다.
+  const [pickedInfo, setPickedInfo] = useState<Record<string, any>>({});
+  const [pickedQuotes, setPickedQuotes] = useState<Record<string, QuoteForm>>({});
   const [addNote, setAddNote] = useState('');
-  const [addQuote, setAddQuote] = useState<QuoteForm>(emptyQuote);
 
   const [offerFor, setOfferFor] = useState('');
   const [offer, setOffer] = useState<OfferForm>(emptyOffer);
@@ -430,19 +545,36 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
 
   useEffect(() => {
     setPicked([]);
+    setPickedInfo({});
+    setPickedQuotes({});
     setOfferFor('');
     setQuoteFor('');
     setQuery('');
     load();
   }, [load]);
 
+  /** 후보를 고르거나 놓는다. 이미 적어 둔 제시가는 다시 골라도 남겨 둔다. */
+  const togglePick = (p: any) => {
+    const username = p.username;
+    if (picked.includes(username)) {
+      setPicked((prev) => prev.filter((u) => u !== username));
+      return;
+    }
+    setPicked((prev) => [...prev, username]);
+    setPickedInfo((prev) => ({ ...prev, [username]: p }));
+    setPickedQuotes((prev) => (prev[username] ? prev : { ...prev, [username]: emptyQuote }));
+  };
+
   const addCandidates = async () => {
     if (picked.length === 0) return;
     setBusy(true);
+    // 제시가만 보낸다. 지급 단가는 비워 두면 서버가 각자의 등록 단가로 채운다.
+    const quotes: Record<string, any> = {};
+    for (const u of picked) quotes[u] = quotePayload(pickedQuotes[u] || emptyQuote).quote;
     const res = await apiService.addListupCandidates(campaignId, picked, {
       token,
       note: addNote,
-      ...quotePayload(addQuote),
+      quotes,
     });
     setBusy(false);
     if (res.error) {
@@ -450,8 +582,9 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
       return;
     }
     setPicked([]);
+    setPickedInfo({});
+    setPickedQuotes({});
     setAddNote('');
-    setAddQuote(emptyQuote);
     await load(query);
     notify(`${res.added}명을 명단에 올렸습니다.${res.skipped ? ` (이미 있던 ${res.skipped}명 제외)` : ''}`);
   };
@@ -787,8 +920,27 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
             )}
           </div>
 
+          {/* 고른 명단. 사람마다 카드를 펼쳐 두고 각자의 단가를 그 자리에서 적는다. */}
           {picked.length > 0 && (
             <div className="px-4 py-3 bg-blue-50/70 border-b border-blue-100 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-[12px] font-black text-blue-700">
+                  고른 후보 {picked.length}명 · 브랜드에게 보일 단가를 사람마다 적어 주세요
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2.5 items-start">
+                {picked.map((u) => (
+                  <PickedQuoteCard
+                    key={u}
+                    data={pickedInfo[u] || { username: u }}
+                    value={pickedQuotes[u] || emptyQuote}
+                    onChange={(next) => setPickedQuotes((prev) => ({ ...prev, [u]: next }))}
+                    onRemove={() => setPicked((prev) => prev.filter((x) => x !== u))}
+                    contentFormat={campaign?.contentFormat}
+                    formatName={poolFormatName}
+                  />
+                ))}
+              </div>
               <textarea
                 value={addNote}
                 onChange={(e) => setAddNote(e.target.value)}
@@ -796,20 +948,14 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 placeholder="브랜드에게 보일 추천 이유 (예: 홈카페 리뷰 반응이 좋고 평균 조회수가 안정적입니다)"
                 className="w-full text-[11px] font-medium text-slate-700 border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:border-blue-400"
               />
-              {/* 여기 적은 값이 브랜드 카드에 그대로 찍힌다. 비워 두면 광고비는
-                  "협의"로 나간다. */}
-              <QuoteFields
-                value={addQuote}
-                onChange={setAddQuote}
-                payoutOptional
-                contentFormat={campaign?.contentFormat}
-                hint="선택한 후보 전체에 같은 값으로 적용됩니다. 올린 뒤 한 명씩 고칠 수 있습니다."
-              />
-              <div className="flex justify-end">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold text-slate-400">
+                  제시가를 비워 두면 브랜드 카드에 "협의"로 나갑니다. 올린 뒤에도 한 명씩 고칠 수 있습니다.
+                </p>
                 <button
                   onClick={addCandidates}
                   disabled={busy}
-                  className="px-3.5 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700 disabled:opacity-40"
+                  className="px-3.5 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700 disabled:opacity-40 flex-shrink-0"
                 >
                   {picked.length}명 명단에 올리기
                 </button>
@@ -837,9 +983,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setPicked((prev) =>
-                        on ? prev.filter((u) => u !== p.username) : [...prev, p.username],
-                      );
+                      togglePick(p);
                     }}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex-shrink-0 ${
                       on
