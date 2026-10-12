@@ -846,7 +846,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           // 확인 대화상자로 알리지 않는다. 대화상자는 방금 바뀐 화면을 가린 채
           // 확인을 누를 때까지 기다리게 하는데, 정작 알려 줄 내용은 그 뒤에 있는
           // 접수 완료 카드에 이미 다 적혀 있다.
-          setNotice({ type: 'ok', text: '접수되었습니다. 담당자 확인 후 안내해 드립니다.' });
+          setNotice({ type: 'ok', text: '접수되었습니다.' });
           onRegisteredChange?.(true);
         }
         writeStateCache(variant, applicantUsername, {
