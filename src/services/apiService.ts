@@ -2758,6 +2758,38 @@ export const apiService = {
    * 캠페인 후보 명단. 브랜드는 자기 캠페인의 명단을, 담당자는 명단과 함께
    * `pool` 로 명단에 올릴 후보 풀까지 받는다.
    */
+  /** 카카오톡 메시지 받는 사람 확인 — 가린 번호와 발송 가능 여부. 담당자 전용. */
+  async getKakaoRecipient(username: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch(
+        `/api/manager-kakao-message?username=${encodeURIComponent(username)}`,
+        { credentials: 'same-origin', headers: await collabHeaders(token) },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '받는 사람을 확인하지 못했습니다.' };
+      return json;
+    } catch {
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 픽스폴리오 카카오톡 채널 이름으로 인플루언서에게 메시지를 보낸다. 담당자 전용. */
+  async sendKakaoMessage(username: string, message: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch('/api/manager-kakao-message', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ username, message }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '메시지를 보내지 못했습니다.' };
+      return json;
+    } catch {
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getCampaignListup(
     campaignId: string,
     opts: { token?: string; pool?: boolean; q?: string } = {},
