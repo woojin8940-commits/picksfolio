@@ -294,6 +294,12 @@ function shapeInfluencerApplication(row: any) {
     instagram_avg_likes: Number(row.instagram_avg_likes || 0),
     instagram_avg_comments: Number(row.instagram_avg_comments || 0),
     instagram_connected: !!row.instagram_connected,
+    // 연동한 인스타 계정의 아이디. 픽스폴리오 아이디와 인스타 아이디는 다를 수 있어서,
+    // 명단 맨 위에 적는 @계정은 이 값을 먼저 쓴다. 연동이 끊긴 행의 값은 더는 아무도
+    // 확인해 주지 않으므로 내리지 않는다.
+    instagram_handle: row.instagram_connected
+      ? String(row.instagram_linked_handle || "").trim().replace(/^@/, "")
+      : "",
     instagram_recent_reels: recentReels.slice(0, 3),
     instagram_reel_trend_percent: trendPercent,
     instagram_recent_average_views: recentAverage,
@@ -747,6 +753,7 @@ export default async (req: Request) => {
           rows = await db.sql`
             SELECT a.*,
               c.connected AS instagram_connected,
+              c.instagram_handle AS instagram_linked_handle,
               c.followers AS instagram_meta_followers,
               c.following AS instagram_following,
               c.avg_views AS instagram_avg_views,
@@ -765,6 +772,7 @@ export default async (req: Request) => {
           rows = await db.sql`
             SELECT a.*,
               c.connected AS instagram_connected,
+              c.instagram_handle AS instagram_linked_handle,
               c.followers AS instagram_meta_followers,
               c.following AS instagram_following,
               c.avg_views AS instagram_avg_views,

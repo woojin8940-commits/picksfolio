@@ -29,6 +29,8 @@ interface DirApplication {
   instagram_avg_likes: number;
   instagram_avg_comments: number;
   instagram_connected: boolean;
+  /** 연동한 인스타 계정 아이디. 연동이 없으면 빈 값. */
+  instagram_handle?: string;
   instagram_recent_reels: Array<{
     id: string;
     permalink: string;
@@ -116,14 +118,18 @@ function fmtDate(d: string) {
 }
 
 /**
- * 지원자의 인스타 계정. 계정을 직접 적어 두지 않은 지원서에서는 인스타 링크에서
- * 아이디를 뽑아 쓴다 — 명단에서 먼저 읽히는 값이라 비어 있으면 안 된다.
+ * 지원자의 인스타 계정. 명단에서 먼저 읽히는 값이라 비어 있으면 안 된다.
+ *
+ * 픽스폴리오 아이디(applicant_username)는 인스타 아이디와 다를 수 있다. 그래서
+ * 연동한 계정의 아이디를 먼저 쓰고, 없으면 인스타 링크에서 뽑고, 그것도 없을 때만
+ * 픽스폴리오 아이디로 채운다.
  */
-const handleOf = (it: { applicant_username?: string; instagram_url?: string }) => {
-  const direct = String(it.applicant_username || '').trim();
-  if (direct) return direct.replace(/^@/, '');
+const handleOf = (it: { applicant_username?: string; instagram_url?: string; instagram_handle?: string }) => {
+  const linked = String(it.instagram_handle || '').trim().replace(/^@/, '');
+  if (linked) return linked;
   const hit = String(it.instagram_url || '').trim().match(/instagram\.com\/([^/?#]+)/i);
-  return hit ? hit[1] : '';
+  if (hit) return hit[1];
+  return String(it.applicant_username || '').trim().replace(/^@/, '');
 };
 
 const LinkChip: React.FC<{ label: string; url: string }> = ({ label, url }) => {
