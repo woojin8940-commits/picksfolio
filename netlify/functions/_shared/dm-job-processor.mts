@@ -15,7 +15,7 @@ import {
 } from "./instagram-dm.mts";
 import type { DmContent } from "./instagram-dm.mts";
 import { claimIfNew, confirmFailed, confirmedFailure, confirmSent, confirmedSent, contentHashOf, dmContentKey, noteSentText, noteUncertainReply, privateReplyKey, publicReplyKey, release, reopenClaim, UNCERTAIN_REPLY_RETRIES, uncertainReplyAttempts } from "./dm-send-registry.mts";
-import { linkFeatureOff } from "./instagram-metrics.mts";
+import { INSTAGRAM_GRAPH_VERSION, linkFeatureOff } from "./instagram-metrics.mts";
 import { completeDmJob, enqueueScheduledJob, pauseDmAccount, retryDmJob } from "./dm-jobs.mts";
 import type { DmJob } from "./dm-jobs.mts";
 import { processWebhookPayload } from "../instagram-webhook.mts";
@@ -37,7 +37,7 @@ import { baitPayload, baitSuspended, noteBaitFailure, noteBaitSuccess, notifyAdm
  * 사용자는 예약이 나간 줄 알고 있게 된다.
  */
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 
 /**
  * 댓글 비공개 답장이 허용되는 기간.

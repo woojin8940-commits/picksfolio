@@ -1,11 +1,11 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
-import { graphHostFor, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
+import { graphHostFor, INSTAGRAM_GRAPH_VERSION, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { processWebhookPayload } from "./instagram-webhook.mts";
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 const REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const WORK_BUDGET_MS = 12 * 60 * 1000;
 const MAX_MEDIA = 400;

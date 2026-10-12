@@ -875,8 +875,10 @@ async function applyOfferToCollab(
     return stage ? { key: stage.key, due: addDays(startKey, stage.dueOffsetDays) } : null;
   };
 
-  const script = stageDue("script");
-  const content = stageDue("content");
+  // 지금의 다섯 단계 묶음은 기획안 · 영상 초안을 plan · video 로 부른다. 예전 이름만
+  // 찾으면 합의한 기한이 단계에 닿지 않고, 조건표의 기한은 빈 값으로 덮인다.
+  const script = stageDue("script") || stageDue("plan");
+  const content = stageDue("content") || stageDue("video");
   const upload = stageDue("upload");
 
   const scriptDue = offer.scriptDue || script?.due || "";

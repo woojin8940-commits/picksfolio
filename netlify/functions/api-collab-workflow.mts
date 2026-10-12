@@ -531,9 +531,39 @@ async function uploadDayOf(db: any, collab: any): Promise<string> {
  * 광고비가 0원인 협업(제품 협찬형)은 예약하지 않는다. 그대로 두면 받을 것이 없는
  * 0원짜리 줄이 인플루언서 정산 목록에 남는다.
  */
-async function scheduleSettlementFor(db: any, collab: any) {
+/**
+ * 정산에 쓸 인플루언서 보수. 확정 조건(collab_terms.fee)이 먼저고, 비어 있으면
+ * 인플루언서가 수락한 명단 제안의 금액으로 메운다 — 상세 화면(payoutFee)과 같은 규칙.
+ * 예전에는 조건 금액만 봐서, 화면에는 보수가 보이는데 업로드를 확인해도 정산이 잡히지
+ * 않았다(담당자가 조건표를 다시 저장하지 않은 협업).
+ */
+async function payoutFeeOf(db: any, collab: any): Promise<number> {
+  const wonOf = (raw: unknown) => {
+    const value = Math.trunc(Number(raw || 0));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  };
   const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collab.id}`) as any[];
-  const fee = Number(termsRows?.[0]?.fee || 0);
+  const fee = wonOf(termsRows?.[0]?.fee);
+  if (fee > 0 || !collab.campaign_id) return fee;
+  const listupRows = (await db.sql`
+    SELECT offer FROM campaign_listups
+    WHERE campaign_id = ${collab.campaign_id}
+      AND LOWER(influencer_username) = ${String(collab.creator_username || "").trim().toLowerCase().replace(/^biz\//, "")}
+    LIMIT 1
+  `) as any[];
+  let offer = listupRows?.[0]?.offer;
+  if (typeof offer === "string") {
+    try {
+      offer = JSON.parse(offer);
+    } catch {
+      offer = null;
+    }
+  }
+  return wonOf(offer && typeof offer === "object" ? (offer as any).fee : 0);
+}
+
+async function scheduleSettlementFor(db: any, collab: any) {
+  const fee = await payoutFeeOf(db, collab);
   if (fee <= 0) return null;
   const uploadDay = await uploadDayOf(db, collab);
   const scheduledDate = settlementDateFrom(uploadDay);
@@ -745,7 +775,8 @@ export default async (req: Request, context: Context) => {
         `,
         db.sql`
           SELECT DISTINCT ON (collab_id, stage_key)
-                 collab_id, stage_key, kind, version, status, created_at
+                 collab_id, stage_key, kind, version, status, created_at,
+                 COALESCE(payload->>'fileUrl', '') AS file_url
           FROM collab_deliverables
           WHERE collab_id = ANY(${ids})
           ORDER BY collab_id, stage_key, version DESC
@@ -963,7 +994,9 @@ export default async (req: Request, context: Context) => {
             status: String(stage?.status || ""),
             title: String(stage?.title || ""),
             dueDate: stage?.due_date || "",
-            submitted: Boolean(work),
+            // 영상 칸은 영상 파일이 있어야 제출이다. 본문 캡션만 먼저 저장한 버전(captionOnly)
+            // 을 제출로 세면 브랜드 목록에 "검토 필요"가 뜨는데, 눌러 보면 확인할 영상이 없다.
+            submitted: Boolean(work) && (step !== "video" || Boolean(String(work?.file_url || "").trim())),
             submittedAt: work?.created_at || null,
             version: Number(work?.version || 0),
             workStatus: String(work?.status || ""),
@@ -1702,8 +1735,7 @@ export default async (req: Request, context: Context) => {
 
         // 정산 항목의 예정일을 담당자가 적은 날짜로 맞춘다. 항목이 아직 없으면
         // (업로드 확인 전에 회차를 먼저 잡은 경우) 여기서 만든다.
-        const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
-        const fee = Number(termsRows?.[0]?.fee || 0);
+        const fee = await payoutFeeOf(db, collab);
         try {
           await upsertSettlementForProposal(
             settlementProposalId(collab),
@@ -1798,8 +1830,7 @@ export default async (req: Request, context: Context) => {
          * 없는 '0원 완료' 항목이 인플루언서 정산금 화면에 남는다. 캠페인 정산은 화면에서
          * 고칠 수 없으니(담당자가 관리하는 값이다) 만들 때 조건표 금액을 함께 채운다.
          */
-        const feeRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
-        const paidFee = Number(feeRows?.[0]?.fee || 0);
+        const paidFee = await payoutFeeOf(db, collab);
         try {
           await upsertSettlementForProposal(
             settlementProposalId(collab),
@@ -2241,6 +2272,16 @@ export default async (req: Request, context: Context) => {
 
         const transition = await advanceProcessStage(db, collab, stage, caller.username);
         const next = transition.next;
+
+        // 다섯 단계 묶음이 아닌 협업(커머스 group_buy_v1 등)은 담당자 승인(approve_stage)
+        // 으로만 단계가 움직인다. 예전에는 여기서도 성공을 돌려주고 "검토 완료" 이벤트를
+        // 남겨, 단계는 그대로인데 인플루언서에게 "업로드를 진행해 주세요" 알림톡이 나갔다.
+        if (!transition.advanced && stepKey !== "upload") {
+          return jsonError(
+            "이 협업은 담당자 검수로 다음 단계가 열립니다. 운영 콘솔의 협업 관리에서 단계를 승인해 주세요.",
+            409,
+          );
+        }
 
         await logCollabEvent(db, {
           id: `ce_step_confirmed_${collabId}_${stage?.stage_key || stepKey}`,

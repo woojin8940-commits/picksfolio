@@ -181,6 +181,27 @@ const NOTIFY_MAP: Record<string, NotifyRule> = {
     title: (e) => `${e.campaign_title} 협업 완료`,
     body: () => "모든 단계가 끝났습니다. 정산 일정은 정산 화면에서 확인하실 수 있습니다.",
   },
+  /**
+   * 업로드 확인 · 정산 단계. 다섯 단계 묶음에서는 업로드 확인이 마지막 칸이라
+   * 협업이 여기서 끝나는데, 이 이벤트들이 목록에 없어서 인플루언서는 업로드가
+   * 확인됐는지도, 지급일이 정해졌는지도, 입금됐는지도 알림으로 받지 못했다.
+   * 승인된 알림톡 템플릿이 없으므로 앱 푸시와 화면 안 알림으로만 보낸다.
+   */
+  upload_confirmed: {
+    to: ["influencer"],
+    title: (e) => `${e.campaign_title} 업로드 확인`,
+    body: () => "업로드가 확인되어 협업이 마무리되었습니다. 정산 정보를 확인해 주세요.",
+  },
+  settlement_scheduled: {
+    to: ["influencer"],
+    title: (e) => `${e.campaign_title} 지급일 안내`,
+    body: (e) => `${e.summary || "정산 지급일이 정해졌습니다"}. 정산 화면에서 확인해 주세요.`,
+  },
+  settlement_completed: {
+    to: ["influencer"],
+    title: (e) => `${e.campaign_title} 정산 완료`,
+    body: () => "협업 정산금이 지급되었습니다. 입금 내역을 확인해 주세요.",
+  },
   schedule_changed: {
     to: ["influencer", "brand"],
     title: (e) => `${e.campaign_title} 일정 변경`,

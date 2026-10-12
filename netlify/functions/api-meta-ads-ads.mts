@@ -193,7 +193,7 @@ async function runCreative(
       {
         name: `${r.name} · 소재`,
         object_id: r.pageId,
-        instagram_actor_id: r.instagramUserId,
+        instagram_user_id: r.instagramUserId,
         source_instagram_media_id: contentId,
       },
       proof,
@@ -215,7 +215,7 @@ async function runCreative(
   const cta = { type: metaCta(r.cta), value: { link: r.linkUrl } };
   const storySpec = (withInstagram: boolean): Record<string, unknown> => ({
     page_id: r.pageId,
-    ...(withInstagram && r.instagramUserId ? { instagram_actor_id: r.instagramUserId } : {}),
+    ...(withInstagram && r.instagramUserId ? { instagram_user_id: r.instagramUserId } : {}),
     ...(r.creativeKind === "video"
       ? {
           video_data: {

@@ -35,7 +35,7 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { withDmSendDeadline } from "./_shared/dm-send-budget.mts";
 import { getDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { queueRemainingDmMessages } from "./_shared/dm-schedule-store.mts";
-import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
+import { INSTAGRAM_GRAPH_VERSION, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 
 /**
  * 인스타그램 발송(수동).
@@ -61,7 +61,7 @@ import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
  *    "이미 발송됨"으로 세고 실패로 표시하지 않는다.
  */
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 
 /**
  * 발송에 쓸 시간 예산. 동기 함수 한도(10초)보다 넉넉히 앞서 끝내야 응답·로그를

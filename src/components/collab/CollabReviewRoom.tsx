@@ -46,8 +46,18 @@ interface CollabReviewRoomProps {
 }
 
 const TARGET_LABEL: Record<'script' | 'content', { title: string; empty: string }> = {
-  script: { title: '대본 피드백', empty: '아직 제출된 대본이 없습니다.' },
+  script: { title: '기획안 · 대본 피드백', empty: '아직 제출된 기획안 · 대본이 없습니다.' },
   content: { title: '영상 피드백', empty: '아직 제출된 영상이 없습니다.' },
+};
+
+/**
+ * 검수 대상별 제출물 종류. 예전 아홉 단계 묶음은 script/content 로, 지금의 다섯 단계
+ * 묶음(campaign_process_v1)은 plan/video 로 남긴다(api-collab-workflow 의 save_step_work).
+ * 한쪽만 보면 새 협업의 검수실이 늘 "아직 제출된 것이 없습니다"로 비어 있다.
+ */
+const TARGET_KINDS: Record<'script' | 'content', string[]> = {
+  script: ['script', 'plan'],
+  content: ['content', 'video'],
 };
 
 const DELIVERABLE_STATUS: Record<string, { label: string; cls: string }> = {
@@ -106,7 +116,7 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
   const versions: any[] = useMemo(
     () =>
       (data?.deliverables || [])
-        .filter((d: any) => d.kind === target)
+        .filter((d: any) => TARGET_KINDS[target].includes(d.kind))
         .sort((a: any, b: any) => a.version - b.version),
     [data, target],
   );
