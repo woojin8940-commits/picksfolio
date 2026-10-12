@@ -1,3 +1,5 @@
+import { INSTAGRAM_GRAPH_VERSION } from "./instagram-metrics.mts";
+
 /**
  * 아이스브레이커(대화 시작 질문) 동기화.
  *
@@ -19,7 +21,7 @@
  * 지원하지 않는다). 화면 안내에도 같은 내용을 적어 둔다.
  */
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 
 /** 인스타그램이 허용하는 최대 개수. */
 export const ICE_BREAKER_MAX = 4;

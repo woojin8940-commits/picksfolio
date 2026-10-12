@@ -207,7 +207,16 @@ export const graphHostFor = (tokenSource?: string) =>
  * 목록(/me/media) 요청에는 붙이지 않는다. 그쪽은 지금 값이 잘 오고 있고, 버전을
  * 바꾸는 것은 그 자체로 필드가 사라질 위험이라 필요한 자리에만 건다.
  */
-const GRAPH_VERSION = "v23.0";
+/**
+ * 인스타그램 그래프 API 버전 — 연동 · 자동 DM · 웹훅 · 지표가 모두 이 값 하나를 쓴다.
+ *
+ * 예전에는 파일마다 따로 적혀 있어(v21.0 여덟 곳, v23.0 한 곳) 만료가 다가와도 어디를
+ * 고쳐야 하는지 흩어져 있었다. 올릴 때는 여기 한 줄만 바꾸고, 메타 버전 표와 변경 내역을
+ * 확인한다 — https://developers.facebook.com/docs/graph-api/changelog/versions/
+ * v25.0 만료 예정: 2028-07-29.
+ */
+export const INSTAGRAM_GRAPH_VERSION = "v25.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 
 /** 미디어 목록에서 항상 받을 수 있는 필드들. 조회수는 여기 넣지 않는다(위 주석 참고). */
 export const MEDIA_FIELDS =

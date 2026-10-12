@@ -1,3 +1,5 @@
+import { INSTAGRAM_GRAPH_VERSION } from "./instagram-metrics.mts";
+
 /**
  * 인스타그램 계정별 웹훅 구독.
  *
@@ -10,7 +12,7 @@
  * 저장할 때(api-dm-automation) 양쪽에서 호출한다.
  */
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 
 /**
  * 구독 요청 한 번에 기다리는 시간. 설정 화면을 여는 길(api-dm-automation GET)과 저장

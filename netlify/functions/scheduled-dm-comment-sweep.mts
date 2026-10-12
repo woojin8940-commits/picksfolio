@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { enqueueCommentEvents, type QueuedComment } from "./_shared/dm-jobs.mts";
-import { graphHostFor, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
+import { graphHostFor, INSTAGRAM_GRAPH_VERSION, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { randomUUID } from "node:crypto";
@@ -39,7 +39,7 @@ import { randomUUID } from "node:crypto";
  * 게시물별 확인 기록은 계정마다 블롭 하나(`acct_<IG ID>`)에 남긴다.
  */
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 /** 실행 한 번에 쓸 시간. 예약 함수 제한(30초) 안에서 끝낸다. */
 const RUN_BUDGET_MS = 22_000;
 /**

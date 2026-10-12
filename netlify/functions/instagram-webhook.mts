@@ -17,7 +17,7 @@ import {
 import type { DmButton, DmCard, DmFollowUp, DmPlan } from "./_shared/instagram-dm.mts";
 import { noteWebhookReceived, resolveDmAccountByIgId } from "./_shared/dm-webhook-index.mts";
 import { DmAccessLookupError, dmAutomationAllowedForSend } from "./_shared/dm-automation-access.mts";
-import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
+import { INSTAGRAM_GRAPH_VERSION, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
   claimIfNew,
@@ -86,7 +86,7 @@ import {
  * 전달분은 조용히 건너뛴다.
  */
 
-const GRAPH_VERSION = "v21.0";
+const GRAPH_VERSION = INSTAGRAM_GRAPH_VERSION;
 
 interface DmAutomationItem {
   id: string;
