@@ -18,8 +18,14 @@ import { getStore } from "@netlify/blobs";
  * 그래프가 돌려준 데이터뿐이다.
  */
 
-/** 그래프 API 버전. 다른 함수들과 같은 버전으로 맞춘다. */
-export const GRAPH_VERSION = "v21.0";
+/**
+ * 마케팅 API 버전.
+ *
+ * 마케팅 API 는 그래프 API 보다 수명이 짧다(약 1년). v21.0 은 2025-09-09 에 만료돼
+ * 소재·광고 세트를 만드는 호출부터 실패했다. 메타 버전 표에서 지금 살아 있는 버전으로
+ * 맞춘다 — https://developers.facebook.com/docs/graph-api/changelog/versions/
+ */
+export const GRAPH_VERSION = "v25.0";
 
 /**
  * 동의 화면에서 요청할 권한.

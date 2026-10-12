@@ -141,13 +141,14 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
 
   const assign = async (id: string, username: string) => {
     setBusyId(id);
-    const res = await apiService.adminCampaignAction(token, id, 'assign_manager', undefined, username || undefined);
+    const self = username === '__self__';
+    const res = await apiService.adminCampaignAction(token, id, 'assign_manager', undefined, self ? undefined : username || undefined);
     setBusyId('');
     if (!res.success) {
       setNotice(res.error || '담당자 배정에 실패했습니다.');
       return;
     }
-    setNotice(`담당자를 @${username} 로 변경했습니다. 진행 중인 협업 담당자도 함께 바뀝니다.`);
+    setNotice(`담당자를 @${res.managerUsername || username} 로 변경했습니다. 진행 중인 협업 담당자도 함께 바뀝니다.`);
     window.setTimeout(() => setNotice(''), 4000);
     load();
   };
@@ -430,6 +431,9 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
                         } disabled:opacity-50`}
                       >
                         <option value="">담당 미배정</option>
+                        {/* 담당자 계정이 없을 때도 운영자가 직접 맡을 수 있게. 서버가 로그인한
+                            운영자 아이디로 바꿔 저장한다. */}
+                        <option value="__self__">운영자 직접 (나)</option>
                         {managers.map(m => (
                           <option key={m.username} value={m.username}>
                             {m.displayName ? `${m.displayName} (@${m.username})` : `@${m.username}`}

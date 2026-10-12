@@ -910,7 +910,7 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                           onClick={() => setReviewTarget({ collabId: c.id, target: 'script' })}
                           className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black hover:bg-slate-200"
                         >
-                          대본 확인
+                          기획안 확인
                         </button>
                         <button
                           onClick={() => setReviewTarget({ collabId: c.id, target: 'content' })}

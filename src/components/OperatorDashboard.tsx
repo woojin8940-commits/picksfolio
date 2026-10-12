@@ -9,7 +9,7 @@ import AdminSettlementConsole from './admin/AdminSettlementConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminOperatorOverview from './admin/AdminOperatorOverview';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
-import AdminCampaignListup from './admin/AdminCampaignListup';
+import AdminManagerWorkspace from './admin/AdminManagerWorkspace';
 import AdminCampaignBoard from './admin/AdminCampaignBoard';
 import AdminCollabManagerConsole from './admin/AdminCollabManagerConsole';
 import AdminRevenueCards from './admin/AdminRevenueCards';
@@ -281,7 +281,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       group: '캠페인',
       tabs: [
         { key: 'campaigns', label: '1. 캠페인 승인', badge: pendingCampaigns },
-        { key: 'listup', label: '2. 인플루언서 리스트업' },
+        { key: 'listup', label: '2. 인플루언서 배정 · 진행' },
         { key: 'collabs', label: '3. 캠페인 관리' },
       ],
     },
@@ -426,7 +426,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-6">
+      <div className={`mx-auto px-4 md:px-8 py-6 ${activeTab === 'listup' ? 'max-w-[1560px]' : 'max-w-7xl'}`}>
         {/* Tab Navigation — 일하는 순서대로 묶어 둔다. */}
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           {navGroups.map((group, gi) => (
@@ -711,10 +711,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             ? (
               <div className="space-y-4">
                 <TabIntro
-                  title="인플루언서 리스트업 · 후보 명단과 단가 책정"
-                  body="승인된 캠페인을 골라 지원자와 등록 인플루언서 풀을 함께 검토하고, 브랜드에 제안할 후보 명단을 만듭니다. 후보마다 인플루언서 단가와 브랜드 제시가를 함께 입력하면 그 차액이 우리 수익으로 집계됩니다."
+                  title="인플루언서 배정 · 진행 · 담당자 화면과 같은 작업대"
+                  body="담당자 대시보드와 같은 화면입니다. 캠페인을 맡고, 지원자와 등록 인플루언서 풀에서 후보를 명단에 올려 단가를 정하고, 브랜드가 고른 후보에게 제안해 협업을 시작합니다. 시작된 협업의 진행 · 검수 · 인사이트 · 정산도 캠페인 안에서 그대로 처리합니다."
                 />
-                <AdminCampaignListup token={adminToken} />
+                <AdminManagerWorkspace />
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 리스트업이 표시됩니다." />

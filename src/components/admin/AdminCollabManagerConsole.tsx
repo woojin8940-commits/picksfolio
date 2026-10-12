@@ -1244,12 +1244,12 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                       <span className="text-[10px] text-slate-400 font-bold">
                                         {DELIVERABLE_STATUS_LABEL[d.status] || d.status}
                                       </span>
-                                      {(d.kind === 'script' || d.kind === 'content') && (
+                                      {['script', 'content', 'plan', 'video'].includes(d.kind) && (
                                         <button
-                                          onClick={() => setReviewTarget(d.kind)}
+                                          onClick={() => setReviewTarget(d.kind === 'script' || d.kind === 'plan' ? 'script' : 'content')}
                                           className="ml-auto px-2.5 py-1 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700"
                                         >
-                                          {d.kind === 'script' ? '대본 검수' : '영상 검수'}
+                                          {d.kind === 'script' ? '대본 검수' : d.kind === 'plan' ? '기획안 검수' : '영상 검수'}
                                         </button>
                                       )}
                                     </div>

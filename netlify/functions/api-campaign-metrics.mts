@@ -2,6 +2,7 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { isAssignedManager } from "./_shared/manager-auth.mts";
+import { requireAdmin } from "./_shared/admin-auth.mts";
 import {
   FRESH_HOURS,
   collectCampaignMetrics,
@@ -65,7 +66,16 @@ async function resolveRole(
   }
 
   const caller = await requireSignedInUser(req);
-  if (!caller.ok) return { ok: false, response: caller.response };
+  if (!caller.ok) {
+    // 운영 콘솔에 이메일(Netlify Identity)로 들어온 운영자는 서비스 계정 토큰이 없다.
+    // 운영 콘솔이 담당자 화면을 그대로 쓰므로, 인사이트 탭도 담당자로 열려야 한다.
+    const admin = await requireAdmin(req);
+    if (admin.ok) {
+      const username = norm(String((admin.user as any)?.email || "").split("@")[0]);
+      return { ok: true, role: "manager", username, campaign };
+    }
+    return { ok: false, response: caller.response };
+  }
   const me = norm(caller.username);
 
   if (caller.isAdmin) return { ok: true, role: "manager", username: me, campaign };

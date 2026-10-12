@@ -259,9 +259,11 @@ async function refreshRecord(storeName: string, key: string): Promise<Outcome> {
       // 없는 재연동을 하게 된다.
       const err = data?.error;
       const msg = String(err?.message || "").toLowerCase();
+      // 오류 종류(type)가 OAuthException 이라는 것만으로는 판단하지 않는다. 메타는 호출
+      // 한도 초과(code 4 · 17 · 32 · 613)나 일시 오류에도 같은 종류를 붙이므로, 그것까지
+      // 무효로 읽으면 멀쩡한 계정에 "다시 연동"이 뜨고 밤 사이 웹훅 점검에서도 빠진다.
       const tokenDead =
         Number(err?.code) === 190 ||
-        String(err?.type || "") === "OAuthException" ||
         msg.includes("has not authorized application") ||
         msg.includes("error validating access token") ||
         msg.includes("session has expired");

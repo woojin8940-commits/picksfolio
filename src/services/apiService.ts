@@ -1,7 +1,7 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
 import type { MembershipTier } from '../utils/membershipTiers';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, withTimeout } from './supabase';
-import { scopedKey } from '../utils/accountScope';
+import { scopedKey, getAccountScope, sessionGet } from '../utils/accountScope';
 
 const BIZ_SESSION_KEY = 'picks_business_session';
 const BIZ_TOKEN_KEY = 'picks_business_access_token';
@@ -389,6 +389,13 @@ export async function authHeaders(
   if (!useBusinessToken) {
     token = persistedSupabaseToken();
     if (!token) token = usableToken(lastKnownSupabaseToken);
+    // 운영 콘솔 탭에서 아이디로 로그인한 운영자는 Supabase 세션을 남기지 않고 토큰만
+    // picks_admin_token 에 둔다. 운영 콘솔이 담당자 화면(캠페인 배정 · 브랜드 선택)을
+    // 그대로 쓰기 시작하면서, 그 화면의 호출들이 토큰 없이 나가 403 이 되던 것을 막는다.
+    // 이메일(Netlify Identity) 로그인은 이 값이 비어 있고 nf_jwt 쿠키로 인증된다.
+    if (!token && getAccountScope() === 'operator') {
+      token = usableToken(sessionGet('picks_admin_token') || '');
+    }
     if (!token) {
       try {
         const { data } = (await supabase?.auth.getSession()) || { data: null };
@@ -2355,7 +2362,7 @@ export const apiService = {
     action: 'approve' | 'reject' | 'assign_manager',
     reason?: string,
     managerUsername?: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; managerUsername?: string }> {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -2365,11 +2372,11 @@ export const apiService = {
         headers,
         body: JSON.stringify({ id, action, reason, managerUsername }),
       });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
         return { success: false, error: json?.error };
       }
-      return { success: true };
+      return { success: true, managerUsername: json?.managerUsername };
     } catch (e) {
       console.error('[API] Failed to perform admin campaign action:', e);
       return { success: false, error: '네트워크 오류' };

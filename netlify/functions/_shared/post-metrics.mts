@@ -349,6 +349,16 @@ export async function collectCollabMetrics(
   let found: { media: any | null; error: string; tokenDead: boolean } = base.mediaId
     ? await fetchMediaById(link!, base.mediaId)
     : { media: null, error: "", tokenDead: false };
+  // 인플루언서가 게시물 링크를 바꿔 다시 냈으면 저장해 둔 id 는 예전 게시물이다. 그대로
+  // 쓰면 새 링크 아래에 예전 게시물의 조회수 · 좋아요가 계속 찍힌다.
+  if (
+    found.media &&
+    shortcodeOf(permalink) &&
+    shortcodeOf(found.media.permalink) &&
+    shortcodeOf(found.media.permalink) !== shortcodeOf(permalink)
+  ) {
+    found = { media: null, error: "", tokenDead: false };
+  }
   if (!found.media && !found.tokenDead) {
     found = await findMediaByPermalink(link!, permalink);
   }

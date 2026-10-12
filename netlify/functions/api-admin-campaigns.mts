@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { requireAdmin } from "./_shared/admin-auth.mts";
+import { reassignSupportThreads } from "./_shared/collab-workflow.mts";
 
 export default async (req: Request, context: Context) => {
   const admin = await requireAdmin(req);
@@ -150,7 +151,10 @@ export default async (req: Request, context: Context) => {
       }
 
       // 담당자 식별자는 이메일 앞부분을 쓴다(운영 콘솔은 Netlify Identity 로그인).
-      const actingManager = String((admin as any).email || "")
+      // 이메일은 requireAdmin 이 돌려준 user 아래에 있다. 예전에는 admin.email 을
+      // 읽어 늘 빈 값이 됐고, "내 담당으로 배정"이 담당자를 비우는 동작이 됐다.
+      // 담당자 API(_shared/manager-auth)가 운영자를 부르는 아이디와 같은 규칙이다.
+      const actingManager = String((admin.user as any)?.email || "")
         .split("@")[0]
         .trim()
         .toLowerCase();
@@ -160,6 +164,9 @@ export default async (req: Request, context: Context) => {
           .trim()
           .toLowerCase()
           .replace(/^biz\//, "");
+        if (!target) {
+          return Response.json({ error: "배정할 담당자를 확인할 수 없습니다." }, { status: 400 });
+        }
         await db.sql`
           UPDATE campaigns
           SET manager_username = ${target}, manager_assigned_at = NOW(), updated_at = NOW()
@@ -167,11 +174,17 @@ export default async (req: Request, context: Context) => {
         `;
         // 이미 진행 중인 협업의 담당자도 함께 옮긴다 — 캠페인 담당자와 협업 담당자가
         // 갈리면 지원자는 누구에게 물어야 할지 알 수 없다.
-        await db.sql`
+        const moved = (await db.sql`
           UPDATE campaign_collabs
           SET manager_username = ${target}, updated_at = NOW()
           WHERE campaign_id = ${id}
-        `;
+          RETURNING id
+        `) as any[];
+        // 협업의 담당자 대화방도 함께 옮긴다. 옮기지 않으면 대화방에는 예전 담당자가
+        // 남아, 새 담당자의 대화 목록에 그 방이 뜨지 않는다.
+        for (const row of moved) {
+          await reassignSupportThreads(db, String(row.id), target).catch(() => {});
+        }
         return Response.json({ success: true, managerUsername: target });
       }
 

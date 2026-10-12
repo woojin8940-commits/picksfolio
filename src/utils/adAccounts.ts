@@ -38,8 +38,8 @@ export type MetaPermission = {
 /**
  * 연동 안내에 그대로 그리는 권한 목록의 기본값(= 연동 전에 보이는 상태).
  *
- * 인스타그램 인사이트는 인스타그램 연동에서 이미 승인받은 권한이라 처음부터 승인됨으로
- * 둔다. 광고 쪽 세 개는 심사 대기 중이다. 연동을 마치면 이 상태는 실제 동의 결과
+ * 메타 앱 심사가 모두 승인되어 연동 전에도 승인됨으로 둔다(앱 심사 결과이지 이 브랜드의
+ * 동의 결과는 아니다). 연동을 마치면 이 상태는 실제 동의 결과
  * (`/me/permissions` 의 granted · declined)로 덮인다 — resolveMetaPermissions().
  */
 export const META_PERMISSIONS: MetaPermission[] = [
@@ -49,24 +49,24 @@ export const META_PERMISSIONS: MetaPermission[] = [
     status: 'approved',
     purpose: '게시물·채널 지표 조회',
   },
-  { label: '광고 관리', scope: 'ads_management', status: 'pending', purpose: '광고 생성·집행' },
-  { label: '광고 조회', scope: 'ads_read', status: 'pending', purpose: '광고 지표 조회' },
+  { label: '광고 관리', scope: 'ads_management', status: 'approved', purpose: '광고 생성·집행' },
+  { label: '광고 조회', scope: 'ads_read', status: 'approved', purpose: '광고 지표 조회' },
   {
     label: '비즈니스 관리',
     scope: 'business_management',
-    status: 'pending',
+    status: 'approved',
     purpose: '광고 계정·비즈니스 자산 접근',
   },
   {
     label: '페이지 목록',
     scope: 'pages_show_list',
-    status: 'pending',
+    status: 'approved',
     purpose: '광고를 내보낼 페이스북 페이지 선택',
   },
   {
     label: '페이지 참여 조회',
     scope: 'pages_read_engagement',
-    status: 'pending',
+    status: 'approved',
     purpose: '페이지 게시물 반응·댓글·공유 수 조회',
   },
 ];
