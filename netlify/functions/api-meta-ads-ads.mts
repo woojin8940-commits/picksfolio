@@ -12,6 +12,8 @@ import {
   graphPost,
   GraphResult,
   MetaAdRecord,
+  accountPixelIds,
+  eventMetrics,
   metaCta,
   purchaseMetrics,
   isMissingObject,
@@ -86,19 +88,24 @@ async function runCampaign(token: string, proof: string, r: MetaAdRecord): Promi
   let objective = "OUTCOME_TRAFFIC";
   if (r.objective === "awareness") objective = "OUTCOME_AWARENESS";
   if (r.objective === "engagement") objective = "OUTCOME_ENGAGEMENT";
+  // 화면에서 고른 픽셀이 이 광고 계정 것인지 확인한다. 남의 계정 픽셀을 붙이면 광고 단계에서
+  // 거절되고, 그 전까지 만든 캠페인·세트가 빈 채로 남는다.
+  const list = (await accountPixelIds(r.adAccountId, token, proof)) || [];
   if (r.objective === "conversions") {
     // 전환(구매) 최적화는 픽셀이 있어야 한다. 없는 계정에서 OUTCOME_SALES 로 만들면 광고
-    // 세트 단계에서 막히므로, 여기서 확인하고 따로 알리지 않고 트래픽 목적으로 돌린다.
-    // 화면에서 픽셀을 골랐으면 그 픽셀이 이 계정 것인지 확인하고 쓴다.
-    const pixels = await graphGet(`${r.adAccountId}/adspixels`, token, { fields: "id,name", limit: 50 }, proof);
-    const list: string[] = pixels.ok && Array.isArray(pixels.data?.data) ? pixels.data.data.map((p: any) => String(p?.id || "")) : [];
+    // 세트 단계에서 막히므로, 여기서 확인하고 트래픽 목적으로 돌린다(진행 화면에 경고로 남긴다).
     const pixelId = r.pixelId && list.includes(r.pixelId) ? r.pixelId : list[0] || "";
     if (pixelId) {
       objective = "OUTCOME_SALES";
       r.pixelId = pixelId;
     } else {
       r.pixelId = undefined;
+      r.warnings.push("이 광고 계정에 픽셀이 없어 판매 대신 트래픽(링크 클릭) 목적으로 집행합니다.");
     }
+  } else if (r.pixelId && !list.includes(r.pixelId)) {
+    // 판매가 아닌 목적의 픽셀은 측정(tracking_specs)에만 쓴다. 이 계정 것이 아니면 빼고 만든다.
+    r.warnings.push("고른 픽셀이 이 광고 계정에 없어 웹사이트 이벤트 추적 없이 만듭니다.");
+    r.pixelId = undefined;
   }
   r.metaObjective = objective;
   return postWithFallback(
@@ -317,13 +324,28 @@ async function runCreative(
   return retry;
 }
 
+/**
+ * 광고를 만든다. 픽셀을 골랐으면 광고 관리자의 '추적 › 웹사이트 이벤트' 와 같은 값
+ * (tracking_specs)을 붙인다.
+ *
+ * 판매 목적은 광고 세트의 promoted_object 로 픽셀이 이미 연결되지만, 트래픽 · 인지도 · 참여
+ * 목적은 이것이 없으면 광고를 보고 들어와 구매해도 그 구매가 이 광고의 성과로 잡히지 않는다.
+ * 메타가 이 값을 거절하면(오래된 광고 계정 설정 등) 추적 없이 만들고 그 사실을 남긴다 —
+ * 측정 하나 때문에 광고 자체를 못 만들면 안 된다.
+ */
 async function runAd(token: string, proof: string, r: MetaAdRecord): Promise<GraphResult> {
-  return graphPost(
+  const base = { name: r.name, adset_id: r.adSetId, creative: { creative_id: r.creativeId }, status: r.initialStatus };
+  if (!r.pixelId) return graphPost(`${r.adAccountId}/ads`, token, base, proof);
+  const tracked = await graphPost(
     `${r.adAccountId}/ads`,
     token,
-    { name: r.name, adset_id: r.adSetId, creative: { creative_id: r.creativeId }, status: r.initialStatus },
+    { ...base, tracking_specs: [{ "action.type": ["offsite_conversion"], fb_pixel: [r.pixelId] }] },
     proof,
   );
+  if (tracked.ok) return tracked;
+  const plain = await graphPost(`${r.adAccountId}/ads`, token, base, proof);
+  if (plain.ok) r.warnings.push(`픽셀 추적을 붙이지 못해 추적 없이 만들었습니다. (${tracked.error})`);
+  return plain.ok ? plain : tracked;
 }
 
 /** 다음 단계 하나를 실행하고 기록을 저장한다. */
@@ -364,11 +386,17 @@ async function advance(username: string, token: string, proof: string, r: MetaAd
 /* 조회                                                                                     */
 /* ---------------------------------------------------------------------------------------- */
 
-const LIVE_FIELDS =
+/**
+ * 지표 기간. 광고 관리자 오른쪽 위 날짜 선택과 같은 값(date_preset)만 받는다.
+ * 기본은 '전체 기간'(maximum) — 예전 화면과 같은 숫자다.
+ */
+const DATE_PRESETS = ["today", "yesterday", "last_7d", "last_14d", "last_30d", "this_month", "last_month", "maximum"];
+
+const liveFields = (preset: string) =>
   "id,effective_status,configured_status,ad_review_feedback,issues_info," +
   "adset{id,start_time,end_time,lifetime_budget,effective_status}," +
   "campaign{id,effective_status}," +
-  "insights.date_preset(maximum){impressions,clicks,reach,spend,actions,action_values}";
+  `insights.date_preset(${preset}){impressions,clicks,inline_link_clicks,reach,spend,actions,action_values,video_thruplay_watched_actions}`;
 
 const DRAFT_FIELDS = "id,effective_status";
 
@@ -409,10 +437,10 @@ async function readMany(token: string, proof: string, ids: string[], fields: str
  * DELETED 이거나(위를 지우면 아래 광고가 같이 지워진다), 조회 자체가 '없는 객체' 로 돌아오면
  * 지워진 것으로 본다. 광고까지 못 만든 기록은 만들어 둔 캠페인으로 같은 판단을 한다.
  */
-async function liveStatus(token: string, proof: string, records: MetaAdRecord[]) {
+async function liveStatus(token: string, proof: string, records: MetaAdRecord[], preset = "maximum") {
   const adIds = records.map((r) => r.adId).filter(Boolean) as string[];
   const draftCampaignIds = records.filter((r) => !r.adId && r.campaignId).map((r) => r.campaignId!) as string[];
-  const ads = await readMany(token, proof, adIds, LIVE_FIELDS);
+  const ads = await readMany(token, proof, adIds, liveFields(preset));
   const drafts = await readMany(token, proof, draftCampaignIds, DRAFT_FIELDS);
   const errors = [...ads.errors, ...drafts.errors];
   const live = ads.rows;
@@ -470,9 +498,12 @@ async function liveStatus(token: string, proof: string, records: MetaAdRecord[])
           issues,
           impressions: Number(insight.impressions) || 0,
           clicks: Number(insight.clicks) || 0,
+          /** 링크 클릭(광고 관리자의 'CPC(링크 클릭당 비용)' 분모). clicks 는 모든 클릭이다. */
+          linkClicks: Number(insight.inline_link_clicks) || 0,
           reach: Number(insight.reach) || 0,
           spend: Number(insight.spend) || 0,
           ...purchaseMetrics(insight),
+          ...eventMetrics(insight),
         },
       };
     }),
@@ -640,11 +671,13 @@ export default async (req: Request, context: Context) => {
   const accounts = diagnosis?.accounts || [];
 
   if (req.method === "GET") {
-    const account = new URL(req.url).searchParams.get("account") || "";
+    const params = new URL(req.url).searchParams;
+    const account = params.get("account") || "";
+    const range = DATE_PRESETS.includes(params.get("range") || "") ? String(params.get("range")) : "maximum";
     const records = (await readAdRecords(username)).filter((r) => !account || r.adAccountId === account);
-    const { ads, errors, deleted } = await liveStatus(token, proof, records);
+    const { ads, errors, deleted } = await liveStatus(token, proof, records, range);
     await removeAdRecords(username, deleted);
-    return Response.json({ ads, errors, fetchedAt: new Date().toISOString(), source: "meta_graph_api" });
+    return Response.json({ ads, errors, range, fetchedAt: new Date().toISOString(), source: "meta_graph_api" });
   }
 
   if (req.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });

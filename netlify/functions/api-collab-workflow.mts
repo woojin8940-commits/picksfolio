@@ -3,6 +3,8 @@ import type { Config, Context } from "@netlify/functions";
 import { resolveIdentities } from "./_shared/manager-auth.mts";
 import {
   addSettlementForProposal,
+  cancelSettlementsForProposal,
+  settlementsForProposal,
   upsertCollabScheduleRecord,
   upsertSettlementForProposal,
 } from "./_shared/collab-records.mts";
@@ -2267,7 +2269,12 @@ export default async (req: Request, context: Context) => {
             WHERE id = ${collabId} AND upload_confirmed_at IS NULL
             RETURNING id
           `) as any[];
-          if (confirmed?.[0]) settlement = await scheduleSettlementFor(db, collab);
+          // 정산은 다섯 단계 묶음에서만 여기서 예약한다. 공동구매(group_buy_v1)처럼 담당자
+          // "게시 확인" 단계가 뒤에 있는 묶음은 그 승인(approve_stage 의 confirm)에서 정산이
+          // 열린다. 예전에는 브랜드가 업로드 확인만 눌러도 담당자 검수 전에 정산이 잡혔다.
+          if (confirmed?.[0] && isProcessV1(collab.template_key)) {
+            settlement = await scheduleSettlementFor(db, collab);
+          }
         }
 
         const transition = await advanceProcessStage(db, collab, stage, caller.username);
@@ -2929,6 +2936,45 @@ export default async (req: Request, context: Context) => {
         if (role !== "manager") return jsonError("취소는 담당자가 처리합니다.", 403);
         const reason = String((body as any).reason || "").trim().slice(0, 2000);
         if (!reason) return jsonError("취소 사유를 입력해 주세요.");
+        /*
+         * 정산이 이미 잡힌 협업. 예전에는 협업만 취소되고 정산 줄은 "예정"으로 남아,
+         * 취소된 협업의 지급일이 브랜드·인플루언서 정산 화면에 그대로 떠 있었다.
+         *
+         * 지급이 끝난 줄이 있으면 취소를 막는다 — 돈이 이미 나갔으므로 협업만 취소로
+         * 돌리면 기록이 실제와 어긋난다. 환수·정정을 먼저 정리해야 한다. 아직 지급 전인
+         * 줄은 협업과 함께 취소로 돌린다.
+         */
+        const stlProposalId = settlementProposalId(collab);
+        let existingSettlements: any[];
+        try {
+          existingSettlements = await settlementsForProposal(
+            stlProposalId,
+            collab.business_username,
+            collab.creator_username,
+          );
+        } catch (stlErr) {
+          console.error("[collab-workflow] 취소 전 정산 확인 실패:", stlErr);
+          return jsonError("정산 기록을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+        }
+        if (existingSettlements.some((s: any) => s?.status === "completed")) {
+          return jsonError(
+            "이미 지급이 완료된 정산이 있는 협업은 취소할 수 없습니다. 정산을 먼저 정리해 주세요.",
+            409,
+          );
+        }
+        if (existingSettlements.length > 0) {
+          try {
+            await cancelSettlementsForProposal(
+              stlProposalId,
+              collab.business_username,
+              collab.creator_username,
+              reason,
+            );
+          } catch (stlErr) {
+            console.error("[collab-workflow] 정산 취소 실패:", stlErr);
+            return jsonError("정산 기록을 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+          }
+        }
         await db.sql`
           UPDATE campaign_collabs
           SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = ${reason},

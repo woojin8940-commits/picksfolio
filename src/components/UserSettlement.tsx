@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
-import { formatKRW, formatNumberWithCommas, stripCommas } from '../utils/formatters';
+import { formatKRW } from '../utils/formatters';
 import { apiService, authHeaders } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -106,55 +106,11 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   const [settlements, setSettlements] = useState<Settlement[]>(() => cachedSettlements);
   const [loading, setLoading] = useState(() => cachedSettlements.length === 0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editAmount, setEditAmount] = useState<string>('');
-  const [savingId, setSavingId] = useState<string | null>(null);
 
   const commitSettlements = (next: Settlement[]) => {
     setSettlements(next);
     writeSettlementCache(userName, next);
     onSettlementsChange?.(next);
-  };
-
-  const startEditAmount = (s: Settlement) => {
-    setEditingId(s.id);
-    setEditAmount(formatNumberWithCommas(s.amount ?? 0));
-  };
-
-  const cancelEditAmount = () => {
-    setEditingId(null);
-    setEditAmount('');
-  };
-
-  const handleSaveAmount = async (settlementId: string) => {
-    const amount = parseInt(stripCommas(editAmount), 10);
-    if (isNaN(amount) || amount < 0) {
-      alert('올바른 금액을 입력해주세요.');
-      return;
-    }
-    setSavingId(settlementId);
-    try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}/${settlementId}?role=influencer`, {
-        method: 'PATCH',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ amount }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        commitSettlements(settlements.map(s =>
-          s.id === settlementId
-            ? (data.settlement || { ...s, amount })
-            : s
-        ));
-        setEditingId(null);
-        setEditAmount('');
-      } else {
-        alert(await readError(res, '정산금 수정에 실패했습니다.'));
-      }
-    } catch {
-      alert('정산금 수정에 실패했습니다.');
-    }
-    setSavingId(null);
   };
 
   // Let the influencer confirm a settlement themselves. Previously only the
@@ -317,12 +273,6 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   /** 아직 지급되지 않은 정산 한 줄. */
   const renderScheduledCard = (s: Settlement) => {
     const managerManaged = sourceOf(s) === 'campaign';
-    /*
-     * 금액을 직접 고칠 수 있는 건은 브랜드와 직접 주고받는 제안 정산뿐이다.
-     * 캠페인 금액은 담당자가 확정한 협업 조건에서 오고(서버도 인플루언서의 금액
-     * 수정을 거절한다), 공동구매는 애초에 금액이 아니라 비율로 약속된 건이다.
-     */
-    const canEditAmount = !managerManaged && !isGroupbuy(s) && !isAmountPending(s);
     return (
       <div key={s.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5">
         <div className="flex items-center justify-between mb-2">
@@ -336,37 +286,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
             </div>
           </div>
           <div className="text-right">
-            {editingId === s.id && canEditAmount ? (
-              <div className="flex flex-col items-end gap-2">
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={editAmount}
-                    onChange={e => setEditAmount(formatNumberWithCommas(e.target.value))}
-                    autoFocus
-                    className="w-28 md:w-32 text-right font-black text-blue-600 text-base border-2 border-blue-200 rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
-                  />
-                  <span className="text-xs font-bold text-slate-400">원</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => handleSaveAmount(s.id)}
-                    disabled={savingId === s.id}
-                    className="px-3 py-1 bg-blue-600 text-white rounded-lg font-black text-[10px] hover:bg-blue-700 transition-colors disabled:opacity-60"
-                  >
-                    {savingId === s.id ? '저장 중...' : '저장'}
-                  </button>
-                  <button
-                    onClick={cancelEditAmount}
-                    disabled={savingId === s.id}
-                    className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg font-black text-[10px] hover:bg-slate-200 transition-colors disabled:opacity-60"
-                  >
-                    취소
-                  </button>
-                </div>
-              </div>
-            ) : isAmountPending(s) && !isGroupbuy(s) ? (
+            {isAmountPending(s) && !isGroupbuy(s) ? (
               /* 담당자가 금액을 확정하기 전. 0원으로 그리면 무보수 협업으로 읽힌다. */
               <>
                 <p className="font-black text-amber-600 text-base">협의중</p>
@@ -374,21 +294,12 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
               </>
             ) : (
               <>
-                <div className="flex items-start justify-end gap-1.5">
-                  <div className="text-right">{renderAmount(s, 'scheduled')}</div>
-                  {canEditAmount && (
-                    <button
-                      onClick={() => startEditAmount(s)}
-                      className="mt-1 text-slate-300 hover:text-blue-500 transition-colors"
-                      title="정산금 수정"
-                      aria-label="정산금 수정"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                {/*
+                  * 금액은 고칠 수 없다. 캠페인 금액은 담당자가 확정한 조건에서, 비즈니스 제안
+                  * 금액은 브랜드가 보낸 제안에서 온다 — 받는 쪽이 금액을 바꾸면 그 값이 브랜드
+                  * 정산 목록에도 그대로 옮겨졌다(서버도 인플루언서의 금액 수정을 거절한다).
+                  */}
+                <div className="text-right">{renderAmount(s, 'scheduled')}</div>
                 {getDaysUntil(s.scheduled_date)}
               </>
             )}

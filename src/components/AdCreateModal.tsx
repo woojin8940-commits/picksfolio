@@ -5,6 +5,7 @@ import { formatKoreanWon } from '../utils/formatters';
 import {
   AD_OBJECTIVES,
   AdCta,
+  CONVERSION_EVENTS,
   AdObjective,
   DEFAULT_AD_OBJECTIVE,
   ctaLabel,
@@ -25,6 +26,7 @@ import {
 import { useMetaPages } from '../hooks/useMetaPages';
 import { AdDeliveryFields, inputCls, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
 import MetaAdProgress from './MetaAdProgress';
+import MetaPixelField from './MetaPixelField';
 import MetaPagePicker from './MetaPagePicker';
 import StartPausedToggle from './StartPausedToggle';
 import ResumeNotice from './MetaAdResumeNotice';
@@ -96,6 +98,12 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   /** 브랜드가 CTA 를 직접 골랐는지. 고른 뒤에는 목적을 바꿔도 그 문구를 지킨다. */
   const [ctaPicked, setCtaPicked] = useState(!!resumeProp?.cta);
   const [linkUrl, setLinkUrl] = useState(resumeProp?.linkUrl || '');
+  /**
+   * 데이터 세트(픽셀). 전환 목적은 이 픽셀로 최적화하고, 인지도 · 트래픽은 측정에만 쓴다.
+   * 자체 소재 광고는 늘 웹사이트로 보내므로 어느 목적이든 붙여 두면 사이트 전환이 잡힌다.
+   */
+  const [pixelId, setPixelId] = useState(resumeProp?.pixelId || '');
+  const [conversionEvent, setConversionEvent] = useState(resumeProp?.conversionEvent || 'PURCHASE');
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -298,6 +306,8 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       bodyText: bodyText.trim(),
       cta,
       linkUrl: link,
+      pixelId: pixelId || undefined,
+      ...(objective === 'conversions' ? { conversionEvent } : {}),
       ...(media
         ? { imageHash: media.imageHash, videoId: media.videoId, creativeKind: isVideo ? 'video' as const : 'image' as const, thumbnailUrl }
         : {}),
@@ -671,6 +681,41 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
                   <p className="text-[10px] text-amber-700 font-medium mt-0.5 leading-relaxed">
                     광고 현황에서 Meta 계정을 연동하고 광고 계정을 고르면 이 창에서 바로 집행할 수 있습니다.
                   </p>
+                </div>
+              )}
+
+              {/* 데이터 세트(픽셀) — 전환은 최적화 대상, 인지도 · 트래픽은 측정용. */}
+              {account && (
+                <div className="space-y-3">
+                  <MetaPixelField
+                    businessUsername={username}
+                    adAccountId={account.id}
+                    pixelId={pixelId}
+                    onChange={setPixelId}
+                    mode={objective === 'conversions' ? 'optimize' : 'track'}
+                    inputId="create-pixel"
+                  />
+                  {objective === 'conversions' && pixelId && (
+                    <div>
+                      <label className={labelCls} htmlFor="create-event">전환 이벤트</label>
+                      <div className="relative mt-1.5">
+                        <select
+                          id="create-event"
+                          value={conversionEvent}
+                          onChange={(e) => setConversionEvent(e.target.value)}
+                          className={selectCls}
+                        >
+                          {CONVERSION_EVENTS.map((ev) => (
+                            <option key={ev.value} value={ev.value}>{ev.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-bold mt-1">
+                        이 이벤트가 일어날 사람에게 노출하고, 광고 현황의 '결과'도 이 이벤트로 셉니다
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { mutateBlobJSON, BlobWriteConflictError } from "./blob-write.mts";
+import { getSupabaseServer } from "./supabase.mts";
 
 /**
  * 협업 현황(정산금 / 협업 내역)이 쓰는 Blobs 키와, 배열 한 덩어리를 통째로
@@ -146,6 +147,80 @@ export async function mutateRecords(
 }
 
 /**
+ * 정산 한 줄을 브랜드 키와 인플루언서 키 양쪽에 쓴다.
+ *
+ * Blobs 에는 두 키를 함께 묶는 트랜잭션이 없다. 예전에는 두 키를 차례로 쓰기만 해서,
+ * 두 번째 쓰기가 충돌로 끝나면 브랜드 쪽에만(또는 인플루언서 쪽에만) 정산이 남았다 —
+ * "브랜드는 예약됐다는데 나는 아무것도 없다"가 그대로 굳는다.
+ *
+ * 그래서 뒤쪽 쓰기가 실패하면 앞서 쓴 키를 이 정산 줄이 쓰기 전 모습으로 되돌리고,
+ * 호출부가 실패를 알 수 있게 오류를 다시 던진다. 되돌리기까지 실패하면 두 쪽이
+ * 어긋난 채 남으므로 운영자 알림함에 남겨 손으로 맞출 수 있게 한다.
+ */
+async function writeSettlementPair(
+  proposalId: string,
+  targets: string[],
+  apply: (records: any[]) => any[] | null,
+): Promise<void> {
+  const written: { key: string; before: any }[] = [];
+  for (const key of targets) {
+    let before: any = undefined;
+    let changed = false;
+    try {
+      await mutateRecords(SETTLEMENTS_STORE, key, (records) => {
+        before = records.find((s: any) => s?.proposal_id === proposalId);
+        const next = apply(records);
+        changed = next !== null;
+        return next;
+      });
+    } catch (err) {
+      await rollbackSettlementPair(proposalId, key, written, err);
+      throw err;
+    }
+    if (changed) written.push({ key, before });
+  }
+}
+
+async function rollbackSettlementPair(
+  proposalId: string,
+  failedKey: string,
+  written: { key: string; before: any }[],
+  cause: unknown,
+): Promise<void> {
+  const unrestored: string[] = [];
+  for (const { key, before } of written) {
+    try {
+      await mutateRecords(SETTLEMENTS_STORE, key, (records) => {
+        const rest = records.filter((s: any) => s?.proposal_id !== proposalId);
+        return before ? [...rest, before] : rest;
+      });
+    } catch {
+      unrestored.push(key);
+    }
+  }
+  console.error(
+    `[collab-records] 정산 양쪽 쓰기 실패 (${proposalId}, ${failedKey}): ${(cause as Error)?.message}` +
+      (unrestored.length ? ` — 되돌리지 못한 키: ${unrestored.join(", ")}` : " — 앞선 쓰기를 되돌림"),
+  );
+  if (unrestored.length === 0) return;
+  try {
+    const { error } = await getSupabaseServer().from("admin_notifications").upsert(
+      {
+        id: `settlement_mismatch_${proposalId}_${new Date().toISOString().slice(0, 10)}`,
+        type: "settlement_mismatch",
+        proposal_title: `정산 기록이 브랜드·인플루언서 양쪽에서 어긋났습니다(${proposalId}). 정산 화면에서 두 쪽을 확인해 주세요.`.slice(0, 300),
+        created_at: new Date().toISOString(),
+        read: false,
+      },
+      { onConflict: "id" },
+    );
+    if (error) throw error;
+  } catch (e) {
+    console.warn("[collab-records] 운영자 알림 실패:", (e as Error)?.message);
+  }
+}
+
+/**
  * 제안/캠페인 수락 시 만들어지는 정산 항목. 업체와 인플루언서 양쪽 키에 같은
  * 내용을 넣는데, proposal_id로 중복을 막는다.
  */
@@ -164,9 +239,7 @@ export async function addSettlementForProposal(settlement: {
   if (settlement.business_username) targets.push(settlementBizKey(settlement.business_username));
   if (settlement.influencer_username) targets.push(settlementInfKey(settlement.influencer_username));
 
-  for (const key of targets) {
-    await mutateRecords(SETTLEMENTS_STORE, key, dedupe);
-  }
+  await writeSettlementPair(settlement.proposal_id, targets, dedupe);
 }
 
 /**
@@ -221,9 +294,58 @@ export async function upsertSettlementForProposal(
   if (businessUsername) targets.push(settlementBizKey(businessUsername));
   if (influencerUsername) targets.push(settlementInfKey(influencerUsername));
 
-  for (const key of targets) {
-    await mutateRecords(SETTLEMENTS_STORE, key, apply);
-  }
+  await writeSettlementPair(proposalId, targets, apply);
+}
+
+/**
+ * 취소된 협업의 정산 줄을 취소로 돌린다. 없는 줄은 만들지 않는다.
+ *
+ * 아직 지급되지 않은 줄(scheduled · pending · in_progress)만 바꾼다. 지급이 끝난
+ * 줄(completed)은 돈이 이미 나간 기록이라 여기서 지우거나 바꾸지 않는다 — 협업 취소
+ * 쪽이 그런 줄이 있으면 취소 자체를 막는다(`settlementsForProposal`).
+ */
+export async function cancelSettlementsForProposal(
+  proposalId: string,
+  businessUsername: string,
+  influencerUsername: string,
+  reason: string,
+): Promise<void> {
+  if (!proposalId) return;
+  const now = new Date().toISOString();
+  const open = new Set(["scheduled", "pending", "in_progress"]);
+  const apply = (records: any[]) => {
+    let touched = false;
+    const next = records.map((s: any) => {
+      if (s?.proposal_id !== proposalId || !open.has(String(s?.status || "scheduled"))) return s;
+      touched = true;
+      return { ...s, status: "cancelled", memo: `협업 취소 · ${reason}`.slice(0, 5000), updated_at: now };
+    });
+    return touched ? next : null;
+  };
+
+  const targets: string[] = [];
+  if (businessUsername) targets.push(settlementBizKey(businessUsername));
+  if (influencerUsername) targets.push(settlementInfKey(influencerUsername));
+
+  await writeSettlementPair(proposalId, targets, apply);
+}
+
+/** 이 협업의 정산 줄(브랜드 쪽과 인플루언서 쪽을 합쳐서). */
+export async function settlementsForProposal(
+  proposalId: string,
+  businessUsername: string,
+  influencerUsername: string,
+): Promise<any[]> {
+  if (!proposalId) return [];
+  const keys: string[] = [];
+  if (businessUsername) keys.push(settlementBizKey(businessUsername));
+  if (influencerUsername) keys.push(settlementInfKey(influencerUsername));
+  // 취소를 막을지 정하는 근거라 방금 지급 완료된 줄까지 보이도록 최신 값을 읽는다.
+  const store = getStore({ name: SETTLEMENTS_STORE, consistency: "strong" });
+  const lists = await Promise.all(
+    keys.map(async (key) => toRecordArray(await store.get(key, { type: "json" }))),
+  );
+  return lists.flat().filter((s: any) => s?.proposal_id === proposalId);
 }
 
 /** 제안이 삭제되면 그 제안에서 파생된 정산 항목도 같이 지운다. */

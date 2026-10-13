@@ -12,6 +12,8 @@ import { buildTargeting, graphErrorResponse, graphGet, graphPost, GOALS_BY_OBJEC
  *        광고 계정의 맞춤 타겟 · 유사 타겟(GET /act_…/customaudiences).
  *   GET  /api/meta-ads/targeting/:username?kind=pixels&account=act_…
  *        광고 계정의 픽셀(GET /act_…/adspixels).
+ *   GET  /api/meta-ads/targeting/:username?kind=pixelStats&account=act_…&pixel=…&days=7
+ *        픽셀이 받은 이벤트 수(GET /{pixel}/stats?aggregation=event) — 이벤트 관리자 개요의 숫자.
  *   POST /api/meta-ads/targeting/:username { action: 'createPixel', adAccountId, name }
  *        광고 계정에 새 픽셀(데이터 세트)을 만든다(POST /act_…/adspixels).
  *   POST /api/meta-ads/targeting/:username { action: 'estimate', adAccountId, draft }
@@ -90,6 +92,59 @@ export default async (req: Request, context: Context) => {
         lastFiredTime: String(row?.last_fired_time || ""),
       }));
       return Response.json({ pixels });
+    }
+
+    if (kind === "pixelStats") {
+      /*
+       * 픽셀이 웹사이트에서 받은 이벤트 수. 광고에서 온 것만이 아니라 사이트 전체 방문의
+       * 이벤트다 — 광고로 생긴 전환은 광고 인사이트(actions)가 따로 센다. 둘을 나란히 두면
+       * "사이트 전체 구매 중 광고가 만든 구매가 얼마인지"가 보인다.
+       *
+       * 이 계정의 픽셀인지 먼저 확인한다. 픽셀 ID 만 받아 그대로 물으면 토큰 주인이 접근할 수
+       * 있는 다른 브랜드의 픽셀 통계까지 읽힌다.
+       */
+      const pixel = String(url.searchParams.get("pixel") || "");
+      if (!/^\d+$/.test(pixel)) return Response.json({ error: "픽셀을 골라 주세요." }, { status: 400 });
+      const owned = await graphGet(`${account}/adspixels`, token, { fields: "id,name,last_fired_time,is_unavailable", limit: 100 }, proof);
+      if (!owned.ok) return graphErrorResponse(owned, "픽셀을 불러오지 못했습니다.");
+      const info = (Array.isArray(owned.data?.data) ? owned.data.data : []).find((row: any) => String(row?.id) === pixel);
+      if (!info) return Response.json({ error: "이 광고 계정의 픽셀이 아닙니다." }, { status: 400 });
+
+      const days = [1, 7, 28].includes(Number(url.searchParams.get("days"))) ? Number(url.searchParams.get("days")) : 7;
+      const since = Math.floor(Date.now() / 1000) - days * 86400;
+      const counts: Record<string, number> = {};
+      // 시간 단위 묶음으로 오므로 쪽을 넘기며 더한다. 끝없이 돌지 않게 쪽 수를 묶어 둔다.
+      let after = "";
+      for (let page = 0; page < 20; page += 1) {
+        const res = await graphGet(
+          `${pixel}/stats`,
+          token,
+          { aggregation: "event", start_time: since, limit: 100, ...(after ? { after } : {}) },
+          proof,
+        );
+        if (!res.ok) return graphErrorResponse(res, "픽셀 이벤트를 불러오지 못했습니다.");
+        for (const bucket of Array.isArray(res.data?.data) ? res.data.data : []) {
+          for (const row of Array.isArray(bucket?.data) ? bucket.data : []) {
+            const name = String(row?.value || "");
+            if (name) counts[name] = (counts[name] || 0) + (Number(row?.count) || 0);
+          }
+        }
+        after = String(res.data?.paging?.cursors?.after || "");
+        if (!after || !res.data?.paging?.next) break;
+      }
+      const events = Object.entries(counts)
+        .map(([event, count]) => ({ event, count }))
+        .sort((a, b) => b.count - a.count);
+      return Response.json({
+        pixel: {
+          id: pixel,
+          name: String(info?.name || "픽셀"),
+          lastFiredTime: String(info?.last_fired_time || ""),
+          unavailable: !!info?.is_unavailable,
+        },
+        days,
+        events,
+      });
     }
 
     return Response.json({ error: "지원하지 않는 조회입니다." }, { status: 400 });

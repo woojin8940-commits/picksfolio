@@ -60,17 +60,27 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
 /**
  * 광고 관리자의 '데이터 세트' 칸. 광고 계정의 픽셀을 고르고, 없으면 여기서 바로 만든다.
  * 만든 뒤에는 웹사이트에 넣을 설치 코드와 이벤트 수신 여부를 보여 준다.
+ *
+ * mode 에 따라 이 픽셀이 하는 일이 다르다.
+ *   · optimize — 판매 목적. 광고 세트가 이 픽셀의 전환 이벤트로 최적화되고, 같은 픽셀로 측정한다.
+ *   · track    — 트래픽 · 인지도 · 참여. 최적화에는 쓰지 않고 광고의 '추적 › 웹사이트 이벤트'로만
+ *                붙여, 이 광고를 보고 들어온 사람의 구매 · 장바구니를 성과로 센다. 붙이지 않을 수도 있다.
+ *   · view     — 광고 현황. 광고를 만들지 않고 픽셀을 고르고 설치 코드를 본다.
  */
 export default function MetaPixelField({
   businessUsername,
   adAccountId,
   pixelId,
   onChange,
+  mode = 'optimize',
+  inputId = 'boost-pixel',
 }: {
   businessUsername: string;
   adAccountId: string;
   pixelId: string;
   onChange: (id: string) => void;
+  mode?: 'optimize' | 'track' | 'view';
+  inputId?: string;
 }) {
   const [pixels, setPixels] = useState<MetaPixel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -129,7 +139,9 @@ export default function MetaPixelField({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label className={labelCls} htmlFor="boost-pixel">데이터 세트(픽셀)</label>
+        <label className={labelCls} htmlFor={inputId}>
+          {mode === 'track' ? '웹사이트 이벤트 추적(픽셀)' : '데이터 세트(픽셀)'}
+        </label>
         <button
           type="button"
           onClick={() => setReload((n) => n + 1)}
@@ -147,7 +159,8 @@ export default function MetaPixelField({
         <p className="text-[10px] font-bold text-rose-500">{loadError}</p>
       ) : pixels.length > 0 ? (
         <div className="relative">
-          <select id="boost-pixel" value={pixelId} onChange={(e) => onChange(e.target.value)} className={selectCls}>
+          <select id={inputId} value={pixelId} onChange={(e) => onChange(e.target.value)} className={selectCls}>
+            {mode === 'track' && <option value="">추적 안 함</option>}
             {pixels.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.id})
@@ -158,8 +171,16 @@ export default function MetaPixelField({
         </div>
       ) : (
         <p className="text-[10px] font-bold text-slate-500 leading-relaxed">
-          이 광고 계정에는 아직 픽셀이 없습니다. 만들어서 웹사이트에 설치하면 구매 · 방문을 재고 전환에 맞춰 집행할 수
-          있어요. 만들지 않아도 광고는 링크 클릭 최적화로 집행됩니다.
+          {mode === 'optimize'
+            ? '이 광고 계정에는 아직 픽셀이 없습니다. 만들어서 웹사이트에 설치하면 구매 · 방문을 재고 전환에 맞춰 집행할 수 있어요. 만들지 않아도 광고는 링크 클릭 최적화로 집행됩니다.'
+            : '이 광고 계정에는 아직 픽셀이 없습니다. 만들어서 웹사이트에 설치하면 광고를 보고 들어온 사람의 구매 · 장바구니 · 가입을 광고 현황에서 볼 수 있어요.'}
+        </p>
+      )}
+
+      {mode === 'track' && pixels.length > 0 && (
+        <p className="text-[10px] font-bold text-slate-400 leading-relaxed">
+          최적화는 고른 성과 목표로 하고, 이 픽셀은 측정에만 씁니다. 광고를 보고 사이트에 들어온 사람의 구매 ·
+          장바구니가 광고 현황의 이 광고 성과로 잡힙니다.
         </p>
       )}
 

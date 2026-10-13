@@ -357,17 +357,39 @@ export type MetaAdLive = {
   spend?: number;
   conversions?: number;
   conversionValue?: number;
+  /** 링크 클릭. clicks 는 프로필·더보기까지 포함한 모든 클릭이다. */
+  linkClicks?: number;
+  /** 이벤트별 횟수(PURCHASE · ADD_TO_CART · LANDING_PAGE_VIEW · THRUPLAY …). */
+  events?: Record<string, number>;
+  /** 이벤트별 전환 가치(구매 · 장바구니 · 결제 시작). */
+  eventValues?: Record<string, number>;
 };
 
 export type MetaAdWithLive = MetaAdRecord & { meta: MetaAdLive };
 
 const adsPath = (username: string) => `/api/meta-ads/ads/${encodeURIComponent(normalize(username))}`;
 
-export const fetchMetaAds = (username: string, adAccountId?: string) =>
-  call<{ ads: MetaAdWithLive[]; errors: string[]; fetchedAt: string; source: string }>(
+/** 지표 기간 — 광고 관리자의 날짜 선택과 같은 값(date_preset). */
+export const AD_DATE_RANGES = [
+  { value: 'today', label: '오늘' },
+  { value: 'yesterday', label: '어제' },
+  { value: 'last_7d', label: '최근 7일' },
+  { value: 'last_30d', label: '최근 30일' },
+  { value: 'this_month', label: '이번 달' },
+  { value: 'maximum', label: '전체 기간' },
+] as const;
+export type AdDateRange = (typeof AD_DATE_RANGES)[number]['value'];
+
+export const fetchMetaAds = (username: string, adAccountId?: string, range: AdDateRange = 'maximum') => {
+  const query = new URLSearchParams();
+  if (adAccountId) query.set('account', adAccountId);
+  if (range !== 'maximum') query.set('range', range);
+  const qs = query.toString();
+  return call<{ ads: MetaAdWithLive[]; errors: string[]; fetchedAt: string; source: string }>(
     username,
-    `${adsPath(username)}${adAccountId ? `?account=${encodeURIComponent(adAccountId)}` : ''}`,
+    `${adsPath(username)}${qs ? `?${qs}` : ''}`,
   );
+};
 
 /** 집행하기에서 보내는 값. imageHash/videoId 는 업로드를 마친 뒤 채운다. */
 export type MetaAdDraft = {
@@ -521,6 +543,24 @@ export const fetchMetaAudiences = (username: string, adAccountId: string) =>
 /** 광고 계정의 Meta 픽셀(데이터 세트). */
 export const fetchMetaPixels = (username: string, adAccountId: string) =>
   call<{ pixels: MetaPixel[] }>(username, `${targetingPath(username)}?kind=pixels&account=${encodeURIComponent(adAccountId)}`);
+
+export type MetaPixelStats = {
+  pixel: MetaPixel & { unavailable: boolean };
+  days: number;
+  /** 웹사이트에서 받은 이벤트(광고 유입만이 아니라 사이트 전체). 많은 순. */
+  events: { event: string; count: number }[];
+};
+
+/** 픽셀이 최근 n일 받은 이벤트 수 — 이벤트 관리자 개요의 숫자. */
+export const fetchMetaPixelStats = (username: string, adAccountId: string, pixelId: string, days: 1 | 7 | 28 = 7) =>
+  call<MetaPixelStats>(
+    username,
+    `${targetingPath(username)}?kind=pixelStats&account=${encodeURIComponent(adAccountId)}&pixel=${encodeURIComponent(pixelId)}&days=${days}`,
+  );
+
+/** 이벤트 관리자에서 이 픽셀을 여는 주소. */
+export const eventsManagerUrl = (pixelId: string) =>
+  `https://business.facebook.com/events_manager2/list/pixel/${encodeURIComponent(pixelId)}/overview`;
 
 /** 광고 계정에 새 픽셀(데이터 세트)을 만든다. */
 export const createMetaPixel = (username: string, adAccountId: string, name: string) =>
