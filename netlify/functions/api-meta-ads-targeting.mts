@@ -1,7 +1,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { readMetaAdsDiagnosis, readMetaAdsToken, tokenErrorResponse } from "./_shared/meta-ads.mts";
-import { buildTargeting, graphErrorResponse, graphGet, GOALS_BY_OBJECTIVE } from "./_shared/meta-ads-graph.mts";
+import { buildTargeting, graphErrorResponse, graphGet, graphPost, GOALS_BY_OBJECTIVE } from "./_shared/meta-ads-graph.mts";
 
 /**
  * 광고 세트 설정을 고르는 데 필요한 메타 목록 — 광고 관리자의 타겟 · 데이터 세트 칸.
@@ -12,6 +12,8 @@ import { buildTargeting, graphErrorResponse, graphGet, GOALS_BY_OBJECTIVE } from
  *        광고 계정의 맞춤 타겟 · 유사 타겟(GET /act_…/customaudiences).
  *   GET  /api/meta-ads/targeting/:username?kind=pixels&account=act_…
  *        광고 계정의 픽셀(GET /act_…/adspixels).
+ *   POST /api/meta-ads/targeting/:username { action: 'createPixel', adAccountId, name }
+ *        광고 계정에 새 픽셀(데이터 세트)을 만든다(POST /act_…/adspixels).
  *   POST /api/meta-ads/targeting/:username { action: 'estimate', adAccountId, draft }
  *        지금 타겟의 예상 규모(GET /act_…/delivery_estimate). 집행과 같은 targeting 을 쓴다.
  *
@@ -96,10 +98,21 @@ export default async (req: Request, context: Context) => {
   if (req.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
 
   const body = (await req.json().catch(() => ({}))) as any;
-  if (body?.action !== "estimate") return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
+  if (body?.action !== "estimate" && body?.action !== "createPixel") {
+    return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
+  }
   const account = String(body?.adAccountId || "");
   const bad = checkAccount(account);
   if (bad) return bad;
+
+  if (body.action === "createPixel") {
+    const name = String(body?.name || "").trim().slice(0, 100) || `${username} 픽셀`;
+    const res = await graphPost(`${account}/adspixels`, token, { name }, proof);
+    if (!res.ok) return graphErrorResponse(res, "픽셀을 만들지 못했습니다.");
+    const id = String((res.data as any)?.id || "");
+    if (!id) return Response.json({ error: "픽셀을 만들지 못했습니다." }, { status: 502 });
+    return Response.json({ pixel: { id, name, lastFiredTime: "" } });
+  }
 
   const draft = (body?.draft || {}) as any;
   const { targeting } = await buildTargeting(token, proof, {
