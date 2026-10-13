@@ -233,6 +233,31 @@ export async function saveAdRecord(username: string, record: MetaAdRecord): Prom
   await store().setJSON(recordsKey(username), next);
 }
 
+/** 광고 기록이 있는 계정들(아이디). 주기 작업이 계정마다 광고 상태를 확인할 때 쓴다. */
+export async function listAdRecordOwners(): Promise<string[]> {
+  const { blobs } = await store().list({ prefix: "ads_list_" });
+  return blobs.map((b) => b.key.slice("ads_list_".length)).filter(Boolean);
+}
+
+/**
+ * 반려 알림을 이미 보낸 광고(광고 ID → 알린 시각). 광고 기록과 다른 키에 둔다 — 주기
+ * 작업이 기록 목록을 통째로 다시 쓰면 그 사이 브랜드가 만든 광고 기록을 덮어쓸 수 있다.
+ */
+const rejectionKey = (username: string) => `ads_rejected_${username.replace(/^biz\//, "").toLowerCase()}`;
+
+export async function readRejectionNotices(username: string): Promise<Record<string, string>> {
+  try {
+    const found = (await store().get(rejectionKey(username), { type: "json" })) as Record<string, string> | null;
+    return found && typeof found === "object" ? found : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function writeRejectionNotices(username: string, notices: Record<string, string>): Promise<void> {
+  await store().setJSON(rejectionKey(username), notices);
+}
+
 /** 기록을 목록에서 뺀다(삭제했거나 메타에서 지워진 광고). */
 export async function removeAdRecords(username: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
@@ -375,6 +400,7 @@ export async function buildTargeting(
   proof: string,
   r: Pick<
     MetaAdRecord,
+    | "adAccountId"
     | "regions"
     | "ageBands"
     | "ageMin"
@@ -387,8 +413,9 @@ export async function buildTargeting(
     | "placementMode"
     | "placements"
   >,
-): Promise<{ targeting: Record<string, unknown>; warning?: string }> {
-  const { geo, warning } = await resolveGeo(token, proof, r.regions || []);
+): Promise<{ targeting: Record<string, unknown>; warning?: string; error?: string }> {
+  const { geo, warning: geoWarning } = await resolveGeo(token, proof, r.regions || []);
+  const warnings = geoWarning ? [geoWarning] : [];
   const legacy = ageRange(r.ageBands || []);
   const ageMin = Math.max(18, Math.min(65, Number(r.ageMin) || legacy.age_min));
   const ageMax = Math.max(ageMin, Math.min(65, Number(r.ageMax) || legacy.age_max));
@@ -411,11 +438,37 @@ export async function buildTargeting(
   }
   const interests = ids(r.interests);
   if (interests.length) targeting.flexible_spec = [{ interests: interests.map((id) => ({ id })) }];
-  const include = ids(r.audiences);
+  let include = ids(r.audiences);
+  let exclude = ids(r.excludedAudiences);
+  // 맞춤 · 유사 타겟 ID 는 화면이 보낸 값이라, 이 광고 계정 것인지 서버에서 다시 확인한다.
+  // 한 메타 로그인(비즈니스 매니저)이 여러 브랜드의 계정을 다루면 토큰으로는 남의 계정
+  // 오디언스도 보이므로, 확인 없이 넘기면 다른 브랜드의 고객 리스트로 타겟팅될 수 있다.
+  // 픽셀 확인(accountPixelIds)과 달리 조회에 실패하면 화면 값을 믿지 않고 멈춘다 —
+  // 빼고 만들면 타겟이 의도보다 넓어지고, 믿고 만들면 검증을 건너뛰게 된다.
+  if (include.length || exclude.length) {
+    let owned = await accountAudienceIds(r.adAccountId, token, proof);
+    if (owned === null) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      owned = await accountAudienceIds(r.adAccountId, token, proof);
+    }
+    if (owned === null) {
+      return {
+        targeting,
+        warning: warnings.join(" ") || undefined,
+        error: "메타에서 이 광고 계정의 맞춤 타겟 목록을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
+      };
+    }
+    const set = new Set(owned);
+    const foreign = [...include, ...exclude].filter((id) => !set.has(id));
+    if (foreign.length) {
+      include = include.filter((id) => set.has(id));
+      exclude = exclude.filter((id) => set.has(id));
+      warnings.push(`이 광고 계정에 없는 맞춤 타겟 ${foreign.length}개를 빼고 만듭니다.`);
+    }
+  }
   if (include.length) targeting.custom_audiences = include.map((id) => ({ id }));
-  const exclude = ids(r.excludedAudiences);
   if (exclude.length) targeting.excluded_custom_audiences = exclude.map((id) => ({ id }));
-  return { targeting, warning };
+  return { targeting, warning: warnings.join(" ") || undefined };
 }
 
 /** 캠페인 목표별로 고를 수 있는 성과 목표. 맨 앞이 기본값이다(화면의 PERFORMANCE_GOALS 와 같다). */
@@ -568,4 +621,32 @@ export async function accountPixelIds(adAccountId: string, token: string, proof:
   const res = await graphGet(`${adAccountId}/adspixels`, token, { fields: "id", limit: 100 }, proof);
   if (!res.ok) return null;
   return Array.isArray(res.data?.data) ? res.data.data.map((p: any) => String(p?.id || "")).filter(Boolean) : [];
+}
+
+/**
+ * 광고 계정에 실제로 있는 맞춤 · 유사 타겟 ID 들. 화면이 보낸 오디언스가 이 계정 것인지
+ * 확인할 때 쓴다(buildTargeting). null 은 "없음"이 아니라 "목록 조회 실패"다.
+ */
+export async function accountAudienceIds(adAccountId: string, token: string, proof: string): Promise<string[] | null> {
+  if (!adAccountId) return null;
+  const found: string[] = [];
+  let after = "";
+  // 계정마다 수백 개를 넘는 경우가 드물어 몇 쪽이면 충분하다. 끝없이 따라가지 않는다.
+  for (let page = 0; page < 10; page++) {
+    const res = await graphGet(
+      `${adAccountId}/customaudiences`,
+      token,
+      { fields: "id", limit: 500, ...(after ? { after } : {}) },
+      proof,
+    );
+    if (!res.ok) return null;
+    const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+    for (const row of rows) {
+      const id = String(row?.id || "");
+      if (id) found.push(id);
+    }
+    after = String(res.data?.paging?.cursors?.after || "");
+    if (!res.data?.paging?.next || !after) break;
+  }
+  return found;
 }

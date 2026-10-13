@@ -170,7 +170,8 @@ export default async (req: Request, context: Context) => {
   }
 
   const draft = (body?.draft || {}) as any;
-  const { targeting } = await buildTargeting(token, proof, {
+  const { targeting, error: targetingError } = await buildTargeting(token, proof, {
+    adAccountId: account,
     regions: Array.isArray(draft.regions) ? draft.regions.map(String).slice(0, 10) : [],
     ageBands: [],
     ageMin: Number(draft.ageMin) || undefined,
@@ -183,6 +184,7 @@ export default async (req: Request, context: Context) => {
     placementMode: draft.placementMode === "manual" ? "manual" : "auto",
     placements: Array.isArray(draft.placements) ? draft.placements.map(String).slice(0, 10) : [],
   });
+  if (targetingError) return Response.json({ error: targetingError }, { status: 502 });
   const allGoals = Object.values(GOALS_BY_OBJECTIVE).flat();
   const goal = allGoals.includes(String(draft.optimizationGoal || "")) ? String(draft.optimizationGoal) : "REACH";
   // 픽셀이 필요한 목표는 추정에 promoted_object 가 있어야 한다. 규모만 보려는 것이라

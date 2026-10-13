@@ -148,12 +148,22 @@ export default async (req: Request, context: Context) => {
              CASE
                WHEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0) > 0
                  THEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0)
-               WHEN cl.collab_id IS NOT NULL THEN 0
+               WHEN cl.id IS NOT NULL THEN 0
                ELSE COALESCE(ct.fee, 0)
              END AS fee
       FROM campaign_collabs cc
       LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
-      LEFT JOIN campaign_listups cl ON cl.collab_id = cc.id
+      -- 명단 행은 협업 아이디로 먼저, 아직 연결되지 않은 행(지원 수락으로 협업이 생긴 뒤
+      -- 담당자가 따로 명단에 올린 경우)은 캠페인 + 인플루언서 아이디로 찾는다. 정산 탭
+      -- (api-campaign-brand-settlement)과 같은 규칙이어야 두 화면의 금액이 같다.
+      LEFT JOIN LATERAL (
+        SELECT l.id, l.quoted_fee, l.quoted_second_use_fee
+        FROM campaign_listups l
+        WHERE l.campaign_id = cc.campaign_id
+          AND (l.collab_id = cc.id OR LOWER(l.influencer_username) = LOWER(cc.creator_username))
+        ORDER BY (l.collab_id = cc.id) DESC NULLS LAST
+        LIMIT 1
+      ) cl ON TRUE
       WHERE cc.campaign_id = ANY(${campaignIds})
       ORDER BY cc.created_at ASC
     `) as any[];
