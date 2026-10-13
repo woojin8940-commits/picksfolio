@@ -90,19 +90,34 @@ async function runCampaign(token: string, proof: string, r: MetaAdRecord): Promi
   if (r.objective === "engagement") objective = "OUTCOME_ENGAGEMENT";
   // 화면에서 고른 픽셀이 이 광고 계정 것인지 확인한다. 남의 계정 픽셀을 붙이면 광고 단계에서
   // 거절되고, 그 전까지 만든 캠페인·세트가 빈 채로 남는다.
-  const list = (await accountPixelIds(r.adAccountId, token, proof)) || [];
+  // null 은 "픽셀 없음"이 아니라 "목록 조회 실패"(일시 장애·레이트리밋)다. 한 번 더 물어보고,
+  // 그래도 실패하면 화면이 보낸 픽셀을 그대로 믿는다 — 없다고 단정해 목적을 바꾸지 않는다.
+  let list = await accountPixelIds(r.adAccountId, token, proof);
+  if (list === null) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    list = await accountPixelIds(r.adAccountId, token, proof);
+  }
+  const verified = list !== null;
   if (r.objective === "conversions") {
     // 전환(구매) 최적화는 픽셀이 있어야 한다. 없는 계정에서 OUTCOME_SALES 로 만들면 광고
     // 세트 단계에서 막히므로, 여기서 확인하고 트래픽 목적으로 돌린다(진행 화면에 경고로 남긴다).
-    const pixelId = r.pixelId && list.includes(r.pixelId) ? r.pixelId : list[0] || "";
+    const pixelId = !list ? r.pixelId || "" : r.pixelId && list.includes(r.pixelId) ? r.pixelId : list[0] || "";
     if (pixelId) {
       objective = "OUTCOME_SALES";
       r.pixelId = pixelId;
+      if (!verified) r.warnings.push("메타에서 픽셀 목록을 확인하지 못해, 고른 픽셀을 그대로 써서 판매 목적으로 집행합니다.");
     } else {
       r.pixelId = undefined;
-      r.warnings.push("이 광고 계정에 픽셀이 없어 판매 대신 트래픽(링크 클릭) 목적으로 집행합니다.");
+      r.warnings.push(
+        verified
+          ? "이 광고 계정에 픽셀이 없어 판매 대신 트래픽(링크 클릭) 목적으로 집행합니다."
+          : "메타에서 픽셀 목록을 확인하지 못했고 고른 픽셀도 없어 판매 대신 트래픽(링크 클릭) 목적으로 집행합니다.",
+      );
     }
-  } else if (r.pixelId && !list.includes(r.pixelId)) {
+  } else if (r.pixelId && !list) {
+    // 확인에 실패했을 뿐이니 고른 픽셀로 추적을 붙인 채 만든다.
+    r.warnings.push("메타에서 픽셀 목록을 확인하지 못해, 고른 픽셀을 확인 없이 웹사이트 이벤트 추적에 씁니다.");
+  } else if (r.pixelId && list && !list.includes(r.pixelId)) {
     // 판매가 아닌 목적의 픽셀은 측정(tracking_specs)에만 쓴다. 이 계정 것이 아니면 빼고 만든다.
     r.warnings.push("고른 픽셀이 이 광고 계정에 없어 웹사이트 이벤트 추적 없이 만듭니다.");
     r.pixelId = undefined;
