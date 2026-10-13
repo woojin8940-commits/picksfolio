@@ -48,6 +48,26 @@ export const AD_REGIONS = [
 ] as const;
 
 /**
+ * 상세 타겟팅 카테고리. 관심사를 하나씩 검색해 고르는 대신, 자주 쓰는 묶음을 미리
+ * 정해 두고 카테고리만 고르게 한다. 키워드는 메타 관심사 이름(영문이 가장 잘 맞는다)이고,
+ * 고르는 순간 메타 목록에서 찾아 실제 관심사 ID 로 바꾼다.
+ */
+export const AD_INTEREST_CATEGORIES = [
+  { key: 'beauty', label: '뷰티', keywords: ['Beauty', 'Cosmetics', 'Skin care', 'Makeup', 'Perfume'] },
+  { key: 'fashion', label: '패션', keywords: ['Fashion', 'Clothing', 'Shoes', 'Handbags', 'Fashion accessories'] },
+  { key: 'parenting', label: '육아', keywords: ['Parenting', 'Motherhood', 'Baby food', 'Toddlers', "Children's clothing"] },
+  { key: 'food', label: '푸드·맛집', keywords: ['Food', 'Restaurants', 'Cooking', 'Desserts', 'Coffee'] },
+  { key: 'fitness', label: '건강·운동', keywords: ['Physical fitness', 'Health & wellness', 'Dieting', 'Yoga', 'Nutrition'] },
+  { key: 'travel', label: '여행', keywords: ['Travel', 'Hotels', 'Vacations', 'Air travel', 'Tourism'] },
+  { key: 'living', label: '리빙·인테리어', keywords: ['Interior design', 'Home improvement', 'Furniture', 'Home Appliances'] },
+  { key: 'pets', label: '반려동물', keywords: ['Pets', 'Dogs', 'Cats', 'Pet food'] },
+  { key: 'tech', label: 'IT·가전', keywords: ['Technology', 'Consumer electronics', 'Smartphones', 'Computers'] },
+  { key: 'games', label: '게임', keywords: ['Video games', 'Mobile games', 'Online games'] },
+] as const;
+
+export type AdInterestCategory = (typeof AD_INTEREST_CATEGORIES)[number]['key'];
+
+/**
  * 광고 목적 — 메타가 캠페인 단위로 먼저 묻는 값이다.
  *
  * 이력에서 고른 게시물을 다시 돌리는 부스팅은 목적이 전환으로 정해져 있지만(그래서
@@ -228,7 +248,7 @@ export const targetSummary = (boost: {
       : boost.ageBands.length
       ? boost.ageBands.join('·')
       : '연령 전체';
-  const region = boost.regions.length ? boost.regions.join('·') : '전국';
+  const region = boost.regions.length ? boost.regions.join('·') : '대한민국';
   const gender = boost.gender && boost.gender !== 'all' ? AD_GENDERS.find((g) => g.value === boost.gender)?.label : '';
   const extra = [
     boost.interests?.length ? `관심사 ${boost.interests.length}개` : '',

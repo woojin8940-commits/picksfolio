@@ -203,7 +203,11 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   /** 빈도 제한은 메타가 도달 최적화에서만 받는다. */
   const canCapFrequency = goal.value === 'REACH';
 
-  // 광고 계정의 픽셀. 고르지 않으면 서버가 첫 번째 픽셀을 쓴다(예전 동작).
+  /**
+   * 광고 계정의 픽셀(메타의 '데이터 세트'). 전환을 재는 추적 코드라 브랜드가 고를 일이
+   * 거의 없어서 고르는 칸은 두지 않고, 계정의 첫 번째 픽셀을 그대로 쓴다. 픽셀이 없을 때
+   * 알려 주려고 목록만 읽는다.
+   */
   const [pixels, setPixels] = useState<MetaPixel[]>([]);
   const [pixelsLoading, setPixelsLoading] = useState(false);
   useEffect(() => {
@@ -644,26 +648,6 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
                 {needsPixel && connected && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className={labelCls} htmlFor="boost-pixel">데이터 세트(픽셀)</label>
-                      <div className="relative mt-1.5">
-                        <select
-                          id="boost-pixel"
-                          value={pixelId}
-                          onChange={(e) => setPixelId(e.target.value)}
-                          disabled={pixelsLoading || pixels.length === 0}
-                          className={`${selectCls} disabled:bg-slate-50 disabled:text-slate-400`}
-                        >
-                          {pixels.length === 0 && (
-                            <option value="">{pixelsLoading ? '불러오는 중...' : '이 광고 계정에 픽셀이 없습니다'}</option>
-                          )}
-                          {pixels.map((px) => (
-                            <option key={px.id} value={px.id}>{px.name} · {px.id}</option>
-                          ))}
-                        </select>
-                        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      </div>
-                    </div>
                     {goal.value === 'OFFSITE_CONVERSIONS' && (
                       <div>
                         <label className={labelCls} htmlFor="boost-event">전환 이벤트</label>
