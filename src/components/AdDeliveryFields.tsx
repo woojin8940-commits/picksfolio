@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Loader2, Search, X } from 'lucide-react';
+import { Check, ChevronDown, Loader2, MapPin, X } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas, stripCommas, todayInSeoul } from '../utils/formatters';
 import {
   AD_AGE_MAX,
   AD_AGE_MIN,
   AD_GENDERS,
+  AD_INTEREST_CATEGORIES,
   AD_PLACEMENTS,
-  AD_REGIONS,
+  AdInterestCategory,
   AdGender,
   AdPlacement,
   AdTargetItem,
@@ -19,8 +20,9 @@ import { MetaAudience, MetaInterest, fetchMetaAudiences, searchMetaInterests } f
  * 광고 집행 조건 — 얼마를, 언제까지, 누구에게, 어디에.
  *
  * 메타 광고 관리자의 '광고 세트' 화면에서 마케터가 손대는 값을 같은 이름으로 옮겼다 —
- * 예산 유형(일일/총) · 입찰 전략 · Advantage+ 타겟 · 지역 · 성별 · 연령 · 상세 타겟팅 ·
- * 맞춤 타겟(포함/제외) · 노출 위치(인스타/페이스북). 기본값은 광고 관리자의 기본값과 같아서,
+ * 예산 유형(일일/총) · 입찰 전략 · Advantage+ 타겟 · 성별 · 연령 · 상세 타겟팅 ·
+ * 맞춤 타겟(포함/제외) · 노출 위치(인스타/페이스북). 지역은 대한민국 하나로 고정이고, 상세
+ * 타겟팅은 검색 대신 미리 정해 둔 카테고리(뷰티 · 패션 · 육아 …)에서 고른다. 기본값은 광고 관리자의 기본값과 같아서,
  * 아무것도 건드리지 않으면 예전과 같은 광고가 만들어진다.
  *
  * 이 값들은 소재가 어디서 왔는지와 상관이 없다. 이력에서 고른 게시물을 부스팅할 때도,
@@ -104,6 +106,9 @@ export const useAdDelivery = () => {
   const [ageMin, setAgeMin] = useState(AD_AGE_MIN);
   const [ageMax, setAgeMax] = useState(AD_AGE_MAX);
   const [interests, setInterests] = useState<AdTargetItem[]>([]);
+  /** 고른 상세 타겟팅 카테고리와, 각 카테고리가 메타에서 찾아 넣은 관심사. 화면에서만 쓴다. */
+  const [interestCategories, setInterestCategories] = useState<AdInterestCategory[]>([]);
+  const categoryItems = useRef<Partial<Record<AdInterestCategory, AdTargetItem[]>>>({});
   const [audiences, setAudiences] = useState<AdTargetItem[]>([]);
   const [excludedAudiences, setExcludedAudiences] = useState<AdTargetItem[]>([]);
   const [advantageAudience, setAdvantageAudience] = useState(false);
@@ -155,7 +160,8 @@ export const useAdDelivery = () => {
     ageMin,
     ageMax,
     gender,
-    regions,
+    // 지역은 대한민국 하나로만 집행한다(빈 목록 = 대한민국 전체).
+    regions: [] as string[],
     interests,
     audiences,
     excludedAudiences,
@@ -198,8 +204,10 @@ export const useAdDelivery = () => {
     setAgeMin(v.ageMin || legacy?.[0] || AD_AGE_MIN);
     setAgeMax(v.ageMax || legacy?.[1] || AD_AGE_MAX);
     setGender(v.gender || 'all');
-    setRegions(v.regions || []);
+    setRegions([]);
     setInterests(v.interests || []);
+    setInterestCategories([]);
+    categoryItems.current = {};
     setAudiences(v.audiences || []);
     setExcludedAudiences(v.excludedAudiences || []);
     setAdvantageAudience(!!v.advantageAudience);
@@ -220,6 +228,7 @@ export const useAdDelivery = () => {
     gender, setGender,
     regions, setRegions,
     interests, setInterests,
+    interestCategories, setInterestCategories, categoryItems,
     audiences, setAudiences,
     excludedAudiences, setExcludedAudiences,
     advantageAudience, setAdvantageAudience,
@@ -312,91 +321,95 @@ const PickedList: React.FC<{ items: AdTargetItem[]; onRemove: (id: string) => vo
   );
 
 /**
- * 상세 타겟팅 — 관심사 · 행동 · 인구 통계 검색. 광고 관리자처럼 입력하면 메타 목록에서
- * 찾아 주고, 고른 항목은 '하나라도 해당하는 사람(또는)'으로 묶인다.
+ * 상세 타겟팅 — 미리 정해 둔 카테고리(뷰티 · 패션 · 육아 …)를 누르기만 하면 된다.
+ * 카테고리를 켜면 그 묶음의 키워드를 메타 관심사 목록에서 찾아 실제 관심사로 넣고,
+ * 끄면 그 카테고리가 넣은 관심사를 뺀다. 고른 관심사는 '하나라도 해당하는 사람(또는)'으로 묶인다.
  */
-const InterestSearch: React.FC<{ username: string; delivery: AdDelivery; idPrefix: string }> = ({
-  username,
-  delivery: d,
-  idPrefix,
-}) => {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<MetaInterest[]>([]);
-  const [loading, setLoading] = useState(false);
+const InterestCategories: React.FC<{ username: string; delivery: AdDelivery }> = ({ username, delivery: d }) => {
+  const [loading, setLoading] = useState<AdInterestCategory | ''>('');
   const [error, setError] = useState('');
-  const seq = useRef(0);
 
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 1) {
-      setResults([]);
-      setError('');
+  /** 키워드마다 이름이 같은 항목(없으면 첫 항목)을 고른다. */
+  const resolve = async (keywords: readonly string[]): Promise<AdTargetItem[] | string> => {
+    const results = await Promise.all(keywords.map((k) => searchMetaInterests(username, k)));
+    const failed = results.find((r) => !r.ok);
+    const items: AdTargetItem[] = [];
+    results.forEach((res, i) => {
+      if (!res.ok) return;
+      const list: MetaInterest[] = res.interests;
+      const kw = keywords[i].toLowerCase();
+      const hit = list.find((it) => it.name.toLowerCase() === kw) || list[0];
+      if (hit && !items.some((p) => p.id === hit.id)) items.push({ id: hit.id, name: hit.name });
+    });
+    if (items.length === 0) return failed && !failed.ok ? failed.error : '이 카테고리의 관심사를 찾지 못했습니다.';
+    return items;
+  };
+
+  const toggle = async (key: AdInterestCategory) => {
+    setError('');
+    if (d.interestCategories.includes(key)) {
+      const own = new Set((d.categoryItems.current[key] || []).map((it) => it.id));
+      // 다른 켜진 카테고리도 넣은 관심사는 남긴다.
+      const keep = new Set(
+        d.interestCategories
+          .filter((c) => c !== key)
+          .flatMap((c) => (d.categoryItems.current[c] || []).map((it) => it.id)),
+      );
+      d.setInterests((prev) => prev.filter((p) => !own.has(p.id) || keep.has(p.id)));
+      d.setInterestCategories((prev) => prev.filter((c) => c !== key));
       return;
     }
-    const mine = ++seq.current;
-    const timer = window.setTimeout(async () => {
-      setLoading(true);
-      const res = await searchMetaInterests(username, term);
-      if (mine !== seq.current) return;
-      setLoading(false);
-      if (res.ok) {
-        setResults(res.interests);
-        setError(res.interests.length ? '' : '일치하는 항목이 없습니다.');
-      } else {
-        setResults([]);
-        setError(res.error);
+    const cat = AD_INTEREST_CATEGORIES.find((c) => c.key === key);
+    if (!cat) return;
+    let items = d.categoryItems.current[key];
+    if (!items) {
+      setLoading(key);
+      const res = await resolve(cat.keywords);
+      setLoading('');
+      if (typeof res === 'string') {
+        setError(res);
+        return;
       }
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [q, username]);
-
-  const pick = (it: MetaInterest) => {
-    d.setInterests((prev) => (prev.some((p) => p.id === it.id) ? prev : [...prev, { id: it.id, name: it.name }].slice(0, 25)));
-    setQ('');
-    setResults([]);
+      items = res;
+      d.categoryItems.current[key] = items;
+    }
+    const add = items;
+    d.setInterests((prev) => [...prev, ...add.filter((it) => !prev.some((p) => p.id === it.id))].slice(0, 25));
+    d.setInterestCategories((prev) => (prev.includes(key) ? prev : [...prev, key]));
   };
 
   return (
     <div>
-      <label className={labelCls} htmlFor={`${idPrefix}-interest`}>상세 타겟팅</label>
-      <div className="relative mt-1.5">
-        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-        <input
-          id={`${idPrefix}-interest`}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="관심사 · 행동 검색 (예: 뷰티, 캠핑, 육아)"
-          className={`${fieldCls} pl-8`}
-          autoComplete="off"
-        />
-        {loading && <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />}
+      <p className={labelCls}>상세 타겟팅</p>
+      <div className="flex flex-wrap gap-1.5 mt-1.5">
+        {AD_INTEREST_CATEGORIES.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => void toggle(c.key)}
+            disabled={!!loading}
+            aria-pressed={d.interestCategories.includes(c.key)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black border transition-colors disabled:opacity-60 ${
+              d.interestCategories.includes(c.key)
+                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            {loading === c.key ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              d.interestCategories.includes(c.key) && <Check className="w-3 h-3" />
+            )}
+            {c.label}
+          </button>
+        ))}
       </div>
-      {results.length > 0 && (
-        <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
-          {results.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              onClick={() => pick(it)}
-              className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2"
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block text-[12px] font-black text-slate-800 truncate">{it.name}</span>
-                {it.path && <span className="block text-[10px] text-slate-400 font-bold truncate">{it.path}</span>}
-              </span>
-              {it.audienceSize > 0 && (
-                <span className="text-[10px] text-slate-400 font-bold flex-shrink-0">약 {formatCount(it.audienceSize)}명</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-      {error && q.trim() && <p className="text-[10px] text-slate-400 font-bold mt-1.5">{error}</p>}
+      {error && <p className="text-[10px] text-amber-600 font-bold mt-1.5">{error}</p>}
       <PickedList items={d.interests} onRemove={(id) => d.setInterests((prev) => prev.filter((p) => p.id !== id))} />
       <p className={hintCls}>
         {d.interests.length === 0
-          ? '비워 두면 관심사 제한 없이 집행합니다'
-          : '고른 항목 중 하나라도 해당하는 사람에게 노출합니다'}
+          ? '카테고리를 고르지 않으면 관심사 제한 없이 집행합니다'
+          : '고른 관심사 중 하나라도 해당하는 사람에게 노출합니다 · 필요 없는 관심사는 × 로 뺄 수 있습니다'}
       </p>
     </div>
   );
@@ -618,19 +631,10 @@ export const AdDeliveryFields: React.FC<{
 
         <div>
           <p className={labelCls}>지역</p>
-          <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {AD_REGIONS.map((region) => (
-              <Chip
-                key={region}
-                label={region}
-                on={d.regions.includes(region)}
-                onClick={() => d.setRegions((prev) => toggleValue(prev, region))}
-              />
-            ))}
+          <div className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black border bg-blue-50 border-blue-200 text-blue-700">
+            <MapPin className="w-3 h-3" />
+            대한민국
           </div>
-          <p className={hintCls}>
-            {d.regions.length === 0 ? '고르지 않으면 대한민국 전체로 집행합니다' : `${d.regions.length}개 지역`}
-          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -672,7 +676,7 @@ export const AdDeliveryFields: React.FC<{
           </div>
         </div>
 
-        {username && <InterestSearch username={username} delivery={d} idPrefix={idPrefix} />}
+        {username && <InterestCategories username={username} delivery={d} />}
         {username && adAccountId && (
           <AudiencePicker username={username} adAccountId={adAccountId} delivery={d} idPrefix={idPrefix} />
         )}
