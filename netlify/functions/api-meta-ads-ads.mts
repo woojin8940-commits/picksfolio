@@ -88,7 +88,7 @@ async function runCampaign(token: string, proof: string, r: MetaAdRecord): Promi
   if (r.objective === "engagement") objective = "OUTCOME_ENGAGEMENT";
   if (r.objective === "conversions") {
     // 전환(구매) 최적화는 픽셀이 있어야 한다. 없는 계정에서 OUTCOME_SALES 로 만들면 광고
-    // 세트 단계에서 막히므로, 여기서 확인하고 트래픽 목적으로 돌린 뒤 그 사실을 남긴다.
+    // 세트 단계에서 막히므로, 여기서 확인하고 따로 알리지 않고 트래픽 목적으로 돌린다.
     // 화면에서 픽셀을 골랐으면 그 픽셀이 이 계정 것인지 확인하고 쓴다.
     const pixels = await graphGet(`${r.adAccountId}/adspixels`, token, { fields: "id,name", limit: 50 }, proof);
     const list: string[] = pixels.ok && Array.isArray(pixels.data?.data) ? pixels.data.data.map((p: any) => String(p?.id || "")) : [];
@@ -98,7 +98,6 @@ async function runCampaign(token: string, proof: string, r: MetaAdRecord): Promi
       r.pixelId = pixelId;
     } else {
       r.pixelId = undefined;
-      r.warnings.push("광고 계정에 Meta 픽셀이 없어 구매 전환 대신 링크 클릭(트래픽) 목적으로 집행합니다.");
     }
   }
   r.metaObjective = objective;

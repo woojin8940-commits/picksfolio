@@ -522,6 +522,13 @@ export const fetchMetaAudiences = (username: string, adAccountId: string) =>
 export const fetchMetaPixels = (username: string, adAccountId: string) =>
   call<{ pixels: MetaPixel[] }>(username, `${targetingPath(username)}?kind=pixels&account=${encodeURIComponent(adAccountId)}`);
 
+/** 광고 계정에 새 픽셀(데이터 세트)을 만든다. */
+export const createMetaPixel = (username: string, adAccountId: string, name: string) =>
+  call<{ pixel: MetaPixel }>(username, targetingPath(username), {
+    method: 'POST',
+    body: JSON.stringify({ action: 'createPixel', adAccountId, name }),
+  });
+
 /** 지금 타겟으로 잡히는 잠재 고객 규모(광고 관리자 오른쪽의 '타겟 규모'). */
 export const estimateMetaAudience = (username: string, adAccountId: string, draft: Partial<MetaAdDraft>) =>
   call<{ lower: number; upper: number }>(username, targetingPath(username), {

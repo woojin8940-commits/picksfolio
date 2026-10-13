@@ -6,10 +6,8 @@ import { useMetaPages } from '../hooks/useMetaPages';
 import { formatKoreanWon } from '../utils/formatters';
 import {
   MetaAdRecord,
-  MetaPixel,
   createMetaAd,
   estimateMetaAudience,
-  fetchMetaPixels,
   notifyMetaAdsChanged,
   resumeMetaAd,
   runRemainingSteps,
@@ -28,6 +26,7 @@ import {
 import { AdDeliveryFields, AdSection, inputCls, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
 import MetaAdProgress from './MetaAdProgress';
 import MetaPagePicker from './MetaPagePicker';
+import MetaPixelField from './MetaPixelField';
 import StartPausedToggle from './StartPausedToggle';
 import ResumeNotice from './MetaAdResumeNotice';
 
@@ -203,35 +202,15 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   /** 빈도 제한은 메타가 도달 최적화에서만 받는다. */
   const canCapFrequency = goal.value === 'REACH';
 
-  /**
-   * 광고 계정의 픽셀(메타의 '데이터 세트'). 전환을 재는 추적 코드라 브랜드가 고를 일이
-   * 거의 없어서 고르는 칸은 두지 않고, 계정의 첫 번째 픽셀을 그대로 쓴다. 픽셀이 없을 때
-   * 알려 주려고 목록만 읽는다.
-   */
-  const [pixels, setPixels] = useState<MetaPixel[]>([]);
-  const [pixelsLoading, setPixelsLoading] = useState(false);
-  useEffect(() => {
-    if (!open || !adAccountId || !connected) return;
-    let alive = true;
-    setPixelsLoading(true);
-    fetchMetaPixels(businessUsername, adAccountId).then((res) => {
-      if (!alive) return;
-      setPixelsLoading(false);
-      const list = res.ok ? res.pixels : [];
-      setPixels(list);
-      setPixelId((prev) => (prev && list.some((p) => p.id === prev) ? prev : list[0]?.id || ''));
-    });
-    return () => {
-      alive = false;
-    };
-  }, [open, adAccountId, connected, businessUsername]);
+  /** 데이터 세트(픽셀) 칸을 보이는 목표. 판매 목표거나 픽셀로 재는 성과 목표일 때. */
+  const showPixel = objective === 'conversions' || needsPixel;
 
   /** 광고 관리자와 같은 설정 묶음. 집행 · 이어서 만들기 · 타겟 규모 추정이 같은 값을 쓴다. */
   const settings = () => ({
     objective,
     optimizationGoal: goal.value,
     conversionEvent: goal.value === 'OFFSITE_CONVERSIONS' ? conversionEvent : goal.value === 'VALUE' ? 'PURCHASE' : undefined,
-    pixelId: needsPixel ? pixelId || undefined : undefined,
+    pixelId: showPixel ? pixelId || undefined : undefined,
     campaignName: campaignName.trim() || undefined,
     linkUrl: linkUrl.trim() || undefined,
     cta: linkUrl.trim() ? cta : undefined,
@@ -359,10 +338,6 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     }
     if (goal.value === 'LANDING_PAGE_VIEWS' && !linkUrl.trim()) {
       setError('랜딩 페이지 조회 최적화는 웹사이트 URL이 있어야 합니다.');
-      return;
-    }
-    if (needsPixel && !pixelId && goal.value !== 'OFFSITE_CONVERSIONS') {
-      setError('이 성과 목표는 Meta 픽셀이 있어야 합니다. 다른 성과 목표를 골라 주세요.');
       return;
     }
     setError('');
@@ -646,6 +621,15 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   <p className="text-[10px] text-slate-400 font-bold mt-1">{goal.hint}</p>
                 </div>
 
+                {showPixel && connected && adAccountId && (
+                  <MetaPixelField
+                    businessUsername={businessUsername}
+                    adAccountId={adAccountId}
+                    pixelId={pixelId}
+                    onChange={setPixelId}
+                  />
+                )}
+
                 {needsPixel && connected && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {goal.value === 'OFFSITE_CONVERSIONS' && (
@@ -665,13 +649,6 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                           <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                         </div>
                       </div>
-                    )}
-                    {!pixelsLoading && pixels.length === 0 && (
-                      <p className="sm:col-span-2 text-[10px] text-amber-600 font-bold leading-relaxed">
-                        {goal.value === 'OFFSITE_CONVERSIONS'
-                          ? '픽셀이 없으면 전환 대신 링크 클릭 최적화로 집행하고, 그 사실을 진행 화면에 적습니다.'
-                          : '이 성과 목표는 픽셀이 있어야 합니다. 링크 클릭수 최대화를 골라 주세요.'}
-                      </p>
                     )}
                   </div>
                 )}
