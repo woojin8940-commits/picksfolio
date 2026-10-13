@@ -1,5 +1,5 @@
 import { authHeaders, fetchWithTimeout } from '../services/apiService';
-import type { AdCta, AdObjective, AdPlacement } from './adBoosts';
+import type { AdCta, AdGender, AdPlacement, AdTargetItem, BidStrategy, BoostObjective } from './adBoosts';
 
 /**
  * 메타 광고 집행·페이지 조회 — 화면에서 부르는 쪽.
@@ -291,7 +291,7 @@ export type MetaAdRecord = {
   creativeId?: string;
   adId?: string;
   initialStatus: 'ACTIVE' | 'PAUSED';
-  objective: AdObjective;
+  objective: BoostObjective;
   metaObjective?: string;
   name: string;
   headline?: string;
@@ -315,6 +315,31 @@ export type MetaAdRecord = {
   regions: string[];
   placementMode: 'auto' | 'manual';
   placements: AdPlacement[];
+} & AdAdvancedSettings;
+
+/**
+ * 광고 관리자와 같은 세부 설정. 예전 기록에는 없으므로 모두 선택 값이다 — 없으면 서버가
+ * 예전과 같은 기본값(총 예산 · 최고 볼륨 · 성별 전체 · 목표의 기본 성과 목표)으로 만든다.
+ */
+export type AdAdvancedSettings = {
+  budgetType?: 'daily' | 'lifetime';
+  bidStrategy?: BidStrategy;
+  /** 결과당 비용 목표 · 입찰가 한도의 금액(원). */
+  bidAmountKrw?: number;
+  optimizationGoal?: string;
+  conversionEvent?: string;
+  pixelId?: string;
+  gender?: AdGender;
+  ageMin?: number;
+  ageMax?: number;
+  interests?: AdTargetItem[];
+  audiences?: AdTargetItem[];
+  excludedAudiences?: AdTargetItem[];
+  advantageAudience?: boolean;
+  /** 도달 · 노출 최적화의 빈도 제한(n일에 최대 m회). */
+  frequencyCap?: { impressions: number; days: number } | null;
+  urlTags?: string;
+  campaignName?: string;
 };
 
 /** 목록 조회 때 메타에서 새로 읽은 값. */
@@ -350,7 +375,7 @@ export type MetaAdDraft = {
   adAccountId: string;
   pageId: string;
   initialStatus: 'ACTIVE' | 'PAUSED';
-  objective?: AdObjective;
+  objective?: BoostObjective;
   headline?: string;
   bodyText?: string;
   cta?: AdCta;
@@ -371,7 +396,7 @@ export type MetaAdDraft = {
   regions: string[];
   placementMode: 'auto' | 'manual';
   placements: string[];
-};
+} & AdAdvancedSettings;
 
 type StepResult = MetaApiResult<{ record: MetaAdRecord; pending?: boolean }> & { record?: MetaAdRecord };
 
@@ -471,3 +496,35 @@ export const adsManagerUrl = (r: Pick<MetaAdRecord, 'adAccountId' | 'campaignId'
     r.campaignId ? `&selected_campaign_ids=${r.campaignId}` : ''
   }`;
 };
+
+/* ---------------------------------------------------------------------------------------- */
+/* 타겟팅 · 픽셀 · 예상 타겟 규모                                                            */
+/* ---------------------------------------------------------------------------------------- */
+
+const targetingPath = (username: string) => `/api/meta-ads/targeting/${encodeURIComponent(normalize(username))}`;
+
+export type MetaInterest = { id: string; name: string; path: string; audienceSize: number };
+export type MetaAudience = { id: string; name: string; subtype: string; size: number };
+export type MetaPixel = { id: string; name: string; lastFiredTime: string };
+
+/** 상세 타겟팅 검색(관심사 · 행동 · 인구 통계). GET /search?type=adinterest */
+export const searchMetaInterests = (username: string, q: string) =>
+  call<{ interests: MetaInterest[] }>(username, `${targetingPath(username)}?kind=interests&q=${encodeURIComponent(q)}`);
+
+/** 광고 계정의 맞춤 타겟 · 유사 타겟. */
+export const fetchMetaAudiences = (username: string, adAccountId: string) =>
+  call<{ audiences: MetaAudience[] }>(
+    username,
+    `${targetingPath(username)}?kind=audiences&account=${encodeURIComponent(adAccountId)}`,
+  );
+
+/** 광고 계정의 Meta 픽셀(데이터 세트). */
+export const fetchMetaPixels = (username: string, adAccountId: string) =>
+  call<{ pixels: MetaPixel[] }>(username, `${targetingPath(username)}?kind=pixels&account=${encodeURIComponent(adAccountId)}`);
+
+/** 지금 타겟으로 잡히는 잠재 고객 규모(광고 관리자 오른쪽의 '타겟 규모'). */
+export const estimateMetaAudience = (username: string, adAccountId: string, draft: Partial<MetaAdDraft>) =>
+  call<{ lower: number; upper: number }>(username, targetingPath(username), {
+    method: 'POST',
+    body: JSON.stringify({ action: 'estimate', adAccountId, draft }),
+  });

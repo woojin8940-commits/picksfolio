@@ -1,11 +1,31 @@
-import React, { useEffect, useState } from 'react';
-import { X, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { X, Check, ChevronDown, Loader2, RotateCcw, Users } from 'lucide-react';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import { useMetaPages } from '../hooks/useMetaPages';
 import { formatKoreanWon } from '../utils/formatters';
-import { MetaAdRecord, createMetaAd, notifyMetaAdsChanged, resumeMetaAd, runRemainingSteps } from '../utils/metaAdsApi';
-import { AdDeliveryFields, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
+import {
+  MetaAdRecord,
+  MetaPixel,
+  createMetaAd,
+  estimateMetaAudience,
+  fetchMetaPixels,
+  notifyMetaAdsChanged,
+  resumeMetaAd,
+  runRemainingSteps,
+} from '../utils/metaAdsApi';
+import {
+  AD_CTAS,
+  AdCta,
+  BID_STRATEGIES,
+  BOOST_OBJECTIVES,
+  BoostObjective,
+  CONVERSION_EVENTS,
+  PERFORMANCE_GOALS,
+  placementSummary,
+  targetSummary,
+} from '../utils/adBoosts';
+import { AdDeliveryFields, AdSection, inputCls, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
 import MetaAdProgress from './MetaAdProgress';
 import MetaPagePicker from './MetaPagePicker';
 import StartPausedToggle from './StartPausedToggle';
@@ -14,12 +34,15 @@ import ResumeNotice from './MetaAdResumeNotice';
 /**
  * 콘텐츠 부스팅 창 — 이력에서 고른 게시물을 광고로 돌리는 설정.
  *
- * 이 창에서 브랜드가 고르는 것은 네 가지뿐이다: 얼마를, 언제까지, 누구에게, 어디에.
- * 무엇을 광고할지(콘텐츠)와 누구 이름으로 나갈지(인플루언서), 무엇을 목적으로 돌릴지
- * (전환)는 이미 정해져 있다 — 이력에서 그 게시물을 눌러 들어왔고, 브랜디드 콘텐츠
- * 광고는 게시물 소유자가 고정이며, 이력에서 성과가 좋은 소재를 다시 돌리는 이유는
- * 전환이다. 그래서 그 셋은 고를 수 있는 항목이 아니라 창 위쪽의 안내로 둔다.
- * 선택지로 만들면 브랜드는 "무엇을 고르라는 건지" 를 한 번 더 생각해야 한다.
+ * 메타 광고 관리자와 같은 순서로 나눈다 — 캠페인(이름 · 목표) → 광고 세트(성과 목표 ·
+ * 전환 이벤트 · 예산 및 일정 · 입찰 · 타겟 · 노출 위치) → 광고(페이지 · 웹사이트 URL ·
+ * CTA · URL 매개변수). 마케터가 광고 관리자에서 자주 만지는 값만 옮겨 왔고, 모두
+ * 광고 관리자의 기본값으로 채워져 있어서 예산만 넣어도 집행된다. 맨 아래 요약은 광고
+ * 관리자 오른쪽의 '타겟 규모'와 설정 요약 자리다.
+ *
+ * 무엇을 광고할지(콘텐츠)와 누구 이름으로 나갈지(인플루언서)는 이미 정해져 있다 —
+ * 이력에서 그 게시물을 눌러 들어왔고, 브랜디드 콘텐츠 광고는 게시물 소유자가 고정이다.
+ * 그래서 그 둘은 고르는 항목이 아니라 창 위쪽의 확인용 카드로 둔다.
  *
  * 노출 위치는 자동이 기본이다. 메타에서도 자동 노출이 단가가 낮게 나오는 쪽이라,
  * 직접 고르는 것은 이유가 있을 때만 하는 선택이어야 한다. 그래서 자동을 켜 둔 채
@@ -76,6 +99,17 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 }) => {
   // 예산 · 기간 · 타겟 · 노출 위치는 '새 광고 만들기' 창과 같은 값·같은 검증을 쓴다.
   const delivery = useAdDelivery();
+  const [objective, setObjective] = useState<BoostObjective>('conversions');
+  const [optimizationGoal, setOptimizationGoal] = useState(PERFORMANCE_GOALS.conversions[0].value);
+  const [conversionEvent, setConversionEvent] = useState('PURCHASE');
+  const [pixelId, setPixelId] = useState('');
+  const [campaignName, setCampaignName] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [cta, setCta] = useState<AdCta>('shop_now');
+  const [urlTags, setUrlTags] = useState('');
+  const [freqOn, setFreqOn] = useState(false);
+  const [freqImpressions, setFreqImpressions] = useState(2);
+  const [freqDays, setFreqDays] = useState(7);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -130,9 +164,164 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
   // 멈춘 광고의 예산·기간·타겟·노출 위치를 한 번 채운다.
   useEffect(() => {
-    if (resume) delivery.fill(resume);
+    if (!resume) return;
+    delivery.fill(resume);
+    const obj = (BOOST_OBJECTIVES.find((o) => o.value === resume.objective)?.value || 'conversions') as BoostObjective;
+    setObjective(obj);
+    setOptimizationGoal(
+      PERFORMANCE_GOALS[obj].some((g) => g.value === resume.optimizationGoal)
+        ? String(resume.optimizationGoal)
+        : PERFORMANCE_GOALS[obj][0].value,
+    );
+    setConversionEvent(resume.conversionEvent || 'PURCHASE');
+    setPixelId(resume.pixelId || '');
+    setCampaignName(resume.campaignName || '');
+    setLinkUrl(resume.linkUrl || '');
+    if (resume.cta) setCta(resume.cta);
+    setUrlTags(resume.urlTags || '');
+    setFreqOn(!!resume.frequencyCap);
+    if (resume.frequencyCap) {
+      setFreqImpressions(resume.frequencyCap.impressions);
+      setFreqDays(resume.frequencyCap.days);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resume?.id]);
+
+  /** 목표를 바꾸면 성과 목표를 그 목표의 기본값으로, CTA 를 어울리는 문구로 맞춘다. */
+  const changeObjective = (next: BoostObjective) => {
+    setObjective(next);
+    setOptimizationGoal(PERFORMANCE_GOALS[next][0].value);
+    setCta(next === 'conversions' ? 'shop_now' : 'learn_more');
+  };
+
+  const goals = PERFORMANCE_GOALS[objective];
+  const goal = goals.find((g) => g.value === optimizationGoal) || goals[0];
+  /** 픽셀이 필요한 성과 목표. 판매 목표의 전환 최적화와 랜딩 페이지 조회가 그렇다. */
+  const needsPixel = ['OFFSITE_CONVERSIONS', 'VALUE', 'LANDING_PAGE_VIEWS'].includes(goal.value);
+  /** 웹사이트로 보내는 목표. 연결 URL 이 있어야 성과가 측정된다. */
+  const needsUrl = objective === 'conversions' || objective === 'traffic';
+  /** 빈도 제한은 메타가 도달 최적화에서만 받는다. */
+  const canCapFrequency = goal.value === 'REACH';
+
+  // 광고 계정의 픽셀. 고르지 않으면 서버가 첫 번째 픽셀을 쓴다(예전 동작).
+  const [pixels, setPixels] = useState<MetaPixel[]>([]);
+  const [pixelsLoading, setPixelsLoading] = useState(false);
+  useEffect(() => {
+    if (!open || !adAccountId || !connected) return;
+    let alive = true;
+    setPixelsLoading(true);
+    fetchMetaPixels(businessUsername, adAccountId).then((res) => {
+      if (!alive) return;
+      setPixelsLoading(false);
+      const list = res.ok ? res.pixels : [];
+      setPixels(list);
+      setPixelId((prev) => (prev && list.some((p) => p.id === prev) ? prev : list[0]?.id || ''));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open, adAccountId, connected, businessUsername]);
+
+  /** 광고 관리자와 같은 설정 묶음. 집행 · 이어서 만들기 · 타겟 규모 추정이 같은 값을 쓴다. */
+  const settings = () => ({
+    objective,
+    optimizationGoal: goal.value,
+    conversionEvent: goal.value === 'OFFSITE_CONVERSIONS' ? conversionEvent : goal.value === 'VALUE' ? 'PURCHASE' : undefined,
+    pixelId: needsPixel ? pixelId || undefined : undefined,
+    campaignName: campaignName.trim() || undefined,
+    linkUrl: linkUrl.trim() || undefined,
+    cta: linkUrl.trim() ? cta : undefined,
+    urlTags: urlTags.trim().replace(/^\?/, '') || undefined,
+    frequencyCap: canCapFrequency && freqOn ? { impressions: freqImpressions, days: freqDays } : null,
+    ...delivery.payload(),
+  });
+
+  // 타겟 규모. 타겟을 바꿀 때마다 잠깐 기다렸다가 다시 묻는다.
+  const [estimate, setEstimate] = useState<{ lower: number; upper: number } | null>(null);
+  const [estimateState, setEstimateState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const estimateKey = JSON.stringify([
+    adAccountId,
+    goal.value,
+    delivery.regions,
+    delivery.ageMin,
+    delivery.ageMax,
+    delivery.gender,
+    delivery.interests.map((i) => i.id),
+    delivery.audiences.map((a) => a.id),
+    delivery.excludedAudiences.map((a) => a.id),
+    delivery.advantageAudience,
+    delivery.placementMode,
+    delivery.placements,
+  ]);
+  useEffect(() => {
+    if (!open || !connected || !adAccountId || phase !== 'form') return;
+    let alive = true;
+    setEstimateState('loading');
+    const timer = window.setTimeout(async () => {
+      const res = await estimateMetaAudience(businessUsername, adAccountId, settings());
+      if (!alive) return;
+      if (res.ok && (res.lower || res.upper)) {
+        setEstimate({ lower: res.lower, upper: res.upper });
+        setEstimateState('idle');
+      } else {
+        setEstimate(null);
+        setEstimateState('error');
+      }
+    }, 600);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, connected, estimateKey, phase]);
+
+  const objectiveLabel = BOOST_OBJECTIVES.find((o) => o.value === objective)?.label || '';
+  const summaryRows = useMemo(
+    () => [
+      { k: '캠페인 목표', v: objectiveLabel },
+      {
+        k: '성과 목표',
+        v:
+          goal.label +
+          (goal.value === 'OFFSITE_CONVERSIONS'
+            ? ` · ${CONVERSION_EVENTS.find((e) => e.value === conversionEvent)?.label || ''}`
+            : ''),
+      },
+      {
+        k: '예산',
+        v:
+          delivery.budgetType === 'daily'
+            ? `일일 ${formatKoreanWon(delivery.dailyBudget) || '-'}${delivery.budgetKrw ? ` (최대 ${formatKoreanWon(delivery.budgetKrw)})` : ''}`
+            : `총 ${formatKoreanWon(delivery.budgetKrw) || '-'}${delivery.dailyBudget ? ` (하루 약 ${formatKoreanWon(delivery.dailyBudget)})` : ''}`,
+      },
+      { k: '일정', v: `${delivery.startDate} ~ ${delivery.endDate} · ${delivery.days}일` },
+      {
+        k: '입찰 전략',
+        v:
+          (BID_STRATEGIES.find((b) => b.value === delivery.bidStrategy)?.label || '') +
+          (delivery.bidStrategy !== 'lowest_cost' && delivery.bidAmount ? ` · ${delivery.bidAmount}원` : ''),
+      },
+      {
+        k: '타겟',
+        v:
+          targetSummary({ ...delivery.payload(), ageBands: [] }) +
+          (delivery.advantageAudience ? ' · Advantage+ 타겟' : '') +
+          (delivery.excludedAudiences.length ? ` · 제외 ${delivery.excludedAudiences.length}개` : ''),
+      },
+      {
+        k: '노출 위치',
+        v: delivery.placementMode === 'auto' ? 'Advantage+ 노출 위치' : placementSummary(delivery),
+      },
+      {
+        k: '연결',
+        v: linkUrl.trim()
+          ? `${AD_CTAS.find((c) => c.value === cta)?.label} · ${linkUrl.trim()}${urlTags.trim() ? `?${urlTags.trim().replace(/^\?/, '')}` : ''}`
+          : '게시물로 연결(웹사이트 URL 없음)',
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [objectiveLabel, goal, conversionEvent, delivery, linkUrl, cta, urlTags],
+  );
 
   const runSteps = async (from: MetaAdRecord) => {
     setRunError('');
@@ -160,6 +349,18 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
       setError(invalid);
       return;
     }
+    if (linkUrl.trim() && !/^https?:\/\/\S+\.\S+/i.test(linkUrl.trim())) {
+      setError('웹사이트 URL은 https:// 로 시작하는 주소로 입력해 주세요.');
+      return;
+    }
+    if (goal.value === 'LANDING_PAGE_VIEWS' && !linkUrl.trim()) {
+      setError('랜딩 페이지 조회 최적화는 웹사이트 URL이 있어야 합니다.');
+      return;
+    }
+    if (needsPixel && !pixelId && goal.value !== 'OFFSITE_CONVERSIONS') {
+      setError('이 성과 목표는 Meta 픽셀이 있어야 합니다. 다른 성과 목표를 골라 주세요.');
+      return;
+    }
     setError('');
     setRunError('');
     setSubmitting(true);
@@ -169,7 +370,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
       ? await resumeMetaAd(businessUsername, resume.id, {
           pageId: page.id,
           initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
-          ...delivery.payload(),
+          ...settings(),
         })
       : await createMetaAd(businessUsername, {
           source: 'partnership',
@@ -182,7 +383,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
           creatorHandle,
           partnershipCode,
           thumbnailUrl: /^https:\/\//.test(thumbnailUrl) ? thumbnailUrl : '',
-          ...delivery.payload(),
+          ...settings(),
         });
     if (!created.ok) {
       if (created.record) {
@@ -206,7 +407,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] modal-maxh-90 flex flex-col">
+      <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] modal-maxh-90 flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <div>
             <p className="text-sm font-black text-slate-900">{resume ? '멈춘 광고 이어서 만들기' : '메타 광고로 부스팅'}</p>
@@ -235,7 +436,12 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 <p className="text-[12px] text-slate-500 font-bold mt-1.5 leading-relaxed">
                   {campaignTitle} · @{creatorHandle}
                   <br />
-                  예산 {formatKoreanWon(delivery.budgetKrw)} · {delivery.startDate} ~ {delivery.endDate}
+                  {objectiveLabel} · {goal.label}
+                  <br />
+                  {delivery.budgetType === 'daily'
+                    ? `일일 예산 ${formatKoreanWon(delivery.dailyBudget)}`
+                    : `총 예산 ${formatKoreanWon(delivery.budgetKrw)}`}{' '}
+                  · {delivery.startDate} ~ {delivery.endDate}
                   {selectedAccount && (
                     <>
                       <br />
@@ -338,16 +544,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 </div>
               </div>
 
-              {/* 목적은 전환으로 고정한다 — 이력에서 소재를 다시 돌리는 이유다. */}
-              <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3">
-                <p className="text-[12px] font-black text-blue-800">전환 목적으로 진행됩니다</p>
-                <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
-                  이 게시물의 브랜디드 콘텐츠 파트너십 코드를 광고 소재로 써서, 구매 전환을
-                  목적으로 집행합니다. 광고 계정에 Meta 픽셀이 없으면 링크 클릭 목적으로 집행하고 그
-                  사실을 진행 화면에 적습니다. 성과는 광고 현황에서 확인합니다.
-                </p>
-              </div>
-
+              <AdSection title="캠페인">
               {/* 어느 계정에서 예산이 빠지는지. 광고 현황에서 연동한 계정을 그대로 읽는다. */}
               <div>
                 <label className={labelCls} htmlFor="boost-ad-account">연동 광고 계정</label>
@@ -387,7 +584,162 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 )}
               </div>
 
-              {connected && (
+
+                <div>
+                  <label className={labelCls} htmlFor="boost-campaign-name">캠페인 이름</label>
+                  <input
+                    id="boost-campaign-name"
+                    value={campaignName}
+                    onChange={(e) => setCampaignName(e.target.value)}
+                    maxLength={150}
+                    placeholder={`[PICKSfolio] ${campaignTitle || '부스팅'} · ${delivery.startDate}`}
+                    className={inputCls}
+                  />
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">비워 두면 위 이름으로 만들어집니다. 광고 관리자에서 이 이름으로 찾습니다.</p>
+                </div>
+
+                <div>
+                  <p className={labelCls}>캠페인 목표</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1.5">
+                    {BOOST_OBJECTIVES.map((o) => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => changeObjective(o.value)}
+                        aria-pressed={objective === o.value}
+                        className={`text-left px-3 py-2.5 rounded-xl border transition-colors ${
+                          objective === o.value
+                            ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
+                            : 'bg-white border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className={`block text-[12px] font-black ${objective === o.value ? 'text-blue-700' : 'text-slate-800'}`}>
+                          {o.label}
+                        </span>
+                        <span className="block text-[10px] text-slate-400 font-bold mt-0.5 leading-snug">{o.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </AdSection>
+
+              <AdSection title="광고 세트">
+                <div>
+                  <label className={labelCls} htmlFor="boost-goal">성과 목표</label>
+                  <div className="relative mt-1.5">
+                    <select
+                      id="boost-goal"
+                      value={goal.value}
+                      onChange={(e) => setOptimizationGoal(e.target.value)}
+                      className={selectCls}
+                    >
+                      {goals.map((g) => (
+                        <option key={g.value} value={g.value}>{g.label}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">{goal.hint}</p>
+                </div>
+
+                {needsPixel && connected && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls} htmlFor="boost-pixel">데이터 세트(픽셀)</label>
+                      <div className="relative mt-1.5">
+                        <select
+                          id="boost-pixel"
+                          value={pixelId}
+                          onChange={(e) => setPixelId(e.target.value)}
+                          disabled={pixelsLoading || pixels.length === 0}
+                          className={`${selectCls} disabled:bg-slate-50 disabled:text-slate-400`}
+                        >
+                          {pixels.length === 0 && (
+                            <option value="">{pixelsLoading ? '불러오는 중...' : '이 광고 계정에 픽셀이 없습니다'}</option>
+                          )}
+                          {pixels.map((px) => (
+                            <option key={px.id} value={px.id}>{px.name} · {px.id}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+                    {goal.value === 'OFFSITE_CONVERSIONS' && (
+                      <div>
+                        <label className={labelCls} htmlFor="boost-event">전환 이벤트</label>
+                        <div className="relative mt-1.5">
+                          <select
+                            id="boost-event"
+                            value={conversionEvent}
+                            onChange={(e) => setConversionEvent(e.target.value)}
+                            className={selectCls}
+                          >
+                            {CONVERSION_EVENTS.map((ev) => (
+                              <option key={ev.value} value={ev.value}>{ev.label}</option>
+                            ))}
+                          </select>
+                          <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
+                    {!pixelsLoading && pixels.length === 0 && (
+                      <p className="sm:col-span-2 text-[10px] text-amber-600 font-bold leading-relaxed">
+                        {goal.value === 'OFFSITE_CONVERSIONS'
+                          ? '픽셀이 없으면 전환 대신 링크 클릭 최적화로 집행하고, 그 사실을 진행 화면에 적습니다.'
+                          : '이 성과 목표는 픽셀이 있어야 합니다. 링크 클릭수 최대화를 골라 주세요.'}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {canCapFrequency && (
+                  <div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={freqOn}
+                        onChange={(e) => setFreqOn(e.target.checked)}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      <span className="text-[11px] font-black text-slate-600">빈도 제한</span>
+                    </label>
+                    {freqOn && (
+                      <div className="flex items-center gap-2 mt-1.5 text-[12px] font-bold text-slate-600">
+                        <input
+                          type="number"
+                          min={1}
+                          max={90}
+                          value={freqDays}
+                          onChange={(e) => setFreqDays(Math.max(1, Math.min(90, Number(e.target.value) || 1)))}
+                          aria-label="빈도 제한 기간(일)"
+                          className="w-16 px-2 py-2 rounded-xl border border-slate-200 text-center"
+                        />
+                        일마다 최대
+                        <input
+                          type="number"
+                          min={1}
+                          max={90}
+                          value={freqImpressions}
+                          onChange={(e) => setFreqImpressions(Math.max(1, Math.min(90, Number(e.target.value) || 1)))}
+                          aria-label="최대 노출 횟수"
+                          className="w-16 px-2 py-2 rounded-xl border border-slate-200 text-center"
+                        />
+                        회 노출
+                      </div>
+                    )}
+                  </div>
+                )}
+              </AdSection>
+
+              <AdDeliveryFields
+                delivery={delivery}
+                idPrefix="boost"
+                username={connected ? businessUsername : undefined}
+                adAccountId={connected ? adAccountId : undefined}
+              />
+
+              <AdSection title="광고">
+                {connected && (
                 <div>
                   <p className={labelCls}>광고 페이지</p>
                   <MetaPagePicker
@@ -404,7 +756,96 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 </div>
               )}
 
-              <AdDeliveryFields delivery={delivery} idPrefix="boost" />
+
+                <div>
+                  <label className={labelCls} htmlFor="boost-url">
+                    웹사이트 URL{needsUrl ? '' : ' (선택)'}
+                  </label>
+                  <input
+                    id="boost-url"
+                    type="url"
+                    value={linkUrl}
+                    onChange={(e) => setLinkUrl(e.target.value)}
+                    placeholder="https://brand.com/product"
+                    className={inputCls}
+                  />
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">
+                    {linkUrl.trim()
+                      ? '파트너십 광고 아래에 버튼이 붙고, 누르면 이 주소로 이동합니다'
+                      : needsUrl
+                      ? '비워 두면 인플루언서 게시물로 연결됩니다. 판매 · 트래픽은 URL을 넣어야 성과가 측정됩니다'
+                      : '넣으면 게시물 아래에 버튼이 붙습니다'}
+                  </p>
+                </div>
+
+                {linkUrl.trim() && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls} htmlFor="boost-cta">클릭 유도 문구(CTA)</label>
+                      <div className="relative mt-1.5">
+                        <select id="boost-cta" value={cta} onChange={(e) => setCta(e.target.value as AdCta)} className={selectCls}>
+                          {AD_CTAS.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelCls} htmlFor="boost-utm">URL 매개변수</label>
+                      <input
+                        id="boost-utm"
+                        value={urlTags}
+                        onChange={(e) => setUrlTags(e.target.value)}
+                        placeholder="utm_source=meta&utm_medium=paid"
+                        className={inputCls}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setUrlTags(
+                          `utm_source=meta&utm_medium=paid_social&utm_campaign=${encodeURIComponent(
+                            (campaignTitle || 'boost').replace(/\s+/g, '_').slice(0, 40),
+                          )}&utm_content=${encodeURIComponent(creatorHandle)}`,
+                        )
+                      }
+                      className="sm:col-span-2 justify-self-start text-[10px] font-black text-blue-600 hover:text-blue-700"
+                    >
+                      UTM 기본값 채우기
+                    </button>
+                  </div>
+                )}
+              </AdSection>
+
+
+              {/* 광고 관리자 오른쪽 패널 자리 — 타겟 규모와 지금 설정 한눈에 보기. */}
+              <section className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-slate-500" />
+                  <p className="text-[12px] font-black text-slate-900">예상 타겟 규모</p>
+                  <span className="ml-auto text-[12px] font-black text-blue-700">
+                    {!connected
+                      ? '-'
+                      : estimateState === 'loading'
+                      ? '계산 중...'
+                      : estimate
+                      ? `${estimate.lower.toLocaleString()} ~ ${estimate.upper.toLocaleString()}명`
+                      : '계산할 수 없음'}
+                  </span>
+                </div>
+                <dl className="mt-3 grid grid-cols-[84px_1fr] gap-x-3 gap-y-1.5">
+                  {summaryRows.map((row) => (
+                    <React.Fragment key={row.k}>
+                      <dt className="text-[11px] font-black text-slate-400">{row.k}</dt>
+                      <dd className="text-[11px] font-bold text-slate-700 break-all">{row.v}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+                <p className="text-[10px] text-slate-400 font-medium mt-2 leading-relaxed">
+                  타겟 규모는 Meta가 알려 주는 추정치이며 실제 결과를 보장하지 않습니다.
+                </p>
+              </section>
 
               <StartPausedToggle checked={startPaused} onChange={setStartPaused} />
             </div>

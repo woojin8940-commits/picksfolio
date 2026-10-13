@@ -3,20 +3,20 @@ import { randomBytes } from "node:crypto";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { readMetaAdsDiagnosis, readMetaAdsToken, tokenErrorResponse } from "./_shared/meta-ads.mts";
 import {
-  ageRange,
+  buildTargeting,
+  CONVERSION_EVENTS,
   displayStatus,
+  GOALS_BY_OBJECTIVE,
   graphErrorResponse,
   graphGet,
   graphPost,
   GraphResult,
   MetaAdRecord,
   metaCta,
-  placementParams,
   purchaseMetrics,
   isMissingObject,
   readAdRecords,
   removeAdRecords,
-  resolveGeo,
   saveAdRecord,
   scheduleTimes,
   toMinorUnits,
@@ -85,15 +85,19 @@ async function postWithFallback(
 async function runCampaign(token: string, proof: string, r: MetaAdRecord): Promise<GraphResult> {
   let objective = "OUTCOME_TRAFFIC";
   if (r.objective === "awareness") objective = "OUTCOME_AWARENESS";
+  if (r.objective === "engagement") objective = "OUTCOME_ENGAGEMENT";
   if (r.objective === "conversions") {
     // 전환(구매) 최적화는 픽셀이 있어야 한다. 없는 계정에서 OUTCOME_SALES 로 만들면 광고
     // 세트 단계에서 막히므로, 여기서 확인하고 트래픽 목적으로 돌린 뒤 그 사실을 남긴다.
-    const pixels = await graphGet(`${r.adAccountId}/adspixels`, token, { fields: "id,name", limit: 1 }, proof);
-    const pixelId = pixels.ok && Array.isArray(pixels.data?.data) ? String(pixels.data.data[0]?.id || "") : "";
+    // 화면에서 픽셀을 골랐으면 그 픽셀이 이 계정 것인지 확인하고 쓴다.
+    const pixels = await graphGet(`${r.adAccountId}/adspixels`, token, { fields: "id,name", limit: 50 }, proof);
+    const list: string[] = pixels.ok && Array.isArray(pixels.data?.data) ? pixels.data.data.map((p: any) => String(p?.id || "")) : [];
+    const pixelId = r.pixelId && list.includes(r.pixelId) ? r.pixelId : list[0] || "";
     if (pixelId) {
       objective = "OUTCOME_SALES";
       r.pixelId = pixelId;
     } else {
+      r.pixelId = undefined;
       r.warnings.push("광고 계정에 Meta 픽셀이 없어 구매 전환 대신 링크 클릭(트래픽) 목적으로 집행합니다.");
     }
   }
@@ -113,23 +117,73 @@ async function runCampaign(token: string, proof: string, r: MetaAdRecord): Promi
   );
 }
 
+/** 성과 목표 → optimization_goal · promoted_object · destination_type. */
+function adSetGoal(r: MetaAdRecord) {
+  const pixelId = r.pixelId || "";
+  const hasLink = !!r.linkUrl;
+  let goal = r.optimizationGoal || "";
+
+  if (r.metaObjective === "OUTCOME_SALES" && pixelId) {
+    if (!["OFFSITE_CONVERSIONS", "VALUE", "LANDING_PAGE_VIEWS", "LINK_CLICKS"].includes(goal)) goal = "OFFSITE_CONVERSIONS";
+    const event = goal === "VALUE" ? "PURCHASE" : r.conversionEvent || "PURCHASE";
+    return {
+      optimization_goal: goal,
+      promoted_object: { pixel_id: pixelId, custom_event_type: event },
+      destination_type: "WEBSITE" as string | undefined,
+    };
+  }
+  if (r.metaObjective === "OUTCOME_AWARENESS") {
+    if (!GOALS_BY_OBJECTIVE.awareness.includes(goal)) goal = "REACH";
+    return { optimization_goal: goal, promoted_object: undefined, destination_type: undefined };
+  }
+  if (r.metaObjective === "OUTCOME_ENGAGEMENT") {
+    if (!GOALS_BY_OBJECTIVE.engagement.includes(goal)) goal = "POST_ENGAGEMENT";
+    return {
+      optimization_goal: goal,
+      promoted_object: { page_id: r.pageId },
+      destination_type: goal === "THRUPLAY" ? "ON_VIDEO" : "ON_POST",
+    };
+  }
+  // 트래픽(또는 픽셀이 없어 트래픽으로 돌린 판매).
+  if (!GOALS_BY_OBJECTIVE.traffic.includes(goal) || (goal === "LANDING_PAGE_VIEWS" && !hasLink)) goal = "LINK_CLICKS";
+  // 파트너십 게시물 부스팅에 연결 URL 이 없으면 게시물 자체로 보낸다.
+  const destination_type = r.source === "partnership" && !hasLink ? undefined : "WEBSITE";
+  return { optimization_goal: goal, promoted_object: undefined, destination_type };
+}
+
+/** 입찰 전략 → bid_strategy · bid_amount. 금액이 없으면 최고 볼륨으로 둔다. */
+function bidParams(r: MetaAdRecord): Record<string, unknown> {
+  const amount = Math.floor(Number(r.bidAmountKrw) || 0);
+  if (r.bidStrategy === "cost_cap" && amount > 0) {
+    return { bid_strategy: "COST_CAP", bid_amount: toMinorUnits(amount, r.currency) };
+  }
+  if (r.bidStrategy === "bid_cap" && amount > 0) {
+    return { bid_strategy: "LOWEST_COST_WITH_BID_CAP", bid_amount: toMinorUnits(amount, r.currency) };
+  }
+  return { bid_strategy: "LOWEST_COST_WITHOUT_CAP" };
+}
+
 async function runAdSet(token: string, proof: string, r: MetaAdRecord): Promise<GraphResult> {
-  const { geo, warning } = await resolveGeo(token, proof, r.regions);
+  const { targeting, warning } = await buildTargeting(token, proof, r);
   if (warning) r.warnings.push(warning);
 
-  const pixelId = r.pixelId || "";
-  let optimization_goal = "LINK_CLICKS";
-  let promoted_object: Record<string, unknown> | undefined;
-  let destination_type: string | undefined = "WEBSITE";
-  if (r.metaObjective === "OUTCOME_AWARENESS") {
-    optimization_goal = "REACH";
-    destination_type = undefined;
-  } else if (r.metaObjective === "OUTCOME_SALES" && pixelId) {
-    optimization_goal = "OFFSITE_CONVERSIONS";
-    promoted_object = { pixel_id: pixelId, custom_event_type: "PURCHASE" };
+  const { optimization_goal, promoted_object, destination_type } = adSetGoal(r);
+  if (r.optimizationGoal && r.optimizationGoal !== optimization_goal) {
+    r.warnings.push(`성과 목표를 ${r.optimizationGoal} 대신 ${optimization_goal}(으)로 집행합니다.`);
   }
-  // 파트너십 게시물 부스팅은 연결 URL 이 없다 — 게시물 자체로 보낸다.
-  if (r.source === "partnership" && optimization_goal === "LINK_CLICKS") destination_type = undefined;
+  r.optimizationGoal = optimization_goal;
+
+  const budget = toMinorUnits(r.budgetKrw, r.currency);
+  const freq =
+    optimization_goal === "REACH" && r.frequencyCap
+      ? [
+          {
+            event: "IMPRESSIONS",
+            interval_days: Math.max(1, Math.min(90, Math.floor(r.frequencyCap.days) || 7)),
+            max_frequency: Math.max(1, Math.min(90, Math.floor(r.frequencyCap.impressions) || 2)),
+          },
+        ]
+      : undefined;
 
   const times = scheduleTimes(r.startDate, r.endDate);
   return postWithFallback(
@@ -140,19 +194,15 @@ async function runAdSet(token: string, proof: string, r: MetaAdRecord): Promise<
       name: `${r.name} · 광고 세트`,
       campaign_id: r.campaignId,
       status: r.initialStatus,
-      lifetime_budget: toMinorUnits(r.budgetKrw, r.currency),
+      ...(r.budgetType === "daily" ? { daily_budget: budget } : { lifetime_budget: budget }),
       ...times,
       billing_event: "IMPRESSIONS",
-      bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+      ...bidParams(r),
       optimization_goal,
       promoted_object,
       destination_type,
-      targeting: {
-        geo_locations: geo,
-        ...ageRange(r.ageBands),
-        ...placementParams(r.placementMode, r.placements),
-        targeting_automation: { advantage_audience: 0 },
-      },
+      frequency_control_specs: freq,
+      targeting,
     },
     {},
   );
@@ -187,17 +237,29 @@ async function runCreative(
     if (!contentId) {
       return { ok: false, status: 404, data: lookup.data, error: "이 파트너십 광고 코드로 게시물을 찾지 못했습니다." };
     }
-    return graphPost(
+    const base = {
+      name: `${r.name} · 소재`,
+      object_id: r.pageId,
+      instagram_user_id: r.instagramUserId,
+      source_instagram_media_id: contentId,
+    };
+    if (!r.linkUrl) return graphPost(`${r.adAccountId}/adcreatives`, token, base, proof);
+    // 웹사이트 URL 을 넣었으면 게시물 아래에 CTA 버튼과 URL 매개변수를 붙인다. 이 게시물에
+    // 버튼을 붙일 수 없다고 메타가 거절하면 버튼 없이 만들고 그 사실을 남긴다.
+    const withLink = await graphPost(
       `${r.adAccountId}/adcreatives`,
       token,
       {
-        name: `${r.name} · 소재`,
-        object_id: r.pageId,
-        instagram_user_id: r.instagramUserId,
-        source_instagram_media_id: contentId,
+        ...base,
+        call_to_action: { type: metaCta(r.cta), value: { link: r.linkUrl } },
+        url_tags: r.urlTags || undefined,
       },
       proof,
     );
+    if (withLink.ok) return withLink;
+    const plain = await graphPost(`${r.adAccountId}/adcreatives`, token, base, proof);
+    if (plain.ok) r.warnings.push(`웹사이트 버튼을 붙이지 못해 게시물 그대로 만들었습니다. (${withLink.error})`);
+    return plain.ok ? plain : withLink;
   }
 
   if (r.creativeKind === "video" && r.videoId) {
@@ -240,7 +302,7 @@ async function runCreative(
   const first = await graphPost(
     `${r.adAccountId}/adcreatives`,
     token,
-    { name: `${r.name} · 소재`, object_story_spec: storySpec(true) },
+    { name: `${r.name} · 소재`, object_story_spec: storySpec(true), url_tags: r.urlTags || undefined },
     proof,
   );
   if (first.ok || !r.instagramUserId) return first;
@@ -249,7 +311,7 @@ async function runCreative(
   const retry = await graphPost(
     `${r.adAccountId}/adcreatives`,
     token,
-    { name: `${r.name} · 소재`, object_story_spec: storySpec(false) },
+    { name: `${r.name} · 소재`, object_story_spec: storySpec(false), url_tags: r.urlTags || undefined },
     proof,
   );
   if (retry.ok) r.warnings.push(`인스타그램 계정을 소재에 직접 연결하지 못해 페이지 기준으로 만들었습니다. (${first.error})`);
@@ -432,10 +494,27 @@ async function buildRecord(
   proof: string,
 ): Promise<MetaAdRecord | Response> {
   const source = draft.source === "partnership" ? "partnership" : "own";
-  const objective =
+  // 부스팅은 '참여' 목표까지 고를 수 있다. 예전 부스팅 기록은 목표가 비어 있어 전환이 된다.
+  const objectives =
     source === "partnership"
-      ? "conversions"
-      : (["awareness", "traffic", "conversions"] as const).find((o) => o === draft.objective) || "conversions";
+      ? (["conversions", "traffic", "engagement", "awareness"] as const)
+      : (["awareness", "traffic", "conversions"] as const);
+  const objective = objectives.find((o) => o === draft.objective) || "conversions";
+  const goals = GOALS_BY_OBJECTIVE[objective] || [];
+  const optimizationGoal = goals.includes(String(draft.optimizationGoal || "")) ? String(draft.optimizationGoal) : goals[0];
+  const conversionEvent = CONVERSION_EVENTS.includes(String(draft.conversionEvent || ""))
+    ? String(draft.conversionEvent)
+    : "PURCHASE";
+  const budgetType = draft.budgetType === "daily" ? "daily" : "lifetime";
+  const bidStrategy = (["cost_cap", "bid_cap"] as const).find((b) => b === draft.bidStrategy) || "lowest_cost";
+  const bidAmountKrw = bidStrategy === "lowest_cost" ? 0 : Math.floor(Number(draft.bidAmountKrw) || 0);
+  const targetList = (v: unknown) =>
+    (Array.isArray(v) ? v : [])
+      .map((x: any) => ({ id: clean(x?.id, 30), name: clean(x?.name, 200) }))
+      .filter((x) => /^\d+$/.test(x.id))
+      .slice(0, 50);
+  const freq = draft.frequencyCap as { impressions?: number; days?: number } | null | undefined;
+  const urlTags = clean(draft.urlTags, 500).replace(/^\?/, "");
   const budget = Math.floor(Number(draft.budgetKrw) || 0);
   const startDate = clean(draft.startDate, 10);
   const endDate = clean(draft.endDate, 10);
@@ -450,7 +529,10 @@ async function buildRecord(
     (source === "own" && !clean(draft.headline, 100) && "광고 제목을 입력해 주세요.") ||
     (source === "own" && !draft.imageHash && "광고 소재를 먼저 업로드해 주세요.") ||
     (source === "own" && draft.creativeKind === "video" && !draft.videoId && "영상 업로드가 끝나지 않았습니다.") ||
-    (source === "partnership" && !clean(draft.partnershipCode, 300) && "파트너십 코드가 없습니다.");
+    (source === "partnership" && !clean(draft.partnershipCode, 300) && "파트너십 코드가 없습니다.") ||
+    (source === "partnership" && linkUrl && !/^https?:\/\//i.test(linkUrl) && "웹사이트 URL을 확인해 주세요.") ||
+    (bidStrategy !== "lowest_cost" && bidAmountKrw <= 0 && "입찰 금액을 입력해 주세요.") ||
+    (optimizationGoal === "LANDING_PAGE_VIEWS" && !linkUrl && "랜딩 페이지 조회 최적화는 웹사이트 URL이 있어야 합니다.");
   if (invalid) return Response.json({ error: invalid }, { status: 400 });
 
   // 페이지는 이 사람이 실제로 접근할 수 있는지 메타에 물어보고, 이름과 연결된 인스타그램
@@ -478,10 +560,10 @@ async function buildRecord(
     warnings: [],
     initialStatus: draft.initialStatus === "PAUSED" ? "PAUSED" : "ACTIVE",
     objective,
-    name: clean(
-      `[PICKSfolio] ${source === "own" ? headline : draft.campaignTitle || "부스팅"} · ${startDate}`,
-      200,
-    ),
+    name:
+      clean(draft.campaignName, 200) ||
+      clean(`[PICKSfolio] ${source === "own" ? headline : draft.campaignTitle || "부스팅"} · ${startDate}`, 200),
+    campaignName: clean(draft.campaignName, 200) || undefined,
     headline,
     bodyText: clean(draft.bodyText, 1000),
     cta: clean(draft.cta, 30),
@@ -509,6 +591,24 @@ async function buildRecord(
     regions: Array.isArray(draft.regions) ? draft.regions.map(String).slice(0, 10) : [],
     placementMode: draft.placementMode === "manual" ? "manual" : "auto",
     placements: Array.isArray(draft.placements) ? draft.placements.map(String).slice(0, 10) : [],
+    budgetType,
+    bidStrategy,
+    bidAmountKrw,
+    optimizationGoal,
+    conversionEvent,
+    pixelId: /^\d+$/.test(clean(draft.pixelId, 30)) ? clean(draft.pixelId, 30) : undefined,
+    gender: draft.gender === "male" || draft.gender === "female" ? draft.gender : "all",
+    ageMin: Number(draft.ageMin) ? Math.max(18, Math.min(65, Math.floor(Number(draft.ageMin)))) : undefined,
+    ageMax: Number(draft.ageMax) ? Math.max(18, Math.min(65, Math.floor(Number(draft.ageMax)))) : undefined,
+    interests: targetList(draft.interests),
+    audiences: targetList(draft.audiences),
+    excludedAudiences: targetList(draft.excludedAudiences),
+    advantageAudience: !!draft.advantageAudience,
+    frequencyCap:
+      freq && Number(freq.impressions) > 0 && Number(freq.days) > 0
+        ? { impressions: Math.floor(Number(freq.impressions)), days: Math.floor(Number(freq.days)) }
+        : null,
+    urlTags: urlTags || undefined,
   };
 
   return record;

@@ -17,10 +17,14 @@
 
 /** 노출 위치 — 메타가 쓰는 배치 이름을 그대로 둔다. */
 export const AD_PLACEMENTS = [
-  { value: 'feed', label: '피드' },
-  { value: 'story', label: '스토리' },
-  { value: 'reels', label: '릴스' },
-  { value: 'explore', label: '탐색' },
+  { value: 'feed', label: '인스타 피드', group: 'instagram' },
+  { value: 'ig_profile_feed', label: '인스타 프로필 피드', group: 'instagram' },
+  { value: 'story', label: '인스타 스토리', group: 'instagram' },
+  { value: 'reels', label: '인스타 릴스', group: 'instagram' },
+  { value: 'explore', label: '인스타 탐색', group: 'instagram' },
+  { value: 'fb_feed', label: '페이스북 피드', group: 'facebook' },
+  { value: 'fb_story', label: '페이스북 스토리', group: 'facebook' },
+  { value: 'fb_reels', label: '페이스북 릴스', group: 'facebook' },
 ] as const;
 
 export type AdPlacement = (typeof AD_PLACEMENTS)[number]['value'];
@@ -91,7 +95,7 @@ export type AdObjective = (typeof AD_OBJECTIVES)[number]['value'];
 
 export const DEFAULT_AD_OBJECTIVE: AdObjective = 'conversions';
 
-export const findObjective = (value: AdObjective | undefined) =>
+export const findObjective = (value: string | undefined) =>
   AD_OBJECTIVES.find((o) => o.value === value) || null;
 
 /** CTA 버튼 문구. 메타 광고의 call_to_action 과 같은 선택지만 둔다. */
@@ -126,11 +130,111 @@ export const ctasForObjective = (objective: AdObjective) => {
 export const ctaLabel = (value: AdCta | undefined): string =>
   AD_CTAS.find((c) => c.value === value)?.label || '';
 
+/* ---------------------------------------------------------------------------------------- */
+/* 광고 관리자와 같은 이름의 세부 설정                                                       */
+/*                                                                                          */
+/* 메타 광고 관리자에서 마케터가 실제로 손대는 값만 옮겨 둔다 — 캠페인 목표 · 성과 목표 ·    */
+/* 전환 이벤트 · 예산 유형 · 입찰 전략 · 성별/연령 · 상세 타겟팅 · 맞춤 타겟 · Advantage+.   */
+/* 이름은 광고 관리자 한국어 화면의 말을 그대로 쓴다. 같은 광고를 광고 관리자에서 열었을 때  */
+/* 같은 말이 보여야 이 화면에서 정한 값이 그대로 들어갔는지 확인할 수 있다.                 */
+/* ---------------------------------------------------------------------------------------- */
+
+/**
+ * 부스팅의 캠페인 목표. 직접 만들기의 세 목표에 '참여'가 더해진다 — 이미 반응이 좋은
+ * 인플루언서 게시물에 좋아요·댓글·조회를 더 붙이는 것은 부스팅에서만 의미가 있다.
+ */
+export const BOOST_OBJECTIVES = [
+  { value: 'conversions', label: '판매', hint: '구매 · 장바구니 등 웹사이트 전환' },
+  { value: 'traffic', label: '트래픽', hint: '웹사이트 방문 · 링크 클릭' },
+  { value: 'engagement', label: '참여', hint: '게시물 반응 · 동영상 조회' },
+  { value: 'awareness', label: '인지도', hint: '최대한 많은 사람에게 도달' },
+] as const;
+
+export type BoostObjective = (typeof BOOST_OBJECTIVES)[number]['value'];
+
+/** 목표별 성과 목표(광고 세트의 optimization_goal). 맨 앞이 메타의 기본값이다. */
+export const PERFORMANCE_GOALS: Record<BoostObjective, { value: string; label: string; hint: string }[]> = {
+  conversions: [
+    { value: 'OFFSITE_CONVERSIONS', label: '전환수 최대화', hint: '고른 전환 이벤트가 일어날 사람에게 노출합니다' },
+    { value: 'VALUE', label: '전환 가치 최대화', hint: '구매 금액이 클 사람에게 노출합니다(구매 이벤트 · 금액 전송 필요)' },
+    { value: 'LANDING_PAGE_VIEWS', label: '랜딩 페이지 조회수 최대화', hint: '픽셀이 페이지 로드를 확인한 방문만 셉니다' },
+    { value: 'LINK_CLICKS', label: '링크 클릭수 최대화', hint: '픽셀이 없거나 이벤트가 적을 때 씁니다' },
+  ],
+  traffic: [
+    { value: 'LINK_CLICKS', label: '링크 클릭수 최대화', hint: '광고 링크를 누를 사람에게 노출합니다' },
+    { value: 'LANDING_PAGE_VIEWS', label: '랜딩 페이지 조회수 최대화', hint: '페이지가 실제로 열린 방문만 셉니다(픽셀 필요)' },
+    { value: 'REACH', label: '일일 고유 도달 최대화', hint: '하루 한 번씩 최대한 많은 사람에게 노출합니다' },
+  ],
+  engagement: [
+    { value: 'POST_ENGAGEMENT', label: '참여 최대화', hint: '좋아요 · 댓글 · 공유 · 저장을 늘립니다' },
+    { value: 'THRUPLAY', label: 'ThruPlay 조회수 최대화', hint: '동영상을 15초 이상(짧으면 끝까지) 본 수를 늘립니다' },
+    { value: 'REACH', label: '도달 최대화', hint: '최대한 많은 사람에게 노출합니다' },
+  ],
+  awareness: [
+    { value: 'REACH', label: '도달 최대화', hint: '최대한 많은 사람에게 한 번 이상 노출합니다' },
+    { value: 'IMPRESSIONS', label: '노출 최대화', hint: '같은 사람에게 여러 번 보여도 노출 횟수를 늘립니다' },
+    { value: 'AD_RECALL_LIFT', label: '광고 상기도 성과 증대', hint: '광고를 기억할 가능성이 높은 사람에게 노출합니다' },
+  ],
+};
+
+/** 판매 목표의 전환 이벤트(픽셀 표준 이벤트). */
+export const CONVERSION_EVENTS = [
+  { value: 'PURCHASE', label: '구매' },
+  { value: 'ADD_TO_CART', label: '장바구니에 담기' },
+  { value: 'INITIATED_CHECKOUT', label: '결제 시작' },
+  { value: 'ADD_PAYMENT_INFO', label: '결제 정보 추가' },
+  { value: 'COMPLETE_REGISTRATION', label: '등록 완료' },
+  { value: 'LEAD', label: '잠재 고객' },
+  { value: 'CONTENT_VIEW', label: '콘텐츠 조회' },
+] as const;
+
+/** 입찰 전략. 광고 관리자 이름 그대로. */
+export const BID_STRATEGIES = [
+  { value: 'lowest_cost', label: '최고 볼륨', hint: '예산을 다 쓰면서 결과를 최대한 많이 냅니다(기본값)' },
+  { value: 'cost_cap', label: '결과당 비용 목표', hint: '평균 결과당 비용을 목표 금액 근처로 맞춥니다' },
+  { value: 'bid_cap', label: '입찰가 한도', hint: '경매마다 입찰가가 이 금액을 넘지 않게 합니다' },
+] as const;
+
+export type BidStrategy = (typeof BID_STRATEGIES)[number]['value'];
+
+export const AD_GENDERS = [
+  { value: 'all', label: '전체' },
+  { value: 'male', label: '남성' },
+  { value: 'female', label: '여성' },
+] as const;
+
+export type AdGender = (typeof AD_GENDERS)[number]['value'];
+
+/** 메타가 받는 연령 범위. 65 는 '65세 이상'이다. */
+export const AD_AGE_MIN = 18;
+export const AD_AGE_MAX = 65;
+
+/** 상세 타겟팅 · 맞춤 타겟 한 줄. 이름은 화면과 요약에만 쓰고, 메타에는 id 만 보낸다. */
+export type AdTargetItem = { id: string; name: string };
+
 /** 타겟을 한 줄로 적는다. 비어 있으면 메타 기본값(전체)이라고 쓴다. */
-export const targetSummary = (boost: { ageBands: string[]; regions: string[] }): string => {
-  const age = boost.ageBands.length ? boost.ageBands.join('·') : '연령 전체';
+export const targetSummary = (boost: {
+  ageBands: string[];
+  regions: string[];
+  ageMin?: number;
+  ageMax?: number;
+  gender?: AdGender;
+  interests?: AdTargetItem[];
+  audiences?: AdTargetItem[];
+}): string => {
+  const age =
+    boost.ageMin || boost.ageMax
+      ? `${boost.ageMin || AD_AGE_MIN}~${(boost.ageMax || AD_AGE_MAX) >= AD_AGE_MAX ? '65+' : boost.ageMax}세`
+      : boost.ageBands.length
+      ? boost.ageBands.join('·')
+      : '연령 전체';
   const region = boost.regions.length ? boost.regions.join('·') : '전국';
-  return `${age} · ${region}`;
+  const gender = boost.gender && boost.gender !== 'all' ? AD_GENDERS.find((g) => g.value === boost.gender)?.label : '';
+  const extra = [
+    boost.interests?.length ? `관심사 ${boost.interests.length}개` : '',
+    boost.audiences?.length ? `맞춤 타겟 ${boost.audiences.length}개` : '',
+  ];
+  return [age, gender, region, ...extra].filter(Boolean).join(' · ');
 };
 
 /** 노출 위치를 한 줄로 적는다. */
