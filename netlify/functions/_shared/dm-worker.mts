@@ -39,11 +39,15 @@ export function verifyWorkerRequest(body: string, supplied: string | null): bool
 }
 
 export async function wakeDmWorkers(accounts?: string[], limit = 50): Promise<void> {
+  const current = workerContext.getStore();
+  const owned = current && !current.lost && (!current.deadline || current.deadline > Date.now()) ? current.account : null;
+  const targets = accounts ? [...new Set(accounts.filter((account) => account && account !== owned))] : null;
+  if (targets && targets.length === 0) return;
   const origin = new URL(process.env.URL || "https://picks-folio.com");
   if (origin.protocol !== "https:" || origin.username || origin.password) throw new Error("Invalid worker origin");
   workerSecret();
   const tickets = await queueRpc<{ ig_account_id: string; token: string }[]>("dm_request_workers", {
-    p_accounts: accounts ? [...new Set(accounts.filter(Boolean))] : null,
+    p_accounts: targets,
     p_limit: limit,
   });
   for (let offset = 0; offset < tickets.length; offset += 10) {

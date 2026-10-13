@@ -3,21 +3,16 @@ import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions'
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
   const { user } = JSON.parse(event.body || '{}')
 
-  const adminEmails = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me']
-  const existingRoles: string[] = user.app_metadata?.roles || []
-
-  let roles: string[]
-  if (adminEmails.includes(user.email) || existingRoles.includes('admin')) {
-    roles = ['admin']
-  } else {
-    roles = existingRoles.length > 0 ? existingRoles : ['member']
-  }
+  const rawRoles = user?.app_metadata?.roles
+  const existingRoles: string[] = Array.isArray(rawRoles)
+    ? rawRoles.filter((role): role is string => typeof role === 'string') : []
+  const roles = existingRoles.length > 0 ? existingRoles : ['member']
 
   return {
     statusCode: 200,
     body: JSON.stringify({
       app_metadata: {
-        ...user.app_metadata,
+        ...user?.app_metadata,
         roles,
       },
     }),

@@ -1,5 +1,18 @@
 import { getStore } from "@netlify/blobs";
 
+export function getCheckedBlobStore(name: string) {
+  return getStore({ name, consistency: "strong", fetch: async (input, init) => {
+    const response = await globalThis.fetch(input, init);
+    const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    // Conditional writes in this SDK must not treat rejected HTTP requests as successful claims.
+    if (method === "PUT" && !response.ok && response.status !== 412) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Blob write rejected (HTTP ${response.status})`);
+    }
+    return response;
+  } });
+}
+
 /**
  * Blobs 문서 한 덩어리를 "읽고 → 고치고 → 다시 쓰는" 공통 패턴.
  *
@@ -30,7 +43,7 @@ export async function mutateBlobJSON<T>(
   mutate: (current: T | null) => T | null,
   attempts = 5,
 ): Promise<T | null> {
-  const store = getStore(storeName);
+  const store = getCheckedBlobStore(storeName);
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const snapshot = await store.getWithMetadata(key, { type: "json", consistency: "strong" });

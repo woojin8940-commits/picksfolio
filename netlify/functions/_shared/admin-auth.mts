@@ -1,14 +1,12 @@
 import { getUser } from '@netlify/identity'
 import { requireSignedInUser } from './user-auth.mts'
 
-const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me']
-
 export async function requireAdmin(req: Request): Promise<{ ok: true; user: any } | { ok: false; response: Response }> {
   const identityUser = await getUser()
   if (identityUser) {
-    const roles: string[] = (identityUser as any).app_metadata?.roles || []
-    const email = ((identityUser as any).email || '').trim().toLowerCase()
-    if (roles.includes('admin') || ADMIN_EMAILS.includes(email)) {
+    const values = [(identityUser as any).roles, (identityUser as any).appMetadata?.roles, (identityUser as any).app_metadata?.roles]
+    const roles = values.flatMap((value) => Array.isArray(value) ? value.filter((role): role is string => typeof role === 'string') : [])
+    if (identityUser.role === 'admin' || roles.includes('admin')) {
       return { ok: true, user: identityUser }
     }
   }

@@ -286,7 +286,7 @@ async function pickOwner(
  * IG 계정 ID 로 사용자명을 찾는다. 인덱스에 없으면 설정 블롭을 훑어 찾고 인덱스를
  * 채운다. 그래도 못 찾으면 잠시 동안(MISS_TTL_MS) 다시 훑지 않는다.
  */
-export async function resolveDmAccountByIgId(igAccountId: string): Promise<string | null> {
+export async function resolveDmAccountByIgId(igAccountId: string, allowScan = true): Promise<string | null> {
   if (!igAccountId) return null;
   const store = indexStore();
 
@@ -295,6 +295,7 @@ export async function resolveDmAccountByIgId(igAccountId: string): Promise<strin
   );
 
   if (candidates.length === 0) {
+    if (!allowScan) return null;
     const missAt = await store.get(missKey(igAccountId), { type: "text" }).catch(() => null);
     if (missAt && Date.now() - Date.parse(missAt) < MISS_TTL_MS) return null;
 

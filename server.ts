@@ -1,6 +1,6 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import { SolapiMessageService } from "solapi";
+import sendSms from "./netlify/functions/send-sms.ts";
 
 async function startServer() {
   const app = express();
@@ -10,40 +10,19 @@ async function startServer() {
 
   // API Routes
   app.post("/.netlify/functions/send-sms", async (req, res) => {
-    const { receiver } = req.body;
-
-    if (!receiver) {
-      return res.status(400).json({ error: "수신자 번호가 필요합니다." });
-    }
-
-    // Generate 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-    const apiKey = process.env.SOLAPI_API_KEY;
-    const apiSecret = process.env.SOLAPI_API_SECRET;
-    const fromNumber = process.env.SOLAPI_FROM_NUMBER;
-
-    if (!apiKey || !apiSecret || !fromNumber) {
-      return res.status(500).json({ error: "서버 설정 오류", message: "API 키가 설정되지 않았습니다." });
-    }
-
     try {
-      const messageService = new SolapiMessageService(apiKey, apiSecret);
-      const result = await messageService.sendOne({
-        to: receiver,
-        from: fromNumber,
-        text: `[픽스폴리오] 인증번호는 [${code}] 입니다.`,
-      });
-
-      res.json({ 
-        success: true, 
-        message: "인증번호가 발송되었습니다.", 
-        code: code,
-        result: result 
-      });
-    } catch (error: any) {
-      console.error("SMS Sending Error:", error.message);
-      res.status(500).json({ error: "서버 에러", message: error.message });
+      const response = await sendSms(new Request(`http://localhost:${PORT}/.netlify/functions/send-sms`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-nf-client-connection-ip": req.socket.remoteAddress || "unknown" },
+        body: JSON.stringify(req.body),
+      }));
+      for (const header of ["content-type", "retry-after", "cache-control"]) {
+        const value = response.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+      res.status(response.status).send(await response.text());
+    } catch (error) {
+      console.error("SMS Sending Error:", error);
+      res.status(500).json({ error: "인증번호를 보내지 못했습니다. 잠시 후 다시 시도해 주세요." });
     }
   });
 

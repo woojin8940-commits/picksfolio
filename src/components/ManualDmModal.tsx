@@ -6,6 +6,7 @@ import {
 import { apiService, DmAutomationItem, DmCarouselCard, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { manualDmResult, type ManualDmBatchResult } from '../utils/manualDmResult';
 
 interface ManualDmModalProps {
   isOpen: boolean;
@@ -53,7 +54,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   entitled,
   media = [],
 }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   /**
    * 직접 작성 기본 문구는 화면 언어를 따라간다. 이 값은 화면 문구가 아니라 그대로
@@ -232,12 +233,18 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       return;
     }
 
+    const notice = language === 'en'
+      ? 'Send the configured messages and public replies to eligible commenters?'
+      : '발송 가능한 댓글 작성자에게 설정한 DM과 공개 답글을 보내시겠습니까?';
+    if (!window.confirm(notice)) return;
+
     setSending(true);
     setResult(null);
 
     const validButtons = buttons.filter((b) => b.label.trim());
 
     let outcome: { tone: ResultTone; message: string; done: boolean };
+    const batches: ManualDmBatchResult[] = [];
     try {
       const payload = {
         username: userName,
@@ -265,11 +272,12 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       const send = () => apiService.sendInstagramDm({ ...payload, excludeCommentIds: [...excluded] });
       const startedAt = Date.now();
       let res = await send();
+      batches.push(res);
       let stalls = 0;
       while (
         res.connected !== false &&
-        !(res.error && !res.message) &&
-        ((res.remaining || 0) > 0 || res.incomplete || res.indeterminate) &&
+        !res.error && !res.indeterminate &&
+        ((res.remaining || 0) > 0 || res.incomplete) &&
         stalls < MAX_SEND_STALLS &&
         Date.now() - startedAt < MAX_SEND_DURATION_MS
       ) {
@@ -277,6 +285,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         if (stalls > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(2_000 * stalls, 10_000)));
         const before = res.remaining || 0;
         const next = await send();
+        batches.push(next);
         const progressed =
           (next.count || 0) + (next.replyCount || 0) + (next.failCount || 0) > 0 ||
           (next.remaining || 0) < before;
@@ -284,35 +293,10 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         res = next;
       }
 
-      // 발송 결과는 '완료'로만 알린다 — 몇 건이 나갔는지, 실패했는지는 보여주지
-      // 않는다. 연동이 안 됐거나 플랜이 막혀 발송 자체를 시작할 수 없는 경우만
-      // 이유를 보여준다.
-      if (res.connected === false) {
-        outcome = {
-          tone: 'error',
-          message: res.message?.trim() || t(
-            'dm.notConnected',
-            '인스타그램 계정이 연동되지 않아 발송하지 못했습니다.',
-            'The Instagram account is not connected, so nothing was sent.',
-          ),
-          done: false,
-        };
-      } else if (res.error && !res.message) {
-        outcome = { tone: 'error', message: res.error, done: false };
-      } else {
-        outcome = { tone: 'success', message: t('dm.sendDone', '완료', 'Done'), done: true };
-      }
+      outcome = manualDmResult(batches, language === 'en');
     } catch (e) {
       console.error('[ManualDmModal] 발송 요청 실패:', e);
-      outcome = {
-        tone: 'error',
-        message: t(
-          'dm.sendRequestFailed',
-          '발송 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-          'The send request failed. Please try again in a moment.',
-        ),
-        done: false,
-      };
+      outcome = manualDmResult(batches, language === 'en', true);
     }
 
     setResult({ tone: outcome.tone, message: outcome.message });
@@ -368,7 +352,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
               ) : (
                 <AlertCircle size={16} className="shrink-0 mt-0.5" />
               )}
-              <span className="leading-relaxed">{result.message}</span>
+              <span className="min-w-0 break-words leading-relaxed">{result.message}</span>
             </div>
           )}
 

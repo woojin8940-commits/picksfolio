@@ -5,3 +5,6 @@ dist/
 .env
 .env.*
 !.env.example
+
+/깃허브/
+/picksfolio_service_deck.pptx

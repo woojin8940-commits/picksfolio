@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { login, acceptInvite, handleAuthCallback, AuthError, MissingIdentityError } from '@netlify/identity';
 
-const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
+function hasIdentityAdminRole(user: any): boolean {
+  const values = [user?.roles, user?.appMetadata?.roles, user?.app_metadata?.roles];
+  return user?.role === 'admin' || values.some((value) => Array.isArray(value) && value.includes('admin'));
+}
 
 interface OperatorLoginProps {
   onLoginSuccess: (info?: { username: string; token: string }) => void;
@@ -52,9 +55,13 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
 
     setLoading(true);
     try {
-      await acceptInvite(inviteToken!, password);
+      const user = await acceptInvite(inviteToken!, password);
       setInviteToken(null);
       window.history.replaceState(null, '', window.location.pathname);
+      if (!hasIdentityAdminRole(user)) {
+        setError('관리자 권한이 없는 계정입니다.');
+        return;
+      }
       onLoginSuccess();
       return;
     } catch (err) {
@@ -80,8 +87,7 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
     if (isEmailInput(input)) {
       try {
         const user = await login(input, password);
-        const roles: string[] = (user as any).app_metadata?.roles || [];
-        if (!roles.includes('admin') && !ADMIN_EMAILS.includes(input.toLowerCase())) {
+        if (!hasIdentityAdminRole(user)) {
           setError('관리자 권한이 없는 계정입니다.');
           setLoading(false);
           return;
