@@ -425,6 +425,8 @@ const AudiencePicker: React.FC<{ username: string; adAccountId: string; delivery
   const [list, setList] = useState<MetaAudience[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // 목록을 마지막으로 읽은 계정. 계정을 바꿨는지 알아야 조회 실패 때 고른 타겟을 비운다.
+  const loadedAccount = useRef('');
 
   useEffect(() => {
     if (!adAccountId) return;
@@ -434,15 +436,33 @@ const AudiencePicker: React.FC<{ username: string; adAccountId: string; delivery
     fetchMetaAudiences(username, adAccountId).then((res) => {
       if (!alive) return;
       setLoading(false);
-      if (res.ok) setList(res.audiences);
-      else {
+      const switched = Boolean(loadedAccount.current) && loadedAccount.current !== adAccountId;
+      loadedAccount.current = adAccountId;
+      if (res.ok) {
+        setList(res.audiences);
+        // 계정을 바꾸면 앞 계정에서 고른 타겟이 칩으로 남는다(픽셀 칸이 계정 전환 때 선택을
+        // 고치는 것과 같다). 새 계정 목록에 없는 타겟은 빼야, 다른 계정의 오디언스가 이
+        // 계정 광고에 섞여 들어가지 않는다.
+        const owned = new Set(res.audiences.map((a) => a.id));
+        d.setAudiences((prev) => (prev.every((a) => owned.has(a.id)) ? prev : prev.filter((a) => owned.has(a.id))));
+        d.setExcludedAudiences((prev) =>
+          prev.every((a) => owned.has(a.id)) ? prev : prev.filter((a) => owned.has(a.id)),
+        );
+      } else {
         setList([]);
         setError(res.error);
+        // 새 계정의 목록을 모르면 앞 계정에서 고른 타겟이 이 계정 것인지 알 수 없다 — 비운다.
+        if (switched) {
+          d.setAudiences([]);
+          d.setExcludedAudiences([]);
+        }
       }
     });
     return () => {
       alive = false;
     };
+    // d 의 setter 는 매번 같은 함수라 계정이 바뀔 때만 다시 읽는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, adAccountId]);
 
   const used = new Set([...d.audiences, ...d.excludedAudiences].map((a) => a.id));

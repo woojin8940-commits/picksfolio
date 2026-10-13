@@ -185,8 +185,11 @@ function bidParams(r: MetaAdRecord): Record<string, unknown> {
 }
 
 async function runAdSet(token: string, proof: string, r: MetaAdRecord): Promise<GraphResult> {
-  const { targeting, warning } = await buildTargeting(token, proof, r);
+  const { targeting, warning, error } = await buildTargeting(token, proof, r);
   if (warning) r.warnings.push(warning);
+  // 맞춤 타겟의 소속을 확인하지 못했으면 광고 세트를 만들지 않는다. 이 단계에서 멈춰 두면
+  // 다시 시도할 때 이어서 만든다.
+  if (error) return { ok: false, status: 502, data: {}, error };
 
   const { optimization_goal, promoted_object, destination_type } = adSetGoal(r);
   if (r.optimizationGoal && r.optimizationGoal !== optimization_goal) {

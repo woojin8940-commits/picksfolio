@@ -817,9 +817,23 @@ export default async (req: Request, context: Context) => {
         `,
         // 수락된 리스트업 제안의 금액. 조건표가 비어 있는 협업의 보수를 여기서 메운다 —
         // 상세 화면과 같은 규칙이어야 목록의 0원과 상세의 금액이 어긋나지 않는다.
+        //
+        // 명단 행은 협업 아이디로 먼저, 연결되지 않은 행은 캠페인 + 인플루언서 아이디로
+        // 찾는다(상세 · 정산 탭과 같은 규칙). 지원 수락으로 협업이 생긴 뒤 담당자가 같은
+        // 사람을 명단에 따로 올리면 collab_id 가 비어 있어, 협업 아이디로만 찾으면 그
+        // 협업의 광고비가 0원으로 합산됐다(공동구매).
         db.sql`
-          SELECT collab_id, offer, quoted_fee, quoted_second_use_fee FROM campaign_listups
-          WHERE collab_id = ANY(${ids})
+          SELECT cc.id AS collab_id, l.offer, l.quoted_fee, l.quoted_second_use_fee
+          FROM campaign_collabs cc
+          JOIN LATERAL (
+            SELECT l.offer, l.quoted_fee, l.quoted_second_use_fee
+            FROM campaign_listups l
+            WHERE l.campaign_id = cc.campaign_id
+              AND (l.collab_id = cc.id OR LOWER(l.influencer_username) = LOWER(cc.creator_username))
+            ORDER BY (l.collab_id = cc.id) DESC NULLS LAST
+            LIMIT 1
+          ) l ON TRUE
+          WHERE cc.id = ANY(${ids})
         `,
       ]);
       /**
