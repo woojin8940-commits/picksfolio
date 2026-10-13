@@ -1060,6 +1060,42 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         </div>
       ) : (
         <>
+          {/* 브랜드가 아직 가이드를 올리지 않았으면 이 줄이 진행사항의 첫 할 일이다.
+              다른 줄과 같은 흰 카드로 두면 보드 위의 안내문처럼 읽혀 지나치게 되므로,
+              올리기 전에는 색을 입히고 올리기 버튼을 크게 세운다. */}
+          {campaignId && !isManager && !hasGuideline && (
+            <section className="rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50 px-4 py-4 md:px-5 md:py-5">
+              <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+                <span className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 8l-4-4m0 0L8 8m4-4v12" /></svg>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-black text-orange-600">STEP 1 · 먼저 해 주세요</p>
+                  <p className="text-base font-black text-slate-900 mt-0.5">콘텐츠 가이드를 올려 주세요</p>
+                  <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">
+                    가이드 파일(PDF·이미지)을 올려 두면 진행 중인 인플루언서가 자기 진행사항에서 바로 엽니다. 따로 확인 체크는 받지 않습니다.
+                  </p>
+                </div>
+                <label
+                  className={`inline-flex items-center justify-center gap-1.5 px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-black shadow-sm transition-colors flex-shrink-0 ${
+                    guideUploading ? 'opacity-60 pointer-events-none' : 'cursor-pointer'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,video/*,application/pdf,.doc,.docx,.ppt,.pptx"
+                    disabled={guideUploading}
+                    onChange={e => { uploadGuideFiles(e.target.files); e.target.value = ''; }}
+                    className="sr-only"
+                  />
+                  {guideUploading ? '올리는 중...' : '가이드 파일 올리기'}
+                </label>
+              </div>
+            </section>
+          )}
+
+
           {/* ── 맨 위 한 줄 ──────────────────────────────────────────────
               브랜드가 이 화면을 열고 먼저 확인하는 두 값 — 지금 몇 명이 굴러가는지,
               그 사람들에게 나갈 돈이 얼마인지. 그다음이 "오늘 내가 손댈 것이 있는지"다. */}
@@ -1111,7 +1147,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               번 올려 두는 파일이고, "인플루언서가 확인했는지"를 단계로 세면 아무도 누르지
               않는 확인 버튼 때문에 모두가 첫 칸에 멈춰 있는 것처럼 보였다. 올린 파일은
               진행 중인 인플루언서의 진행사항에서 그대로 열린다. */}
-          {campaignId && (
+          {campaignId && (isManager || hasGuideline) && (
             <section className="rounded-2xl border border-slate-100 bg-white shadow-sm px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span className={`flex-shrink-0 ${hasGuideline ? 'text-emerald-500' : 'text-slate-300'}`}>
@@ -1177,7 +1213,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
             <p className="px-1 text-sm text-slate-400 font-medium">
               {isManager
                 ? '진행을 확정하면 아래 보드의 제품 배송 칸에 카드가 한 장씩 들어옵니다.'
-                : '담당자가 진행을 확정하면 아래 보드의 제품 배송 칸에 카드가 한 장씩 들어옵니다.'}
+                : '진행이 확정되면 아래 보드의 제품 배송 칸에 카드가 한 장씩 들어옵니다.'}
               {picks.length > 0 && " 확정 전 후보는 아래 '제안 진행 중'에서 볼 수 있습니다."}
             </p>
           )}

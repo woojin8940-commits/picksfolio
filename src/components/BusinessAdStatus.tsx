@@ -513,7 +513,12 @@ const recordToAd = (ad: MetaAdWithLive): AdItem => {
     reach: live.reach || 0,
     conversions: live.conversions || 0,
     conversionValueKrw: live.conversionValue || 0,
-    budgetKrw: ad.budgetKrw,
+    // 일일 예산 광고는 하루치로 저장된다. 소진 막대는 기간 전체와 견줘야 하므로 일수를 곱한다.
+    budgetKrw:
+      ad.budgetType === 'daily'
+        ? ad.budgetKrw *
+          Math.max(1, Math.round((Date.parse(`${ad.endDate}T00:00:00`) - Date.parse(`${ad.startDate}T00:00:00`)) / 86400000) + 1)
+        : ad.budgetKrw,
     spendKrw: Math.round(live.spend || 0),
     thumbnailUrl: ad.thumbnailUrl,
     targetLine: targetSummary(ad),

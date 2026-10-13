@@ -80,7 +80,9 @@ type UploadState = { state: 'idle' | 'running' | 'done' | 'error'; label: string
 const ACCEPT = 'image/*,video/*';
 
 const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, username, onSubmitted, resume: resumeProp }) => {
-  const [objective, setObjective] = useState<AdObjective>(resumeProp?.objective || DEFAULT_AD_OBJECTIVE);
+  // 직접 만들기에는 '참여' 목표가 없다(부스팅에만 있다). 예전 기록이 다른 값이면 기본값으로.
+  const resumeObjective = (findObjective(resumeProp?.objective)?.value || DEFAULT_AD_OBJECTIVE) as AdObjective;
+  const [objective, setObjective] = useState<AdObjective>(resumeObjective);
   const [file, setFile] = useState<File | null>(null);
   /** 창이 열려 있는 동안의 미리보기(blob URL). 저장하는 값과는 다르다. */
   const [previewUrl, setPreviewUrl] = useState('');
@@ -89,7 +91,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   const [headline, setHeadline] = useState(resumeProp?.headline || '');
   const [bodyText, setBodyText] = useState(resumeProp?.bodyText || '');
   const [cta, setCta] = useState<AdCta>(
-    resumeProp?.cta || ctasForObjective(resumeProp?.objective || DEFAULT_AD_OBJECTIVE)[0].value,
+    resumeProp?.cta || ctasForObjective(resumeObjective)[0].value,
   );
   /** 브랜드가 CTA 를 직접 골랐는지. 고른 뒤에는 목적을 바꿔도 그 문구를 지킨다. */
   const [ctaPicked, setCtaPicked] = useState(!!resumeProp?.cta);
@@ -673,7 +675,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
               )}
 
               {/* 여기서부터는 부스팅 창과 같은 항목·같은 검증이다. */}
-              <AdDeliveryFields delivery={delivery} idPrefix="create" />
+              <AdDeliveryFields delivery={delivery} idPrefix="create" username={username} adAccountId={account?.id} />
 
               <StartPausedToggle checked={startPaused} onChange={setStartPaused} />
             </div>

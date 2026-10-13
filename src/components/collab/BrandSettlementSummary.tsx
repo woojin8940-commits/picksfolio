@@ -305,7 +305,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
               </p>
             ) : (
               <p className="text-[11px] text-slate-400 font-medium mt-2 leading-relaxed">
-                픽스폴리오 계좌로 한 번 보내 주세요. 담당자가 입금을 확인하면 이 칸이 '정산완료'로 바뀝니다.
+                픽스폴리오에서 입금을 확인하면 이 칸이 '정산완료'로 바뀝니다.
               </p>
             )}
             {billing.pendingCount > 0 && (

@@ -151,7 +151,7 @@ export interface MetaAdRecord {
 
   /** 처음 만들 때의 상태. PAUSED 면 광고가 만들어져도 노출·과금이 시작되지 않는다. */
   initialStatus: "ACTIVE" | "PAUSED";
-  objective: "awareness" | "traffic" | "conversions";
+  objective: "awareness" | "traffic" | "conversions" | "engagement";
   metaObjective?: string;
   /** 구매 전환 목적일 때 최적화에 쓰는 광고 계정의 픽셀. */
   pixelId?: string;
@@ -181,6 +181,26 @@ export interface MetaAdRecord {
   regions: string[];
   placementMode: "auto" | "manual";
   placements: string[];
+
+  /*
+   * 광고 관리자와 같은 세부 설정. 예전 기록에는 없다 — 없으면 예전과 같은 기본값
+   * (총 예산 · 최고 볼륨 · 성별 전체 · 목표의 기본 성과 목표)으로 만든다.
+   */
+  budgetType?: "daily" | "lifetime";
+  bidStrategy?: "lowest_cost" | "cost_cap" | "bid_cap";
+  bidAmountKrw?: number;
+  optimizationGoal?: string;
+  conversionEvent?: string;
+  gender?: "all" | "male" | "female";
+  ageMin?: number;
+  ageMax?: number;
+  interests?: { id: string; name: string }[];
+  audiences?: { id: string; name: string }[];
+  excludedAudiences?: { id: string; name: string }[];
+  advantageAudience?: boolean;
+  frequencyCap?: { impressions: number; days: number } | null;
+  urlTags?: string;
+  campaignName?: string;
 }
 
 const RECORD_STORE = "meta-ads";
@@ -306,13 +326,110 @@ export async function resolveGeo(
   return { geo: { regions: [...new Set(found)].map((key) => ({ key })) } };
 }
 
-/** 노출 위치 → 인스타그램 게재 위치. '자동' 이면 아무것도 넘기지 않는다(Advantage+ 게재 위치). */
+/**
+ * 노출 위치 → 메타 게재 위치. '자동' 이면 아무것도 넘기지 않는다(Advantage+ 게재 위치).
+ * 예전 값(feed · story · reels · explore)은 인스타그램 위치 그대로다.
+ */
 export function placementParams(mode: string, placements: string[]): Record<string, unknown> {
   if (mode !== "manual" || placements.length === 0) return {};
-  const map: Record<string, string> = { feed: "stream", story: "story", reels: "reels", explore: "explore" };
-  const positions = placements.map((p) => map[p]).filter(Boolean);
-  return { publisher_platforms: ["instagram"], instagram_positions: positions };
+  const ig: Record<string, string> = {
+    feed: "stream",
+    ig_profile_feed: "profile_feed",
+    story: "story",
+    reels: "reels",
+    explore: "explore",
+  };
+  const fb: Record<string, string> = { fb_feed: "feed", fb_story: "story", fb_reels: "facebook_reels" };
+  const instagram_positions = placements.map((p) => ig[p]).filter(Boolean);
+  const facebook_positions = placements.map((p) => fb[p]).filter(Boolean);
+  const publisher_platforms = [
+    ...(instagram_positions.length ? ["instagram"] : []),
+    ...(facebook_positions.length ? ["facebook"] : []),
+  ];
+  if (publisher_platforms.length === 0) return {};
+  return {
+    publisher_platforms,
+    ...(instagram_positions.length ? { instagram_positions } : {}),
+    ...(facebook_positions.length ? { facebook_positions } : {}),
+  };
 }
+
+const ids = (list?: { id: string }[]) =>
+  (Array.isArray(list) ? list : []).map((x) => String(x?.id || "")).filter((id) => /^\d+$/.test(id));
+
+/**
+ * 광고 세트의 targeting 한 덩어리. 집행과 '예상 타겟 규모' 가 같은 값을 쓴다 — 둘이
+ * 다르면 화면에 보인 규모와 실제로 나간 광고의 타겟이 어긋난다.
+ *
+ * Advantage+ 타겟을 켜면 메타 규칙상 연령 상한은 65 로 두고(하한은 25 까지만 제한으로
+ * 쓸 수 있다) 고른 연령은 age_range 제안으로 넘긴다. 성별 · 관심사도 제안이 되므로
+ * 성별은 보내지 않는다. 지역과 제외 타겟은 그대로 지킨다.
+ */
+export async function buildTargeting(
+  token: string,
+  proof: string,
+  r: Pick<
+    MetaAdRecord,
+    | "regions"
+    | "ageBands"
+    | "ageMin"
+    | "ageMax"
+    | "gender"
+    | "interests"
+    | "audiences"
+    | "excludedAudiences"
+    | "advantageAudience"
+    | "placementMode"
+    | "placements"
+  >,
+): Promise<{ targeting: Record<string, unknown>; warning?: string }> {
+  const { geo, warning } = await resolveGeo(token, proof, r.regions || []);
+  const legacy = ageRange(r.ageBands || []);
+  const ageMin = Math.max(18, Math.min(65, Number(r.ageMin) || legacy.age_min));
+  const ageMax = Math.max(ageMin, Math.min(65, Number(r.ageMax) || legacy.age_max));
+  const advantage = !!r.advantageAudience;
+
+  const targeting: Record<string, unknown> = {
+    geo_locations: geo,
+    ...placementParams(r.placementMode, r.placements || []),
+    targeting_automation: { advantage_audience: advantage ? 1 : 0 },
+  };
+  if (advantage) {
+    targeting.age_min = Math.min(ageMin, 25);
+    targeting.age_max = 65;
+    if (ageMin !== 18 || ageMax !== 65) targeting.age_range = [ageMin, ageMax];
+  } else {
+    targeting.age_min = ageMin;
+    targeting.age_max = ageMax;
+    if (r.gender === "male") targeting.genders = [1];
+    if (r.gender === "female") targeting.genders = [2];
+  }
+  const interests = ids(r.interests);
+  if (interests.length) targeting.flexible_spec = [{ interests: interests.map((id) => ({ id })) }];
+  const include = ids(r.audiences);
+  if (include.length) targeting.custom_audiences = include.map((id) => ({ id }));
+  const exclude = ids(r.excludedAudiences);
+  if (exclude.length) targeting.excluded_custom_audiences = exclude.map((id) => ({ id }));
+  return { targeting, warning };
+}
+
+/** 캠페인 목표별로 고를 수 있는 성과 목표. 맨 앞이 기본값이다(화면의 PERFORMANCE_GOALS 와 같다). */
+export const GOALS_BY_OBJECTIVE: Record<string, string[]> = {
+  conversions: ["OFFSITE_CONVERSIONS", "VALUE", "LANDING_PAGE_VIEWS", "LINK_CLICKS"],
+  traffic: ["LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH"],
+  engagement: ["POST_ENGAGEMENT", "THRUPLAY", "REACH"],
+  awareness: ["REACH", "IMPRESSIONS", "AD_RECALL_LIFT"],
+};
+
+export const CONVERSION_EVENTS = [
+  "PURCHASE",
+  "ADD_TO_CART",
+  "INITIATED_CHECKOUT",
+  "ADD_PAYMENT_INFO",
+  "COMPLETE_REGISTRATION",
+  "LEAD",
+  "CONTENT_VIEW",
+];
 
 /** 화면의 CTA 값 → 메타 call_to_action type. */
 export const metaCta = (cta?: string): string =>
