@@ -16,6 +16,7 @@ import {
 } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard, DmFollowUp, DmPlan } from "./_shared/instagram-dm.mts";
 import { noteWebhookReceived, resolveDmAccountByIgId } from "./_shared/dm-webhook-index.mts";
+import { keywordHit } from "./_shared/dm-keywords.mts";
 import { DmAccessLookupError, dmAutomationAllowedForSend } from "./_shared/dm-automation-access.mts";
 import { INSTAGRAM_GRAPH_VERSION, linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
@@ -40,7 +41,7 @@ import {
   release,
 } from "./_shared/dm-send-registry.mts";
 import { createScheduledJob, queueRemainingDmMessages } from "./_shared/dm-schedule-store.mts";
-import { backupCommentEvents, enqueueCommentEvents, enqueueMessageEvents } from "./_shared/dm-jobs.mts";
+import { backupCommentEvents, backupMessageEvents, enqueueCommentEvents, enqueueMessageEvents } from "./_shared/dm-jobs.mts";
 import type { QueuedComment, QueuedMessage } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
@@ -267,46 +268,6 @@ function hasContent(a: DmAutomationItem): boolean {
 /** 공개 답글로 남길 문구가 하나라도 설정돼 있는지. */
 function hasReplyContent(a: DmAutomationItem): boolean {
   return Boolean(a.replyEnabled) && (a.replies || []).some((r) => r && r.trim());
-}
-
-/**
- * 키워드 비교용으로 글자를 맞춘다.
- *
- * 입력칸 앞에 # 아이콘이 있어 사용자가 "#가격" 처럼 넣는 경우가 많은데, 그대로 비교하면
- * "가격 얼마예요?" 댓글에 걸리지 않았다. 앞의 # 을 떼고, 한글 자모 조합 · 전각 문자
- * 차이(NFKC)와 연속 공백 · 대소문자를 맞춘 뒤 부분 일치로 본다.
- */
-function normalizeMatchText(value: string): string {
-  return String(value || "").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-const withoutSpaces = (value: string) => value.replace(/\s+/g, "");
-
-/**
- * 띄어쓰기를 무시해도 되는 키워드인지.
- *
- * 키워드를 "링크 주세요"로 적어 두면 "링크주세요" 댓글에 걸리지 않았고(반대도 마찬가지),
- * 댓글을 다는 사람은 띄어쓰기를 제각각 한다. 그렇다고 모든 키워드에서 띄어쓰기를 지우면
- * 짧은 키워드가 낱말 경계를 넘어 걸린다 — "DM" 이 "good morning"(goodmorning)에, "정보"가
- * "일정 보고"(일정보고)에 걸려, 묻지도 않은 사람에게 되돌릴 수 없는 DM 이 나간다. 그래서
- * 띄어쓰기가 들어 있는 키워드와, 한글 등 영문이 아닌 글자가 섞인 세 글자 이상 키워드에만
- * 띄어쓰기를 무시한 비교를 더한다. 나머지는 예전처럼 그대로 부분 일치로 본다.
- */
-function spacingTolerant(needle: string): boolean {
-  if (needle.includes(" ")) return true;
-  return /[^\x00-\x7f]/.test(needle) && Array.from(needle).length >= 3;
-}
-
-function keywordHit(keywords: string[] | undefined, text: string): boolean {
-  const haystack = normalizeMatchText(text);
-  const compactHaystack = withoutSpaces(haystack);
-  return (keywords || []).some((k) => {
-    // 전각 "＃" 도 떼어지도록 맞춘 다음에 앞의 # 을 뗀다.
-    const needle = normalizeMatchText(String(k || "")).replace(/^#+/, "").trim();
-    if (!needle) return false;
-    if (haystack.includes(needle)) return true;
-    return spacingTolerant(needle) && compactHaystack.includes(withoutSpaces(needle));
-  });
 }
 
 function matchAutomation(a: DmAutomationItem, text: string, mediaId: string): boolean {
@@ -690,12 +651,14 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
   if (!commentId) return;
 
   const { username, settings, igId, accessToken } = ctx;
-  await noteDmContact({ username, igsid: senderId, text: postback?.title, kind: "postback" }).catch(() => undefined);
 
   const skip = (reason: string, extra: Record<string, unknown> = {}) =>
     appendLog(username, { kind: "dm", status: "skipped", trigger: "bait_click", reason, recipientId: senderId, commentId, ...extra });
 
-  const pending = await getBaitPending(username, commentId);
+  const [pending] = await Promise.all([
+    getBaitPending(username, commentId),
+    noteDmContact({ username, igsid: senderId, text: postback?.title, kind: "postback" }).catch(() => undefined),
+  ]);
   if (!pending) return skip("대기 중인 1단계 메시지를 찾지 못했습니다(오래된 버튼일 수 있습니다).");
   if (pending.fromId && pending.fromId !== senderId) return skip("댓글 작성자가 아닌 사람이 누른 버튼입니다.");
 
@@ -1035,7 +998,7 @@ export default async (req: Request, _context: Context) => {
    * 시간 여유가 있고, 실패하면 다시 시도한다.
    *
    * 발신 에코는 아무것도 보내지 않으므로(외부 자동 DM 감지만 한다) 여기서 바로 본다.
-   * 대기열에 넣지 못하면(새 이벤트 종류를 아직 받지 못하는 DB 등) 예전처럼 바로 처리한다.
+   * 대기열이 실패하면 백업 저장소에 남겨 다음 실행에서 복구한다.
    */
   const queuedMessages: QueuedMessage[] = [];
   const inlineEntries: any[] = [];
@@ -1060,14 +1023,13 @@ export default async (req: Request, _context: Context) => {
     try {
       await enqueueMessageEvents(queuedMessages);
     } catch (e) {
-      console.error("[ig-webhook] message queue failed — handling inline:", (e as Error)?.message);
-      for (const queued of queuedMessages) {
-        inlineEntries.push({ id: queued.igAccountId, time: queued.entryTime, messaging: [queued.event] });
-      }
+      console.error("[ig-webhook] message queue failed:", (e as Error)?.message);
+      try { await backupMessageEvents(queuedMessages); }
+      catch { return new Response("Queue unavailable", { status: 503 }); }
     }
   }
   if (inlineEntries.length > 0) {
-    await processWebhookPayload({ entry: inlineEntries }, true).catch((e) =>
+    await processWebhookPayload({ entry: inlineEntries }, true, "", false).catch((e) =>
       console.error("[ig-webhook] messaging processing error:", e),
     );
   }
@@ -1117,6 +1079,7 @@ export async function processWebhookPayload(
   payload: any,
   skipComments = false,
   onlyAutomationId = "",
+  allowAccountScan = true,
 ): Promise<WebhookProcessResult> {
   const outcome: WebhookProcessResult = { retryable: false };
 
@@ -1136,7 +1099,7 @@ export async function processWebhookPayload(
        * 안 될 때 Meta 가 이벤트를 안 보내는 것인지, 받고도 주인을 못 찾은 것인지
        * 설정 화면에서 구분할 수 있어야 한다.
        */
-      const username = await resolveDmAccountByIgId(igAccountId);
+      const username = await resolveDmAccountByIgId(igAccountId, allowAccountScan);
       await noteWebhookReceived(igAccountId, username);
       if (!username) {
         console.warn("[ig-webhook] no account for IG id", igAccountId);

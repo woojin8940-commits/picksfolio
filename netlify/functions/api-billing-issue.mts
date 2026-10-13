@@ -1,4 +1,5 @@
 import type { Config } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
 import { randomUUID } from "node:crypto";
 import {
   chargeMembershipBillingKey,
@@ -23,6 +24,7 @@ import { findProfileByUsername, requireAccountOwner } from "./_shared/user-auth.
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
+import { migrateSellerMembership } from "./_shared/seller-membership-store.mts";
 
 const STORE = "seller-verification";
 
@@ -84,6 +86,7 @@ export default async (req: Request) => {
     }
 
     const key = `seller_${username.toLowerCase()}`;
+    await migrateSellerMembership(getStore({ name: STORE, consistency: "strong" }), String(username));
 
     // ── 출시 혜택 코드(선택) ──
     // 코드를 함께 보내면 첫 달 결제를 건너뛰고 첫 청구일을 무료 기간만큼 뒤로 미룬다.

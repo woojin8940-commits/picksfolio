@@ -1,5 +1,8 @@
-import { getStore } from "@netlify/blobs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { getCheckedBlobStore, mutateBlobJSON } from "./blob-write.mts";
+import { getSupabaseServer } from "./supabase.mts";
+import { baitMainKey, getBaitPending } from "./dm-bait.mts";
+import { mapConcurrent } from "./concurrency.mts";
 
 /**
  * DM 발송 대장(누구에게 무엇을 이미 보냈는지).
@@ -29,12 +32,11 @@ import { createHash } from "node:crypto";
  */
 
 const STORE = "dm-automation-sent";
-/** 사용자당 보관할 최대 기록 수. */
-const KEEP = 3000;
+const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 const prefixFor = (username: string) => `sent_${username.toLowerCase()}/`;
 
-const store = () => getStore({ name: STORE, consistency: "strong" });
+const store = () => getCheckedBlobStore(STORE);
 
 /** 비공개 답장(댓글 1건당 1회)을 이미 썼는지 표시하는 키. */
 export const privateReplyKey = (commentId: string) => `reply_${commentId}`;
@@ -252,11 +254,11 @@ async function updateRecord(username: string, key: string, values: Record<string
 }
 
 export async function confirmSent(username: string, key: string): Promise<void> {
-  await updateRecord(username, key, { confirmed: true, failure: null });
+  await updateRecord(username, key, { at: new Date().toISOString(), confirmed: true, queued: false, failure: null });
 }
 
 export async function confirmFailed(username: string, key: string, error: string, kind: string): Promise<void> {
-  await updateRecord(username, key, { confirmed: false, failure: { error, kind } });
+  await updateRecord(username, key, { at: new Date().toISOString(), confirmed: false, queued: false, failure: { error, kind } });
 }
 
 export async function confirmedFailure(username: string, key: string): Promise<{ error: string; kind: string } | null> {
@@ -282,25 +284,77 @@ export async function release(username: string, key: string, strict = false): Pr
   }
 }
 
-/**
- * 보관 한도를 넘긴 오래된 기록을 지운다.
- *
- * 인스타그램 댓글 ID 는 대체로 증가하므로 사전순 정렬이 대략 시간순이다. 한도를
- * 넘겨 지워지는 기록은 이미 아주 오래된 댓글이라, 그 시점에는 인스타그램 자체가
- * 비공개 답장·24시간 창을 이유로 재발송을 거부한다. 따라서 정리로 중복 발송이
- * 생길 위험은 사실상 없다.
- */
-export async function pruneSentRegistry(username: string, keep = KEEP): Promise<void> {
+/** Retain active, uncertain and recent claims; a count limit must never delete recent sends. */
+export async function pruneSentRegistry(username: string, maxScan = 1000): Promise<void> {
+  if (!username) return;
+  const controlKey = `maintenance/${username.toLowerCase()}`;
+  const token = randomUUID();
+  let acquired = false;
   try {
     const s = store();
-    const { blobs } = await s.list({ prefix: prefixFor(username) });
-    if (blobs.length <= keep) return;
-    const stale = blobs
-      .map((b) => b.key)
-      .sort()
-      .slice(0, blobs.length - keep);
-    await Promise.all(stale.map((key) => s.delete(key).catch(() => {})));
-  } catch {
-    // 정리는 실패해도 무방하다.
+    const control = await mutateBlobJSON<{ token: string; after: string; nextAt: number }>(STORE, controlKey, (current) => {
+      acquired = false;
+      if (current && current.nextAt > Date.now()) return null;
+      acquired = true;
+      return { token, after: current?.after || "", nextAt: Date.now() + 60 * 60_000 };
+    });
+    if (!acquired || !control) return;
+    const { data: active, error } = await getSupabaseServer().from("dm_jobs").select("payload")
+      .eq("username", username.toLowerCase()).in("status", ["pending", "processing", "uncertain"]).limit(1001)
+      .abortSignal(AbortSignal.timeout(4_000));
+    if (error || !active || active.length > 1000) return;
+    const protectedKeys = new Set<string>();
+    const protectedPrefixes: string[] = [];
+    for (const row of active) {
+      const payload = row.payload || {};
+      const claim = String(payload.claimKey || "");
+      if (claim) protectedKeys.add(claim);
+      if (claim || payload.id) protectedPrefixes.push(`schedule_${claim || payload.id}_`);
+      const comment = String(payload.change?.value?.id || payload.commentId || "");
+      if (comment) {
+        for (const key of [privateReplyKey(comment), publicReplyKey(comment), commentDmKey(comment), baitMainKey(comment)]) protectedKeys.add(key);
+        protectedPrefixes.push(`dm_${comment}_`);
+      }
+    }
+    const deadline = Date.now() + 10_000;
+    const cutoff = Date.now() - RETENTION_MS;
+    const prefix = prefixFor(username);
+    let after = control.after;
+    let scanned = 0;
+    let completed = true;
+    for await (const page of s.list({ prefix, paginate: true })) {
+      const keys = page.blobs.map((blob) => blob.key).filter((key) => key > control.after).sort();
+      for (let offset = 0; offset < keys.length; offset += 8) {
+        if (Date.now() >= deadline || scanned >= maxScan) { completed = false; break; }
+        const batch = keys.slice(offset, offset + Math.min(8, maxScan - scanned));
+        const processed = await mapConcurrent(batch, 8, async (path) => {
+          if (Date.now() >= deadline) return false;
+          const key = path.slice(prefix.length);
+          if (key.startsWith("text_")) return true;
+          if (protectedKeys.has(key) || protectedPrefixes.some((value) => key.startsWith(value))) return true;
+          const snapshot = await s.getWithMetadata(path, { type: "json", consistency: "strong" });
+          const record = snapshot?.data as { at?: string; confirmed?: boolean; queued?: boolean; failure?: { kind?: string } } | undefined;
+          const at = Date.parse(record?.at || "");
+          if (!Number.isFinite(at) || at >= cutoff || (record?.queued && !record.confirmed) || record?.failure?.kind === "uncertain") return true;
+          const bait = key.startsWith("baitmain_") ? key.slice(9)
+            : key.startsWith("schedule_baitmain_") ? key.slice(18).replace(/_\d+$/, "") : "";
+          if (bait && await getBaitPending(username, bait)) return true;
+          const latest = await s.getWithMetadata(path, { type: "json", consistency: "strong" });
+          if (Date.now() < deadline && snapshot?.etag && latest?.etag === snapshot.etag) await s.delete(path);
+          return true;
+        });
+        for (let i = 0; i < batch.length; i++) {
+          if (!processed[i]) { completed = false; break; }
+          after = batch[i];
+          scanned++;
+        }
+        if (!completed) break;
+      }
+      if (!completed) break;
+    }
+    await mutateBlobJSON<{ token: string; after: string; nextAt: number }>(STORE, controlKey, (current) =>
+      current?.token === token ? { ...current, after: completed ? "" : after } : null);
+  } catch (e) {
+    console.warn("[dm-registry] cleanup failed:", (e as Error)?.message);
   }
 }

@@ -581,6 +581,7 @@ const handleSend = async (req: Request) => {
   const windowStart = Date.now() - COMMENT_REPLY_WINDOW_MS;
   /** 7일 창을 벗어나 대상에서 빠진 댓글 수. */
   let staleCount = 0;
+  let unknownTimeCount = 0;
 
   for (const commentsList of commentLists) {
     for (const c of commentsList) {
@@ -599,6 +600,10 @@ const handleSend = async (req: Request) => {
 
       // 7일 이내에 달린 댓글만 발송 대상이다.
       const parsedCommentedAt = parseCommentTime(c?.timestamp);
+      if (parsedCommentedAt === null) {
+        unknownTimeCount++;
+        continue;
+      }
       if (parsedCommentedAt !== null && parsedCommentedAt < windowStart) {
         staleCount += 1;
         continue;
@@ -631,6 +636,7 @@ const handleSend = async (req: Request) => {
       status: "skipped",
       reason: "no_recent_commenters",
       staleCount,
+      unknownTimeCount,
       targetMediaIds,
       ruleId: body.ruleId,
     });
@@ -640,7 +646,9 @@ const handleSend = async (req: Request) => {
       count: 0,
       total: 0,
       incomplete: commentCollectionIncomplete || !cursorPersisted,
-      message: !cursorPersisted
+      message: unknownTimeCount > 0 && !commentCollectionIncomplete && cursorPersisted
+        ? "댓글 작성 시각을 확인하지 못해 발송 대상에 포함하지 않았습니다. 인스타그램 연동 권한을 확인해 주세요."
+        : !cursorPersisted
         ? "댓글 조회 위치를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
         : commentCollectionIncomplete
         ? "일부 게시물의 댓글을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
@@ -984,6 +992,7 @@ const handleSend = async (req: Request) => {
   });
 
   const parts: string[] = [];
+  if (unknownTimeCount > 0) parts.push(`작성 시각을 확인하지 못한 댓글 ${unknownTimeCount}건은 발송 대상에서 제외했습니다.`);
   if (successCount > 0) {
     parts.push(`댓글 작성자 ${targetCommenters.length}명 중 ${successCount}명에게 DM을 발송했습니다.`);
   }

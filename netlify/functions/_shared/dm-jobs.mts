@@ -1,8 +1,10 @@
 import { getSupabaseServer } from "./supabase.mts";
 import { getStore } from "@netlify/blobs";
+import { getCheckedBlobStore } from "./blob-write.mts";
 import { createHash } from "node:crypto";
 import { resolveDmAccountByIgId } from "./dm-webhook-index.mts";
 import { queueRpc, wakeDmWorkers } from "./dm-worker.mts";
+import { mapConcurrent } from "./concurrency.mts";
 
 export interface DmJob {
   id: string;
@@ -50,12 +52,13 @@ export const scheduledJobId = (username: string, id: string) =>
  * 값으로 넣어야 같은 줄에서 순서와 발송 간격이 지켜진다.
  */
 async function resolveJobAccounts(igAccountIds: string[]) {
-  const accounts = new Map<string, { id: string; username: string | null }>();
-  for (const id of new Set(igAccountIds)) {
-    const username = await resolveDmAccountByIgId(id);
+  const accounts = new Map<string, { id: string | null; username: string | null }>();
+  await mapConcurrent([...new Set(igAccountIds)], 8, async (id) => {
+    const username = await resolveDmAccountByIgId(id, false);
     const settings = username ? await getStore({ name: "dm-automation", consistency: "strong" }).get(`dm_${username}`, { type: "json" }) as any : null;
-    accounts.set(id, { id: String(settings?.igUserId || settings?.igAccountId || id), username: username || null });
-  }
+    const linked = settings && [settings.igUserId, settings.igAccountId].includes(id);
+    accounts.set(id, { id: linked ? String(settings.igUserId || settings.igAccountId) : null, username: linked ? username : null });
+  });
   return accounts;
 }
 
@@ -80,9 +83,9 @@ export async function enqueueMessageEvents(events: QueuedMessage[]): Promise<voi
   const { error } = await getSupabaseServer().from("dm_jobs").upsert(rows, {
     onConflict: "id",
     ignoreDuplicates: true,
-  });
+  }).abortSignal(AbortSignal.timeout(2_000));
   if (error) throw error;
-  await wakeDmWorkers([...accounts.values()].map((account) => account.id)).catch((e) => console.error("[dm-queue] wake failed:", (e as Error)?.message));
+  await wakeDmWorkers([...accounts.values()].flatMap((account) => account.id ? [account.id] : [])).catch((e) => console.error("[dm-queue] wake failed:", (e as Error)?.message));
 }
 
 export async function enqueueCommentEvents(events: QueuedComment[]): Promise<void> {
@@ -101,14 +104,36 @@ export async function enqueueCommentEvents(events: QueuedComment[]): Promise<voi
     const { error } = await client.from("dm_jobs").upsert(rows, {
       onConflict: "id",
       ignoreDuplicates: true,
-    });
+    }).abortSignal(AbortSignal.timeout(2_000));
     if (error) throw error;
   }
-  await wakeDmWorkers([...accounts.values()].map((account) => account.id)).catch((e) => console.error("[dm-queue] wake failed:", (e as Error)?.message));
+  await wakeDmWorkers([...accounts.values()].flatMap((account) => account.id ? [account.id] : [])).catch((e) => console.error("[dm-queue] wake failed:", (e as Error)?.message));
+}
+
+export async function backupMessageEvents(events: QueuedMessage[]): Promise<void> {
+  const store = getCheckedBlobStore("dm-message-backup");
+  await mapConcurrent(events, 8, async (event) => {
+    const key = createHash("sha256").update(`${event.igAccountId}:${messageEventId(event.event)}`).digest("hex");
+    await store.set(key, JSON.stringify(event), { onlyIfNew: true });
+  });
+}
+
+export async function restoreMessageEvents(deadline: number): Promise<void> {
+  const store = getStore({ name: "dm-message-backup", consistency: "strong" });
+  for await (const page of store.list({ paginate: true })) {
+    for (const blob of page.blobs.slice(0, 20)) {
+      if (Date.now() >= deadline) return;
+      const event = await store.get(blob.key, { type: "json" }) as QueuedMessage | null;
+      if (!event) continue;
+      await enqueueMessageEvents([event]);
+      await store.delete(blob.key);
+    }
+    return;
+  }
 }
 
 export async function backupCommentEvents(events: QueuedComment[]): Promise<void> {
-  const store = getStore({ name: "dm-comment-backup", consistency: "strong" });
+  const store = getCheckedBlobStore("dm-comment-backup");
   for (const event of events) {
     const key = createHash("sha256").update(`${event.igAccountId}:${event.change.value.id}`).digest("hex");
     await store.set(key, JSON.stringify(event), { onlyIfNew: true });
@@ -132,17 +157,24 @@ export async function restoreMissingJobAccounts(deadline: number): Promise<void>
   const { data, error } = await client.from("dm_jobs").select("id,username,payload")
     .eq("status", "pending").is("ig_account_id", null).limit(20).abortSignal(AbortSignal.timeout(4_000));
   if (error) throw error;
+  const assigned = new Set<string>();
   for (const job of data || []) {
     if (Date.now() >= deadline) break;
-    const username = String(job.username || job.payload?.username || "");
+    const username = String(job.username || job.payload?.username || "") || await resolveDmAccountByIgId(String(job.payload?.igAccountId || "")) || "";
     const settings = username ? await getStore({ name: "dm-automation", consistency: "strong" }).get(`dm_${username}`, { type: "json" }) as any : null;
-    const account = String(job.payload?.igAccountId || settings?.igUserId || settings?.igAccountId || "");
-    const fields = /^\d+$/.test(account)
-      ? { ig_account_id: account }
+    const account = String(settings?.igUserId || settings?.igAccountId || job.payload?.igAccountId || "");
+    const eventAccount = String(job.payload?.igAccountId || "");
+    const changed = settings && eventAccount && ![settings.igUserId, settings.igAccountId].includes(eventAccount);
+    const fields = changed
+      ? { status: "canceled", completed_at: new Date().toISOString(), error_kind: "account_lookup", outcome: "unlinked", last_error: "이벤트를 받은 인스타그램 계정의 연결이 변경되었습니다." }
+      : /^\d+$/.test(account)
+      ? { ig_account_id: account, username: username || null }
       : { status: "failed", completed_at: new Date().toISOString(), error_kind: "account_lookup", last_error: "인스타그램 계정 연결 정보를 찾지 못했습니다." };
     const result = await client.from("dm_jobs").update(fields).eq("id", job.id).eq("status", "pending").is("ig_account_id", null);
     if (result.error) throw result.error;
+    if (!changed && /^\d+$/.test(account)) assigned.add(account);
   }
+  if (assigned.size > 0) await wakeDmWorkers([...assigned]).catch((e) => console.error("[dm-queue] recovered account wake failed:", (e as Error)?.message));
 }
 
 export async function enqueueScheduledJob(

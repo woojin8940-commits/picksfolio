@@ -4,6 +4,7 @@ import type { DmJob } from "./_shared/dm-jobs.mts";
 import { processDmJob } from "./_shared/dm-job-processor.mts";
 import { queueRpc, renewWorker, verifyWorkerRequest, wakeDmWorkers, workerContext } from "./_shared/dm-worker.mts";
 import type { WorkerContext } from "./_shared/dm-worker.mts";
+import { pruneSentRegistry } from "./_shared/dm-send-registry.mts";
 
 /** 남은 작업이 이 시간 안에 시간이 되면 작업자를 끝내지 않고 기다렸다 이어서 처리한다. */
 const NEAR_DUE_WAIT_MS = 20_000;
@@ -32,6 +33,7 @@ export default async (req: Request) => {
   const deadline = Date.now() + 12 * 60_000;
   context.deadline = deadline;
   let failed = false;
+  let username = "";
   try {
     await workerContext.run(context, async () => {
       while (!context.lost && Date.now() < deadline) {
@@ -50,6 +52,7 @@ export default async (req: Request) => {
           continue;
         }
         context.job = job;
+        if (job.username) username = job.username;
         await processDmJob(job);
         context.job = undefined;
       }
@@ -62,6 +65,7 @@ export default async (req: Request) => {
     await heartbeat;
     await queueRpc("dm_release_worker", { p_account: account, p_token: token }).catch((e) => console.error("[dm-worker] release failed:", (e as Error)?.message));
     if (!failed && !context.lost) await wakeDmWorkers([account]).catch((e) => console.error("[dm-worker] continuation failed:", (e as Error)?.message));
+    if (username) await pruneSentRegistry(username);
   }
 };
 

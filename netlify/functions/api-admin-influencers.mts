@@ -175,15 +175,13 @@ export default async (req: Request, context: Context) => {
           // itself landed under the correct lowercase key.
           const blobKey = String(p.username || '').toLowerCase()
           let stored = await readSellerMembership(sellerStore, blobKey)
-          // Heal orphaned membership grants. Earlier flows (or admins clicking
+          // Read orphaned membership grants. Earlier flows (or admins clicking
           // before profile.username was set) could have written the blob under
           // a synthesized fallback key — email-local, auth.id slice, or the
           // Kakao provider id — instead of the canonical profile.username.
           // When that happened, the user-side `getSellerVerification(username)`
           // read returns nothing and the membership appears not to apply.
-          // If the canonical key has no active membership but a synthesized
-          // alternate does, migrate the blob into the canonical key (and
-          // delete the orphan) so future reads succeed.
+          // Legacy grants can be displayed here without changing billing records.
           if (!stored?.membership_active && blobKey) {
             const altKeys: string[] = []
             const emailLocal = String(p.email || '').split('@')[0].trim().toLowerCase()
@@ -199,14 +197,7 @@ export default async (req: Request, context: Context) => {
               try {
                 const fallbackSv = await readSellerMembership(sellerStore, fk)
                 if (fallbackSv?.membership_active) {
-                  const migrated: SellerVerificationBlob = {
-                    ...fallbackSv,
-                    updated_at: new Date().toISOString(),
-                  }
-                  await sellerStore.setJSON(`seller_${blobKey}`, migrated)
-                  try { await sellerStore.delete(`seller_${fk}`) } catch {}
-                  stored = migrated
-                  console.log(`[admin-influencers] migrated membership "${fk}" → "${blobKey}" for @${p.username}`)
+                  stored = fallbackSv
                   break
                 }
               } catch (e) {

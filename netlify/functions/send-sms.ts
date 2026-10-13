@@ -3,6 +3,7 @@ import { SolapiMessageService } from "solapi";
 import { getDatabase } from "@picks/netlify-database";
 import { randomInt } from "node:crypto";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
+import { reserveSmsVerificationBudget, SmsBudgetError } from "./_shared/sms-budget.mts";
 
 const PURPOSES = new Set(["signup", "business_signup", "find-id", "reset-password"]);
 
@@ -32,9 +33,9 @@ export default async (req: Request) => {
       return Response.json({ error: "수신자 번호가 필요합니다." }, { status: 400 });
     }
 
-    const apiKey = Netlify.env.get("SOLAPI_API_KEY");
-    const apiSecret = Netlify.env.get("SOLAPI_API_SECRET");
-    const fromNumber = Netlify.env.get("SOLAPI_FROM_NUMBER") || DEFAULT_FROM_NUMBER;
+    const apiKey = process.env.SOLAPI_API_KEY;
+    const apiSecret = process.env.SOLAPI_API_SECRET;
+    const fromNumber = process.env.SOLAPI_FROM_NUMBER || DEFAULT_FROM_NUMBER;
 
     if (!apiKey || !apiSecret || !fromNumber) {
       return Response.json({ error: "서버 설정 오류" }, { status: 500 });
@@ -72,6 +73,14 @@ export default async (req: Request) => {
     }
 
     const code = randomInt(100000, 1000000).toString();
+
+    try { await reserveSmsVerificationBudget(); }
+    catch (error) {
+      if (error instanceof SmsBudgetError) {
+        return Response.json({ error: error.message, code: error.code }, { status: error.status });
+      }
+      throw error;
+    }
 
     const reserved = await db.sql`
       INSERT INTO sms_verifications (phone, code, purpose, expires_at)
