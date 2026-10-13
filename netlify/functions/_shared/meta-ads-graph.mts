@@ -153,7 +153,12 @@ export interface MetaAdRecord {
   initialStatus: "ACTIVE" | "PAUSED";
   objective: "awareness" | "traffic" | "conversions" | "engagement";
   metaObjective?: string;
-  /** 구매 전환 목적일 때 최적화에 쓰는 광고 계정의 픽셀. */
+  /**
+   * 이 광고에 연결한 광고 계정의 픽셀(데이터 세트).
+   *
+   * 판매 목적에서는 최적화 대상(promoted_object)이고, 어느 목적이든 광고의 tracking_specs
+   * 로 붙어 웹사이트 이벤트를 이 광고의 성과로 센다 — 광고 관리자의 '추적 › 웹사이트 이벤트'.
+   */
   pixelId?: string;
   name: string;
   headline?: string;
@@ -502,4 +507,65 @@ export function purchaseMetrics(insight: any): { conversions: number; conversion
     conversions: pick(Array.isArray(insight?.actions) ? insight.actions : []),
     conversionValue: pick(Array.isArray(insight?.action_values) ? insight.action_values : []),
   };
+}
+
+/**
+ * 인사이트 actions 의 이벤트를 광고 관리자 열 이름 단위로 묶는다.
+ *
+ * 같은 이벤트가 여러 이름으로 온다(픽셀 전용 `offsite_conversion.fb_pixel_purchase`, 통합
+ * `omni_purchase`, 요약 `purchase`). 셋을 더하면 같은 구매가 두세 번 세어지므로, 광고 관리자처럼
+ * 앞에 둔 이름 하나만 고른다 — 앞의 것이 있으면 뒤의 것은 보지 않는다.
+ *
+ * 키는 화면의 전환 이벤트 값(CONVERSION_EVENTS)과 성과 목표에서 쓰는 이름에 맞춘다.
+ */
+const EVENT_ACTION_TYPES: Record<string, string[]> = {
+  PURCHASE: PURCHASE_TYPES,
+  ADD_TO_CART: ["add_to_cart", "offsite_conversion.fb_pixel_add_to_cart", "omni_add_to_cart"],
+  INITIATED_CHECKOUT: ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"],
+  ADD_PAYMENT_INFO: ["add_payment_info", "offsite_conversion.fb_pixel_add_payment_info"],
+  COMPLETE_REGISTRATION: [
+    "complete_registration",
+    "offsite_conversion.fb_pixel_complete_registration",
+    "omni_complete_registration",
+  ],
+  LEAD: ["lead", "offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped"],
+  CONTENT_VIEW: ["view_content", "offsite_conversion.fb_pixel_view_content", "omni_view_content"],
+  SEARCH: ["search", "offsite_conversion.fb_pixel_search", "omni_search"],
+  LANDING_PAGE_VIEW: ["landing_page_view", "omni_landing_page_view"],
+  LINK_CLICK: ["link_click"],
+  POST_ENGAGEMENT: ["post_engagement"],
+  VIDEO_VIEW: ["video_view"],
+};
+
+/** 이벤트별 횟수와 가치(구매 · 장바구니 · 결제 시작에만 금액이 실린다). */
+export function eventMetrics(insight: any): { events: Record<string, number>; eventValues: Record<string, number> } {
+  const pick = (rows: any[], types: string[]) => {
+    for (const type of types) {
+      const row = rows.find((r) => r?.action_type === type);
+      if (row) return Number(row.value) || 0;
+    }
+    return 0;
+  };
+  const actions = Array.isArray(insight?.actions) ? insight.actions : [];
+  const values = Array.isArray(insight?.action_values) ? insight.action_values : [];
+  const events: Record<string, number> = {};
+  const eventValues: Record<string, number> = {};
+  for (const [key, types] of Object.entries(EVENT_ACTION_TYPES)) {
+    const count = pick(actions, types);
+    if (count) events[key] = count;
+    const value = pick(values, types);
+    if (value) eventValues[key] = value;
+  }
+  // ThruPlay 는 actions 가 아니라 따로 온다(video_thruplay_watched_actions).
+  const thru = Array.isArray(insight?.video_thruplay_watched_actions) ? insight.video_thruplay_watched_actions : [];
+  const thruplays = pick(thru, ["video_view"]);
+  if (thruplays) events.THRUPLAY = thruplays;
+  return { events, eventValues };
+}
+
+/** 광고 계정에 실제로 있는 픽셀 ID 들. 화면이 보낸 픽셀이 이 계정 것인지 확인할 때 쓴다. */
+export async function accountPixelIds(adAccountId: string, token: string, proof: string): Promise<string[] | null> {
+  const res = await graphGet(`${adAccountId}/adspixels`, token, { fields: "id", limit: 100 }, proof);
+  if (!res.ok) return null;
+  return Array.isArray(res.data?.data) ? res.data.data.map((p: any) => String(p?.id || "")).filter(Boolean) : [];
 }

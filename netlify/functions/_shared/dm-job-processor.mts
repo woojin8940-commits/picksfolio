@@ -216,6 +216,7 @@ async function processPreparedMain(key: string, job: DmScheduledJob, queued?: Dm
     }
     attempted = true;
     result = await sendDmMessages({
+      account: job.username,
       graphHost: settings!.tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com",
       graphVersion: GRAPH_VERSION,
       igId: settings!.igUserId || settings!.igAccountId || "",
@@ -346,6 +347,7 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
         const replyKey = publicReplyKey(job.commentId || job.publicReply.commentId);
         if (await claimIfNew(job.username, replyKey, true)) {
           const replyResult = await postCommentReply({
+            account: job.username,
             igId: settings!.igUserId || settings!.igAccountId || "",
             host: settings!.tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com",
             graphVersion: GRAPH_VERSION,
@@ -471,6 +473,7 @@ async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob
       for (const text of sentTextsOf(plan.messages)) await noteSentText(job.username, text);
 
       const sendArgs = {
+        account: job.username,
         graphHost: settings!.tokenSource === "instagram_login"
           ? "graph.instagram.com"
           : "graph.facebook.com",

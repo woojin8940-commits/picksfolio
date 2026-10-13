@@ -30,6 +30,7 @@
 
 import { finishDmSend, reserveDmSend, retryAfterMs } from "./dm-send-budget.mts";
 import { checkWorkerLease } from "./dm-worker.mts";
+import { markSharedLinkNeedsReauth, type MetaLink } from "./instagram-metrics.mts";
 
 export interface DmButton {
   label: string;
@@ -641,6 +642,11 @@ export interface SendDmArgs {
   /** 첫 통이 형식 오류로 거부됐을 때 대신 보낼 메시지(`DmPlan.fallback`). */
   fallback?: Record<string, unknown>;
   continuation?: boolean;
+  /**
+   * 보내는 계정의 픽스폴리오 아이디. 넘기면 토큰이 죽었다는 답(`permission`)을 받았을 때
+   * 그 연동에 재연동 표시를 남긴다(`noteDeadToken`).
+   */
+  account?: string;
 }
 
 /**
@@ -878,6 +884,31 @@ async function postOneMessage(args: {
  * 메시지가 도착해 있으므로, 재시도하면 같은 본문이 두 번 도착한다.
  */
 export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
+  const result = await sendDmMessagesOnce(args);
+  await noteDeadToken(args.account, args.accessToken, result.errorKind);
+  return result;
+}
+
+/**
+ * 발송이 권한 오류(code 190 등)로 거부됐으면 연동에 재연동 표시를 남긴다.
+ *
+ * 토큰은 자연 만료 전에도 죽는다 — 사람이 앱 권한을 지우거나, 메타가 정책 위반으로
+ * 곧장 취소한 경우다. 토큰 갱신 작업은 만료일만 보므로 이걸 모르고, 웹훅도 토큰
+ * 문자열이 있는지만 본다. 여기서 기록하지 않으면 모든 발송이 같은 오류로 실패하는
+ * 동안에도 설정 화면은 계속 "연결됨"이라고 말한다.
+ *
+ * 쓴 토큰과 같은 토큰을 가진 보관함에만 표시한다(`markSharedLinkNeedsReauth`). 대기열에
+ * 오래 있던 작업이 갱신 전 토큰으로 실패한 경우, 이미 새 토큰으로 바뀐 연동에 표시가
+ * 붙으면 안 된다.
+ */
+async function noteDeadToken(account: string | undefined, accessToken: string, kind?: DmErrorKind) {
+  if (!account || kind !== "permission") return;
+  await markSharedLinkNeedsReauth(account, { accessToken } as MetaLink).catch((e) =>
+    console.warn("[ig-dm] 재연동 표시 실패:", (e as Error)?.message),
+  );
+}
+
+async function sendDmMessagesOnce(args: SendDmArgs): Promise<SendDmResult> {
   const { graphHost, graphVersion, igId, accessToken, recipient, followUpRecipient, messages, fallback } = args;
 
   if (messages.length === 0) {
@@ -975,7 +1006,17 @@ export async function postCommentReply(args: {
   commentId: string;
   accessToken: string;
   message: string;
-}): Promise<{ ok: boolean; replyId?: string; error?: string; uncertain?: boolean; errorKind?: DmErrorKind; retryAfterMs?: number }> {
+  /** 보내는 계정의 픽스폴리오 아이디(`SendDmArgs.account` 와 같다). */
+  account?: string;
+}): Promise<CommentReplyResult> {
+  const result = await postCommentReplyOnce(args);
+  await noteDeadToken(args.account, args.accessToken, result.errorKind);
+  return result;
+}
+
+type CommentReplyResult = { ok: boolean; replyId?: string; error?: string; uncertain?: boolean; errorKind?: DmErrorKind; retryAfterMs?: number };
+
+async function postCommentReplyOnce(args: Parameters<typeof postCommentReply>[0]): Promise<CommentReplyResult> {
   const { host, graphVersion, commentId, accessToken, message } = args;
   let reservation: Awaited<ReturnType<typeof reserveDmSend>>;
   try {

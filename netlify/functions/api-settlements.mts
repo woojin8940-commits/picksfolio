@@ -220,6 +220,8 @@ async function loadDerivedSettlements(
            AND LOWER(cl.influencer_username) = LOWER(ca.applicant_username)
           WHERE ca.status = 'accepted'
             AND COALESCE(c.reward_mode, 'paid') <> 'barter'
+            -- 취소된 협업은 정산 예정으로 다시 만들어 내지 않는다.
+            AND COALESCE(cc.status, '') <> 'cancelled'
             AND LOWER(REGEXP_REPLACE(COALESCE(c.business_username, ''), '^biz/', '')) = ${username}
         `
       : db.sql`
@@ -239,6 +241,8 @@ async function loadDerivedSettlements(
           LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
           WHERE ca.status = 'accepted'
             AND COALESCE(c.reward_mode, 'paid') <> 'barter'
+            -- 취소된 협업은 정산 예정으로 다시 만들어 내지 않는다.
+            AND COALESCE(cc.status, '') <> 'cancelled'
             AND LOWER(ca.applicant_username) = ${username}
         `
     ).catch(() => []),
@@ -515,7 +519,8 @@ export default async (req: Request) => {
      *
      *   · 비즈니스 제안(proposal) — 브랜드가 인플루언서에게 직접 지급한다. 입금
      *     사실은 두 사람만 알고 서로 확인해 주면 되므로, 어느 한쪽이 정산 완료를
-     *     누르면 완료다. 반대쪽 목록에도 같은 값이 그대로 미러링된다.
+     *     누르면 완료다. 반대쪽 목록에도 같은 값이 그대로 미러링된다. 금액은 돈을
+     *     보내는 브랜드만 고친다 — 받는 쪽이 고친 금액이 브랜드 목록으로 옮겨지면 안 된다.
      *   · 담당자 관리 캠페인(campaign) — 돈이 브랜드 → 픽스폴리오 → 인플루언서로
      *     흐른다. 브랜드 입금을 확인하고 원천징수를 떼고 실제로 이체하는 사람이
      *     담당자이므로, 지급 완료도 담당자만 닫는다(api-collab-workflow 의
@@ -582,10 +587,27 @@ export default async (req: Request) => {
             { status: 403 },
           );
         }
+      } else if (role === "influencer" && body.amount !== undefined && body.amount !== null && body.amount !== "") {
+        /*
+         * 비즈니스 제안 정산의 금액도 받는 쪽이 바꾸지 못한다. 금액은 브랜드가 보낸 제안
+         * 조건이고, 여기서 고친 값은 브랜드 정산 목록(counterpartKey)에도 그대로 옮겨진다
+         * — 예전에는 인플루언서가 금액만 바꿔 보내면 브랜드가 보낼 금액이 바뀌었다.
+         * 정산 완료(상태)는 양쪽 누구든 누를 수 있으므로 그대로 둔다.
+         */
+        const current = parseAmount(existing?.amount ?? derivedBase?.amount ?? 0);
+        if (parseAmount(body.amount) !== current) {
+          return Response.json(
+            {
+              error: "정산 금액은 브랜드가 보낸 제안 조건을 따릅니다. 금액 변경은 브랜드에게 요청해 주세요.",
+              code: "AMOUNT_LOCKED",
+            },
+            { status: 403 },
+          );
+        }
       }
 
       /**
-       * 고칠 수 있는 칸만 받는다. 인플루언서는 상태와 금액, 브랜드는 여기에 일정 · 메모 ·
+       * 고칠 수 있는 칸만 받는다. 인플루언서는 상태, 브랜드는 금액과 여기에 일정 · 메모 ·
        * 제목 · 업체명까지. 상대방 아이디 · 출처 · 식별자는 저장된 값을 따른다 — 예전에는
        * 브랜드가 보낸 본문을 통째로 덮어써서, 상대방 아이디를 바꿔 이 항목을 남의 정산
        * 목록으로 미러링할 수 있었다.
@@ -595,7 +617,7 @@ export default async (req: Request) => {
       }
       const patch: Record<string, unknown> = {};
       if (body.status) patch.status = String(body.status);
-      if (body.amount !== undefined && body.amount !== null && body.amount !== "") {
+      if (role === "business" && body.amount !== undefined && body.amount !== null && body.amount !== "") {
         patch.amount = parseAmount(body.amount);
       }
       if (role === "business") {

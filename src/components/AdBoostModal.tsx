@@ -202,16 +202,19 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   /** 빈도 제한은 메타가 도달 최적화에서만 받는다. */
   const canCapFrequency = goal.value === 'REACH';
 
-  /** 데이터 세트(픽셀) 칸을 보이는 목적. 서버는 판매(OUTCOME_SALES) 광고 세트에만 픽셀을
-   *  붙이므로, 트래픽 목적의 랜딩 페이지 조회에서 고른 픽셀은 무시된다. 그래서 판매에서만 보인다. */
-  const showPixel = objective === 'conversions';
+  /**
+   * 데이터 세트(픽셀) 칸. 판매는 이 픽셀로 최적화하고, 다른 목적은 광고의 웹사이트 이벤트
+   * 추적(tracking_specs)으로만 붙인다 — 광고 관리자처럼 어느 목적이든 광고를 보고 들어온 사람의
+   * 구매 · 장바구니가 광고 현황에 잡힌다.
+   */
+  const pixelMode = objective === 'conversions' ? 'optimize' : 'track';
 
   /** 광고 관리자와 같은 설정 묶음. 집행 · 이어서 만들기 · 타겟 규모 추정이 같은 값을 쓴다. */
   const settings = () => ({
     objective,
     optimizationGoal: goal.value,
     conversionEvent: goal.value === 'OFFSITE_CONVERSIONS' ? conversionEvent : goal.value === 'VALUE' ? 'PURCHASE' : undefined,
-    pixelId: showPixel ? pixelId || undefined : undefined,
+    pixelId: pixelId || undefined,
     campaignName: campaignName.trim() || undefined,
     linkUrl: linkUrl.trim() || undefined,
     cta: linkUrl.trim() ? cta : undefined,
@@ -622,16 +625,17 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   <p className="text-[10px] text-slate-400 font-bold mt-1">{goal.hint}</p>
                 </div>
 
-                {showPixel && connected && adAccountId && (
+                {connected && adAccountId && (
                   <MetaPixelField
                     businessUsername={businessUsername}
                     adAccountId={adAccountId}
                     pixelId={pixelId}
                     onChange={setPixelId}
+                    mode={pixelMode}
                   />
                 )}
 
-                {showPixel && needsPixel && connected && (
+                {objective === 'conversions' && needsPixel && connected && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {goal.value === 'OFFSITE_CONVERSIONS' && (
                       <div>

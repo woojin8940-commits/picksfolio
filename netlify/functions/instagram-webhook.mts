@@ -472,6 +472,7 @@ async function sendTriggerDm(
 
   try {
     const result = await sendDmMessages({
+      account: username,
       graphHost: graphHost(settings),
       graphVersion: GRAPH_VERSION,
       igId,
@@ -679,6 +680,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
   const eventId = String(postback?.mid || `${senderId}_${event?.timestamp || ""}`);
   const send = (messages: Record<string, unknown>[]) =>
     sendDmMessages({
+      account: username,
       graphHost: graphHost(settings),
       graphVersion: GRAPH_VERSION,
       igId,
@@ -1441,6 +1443,7 @@ export async function processWebhookPayload(
             outcome.sideEffectAttempted = true;
             repliedNow = true;
             const replyResult = await postCommentReply({
+              account: username,
               igId,
               host: graphHost(settings),
               graphVersion: GRAPH_VERSION,
@@ -1600,6 +1603,7 @@ export async function processWebhookPayload(
           sendAttempted = true;
           outcome.sideEffectAttempted = true;
           let result = await sendDmMessages({
+            account: username,
             graphHost: graphHost(settings),
             graphVersion: GRAPH_VERSION,
             igId,
@@ -1653,6 +1657,7 @@ export async function processWebhookPayload(
             sendAttempted = true;
             outcome.sideEffectAttempted = true;
             result = await sendDmMessages({
+              account: username,
               graphHost: graphHost(settings),
               graphVersion: GRAPH_VERSION,
               igId,

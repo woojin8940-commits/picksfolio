@@ -340,6 +340,7 @@ const handleSend = async (req: Request) => {
     }
     try {
       const result = await sendDmMessages({
+        account: username,
         graphHost,
         graphVersion: GRAPH_VERSION,
         igId,
@@ -702,6 +703,7 @@ const handleSend = async (req: Request) => {
 
     const text = replies[Math.floor(Math.random() * replies.length)];
     const result = await postCommentReply({
+      account: username,
       igId: senderIgId,
       host: graphHost,
       graphVersion: GRAPH_VERSION,
@@ -782,6 +784,7 @@ const handleSend = async (req: Request) => {
       if (replyAvailable) {
         sendAttempted = true;
         const result = await sendDmMessages({
+          account: username,
           graphHost,
           graphVersion: GRAPH_VERSION,
           igId: senderIgId,
@@ -818,6 +821,7 @@ const handleSend = async (req: Request) => {
       if (mayRetryViaIgsid && c.fromId && withinDmWindow(await getDmContact(username, c.fromId))) {
         sendAttempted = true;
         const direct = await sendDmMessages({
+          account: username,
           graphHost,
           graphVersion: GRAPH_VERSION,
           igId: senderIgId,

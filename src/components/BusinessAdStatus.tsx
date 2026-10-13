@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
-import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Settings2, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Search, Settings2, Trash2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
-import { ctaLabel, findObjective, placementSummary, targetSummary } from '../utils/adBoosts';
+import { ctaLabel, placementSummary, targetSummary } from '../utils/adBoosts';
+import { AD_STATUS_LABEL, AdResult, AdStatus, EVENT_LABEL, OBJECTIVE_LABEL, resultKind, resultOf } from '../utils/adResults';
 import {
+  AD_DATE_RANGES,
+  AdDateRange,
   MetaAdWithLive,
   STEP_LABELS,
   adsManagerUrl,
@@ -21,6 +24,8 @@ import AdCreateModal from './AdCreateModal';
 import AdBoostModal from './AdBoostModal';
 import MetaAdDeleteDialog from './MetaAdDeleteDialog';
 import MetaPageEngagementPanel from './MetaPageEngagement';
+import AdOverview, { OverviewView } from './AdOverview';
+import AdPixelPanel from './AdPixelPanel';
 
 /**
  * 광고 현황 — 픽스폴리오 안에서 돌리고 있는 콘텐츠 광고.
@@ -69,13 +74,11 @@ interface BusinessAdStatusProps {
   companyName: string;
 }
 
-/**
- * 메타의 effective_status 를 화면 상태로 옮긴 값(서버의 displayStatus 와 같다).
- *
- * 'draft' 는 메타에 광고까지 다 만들지 못한 기록이다(중간 단계에서 멈춘 것). 카드에서
- * '이어서 만들기' 로 멈춘 단계부터 다시 한다.
+/*
+ * 화면 상태(AdStatus)는 메타의 effective_status 를 옮긴 값이다(서버의 displayStatus 와 같다).
+ * 'draft' 는 메타에 광고까지 다 만들지 못한 기록으로, 카드에서 '이어서 만들기' 로 멈춘 단계부터
+ * 다시 한다. 이름과 색은 한눈에 보기 표와 같이 쓰므로 utils/adResults 에 있다.
  */
-type AdStatus = 'draft' | 'review' | 'active' | 'paused' | 'rejected' | 'issue' | 'ended';
 
 type AdItem = {
   id: string;
@@ -92,8 +95,8 @@ type AdItem = {
    * 카드에서 '자체 소재' 배지와 광고 목적으로 구분해 준다.
    */
   own?: boolean;
-  /** 자체 소재 광고에서 고른 광고 목적(브랜드 인지도 · 트래픽 · 전환). */
-  objectiveLabel?: string;
+  /** 광고 목적(판매 · 트래픽 · 참여 · 인지도). 부스팅과 자체 소재 모두. */
+  objectiveLabel: string;
   /** 광고가 나가는 페이지 이름. 자체 소재 광고에만 있다. */
   pageName?: string;
   /** CTA 문구와 연결 URL 을 한 줄로. 자체 소재 광고에만 있다. */
@@ -102,7 +105,15 @@ type AdItem = {
   startDate: string;
   endDate: string;
   impressions: number;
+  /** 모든 클릭(프로필 · 더보기 포함). */
   clicks: number;
+  /** 링크 클릭. 광고 관리자의 CTR(링크 클릭률) · CPC(링크 클릭당 비용)의 기준이다. */
+  linkClicks: number;
+  /** 웹사이트 · 게시물 이벤트별 횟수(구매 · 장바구니 · 랜딩 페이지 조회 …). */
+  events: Record<string, number>;
+  /** 광고 관리자의 '결과' — 성과 목표에 맞춘 숫자와 결과당 비용. */
+  result: AdResult;
+  resultKey: string;
   /** 광고를 한 번 이상 본 사람 수. 노출과 달리 사람 단위라 중복이 없다. */
   reach: number;
   /** 메타 기준 '결과' 수. 이 화면에서는 구매 전환으로 둔다. */
@@ -131,16 +142,6 @@ type AdItem = {
   notes: string[];
 };
 
-const STATUS_LABEL: Record<AdStatus, { label: string; cls: string }> = {
-  draft: { label: '만드는 중 멈춤', cls: 'bg-rose-50 text-rose-600' },
-  review: { label: 'Meta 검토 중', cls: 'bg-amber-50 text-amber-600' },
-  active: { label: '게재 중', cls: 'bg-emerald-50 text-emerald-600' },
-  paused: { label: '일시중지', cls: 'bg-slate-100 text-slate-500' },
-  rejected: { label: '반려됨', cls: 'bg-rose-50 text-rose-600' },
-  issue: { label: '게재 문제', cls: 'bg-orange-50 text-orange-600' },
-  ended: { label: '종료', cls: 'bg-slate-100 text-slate-500' },
-};
-
 /**
  * 메타 광고 관리자와 같은 계산식으로 파생 지표를 만든다.
  *
@@ -148,10 +149,12 @@ const STATUS_LABEL: Record<AdStatus, { label: string; cls: string }> = {
  * 그리는 쪽에서 '—' 로 비워 둔다. 0.00% 로 찍으면 "성과가 나빴다"로 읽힌다.
  */
 const deriveMetrics = (ad: AdItem) => ({
-  /** 클릭 ÷ 노출 */
+  /** 클릭(전체) ÷ 노출 */
   ctr: ad.impressions > 0 ? (ad.clicks / ad.impressions) * 100 : 0,
-  /** 지출 ÷ 클릭 */
-  cpc: ad.clicks > 0 ? Math.round(ad.spendKrw / ad.clicks) : 0,
+  /** 링크 클릭 ÷ 노출 — 광고 관리자의 CTR(링크 클릭률) */
+  linkCtr: ad.impressions > 0 ? (ad.linkClicks / ad.impressions) * 100 : 0,
+  /** 지출 ÷ 링크 클릭 — 광고 관리자의 CPC(링크 클릭당 비용) */
+  cpc: ad.linkClicks > 0 ? Math.round(ad.spendKrw / ad.linkClicks) : 0,
   /** 노출 1,000회당 비용 */
   cpm: ad.impressions > 0 ? Math.round((ad.spendKrw / ad.impressions) * 1000) : 0,
   /** 노출 ÷ 도달 = 한 사람이 평균 몇 번 봤나 */
@@ -237,12 +240,14 @@ interface AdCardProps {
   onToggle: (ad: AdItem, next: 'ACTIVE' | 'PAUSED') => void;
   onContinue: (ad: AdItem) => void;
   onDelete: (ad: AdItem) => void;
+  /** 지표가 '전체 기간' 인지. 다른 기간이면 예산 소진 막대 대신 그 기간 지출만 적는다. */
+  rangeAll: boolean;
 }
 
-const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelete }) => {
+const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelete, rangeAll }) => {
   // 카드마다 따로 접는다 — 한 광고를 자세히 보는 중에 다른 카드가 같이 펴질 이유가 없다.
   const [open, setOpen] = useState(false);
-  const badge = STATUS_LABEL[ad.status];
+  const badge = AD_STATUS_LABEL[ad.status];
   const m = deriveMetrics(ad);
   const waiting = ad.status === 'review';
   const record = ad.source;
@@ -287,6 +292,7 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
             Meta 상태 {ad.effectiveStatus || '—'}
             {record.campaignId ? ` · 캠페인 ID ${record.campaignId}` : ''}
             {record.adId ? ` · 광고 ID ${record.adId}` : ''}
+            {record.step === 'done' ? (record.pixelId ? ` · 픽셀 ${record.pixelId}` : ' · 픽셀 추적 없음') : ''}
           </p>
           <p className="text-[11px] text-slate-400 font-bold mt-0.5">
             {ad.creatorHandle ? `@${ad.creatorHandle}` : ad.pageName || '자체 소재'}
@@ -308,8 +314,22 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
         </div>
       </div>
 
-      {/* 광고를 훑을 때 실제로 보는 네 개. 나머지는 아래 토글 안에 둔다. */}
+      {/*
+        광고를 훑을 때 실제로 보는 네 개. 맨 앞은 광고 관리자의 '결과' — 이 광고가 노린 성과 목표의
+        숫자다. 판매 광고는 구매, 트래픽 광고는 링크 클릭처럼 목적마다 다르다. 나머지는 토글 안에 둔다.
+      */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
+        <Metric
+          label={`결과 · ${ad.result.label}`}
+          value={ad.result.value > 0 ? formatNumberWithCommas(ad.result.value) : '—'}
+          pending={ad.result.value === 0}
+        />
+        <Metric
+          label={ad.result.perThousand ? '결과당 비용(1,000회)' : '결과당 비용'}
+          value={ad.result.costPer > 0 ? formatNumberWithCommas(ad.result.costPer) : '—'}
+          unit={ad.result.costPer > 0 ? '원' : undefined}
+          pending={ad.result.costPer === 0}
+        />
         <Metric
           label="노출수"
           value={ad.impressions > 0 ? formatNumberWithCommas(ad.impressions) : '—'}
@@ -317,22 +337,11 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
           pending={ad.impressions === 0}
         />
         <Metric
-          label="클릭수"
-          value={ad.clicks > 0 ? formatNumberWithCommas(ad.clicks) : '—'}
-          unit={ad.clicks > 0 ? '회' : undefined}
-          pending={ad.clicks === 0}
-        />
-        <Metric
-          label="CTR"
-          value={m.ctr > 0 ? m.ctr.toFixed(2) : '—'}
-          unit={m.ctr > 0 ? '%' : undefined}
-          pending={m.ctr === 0}
-        />
-        <Metric
-          label="CPC"
-          value={m.cpc > 0 ? formatNumberWithCommas(m.cpc) : '—'}
-          unit={m.cpc > 0 ? '원' : undefined}
-          pending={m.cpc === 0}
+          label="CTR(링크)"
+          value={m.linkCtr > 0 ? m.linkCtr.toFixed(2) : '—'}
+          unit={m.linkCtr > 0 ? '%' : undefined}
+          hint="링크 클릭 ÷ 노출"
+          pending={m.linkCtr === 0}
         />
       </div>
 
@@ -345,6 +354,20 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
 
       {open && (
         <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2 animate-in fade-in duration-200">
+          <Metric
+            label="링크 클릭"
+            value={ad.linkClicks > 0 ? formatNumberWithCommas(ad.linkClicks) : '—'}
+            unit={ad.linkClicks > 0 ? '회' : undefined}
+            hint={ad.clicks > 0 ? `클릭(전체) ${formatNumberWithCommas(ad.clicks)}회 · CTR(전체) ${m.ctr.toFixed(2)}%` : undefined}
+            pending={ad.linkClicks === 0}
+          />
+          <Metric
+            label="CPC(링크)"
+            value={m.cpc > 0 ? formatNumberWithCommas(m.cpc) : '—'}
+            unit={m.cpc > 0 ? '원' : undefined}
+            hint="지출 ÷ 링크 클릭"
+            pending={m.cpc === 0}
+          />
           <Metric
             label="CPM"
             value={m.cpm > 0 ? formatNumberWithCommas(m.cpm) : '—'}
@@ -367,17 +390,17 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
             pending={m.frequency === 0}
           />
           <Metric
-            label="전환수"
+            label="구매"
             value={ad.conversions > 0 ? formatNumberWithCommas(ad.conversions) : '—'}
             unit={ad.conversions > 0 ? '건' : undefined}
-            hint={ad.clicks > 0 ? `클릭 대비 ${((ad.conversions / ad.clicks) * 100).toFixed(1)}%` : undefined}
+            hint={ad.linkClicks > 0 ? `링크 클릭 대비 ${((ad.conversions / ad.linkClicks) * 100).toFixed(1)}%` : undefined}
             pending={ad.conversions === 0}
           />
           <Metric
-            label="전환당 비용"
+            label="구매당 비용"
             value={m.cpa > 0 ? formatNumberWithCommas(m.cpa) : '—'}
             unit={m.cpa > 0 ? '원' : undefined}
-            hint="지출 ÷ 전환수"
+            hint="지출 ÷ 구매"
             pending={m.cpa === 0}
           />
           <Metric
@@ -391,10 +414,31 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
             }
             pending={m.roas === 0}
           />
+          {/*
+            픽셀로 잡힌 나머지 이벤트(구매 외). 광고 관리자에서 열을 하나씩 추가해야 보이던 값을
+            있는 것만 모아 둔다.
+          */}
+          {Object.entries(ad.events)
+            .filter(([key]) => !['PURCHASE', 'LINK_CLICK'].includes(key))
+            .map(([key, value]) => (
+              <Metric
+                key={key}
+                label={EVENT_LABEL[key] || key}
+                value={formatNumberWithCommas(value)}
+                unit="건"
+                hint={ad.spendKrw > 0 ? `건당 ${formatNumberWithCommas(Math.round(ad.spendKrw / value))}원` : undefined}
+              />
+            ))}
         </div>
       )}
 
-      <SpendBar budget={ad.budgetKrw} spend={ad.spendKrw} />
+      {rangeAll ? (
+        <SpendBar budget={ad.budgetKrw} spend={ad.spendKrw} />
+      ) : (
+        <p className="mt-2.5 text-[10px] font-black text-slate-500">
+          선택 기간 지출 {formatKoreanWon(ad.spendKrw)} · 예산 {formatKoreanWon(ad.budgetKrw)}
+        </p>
+      )}
 
       {waiting && (
         <p className="text-[10px] text-amber-600 font-black mt-2">
@@ -502,7 +546,11 @@ const recordToAd = (ad: MetaAdWithLive): AdItem => {
     creatorHandle: own ? undefined : ad.creatorHandle,
     partnershipCode: own ? undefined : ad.partnershipCode,
     own,
-    objectiveLabel: own ? findObjective(ad.objective)?.label : undefined,
+    objectiveLabel:
+      // 픽셀이 없어 판매를 트래픽으로 돌려 집행한 광고는 실제 집행 목적을 같이 적는다.
+      ad.objective === 'conversions' && ad.metaObjective === 'OUTCOME_TRAFFIC'
+        ? '판매→트래픽'
+        : OBJECTIVE_LABEL[ad.objective] || '판매',
     pageName: ad.pageName,
     ctaLine: own ? [ctaLabel(ad.cta), ad.linkUrl].filter(Boolean).join(' · ') || undefined : undefined,
     status,
@@ -510,6 +558,10 @@ const recordToAd = (ad: MetaAdWithLive): AdItem => {
     endDate: ad.endDate,
     impressions: live.impressions || 0,
     clicks: live.clicks || 0,
+    linkClicks: live.linkClicks || live.events?.LINK_CLICK || 0,
+    events: live.events || {},
+    result: resultOf(ad),
+    resultKey: resultKind(ad).key,
     reach: live.reach || 0,
     conversions: live.conversions || 0,
     conversionValueKrw: live.conversionValue || 0,
@@ -597,6 +649,15 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
 
   // 필터는 이력 화면과 같은 방식으로 둔다 — 건수가 적어 화면에서 추리는 편이 빠르다.
   const [filter, setFilter] = useState<'' | 'running' | 'ended'>('');
+  /** 목적 · 인플루언서 필터와 검색. 광고가 수십 개가 되면 상태만으로는 추릴 수 없다. */
+  const [objectiveFilter, setObjectiveFilter] = useState('');
+  const [creatorFilter, setCreatorFilter] = useState('');
+  const [query, setQuery] = useState('');
+  /** 한눈에 보기 묶음(광고별 · 인플루언서별 · 목적별). */
+  const [view, setView] = useState<OverviewView>('ads');
+  /** 지표 기간. 광고 관리자의 날짜 선택과 같은 값이다. */
+  const [range, setRange] = useState<AdDateRange>('maximum');
+  const rangeLabel = AD_DATE_RANGES.find((r) => r.value === range)?.label || '전체 기간';
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [metaAds, setMetaAds] = useState<MetaAdWithLive[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -683,7 +744,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
       return;
     }
     setAdsLoading(true);
-    const res = await fetchMetaAds(cleanUsername, accountId);
+    const res = await fetchMetaAds(cleanUsername, accountId, range);
     if (res.ok) {
       setMetaAds(res.ads);
       setFetchedAt(res.fetchedAt);
@@ -694,7 +755,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
       setAdsNeedReconnect(needsReconnect(res));
     }
     setAdsLoading(false);
-  }, [cleanUsername, connected, accountId]);
+  }, [cleanUsername, connected, accountId, range]);
 
   useEffect(() => {
     void loadAds();
@@ -738,23 +799,38 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
 
   const accountAds = useMemo(() => metaAds.map(recordToAd), [metaAds]);
 
-  const visible = useMemo(
-    () =>
-      accountAds.filter((ad) => {
-        if (filter === 'running') {
-          return ad.status === 'active' || ad.status === 'review' || ad.status === 'issue' || ad.status === 'draft';
-        }
-        if (filter === 'ended') return ad.status === 'ended' || ad.status === 'paused' || ad.status === 'rejected';
-        return true;
-      }),
-    [accountAds, filter],
+  /** 필터 선택지 — 지금 계정에 실제로 있는 목적 · 인플루언서만. */
+  const objectiveOptions = useMemo(() => [...new Set(accountAds.map((a) => a.objectiveLabel))], [accountAds]);
+  const creatorOptions = useMemo(
+    () => [...new Set(accountAds.map((a) => (a.creatorHandle ? `@${a.creatorHandle}` : '자체 소재')))],
+    [accountAds],
   );
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return accountAds.filter((ad) => {
+      if (filter === 'running' && !['active', 'review', 'issue', 'draft'].includes(ad.status)) return false;
+      if (filter === 'ended' && !['ended', 'paused', 'rejected'].includes(ad.status)) return false;
+      if (objectiveFilter && ad.objectiveLabel !== objectiveFilter) return false;
+      if (creatorFilter && (ad.creatorHandle ? `@${ad.creatorHandle}` : '자체 소재') !== creatorFilter) return false;
+      if (q) {
+        const hay = [ad.campaignTitle, ad.creatorHandle, ad.pageName, ad.source.name, ad.source.campaignId, ad.source.adId]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [accountAds, filter, objectiveFilter, creatorFilter, query]);
 
   const totals = useMemo(() => {
     const base = {
       ads: 0,
+      live: 0,
       impressions: 0,
       clicks: 0,
+      linkClicks: 0,
       reach: 0,
       conversions: 0,
       conversionValue: 0,
@@ -763,8 +839,10 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
     };
     for (const ad of visible) {
       base.ads++;
+      if (ad.status === 'active') base.live++;
       base.impressions += ad.impressions;
       base.clicks += ad.clicks;
+      base.linkClicks += ad.linkClicks;
       // 도달은 사람 단위라 광고끼리 겹친다. 여기서는 광고별 도달의 단순 합이고,
       // 중복 제거는 메타 쪽에서만 가능하다 — 그래서 화면에도 그렇게 적어 둔다.
       base.reach += ad.reach;
@@ -776,7 +854,10 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
     return base;
   }, [visible]);
 
-  const avgCpc = totals.clicks > 0 ? Math.round(totals.spend / totals.clicks) : 0;
+  // 광고 관리자의 CPC(링크 클릭당 비용) · CTR(링크 클릭률)과 같은 기준.
+  const avgCpc = totals.linkClicks > 0 ? Math.round(totals.spend / totals.linkClicks) : 0;
+  const avgCtr = totals.impressions > 0 ? (totals.linkClicks / totals.impressions) * 100 : 0;
+  const avgCpa = totals.conversions > 0 ? Math.round(totals.spend / totals.conversions) : 0;
   const avgCpm = totals.impressions > 0 ? Math.round((totals.spend / totals.impressions) * 1000) : 0;
   const avgFrequency = totals.reach > 0 ? totals.impressions / totals.reach : 0;
   const avgRoas = totals.spend > 0 ? totals.conversionValue / totals.spend : 0;
@@ -910,36 +991,68 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             </p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/*
+            지표 기간. 광고 관리자 오른쪽 위의 날짜 선택과 같은 값이다. 요약 · 표 · 픽셀 성과가 모두
+            이 기간의 숫자로 바뀐다(상태와 예산은 기간과 무관하다).
+          */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-3">
+            <span className="text-[11px] font-black text-slate-500 flex-shrink-0 mr-1">기간</span>
+            {AD_DATE_RANGES.map((r) => (
+              <button
+                key={r.value}
+                type="button"
+                onClick={() => setRange(r.value)}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition-colors ${
+                  range === r.value ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <Kpi
-              label="집행 중인 광고"
+              label="광고"
               value={formatNumberWithCommas(totals.ads)}
-              unit="건"
+              unit="개"
+              hint={`게재 중 ${totals.live}개${reviewCount > 0 ? ` · Meta 검토 중 ${reviewCount}개` : ''}`}
+            />
+            <Kpi
+              label={range === 'maximum' ? '지출 · 예산 대비' : `지출 · ${rangeLabel}`}
+              value={totals.spend > 0 ? formatNumberWithCommas(totals.spend) : '—'}
+              unit={totals.spend > 0 ? '원' : undefined}
+              pending={totals.spend === 0}
               hint={
-                reviewCount > 0
-                  ? `Meta 검토 중 ${reviewCount}건 포함 · 픽스폴리오에서 만든 광고입니다`
-                  : '픽스폴리오에서 Meta Marketing API로 만든 광고입니다'
+                range === 'maximum'
+                  ? `예산 ${formatKoreanWon(totals.budget)}의 ${spendPct}%`
+                  : `전체 예산 ${formatKoreanWon(totals.budget)}`
               }
             />
             <Kpi
-              label="총 노출수"
+              label="노출수"
               value={totals.impressions > 0 ? formatNumberWithCommas(totals.impressions) : '—'}
               unit={totals.impressions > 0 ? '회' : undefined}
               pending={totals.impressions === 0}
-              hint={`클릭 ${formatNumberWithCommas(totals.clicks)}회`}
+              hint={avgCpm > 0 ? `CPM ${formatNumberWithCommas(avgCpm)}원` : '노출 1,000회당 비용은 노출 후 표시'}
             />
             <Kpi
-              label="평균 CPC"
-              value={avgCpc > 0 ? formatNumberWithCommas(avgCpc) : '—'}
-              unit={avgCpc > 0 ? '원' : undefined}
-              pending={avgCpc === 0}
-              hint="지출 합계 ÷ 클릭 합계"
+              label="링크 클릭"
+              value={totals.linkClicks > 0 ? formatNumberWithCommas(totals.linkClicks) : '—'}
+              unit={totals.linkClicks > 0 ? '회' : undefined}
+              pending={totals.linkClicks === 0}
+              hint={avgCpc > 0 ? `CTR ${avgCtr.toFixed(2)}% · CPC ${formatNumberWithCommas(avgCpc)}원` : 'CTR · CPC(링크 기준)'}
             />
             <Kpi
-              label="예산 대비 지출"
-              value={`${spendPct}`}
-              unit="%"
-              hint={`예산 ${formatKoreanWon(totals.budget)} 중 ${formatKoreanWon(totals.spend)}`}
+              label="구매 · ROAS"
+              value={totals.conversions > 0 ? formatNumberWithCommas(totals.conversions) : '—'}
+              unit={totals.conversions > 0 ? '건' : undefined}
+              pending={totals.conversions === 0}
+              hint={
+                totals.conversions > 0
+                  ? `ROAS ${avgRoas.toFixed(2)}배 · 구매당 ${formatNumberWithCommas(avgCpa)}원`
+                  : '픽셀로 측정한 웹사이트 구매'
+              }
             />
           </div>
 
@@ -952,13 +1065,6 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
 
           {summaryOpen && (
             <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 animate-in fade-in duration-200">
-              <Kpi
-                label="평균 CPM"
-                value={avgCpm > 0 ? formatNumberWithCommas(avgCpm) : '—'}
-                unit={avgCpm > 0 ? '원' : undefined}
-                pending={avgCpm === 0}
-                hint="노출 1,000회당 비용"
-              />
               <Kpi
                 label="총 도달"
                 value={totals.reach > 0 ? formatNumberWithCommas(totals.reach) : '—'}
@@ -974,11 +1080,18 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
                 hint="노출 합계 ÷ 도달 합계"
               />
               <Kpi
-                label="평균 ROAS"
-                value={avgRoas > 0 ? avgRoas.toFixed(2) : '—'}
-                unit={avgRoas > 0 ? '배' : undefined}
-                pending={avgRoas === 0}
-                hint={`전환 ${formatNumberWithCommas(totals.conversions)}건 · 전환 가치 ${formatKoreanWon(totals.conversionValue)}`}
+                label="클릭(전체)"
+                value={totals.clicks > 0 ? formatNumberWithCommas(totals.clicks) : '—'}
+                unit={totals.clicks > 0 ? '회' : undefined}
+                pending={totals.clicks === 0}
+                hint="프로필 · 더보기 클릭까지 포함"
+              />
+              <Kpi
+                label="구매 전환 가치"
+                value={totals.conversionValue > 0 ? formatNumberWithCommas(totals.conversionValue) : '—'}
+                unit={totals.conversionValue > 0 ? '원' : undefined}
+                pending={totals.conversionValue === 0}
+                hint="픽셀 구매 이벤트에 실린 금액의 합계"
               />
             </div>
           )}
@@ -1010,22 +1123,75 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             </div>
           )}
 
-          <div className="mt-6 flex flex-wrap items-center gap-1.5">
-            {([['', '전체'], ['running', '진행 중'], ['ended', '종료·중지']] as ['' | 'running' | 'ended', string][]).map(
-              ([key, label]) => (
-                <button
-                  key={key || 'all'}
-                  onClick={() => setFilter(key)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
-                    filter === key
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
-                  }`}
-                >
-                  {label}
-                </button>
-              ),
-            )}
+          {/* 묶어 보기 · 필터. 표 위에 한 줄로 둔다. */}
+          <div className="mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="inline-flex rounded-xl bg-slate-100 p-1 self-start" role="tablist" aria-label="묶어 보기">
+              {([['ads', '광고별'], ['creator', '인플루언서별'], ['objective', '목적별']] as [OverviewView, string][]).map(
+                ([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === key}
+                    onClick={() => setView(key)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                      view === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {([['', '전체'], ['running', '진행 중'], ['ended', '종료·중지']] as ['' | 'running' | 'ended', string][]).map(
+                ([key, label]) => (
+                  <button
+                    key={key || 'all'}
+                    onClick={() => setFilter(key)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                      filter === key
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
+              <select
+                value={objectiveFilter}
+                onChange={(e) => setObjectiveFilter(e.target.value)}
+                aria-label="광고 목적"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-600"
+              >
+                <option value="">모든 목적</option>
+                {objectiveOptions.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              <select
+                value={creatorFilter}
+                onChange={(e) => setCreatorFilter(e.target.value)}
+                aria-label="인플루언서"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-600 max-w-[160px]"
+              >
+                <option value="">모든 인플루언서</option>
+                {creatorOptions.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="광고 · 캠페인 · ID 검색"
+                  aria-label="광고 검색"
+                  className="pl-7 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 w-44 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
           </div>
 
           {adsLoading && metaAds.length === 0 ? (
@@ -1051,19 +1217,29 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
               )}
             </div>
           ) : (
-            <div className="mt-4 space-y-3">
-              {visible.map((ad) => (
-                <AdCard
-                  key={ad.id}
-                  ad={ad}
-                  busy={busyId === ad.id}
-                  onToggle={(target, next) => void toggleAd(target, next)}
-                  onContinue={continueAd}
-                  onDelete={(target) => setDeleteTarget(target.source)}
-                />
-              ))}
-            </div>
+            <AdOverview
+              ads={visible}
+              view={view}
+              renderDetail={(row) => {
+                const ad = visible.find((v) => v.id === row.id);
+                return ad ? (
+                  <AdCard
+                    ad={ad}
+                    busy={busyId === ad.id}
+                    rangeAll={range === 'maximum'}
+                    onToggle={(target, next) => void toggleAd(target, next)}
+                    onContinue={continueAd}
+                    onDelete={(target) => setDeleteTarget(target.source)}
+                  />
+                ) : null;
+              }}
+            />
           )}
+
+          {/* 데이터 세트(픽셀) — 광고가 만든 웹사이트 전환과 픽셀이 받은 전체 이벤트. */}
+          {accountAds.length > 0 || !adsLoading ? (
+            <AdPixelPanel username={cleanUsername} adAccountId={account.id} ads={visible} rangeLabel={rangeLabel} />
+          ) : null}
 
           {/* 고른 페이지의 게시물 반응(pages_read_engagement). */}
           <div className="mt-6">
