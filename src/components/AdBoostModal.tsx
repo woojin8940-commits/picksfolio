@@ -202,8 +202,9 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   /** 빈도 제한은 메타가 도달 최적화에서만 받는다. */
   const canCapFrequency = goal.value === 'REACH';
 
-  /** 데이터 세트(픽셀) 칸을 보이는 목표. 판매 목표거나 픽셀로 재는 성과 목표일 때. */
-  const showPixel = objective === 'conversions' || needsPixel;
+  /** 데이터 세트(픽셀) 칸을 보이는 목적. 서버는 판매(OUTCOME_SALES) 광고 세트에만 픽셀을
+   *  붙이므로, 트래픽 목적의 랜딩 페이지 조회에서 고른 픽셀은 무시된다. 그래서 판매에서만 보인다. */
+  const showPixel = objective === 'conversions';
 
   /** 광고 관리자와 같은 설정 묶음. 집행 · 이어서 만들기 · 타겟 규모 추정이 같은 값을 쓴다. */
   const settings = () => ({
@@ -630,7 +631,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   />
                 )}
 
-                {needsPixel && connected && (
+                {showPixel && needsPixel && connected && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {goal.value === 'OFFSITE_CONVERSIONS' && (
                       <div>
