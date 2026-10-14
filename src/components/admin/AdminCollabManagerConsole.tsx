@@ -12,10 +12,11 @@ import { copyText } from '../../utils/clipboard';
  *
  * 이 화면은 협업 목록이 아니라 **지금 담당자가 막고 있는 일**에서 시작한다. 브랜드와
  * 인플루언서 사이에 사람을 두면 그 사람이 답을 미루는 순간 양쪽이 함께 멈추기 때문에,
- * 첫 화면에 "선정 대기 · 검수 대기 · 마감 경과 · 답 없는 채널"만 올려 둔다.
+ * 첫 화면에 "선정 대기 · 검수 대기 · 마감 경과"만 올려 둔다. 인플루언서 연락은
+ * 카카오톡 채널(연락 요청 알림톡)과 전화로 한다.
  *
  * 여기서 하는 일:
- *   * 지원자 선정 / 거절 (선정하면 협업 본체와 단계, 양쪽 채널이 만들어진다)
+ *   * 지원자 선정 / 거절 (선정하면 협업 본체와 단계가 만들어진다)
  *   * 조건 확정(금액·마감일) — 확정하면 단계 마감일로 내려간다
  *   * 제출물 검수: 승인 또는 수정 요청
  *   * 브랜드 의견을 다듬어 인플루언서에게 전달
@@ -33,7 +34,6 @@ type QueueData = {
   pendingApplications?: any[];
   awaitingReview?: any[];
   overdueStages?: any[];
-  unansweredThreads?: any[];
   counts?: Record<string, number>;
   error?: string;
 };
@@ -106,12 +106,6 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  // 담당자 채널 — 운영 콘솔 안에서 바로 답장한다
-  const [threadId, setThreadId] = useState('');
-  const [thread, setThread] = useState<any>(null);
-  const [threadLoading, setThreadLoading] = useState(false);
-  const [threadDraft, setThreadDraft] = useState('');
 
   /**
    * 지원자마다 적는 추천 이유 초안.
@@ -209,38 +203,6 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
     setDetailLoading(false);
   };
 
-  const openThread = async (proposalId: string) => {
-    setThreadId(proposalId);
-    setThread(null);
-    setThreadDraft('');
-    setThreadLoading(true);
-    const res = await apiService.getTimelineThread(proposalId, token);
-    setThreadLoading(false);
-    if (res.error) {
-      notify(res.error, 'error');
-      setThreadId('');
-      return;
-    }
-    setThread(res.timeline || null);
-  };
-
-  const sendThreadMessage = async () => {
-    const text = threadDraft.trim();
-    if (!text || !threadId) return;
-    setBusy(true);
-    const res = await apiService.postTimelineComment(threadId, text, token);
-    setBusy(false);
-    if (res.error) {
-      notify(res.error, 'error');
-      return;
-    }
-    setThreadDraft('');
-    setThread((prev: any) =>
-      prev ? { ...prev, comments: [...(prev.comments || []), res.comment] } : prev,
-    );
-    await loadQueue();
-  };
-
   const act = async (collabId: string, action: string, payload: Record<string, any> = {}) => {
     setBusy(true);
     const res = await apiService.collabAction(collabId, action, payload, token, 'manager');
@@ -265,7 +227,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
       return;
     }
     if (status === 'accepted') {
-      notify('선정했습니다. 협업 단계와 양쪽 담당자 채널이 만들어졌습니다.');
+      notify('선정했습니다. 협업 단계가 만들어졌습니다.');
       if (res.collabId) openCollab(res.collabId);
     } else {
       notify('거절 처리했습니다.');
@@ -386,80 +348,6 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
           }`}
         >
           {message.text}
-        </div>
-      )}
-
-      {/* 담당자 채널 대화 — 운영 콘솔은 서비스 화면의 대화 UI 로 넘어갈 수 없어서
-          같은 대화 API 를 여기서 직접 읽고 쓴다. */}
-      {threadId && (
-        <div className="bg-white rounded-2xl border border-blue-100 shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between gap-2 px-4 py-3 bg-blue-50/60 border-b border-blue-100">
-            <div className="min-w-0">
-              <p className="text-xs font-black text-slate-900 truncate">
-                {threadId.startsWith('support_inf_') ? '인플루언서 채널' : threadId.startsWith('support_biz_') ? '브랜드 채널' : '대화'}
-                {thread?.influencerUsername && threadId.startsWith('support_inf_') && ` · @${thread.influencerUsername}`}
-                {thread?.companyName && threadId.startsWith('support_biz_') && ` · ${thread.companyName}`}
-              </p>
-              <p className="text-[10px] text-slate-400 font-bold truncate">{threadId}</p>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              <button
-                onClick={() => openThread(threadId)}
-                className="text-[10px] text-slate-400 font-bold hover:text-slate-700"
-              >
-                새로고침
-              </button>
-              <button
-                onClick={() => {
-                  setThreadId('');
-                  setThread(null);
-                }}
-                className="text-[10px] text-slate-400 font-bold hover:text-slate-700"
-              >
-                닫기
-              </button>
-            </div>
-          </div>
-
-          <div className="max-h-80 overflow-y-auto p-4 space-y-2 bg-slate-50/40">
-            {threadLoading ? (
-              <p className="text-xs text-slate-400 font-bold text-center py-6">대화를 불러오는 중...</p>
-            ) : (thread?.comments || []).length === 0 ? (
-              <p className="text-xs text-slate-400 font-bold text-center py-6">아직 대화가 없습니다. 먼저 말을 걸어 보세요.</p>
-            ) : (
-              thread.comments.map((c: any) => {
-                const mine = c.authorType === 'manager';
-                return (
-                  <div key={c.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-xl px-3 py-2 ${mine ? 'bg-blue-600 text-white' : 'bg-white border border-slate-100 text-slate-700'}`}>
-                      <p className={`text-[10px] font-black mb-0.5 ${mine ? 'text-blue-100' : 'text-slate-400'}`}>
-                        {c.authorName || (c.authorType === 'business' ? '브랜드' : c.authorType === 'influencer' ? '인플루언서' : '담당자')}
-                        {c.createdAt && ` · ${new Date(c.createdAt).toLocaleString('ko-KR')}`}
-                      </p>
-                      <p className="text-xs font-medium whitespace-pre-wrap break-words">{c.content}</p>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          <div className="p-3 border-t border-slate-100 flex gap-2">
-            <textarea
-              value={threadDraft}
-              onChange={e => setThreadDraft(e.target.value)}
-              rows={2}
-              placeholder="담당자 이름으로 전송됩니다"
-              className="flex-1 text-xs font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:border-blue-400"
-            />
-            <button
-              onClick={sendThreadMessage}
-              disabled={busy || !threadDraft.trim()}
-              className="px-4 bg-slate-900 text-white rounded-lg text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 flex-shrink-0"
-            >
-              보내기
-            </button>
-          </div>
         </div>
       )}
 
@@ -685,45 +573,6 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                 </div>
               )}
             </Card>
-
-            {/* 답 없는 채널 */}
-            <Card title="내 답을 기다리는 채널" count={(queue.unansweredThreads || []).length} tone="amber">
-              {(queue.unansweredThreads || []).length === 0 ? (
-                <p className="text-xs text-slate-400 font-medium">모든 채널에 담당자 답변이 마지막입니다.</p>
-              ) : (
-                <div className="space-y-2">
-                  {queue.unansweredThreads!.map(t => (
-                    <div key={t.proposalId} className="flex items-center justify-between gap-3 border border-slate-100 rounded-xl px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-black text-slate-900 truncate">
-                          {t.kind === 'influencer_support' ? '인플루언서' : '브랜드'} @{t.counterpart}
-                        </p>
-                        <p className="text-[10px] text-slate-400 font-medium truncate">{t.preview}</p>
-                        <p className="text-[10px] text-slate-300 font-bold">
-                          {t.lastMessageAt ? new Date(t.lastMessageAt).toLocaleString('ko-KR') : ''}
-                        </p>
-                      </div>
-                      <div className="flex gap-1.5 flex-shrink-0">
-                        <button
-                          onClick={() => openThread(t.proposalId)}
-                          className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700"
-                        >
-                          답장
-                        </button>
-                        {t.collabId && (
-                          <button
-                            onClick={() => openCollab(t.collabId)}
-                            className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black hover:bg-slate-200"
-                          >
-                            협업
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
           </div>
         )
       )}
@@ -784,16 +633,6 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                         </p>
                       </div>
                       <div className="flex gap-1.5 flex-shrink-0">
-                        <button
-                          onClick={() => openThread(`support_inf_${c.id}`)}
-                          className="px-2.5 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black hover:bg-slate-200"
-                        >
-                          인플루언서 채널
-                        </button>
-                        {/* 브랜드 채널 버튼은 없앴다. 브랜드↔담당자 방을 더 이상 만들지
-                            않기 때문이다 — 브랜드의 요청은 진행사항의 단계별 피드백으로
-                            들어오고, 담당자는 '관리'에서 그것을 본다. 예전에 만들어진
-                            방은 담당자 대화 목록에 그대로 남아 있다. */}
                         <button
                           onClick={() => openCollab(c.id)}
                           className="px-2.5 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700"

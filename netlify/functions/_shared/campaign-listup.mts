@@ -781,7 +781,7 @@ function maskName(name: string) {
 /**
  * 인플루언서의 제안 목록과 브랜드 수신함에 협업을 노출한다.
  *
- * 대화는 담당자 채널로 가지만, 양쪽의 기존 목록 화면은 Blobs 의 제안 배열을
+ * 진행은 협업 화면에서 하지만, 양쪽의 기존 목록 화면은 Blobs 의 제안 배열을
  * 읽는다. 협업이 생겼는데 목록에 없으면 "선정됐다는데 아무것도 없다"가 된다.
  */
 export async function mirrorCollabProposal(input: {
@@ -933,8 +933,6 @@ export type AcceptResult = {
   collabId: string;
   applicationId: string;
   created: boolean;
-  influencerThreadId: string;
-  brandThreadId: string;
 };
 
 /**
@@ -998,7 +996,7 @@ export async function acceptListup(input: {
     applicationId = ((back as any[])?.[0]?.id as string) || applicationId;
   }
 
-  // 2) 협업 본체 + 단계 + 조건 초안 + 담당자 채널
+  // 2) 협업 본체 + 단계 + 조건 초안
   const collab = await createCollabForApplication({
     db,
     campaignId: listup.campaign_id,
@@ -1071,7 +1069,5 @@ export async function acceptListup(input: {
     collabId: collab.id,
     applicationId,
     created: collab.created,
-    influencerThreadId: collab.influencerThreadId,
-    brandThreadId: collab.brandThreadId,
   };
 }

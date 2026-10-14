@@ -41,16 +41,12 @@ export type PortOnePayMethod = 'CARD' | 'KAKAOPAY';
 const INTENT_KEY = 'portone_pending_intent';
 
 export interface PortOneIntent {
-  type: 'claude' | 'membership';
+  type: 'membership';
   username: string;
   payMethod: PortOnePayMethod;
   // Where to send the user back inside the SPA after the server finalises.
   returnPath: string;
   orderName: string;
-  // claude one-time payment amount
-  amountKrw?: number;
-  // claude credit grant kind
-  kind?: 'activation' | 'recharge';
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm';
   promoCode?: string;

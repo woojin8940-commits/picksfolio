@@ -16,7 +16,6 @@ import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts"
  *   2. 선정 대기 지원자        — 브랜드 의견이 있으면 함께 보여준다
  *   3. 검수 대기 제출물        — 인플루언서가 이미 일을 끝내고 기다리는 중
  *   4. 마감 경과 단계          — 사람이 개입해야 풀리는 지연
- *   5. 응답 없는 담당자 채널   — 마지막 말이 담당자가 아닌 방
  */
 
 export default async (req: Request) => {
@@ -34,7 +33,7 @@ export default async (req: Request) => {
   const today = todayInSeoul();
 
   try {
-    const [unassigned, pendingApps, awaitingReview, overdueStages, unansweredThreads, counts] =
+    const [unassigned, pendingApps, awaitingReview, overdueStages, counts] =
       await Promise.all([
         db.sql`
           SELECT id, title, brand_name, business_username, type, end_date, created_at,
@@ -88,27 +87,6 @@ export default async (req: Request) => {
             AND s.due_date < ${today}
             AND (${mineOnly} = false OR COALESCE(c.manager_username, '') = ${me})
           ORDER BY s.due_date ASC
-          LIMIT 100
-        `,
-
-        // 마지막 메시지를 담당자가 쓰지 않은 방 = 우리가 답을 미루고 있는 방.
-        db.sql`
-          SELECT t.proposal_id, t.kind, t.collab_id, t.manager_username,
-                 t.company_name, t.proposal_title,
-                 t.influencer_username, t.business_username,
-                 m.author_type, m.author_name, m.content, m.created_at AS last_message_at
-          FROM timelines t
-          JOIN LATERAL (
-            SELECT author_type, author_name, content, created_at
-            FROM timeline_messages tm
-            WHERE tm.proposal_id = t.proposal_id
-            ORDER BY tm.created_at DESC
-            LIMIT 1
-          ) m ON TRUE
-          WHERE t.kind IN ('influencer_support', 'brand_support')
-            AND m.author_type <> 'manager'
-            AND (${mineOnly} = false OR COALESCE(t.manager_username, '') = ${me})
-          ORDER BY m.created_at ASC
           LIMIT 100
         `,
 
@@ -180,19 +158,6 @@ export default async (req: Request) => {
         managerUsername: s.manager_username || "",
         dueDate: s.due_date || "",
         daysLate: -(daysUntil(s.due_date, today) ?? 0),
-      })),
-      unansweredThreads: (unansweredThreads as any[]).map((t) => ({
-        proposalId: t.proposal_id,
-        kind: t.kind,
-        collabId: t.collab_id || "",
-        counterpart: t.kind === "influencer_support" ? t.influencer_username : t.business_username,
-        companyName: t.company_name || "",
-        proposalTitle: t.proposal_title || "",
-        managerUsername: t.manager_username || "",
-        lastAuthorType: t.author_type,
-        lastAuthorName: t.author_name || "",
-        preview: String(t.content || "").slice(0, 80),
-        lastMessageAt: t.last_message_at,
       })),
       counts: (counts as any[])[0] || {},
     });

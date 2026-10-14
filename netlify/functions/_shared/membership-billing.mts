@@ -1,9 +1,7 @@
 /**
  * Recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로).
  *
- * Unlike the Claude plan — which is a prepaid credit wallet topped up by balance,
- * NOT by a calendar cycle, and is intentionally EXCLUDED from this module — the
- * memberships are true monthly subscriptions. Each member pays on the anniversary
+ * The memberships are true monthly subscriptions. Each member pays on the anniversary
  * of the day they subscribed (가입일 기준): subscribe on the 8th → next charge on
  * the 8th of the following month, and so on.
  *

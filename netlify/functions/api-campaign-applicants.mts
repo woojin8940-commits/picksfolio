@@ -26,7 +26,7 @@ import { todayInSeoul } from "./_shared/campaign-recruit.mts";
  *     중간에서 조건과 일정을 맡는다. 브랜드가 "추천"만 남기고 담당자의 확인을 기다리게
  *     하면, 브랜드는 이미 결정을 내렸는데 아무 일도 일어나지 않는 시간이 생긴다.
  *
- * 어느 쪽이든 수락은 협업 본체·단계·담당자 채널 2개를 한꺼번에 만든다(담당자가 중간에
+ * 어느 쪽이든 수락은 협업 본체·단계를 한꺼번에 만든다(담당자가 중간에
  * 들어오는 지점이다). 그래서 누가 눌렀는지를 decided_by / decided_by_role 로 나눠 남긴다
  * — 한 컬럼을 공유하면 "브랜드가 고른 협업"과 "담당자가 고른 협업"을 나중에 구분할 수 없다.
  *
@@ -224,7 +224,7 @@ export default async (req: Request) => {
 
       // --- 선정/거절 ------------------------------------------------------
       // 제품 협찬형·공동구매는 브랜드가 지원자 중에서 직접 수락하고, 광고비 지급형은
-      // 담당자가 고른다. 어느 쪽이든 수락은 협업 본체와 단계, 담당자 채널을 한꺼번에
+      // 담당자가 고른다. 어느 쪽이든 수락은 협업 본체와 단계를 한꺼번에
       // 만들어 담당자를 중간에 세운다.
       const openApply = isOpenApplyMode(appRow.reward_mode);
       const manager = await requireManager(req);
@@ -294,7 +294,7 @@ export default async (req: Request) => {
       const campaignTitle = appRow.campaign_title || "";
       const fee = parseAmount(appRow.reward_amount);
 
-      // 1) 협업 본체 + 단계 + 조건 초안 + 담당자 채널 2개
+      // 1) 협업 본체 + 단계 + 조건 초안
       const collab = await createCollabForApplication({
         db,
         campaignId: appRow.campaign_id,
@@ -334,7 +334,7 @@ export default async (req: Request) => {
       });
 
       // 2) 인플루언서의 제안 목록과 브랜드 수신함에 이 협업을 노출한다.
-      //    (대화는 담당자 채널로 가지만, 목록에는 진행 중 협업으로 보여야 한다.)
+      //    (진행은 협업 화면에서 하지만, 목록에는 진행 중 협업으로 보여야 한다.)
       //    리스트업 수락도 같은 반영이 필요해서 공용 함수로 빼 두었다.
       await mirrorCollabProposal({
         collabId: collab.id,
@@ -369,10 +369,6 @@ export default async (req: Request) => {
       return Response.json({
         success: true,
         collabId: collab.id,
-        threads: {
-          influencerSupport: collab.influencerThreadId,
-          brandSupport: collab.brandThreadId,
-        },
         created: collab.created,
         // 담당자 배정 전이라면 화면이 "담당자가 곧 연락드립니다"로 안내할 수 있게 알려준다.
         managerUsername,

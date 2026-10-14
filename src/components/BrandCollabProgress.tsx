@@ -1102,7 +1102,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
           {/* 담당자 화면에만 붙는 줄 — 브랜드 담당자의 이름과 연락처.
               브랜드에게서 정산금을 받아야 하고 조건 · 일정도 결국 카톡이나 유선으로
               풀리는데, 그 번호를 찾으러 캠페인 목록으로 되돌아가던 걸음을 없앤다.
-              브랜드↔담당자 대화방은 만들지 않는다(서버 threads.brandSupport). */}
+              브랜드와 담당자 사이 대화방은 없다. */}
           {isManager && campaignId && (
             <BrandContactCard campaignId={campaignId} brandName={brandName} />
           )}

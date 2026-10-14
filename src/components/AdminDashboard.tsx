@@ -4,7 +4,7 @@ import { getAnalyticsForRange } from '../services/analyticsService';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
-import { apiService, authHeaders } from '../services/apiService';
+import { apiService } from '../services/apiService';
 import { todayInSeoul } from '../utils/formatters';
 import { Block } from '../types';
 import AITrendAnalysis from './AITrendAnalysis';
@@ -17,7 +17,7 @@ import { useCloseOnBack } from '../hooks/useCloseOnBack';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
+  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs';
   onNavigateDashboard: () => void;
   onViewMyPage: () => void;
   onNavigateLinks: () => void;
@@ -28,7 +28,6 @@ interface AdminDashboardProps {
   onNavigateCalendar: () => void;
   onNavigateMembership: () => void;
   onNavigateOpenSchedule: () => void;
-  onNavigateTimeline: () => void;
   onNavigateCampaigns: () => void;
   /** 이미 시작한 협업만 보는 화면. 캠페인 찾기와 자리를 나눠 둔다. */
   onNavigateMyCollabs: () => void;
@@ -47,7 +46,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateBusiness,
   onNavigateCalendar,
   onNavigateOpenSchedule,
-  onNavigateTimeline,
   onNavigateCampaigns,
   onNavigateMyCollabs,
   children
@@ -60,7 +58,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // 서랍은 화면을 가득 덮는다. 덮인 화면에서 뒤로가기를 누르는 것은 자연스러운
   // 반응인데 그게 앱을 떠나는 동작이면 사용자는 서랍에 갇힌다. 뒤로가기로 닫는다.
   useCloseOnBack(isMobileMenuOpen, () => setIsMobileMenuOpen(false));
-  const [timelineUnread, setTimelineUnread] = useState(0);
   /**
    * 캠페인 협업 진행사항의 안 읽은 수.
    *
@@ -134,29 +131,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return loadDashboardCounts();
     }
   }, [currentSubView, loadDashboardCounts]);
-
-  useVisiblePolling(async signal => {
-    if (!userName) return;
-    const normalizedName = userName.toLowerCase();
-    const cacheKey = `picks_timelines_influencer_${normalizedName}`;
-    try {
-      const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer&unread=1`, {
-        headers: await authHeaders(),
-        signal,
-      });
-      const data = await res.json();
-      if (signal.aborted || !res.ok) return;
-      if (typeof data.unreadTotal === 'number' || data.timelines) {
-        const total = typeof data.unreadTotal === 'number'
-          ? data.unreadTotal
-          : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
-        setTimelineUnread(total);
-        if (data.timelines) {
-          try { localStorage.setItem(cacheKey, JSON.stringify(data.timelines)); } catch {}
-        }
-      }
-    } catch {}
-  }, 120000, !!userName && currentSubView !== 'timeline', userName, 4000);
 
   // 진행사항의 빨간 표시. 협업 화면에 들어가 있는 동안에는 묻지 않는다 — 그 화면이
   // 협업을 열 때마다 읽음을 남기므로, 화면을 벗어난 뒤 다시 세는 것이 맞다.
@@ -233,14 +207,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         : []
       );
 
-  // The timeline (collaboration messages) is a full-height chat view that
-  // manages its own viewport height and pins its composer to the bottom, so it
-  // must not inherit the dashboard's bottom padding (which would otherwise push
-  // the conversation up and leave an empty band beneath it).
-  const isFullHeightView = currentSubView === 'timeline';
-
   return (
-    <div className={`flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 md:pb-0 ${isFullHeightView ? '' : 'pb-20'}`}>
+    <div className={`flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 md:pb-0 pb-20`}>
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-60 bg-[#0b1221] text-white fixed h-full flex-col p-6 z-50">
         <div
@@ -301,13 +269,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClick={onNavigateBusiness}
           />
           <NavItem
-            icon="💬"
-            label={t('nav.timeline', '협업 타임라인', 'Timeline')}
-            active={currentSubView === 'timeline'}
-            onClick={onNavigateTimeline}
-            badge={timelineUnread}
-          />
-          <NavItem
             icon="📅"
             label={t('nav.calendar', '협업 현황', 'Calendar')}
             active={currentSubView === 'calendar'}
@@ -366,7 +327,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <MobileNavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="🤝" label={t('nav.barCollabs', '협업', 'Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
             <MobileNavItem icon="📨" label={t('nav.barInbox', '수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
-            <MobileNavItem icon="💬" label={t('nav.barTimeline', '타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
             <MobileNavItem icon="📅" label={t('nav.barCalendar', '협업현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="🗓️" label={t('nav.barSchedule', '오픈일정', 'Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
           </div>
@@ -410,7 +370,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🤝" label={t('nav.myCollabs', '협업 캠페인', 'Collab Campaigns')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💬" label={t('nav.timeline', '협업 타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
             </nav>
@@ -432,7 +391,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* Content Area */}
-      <div className={`flex-1 md:ml-60 w-full ${isFullHeightView ? 'md:min-h-screen' : 'min-h-screen pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-0'}`}>
+      <div className={`flex-1 md:ml-60 w-full min-h-screen pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-0`}>
         {children || (
           <ErrorBoundary>
             <main className="p-4 md:p-14 w-full animate-in fade-in duration-500">

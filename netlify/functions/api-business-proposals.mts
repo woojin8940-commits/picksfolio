@@ -95,6 +95,10 @@ export default async (req: Request, context: Context) => {
           business_username: username,
           status: row.status || "pending",
           rejection_reason: row.rejection_reason || "",
+          // 수락할 때 인플루언서가 이 브랜드에게 넘긴 연락처(api-proposal-item).
+          influencer_kakao_id: row.influencer_kakao_id || "",
+          influencer_phone: row.influencer_phone || "",
+          contact_shared_at: row.contact_shared_at || "",
           created_at: row.created_at || new Date().toISOString(),
           createdAt: row.created_at || new Date().toISOString(),
           updated_at: row.updated_at || "",

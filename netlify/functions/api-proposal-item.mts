@@ -2,7 +2,6 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
-import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
 import {
@@ -62,8 +61,26 @@ export default async (req: Request, context: Context) => {
     if (status === "rejected" && !rejectionReason) {
       return Response.json({ error: "거절 사유를 입력해 주세요." }, { status: 400 });
     }
-    const changes = { status, rejection_reason: rejectionReason };
     const updatedAt = new Date().toISOString();
+
+    // 수락하면 인플루언서가 적어 낸 카카오톡 아이디와 휴대폰 번호를 이 제안의
+    // 브랜드에게 넘긴다. 이후 대화는 카카오톡으로 이어진다. 화면의 동의 안내를 보고
+    // 직접 입력한 값만 받는다 — 계정 정보에서 끌어오지 않는다.
+    const contact: Record<string, string> = {};
+    if (status === "accepted") {
+      const kakaoId = String(body.influencer_kakao_id || "").trim().replace(/^@+/, "").slice(0, 80);
+      const phone = String(body.influencer_phone || "").replace(/\D/g, "");
+      if (!kakaoId) {
+        return Response.json({ error: "카카오톡 아이디를 입력해 주세요." }, { status: 400 });
+      }
+      if (!/^01\d{8,9}$/.test(phone)) {
+        return Response.json({ error: "휴대폰 번호를 정확히 입력해 주세요." }, { status: 400 });
+      }
+      contact.influencer_kakao_id = kakaoId;
+      contact.influencer_phone = phone;
+      contact.contact_shared_at = updatedAt;
+    }
+    const changes = { status, rejection_reason: rejectionReason, ...contact };
 
     /**
      * 고칠 제안을 찾는다 — Blobs 캐시 먼저, 없으면 SQL.
@@ -204,6 +221,9 @@ export default async (req: Request, context: Context) => {
         UPDATE proposals SET
           status = ${status},
           rejection_reason = ${rejectionReason || null},
+          influencer_kakao_id = COALESCE(${contact.influencer_kakao_id || null}, influencer_kakao_id),
+          influencer_phone = COALESCE(${contact.influencer_phone || null}, influencer_phone),
+          contact_shared_at = COALESCE(${contact.contact_shared_at || null}::timestamptz, contact_shared_at),
           updated_at = NOW()
         WHERE id = ${proposalId}
           AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
@@ -258,22 +278,6 @@ export default async (req: Request, context: Context) => {
     }
 
     if (status === "accepted") {
-      // 방은 제안이 도착할 때 이미 열려 있다(api-proposals POST). 여기서는 수락
-      // 안내만 덧붙이고, 예전 제안이나 방 생성이 실패했던 건은 이 시점에 만든다.
-      try {
-        await ensureTimelineRoom({
-          proposalId,
-          influencerUsername: username,
-          businessUsername: bizUsername,
-          companyName: updatedProposal.company_name || "",
-          proposalTitle: updatedProposal.title || "",
-          systemMessage: `"${updatedProposal.title || "협업 제안"}" 협업 제안이 수락되었습니다. 메시지를 보내 소통을 시작해보세요!`,
-          appendIfExists: statusChanged,
-        });
-      } catch (e) {
-        console.error("Failed to create timeline on accept:", e);
-      }
-
       // 협업일정 등록 — 비즈니스 제안으로 성사된 협업도 협업 내역(캘린더)에 올린다.
       //
       // 담당자 리스트업으로 진행되는 캠페인 협업은 담당자가 일정을 체크하면
@@ -356,20 +360,23 @@ export default async (req: Request, context: Context) => {
         const templateId = Netlify.env.get("SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID") || "";
         const proposalTitle = updatedProposal.title || "협업 제안";
         const statusText = status === "accepted" ? "수락" : "거절";
-        const encodedProposalId = encodeURIComponent(proposalId);
-        const magicLink = status === "accepted"
-          ? `${siteOrigin}/business-admin?tab=timeline&proposal=${encodedProposalId}`
-          : `${siteOrigin}/business-admin?tab=inbox`;
+        // 수락 뒤의 연락은 인플루언서가 남긴 카카오톡 아이디로 이어지므로, 연락처가
+        // 보이는 제안함으로 보낸다.
+        const magicLink = `${siteOrigin}/business-admin?tab=inbox`;
 
         await sendKakaoAlimtalk({
           username: bizUsername,
-          message: `[픽스폴리오] 협업 제안 ${statusText}\n\n@${username}님이 "${proposalTitle}" 협업 제안을 ${statusText}했습니다.\n\n아래 링크에서 확인하세요.\n${magicLink}`,
+          message: status === "accepted"
+            ? `[픽스폴리오] 협업 제안 수락\n\n@${username}님이 "${proposalTitle}" 협업 제안을 수락했습니다.\n인플루언서의 카카오톡 아이디와 휴대폰 번호는 제안함에서 확인하세요.\n${magicLink}`
+            : `[픽스폴리오] 협업 제안 ${statusText}\n\n@${username}님이 "${proposalTitle}" 협업 제안을 ${statusText}했습니다.\n\n아래 링크에서 확인하세요.\n${magicLink}`,
           templateId,
           variables: {
             "#{고객명}": bizUsername,
             "#{업체명}": updatedProposal.company_name || bizUsername,
             "#{프로젝트명}": proposalTitle,
-            "#{메시지내용}": `@${username}님이 협업 제안을 ${statusText}했습니다.`,
+            "#{메시지내용}": status === "accepted"
+              ? `@${username}님이 협업 제안을 수락하고 연락처(카카오톡 아이디 · 휴대폰 번호)를 남겼습니다. 제안함에서 확인하세요.`
+              : `@${username}님이 협업 제안을 ${statusText}했습니다.`,
             "#{링크연결}": magicLink,
           },
         });

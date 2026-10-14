@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { loadPortOne } from '../utils/externalScripts';
-import { payClaudePlan } from '../utils/claudeCharge';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import {
@@ -45,12 +44,6 @@ interface MembershipPlanProps {
 //     카드 정보는 발급 요청에만 쓰고 어디에도 저장하지 않는다.
 //   • 카카오페이: PortOne V2 브라우저 SDK 로 빌링키를 발급해 매월 자동결제한다.
 
-// Claude plan (separate prepaid AI add-on) — activated by its own PortOne payment
-// window opened from this page. Keep these figures in sync with the server's
-// claude-credits pricing module.
-const ACTIVATION_PRICE_KRW = 9900;
-const ACTIVATION_GRANT_CREDITS = 3000;
-
 const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType = 'influencer' }) => {
   const isBrand = accountType === 'brand';
   const { language, t } = useLanguage();
@@ -86,18 +79,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
   // 결제 대상 플랜 — 멤버십 티어.
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('brand_dm');
 
-  // Claude plan (prepaid AI add-on, billed separately from the memberships above).
-  // Activating it opens a PortOne payment window right here; the base monthly grant
-  // of ACTIVATION_GRANT_CREDITS credits is added server-side once the payment clears.
-  const [claudeOpen, setClaudeOpen] = useState(false);
-  const [claudePaying, setClaudePaying] = useState(false);
-  const [claudeError, setClaudeError] = useState<string | null>(null);
-  const [claudeActive, setClaudeActive] = useState(false);
-  const [claudeBalance, setClaudeBalance] = useState<number | null>(null);
-  // 환불(결제 취소)로 회수된 누적 크레딧. 0 보다 크면 잔액이 줄어든 이유를 함께 안내한다.
-  const [claudeRefunded, setClaudeRefunded] = useState(0);
-  const [claudeSyncing, setClaudeSyncing] = useState(false);
-
   const loadVerification = useCallback(async () => {
     const cached = apiService.getCachedSellerVerification(normalizedUserName);
     if (cached) {
@@ -114,30 +95,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
   useEffect(() => {
     loadVerification();
   }, [loadVerification]);
-
-  // 잔액 조회. refresh 를 주면 서버가 결제 취소(환불) 여부를 PG 에 즉시 확인한 뒤 잔액을
-  // 돌려준다 — 환불한 만큼 포인트가 빠졌는지 사용자가 바로 확인할 수 있게 한다.
-  const loadClaude = useCallback(async (refresh = false) => {
-    const data = await apiService.getClaudeCredits(normalizedUserName, { refresh });
-    if (data?.credits) {
-      setClaudeActive(!!data.credits.planActive);
-      setClaudeBalance(data.credits.balanceCredits ?? 0);
-      setClaudeRefunded(data.credits.refundedCredits ?? 0);
-    }
-  }, [normalizedUserName]);
-
-  const refreshClaude = async () => {
-    setClaudeSyncing(true);
-    try {
-      await loadClaude(true);
-    } finally {
-      setClaudeSyncing(false);
-    }
-  };
-
-  useEffect(() => {
-    loadClaude();
-  }, [loadClaude]);
 
   /**
    * 브라우저 비밀번호 관리자가 카드 칸에 넣어 둔 값을 되돌린다.
@@ -162,29 +119,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
     const timers = [50, 200, 600].map((ms) => window.setTimeout(sync, ms));
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [confirmOpen, payMethod, cardForm.birth, cardForm.pw2]);
-
-  // Open the Claude plan payment window and, once the payment is verified
-  // server-side, mark the plan active and refresh the credit balance.
-  const startClaudePlan = async () => {
-    setClaudeError(null);
-    setClaudePaying(true);
-    try {
-      const result = await payClaudePlan(normalizedUserName, 'activation', ACTIVATION_PRICE_KRW, 'CARD');
-      if (!result.success || !result.result) {
-        setClaudeError(result.error || '결제에 실패했습니다. 다시 시도해 주세요.');
-        return;
-      }
-      const granted = result.result.credits;
-      setClaudeActive(true);
-      setClaudeBalance(granted?.balanceCredits ?? ACTIVATION_GRANT_CREDITS);
-      setClaudeOpen(false);
-      flashSuccess(`클로드 플랜이 시작되었습니다. 기본 ${ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전되었습니다.`);
-    } catch {
-      setClaudeError('결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
-    } finally {
-      setClaudePaying(false);
-    }
-  };
 
   const membershipActive = !!verification?.membership_active;
 
@@ -246,7 +180,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
   // 앱을 떠나는 것 말고는 나올 길이 없다.
   useCloseOnBack(confirmOpen, closeConfirm);
   useCloseOnBack(cancelOpen, () => { setCancelOpen(false); setError(null); });
-  useCloseOnBack(claudeOpen, () => { setClaudeOpen(false); setClaudeError(null); });
 
   /**
    * 코드를 확인한다. 여기서 코드가 소진되지는 않고(등록은 결제 요청에서 함께 처리된다),
@@ -610,7 +543,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
     </div>
   );
 
-  // Inside the native app, membership and Claude-plan purchases are not offered
+  // Inside the native app, membership purchases are not offered
   // — digital goods are sold on the website only. Show a neutral notice instead
   // of any plan/pricing or payment UI (App Store / Play Store digital-goods
   // policy). Web behaviour is unchanged.
@@ -793,82 +726,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
             </h4>
             <ul className="space-y-2 text-sm text-slate-600">
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>영상 업로드 · 콘텐츠 업로드</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>캠페인 AI(협업 타임라인 AI 어시스턴트 · 콘텐츠 기획 AI)</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>캠페인 AI(콘텐츠 기획 AI)</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>인사이트 메뉴</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>자동 디엠</strong>은 <strong>브랜드 매칭받기</strong>를 등록하면 무료로 열립니다</li>
             </ul>
           </div>
         )}
-      </section>
-
-      {/* Claude plan — sold SEPARATELY from the memberships above. It is not a
-          membership tier; it is an optional premium AI add-on with its own prepaid
-          credit wallet, activated and managed from the 협업 타임라인 AI. */}
-      <section className="mb-12 max-w-6xl">
-        <div className="relative rounded-2xl border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 p-6 md:p-8 shadow-sm">
-          <div className="absolute -top-3 left-6">
-            <span className="bg-gradient-to-r from-orange-500 to-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-              클로드 플랜 · 🤖 Claude (별도)
-            </span>
-          </div>
-          <div className="md:flex md:items-center md:justify-between gap-6 mt-2">
-            <div className="flex-1">
-              <h4 className="font-bold text-slate-800 text-lg mb-2">협업 AI를 Claude로 — {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</h4>
-              <p className="text-sm text-slate-600 leading-relaxed mb-3">
-                협업 타임라인 AI는 기본적으로 제미나이로 무료로 동작합니다. 깊은 분석이나 문서·계약서 검토처럼 더 강력한 답변이 필요할 때는 <strong>Claude</strong>를 선택할 수 있어요. 클로드 플랜은 <strong>별도로 결제</strong>하며, 결제하면 바로 크레딧이 충전됩니다.
-              </p>
-              <ul className="space-y-1.5 text-sm text-slate-600">
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원 단건 결제 · <strong>{ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</strong> 충전</li>
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>사용한 토큰만큼만 차감 · 남은 크레딧은 이월</li>
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>결제수단은 <strong>신용/체크카드만 가능</strong> · 네이버페이, 페이코, 카카오페이 등 간편결제 제외</li>
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 충전 경로: 이 플랜 화면에서 첫 결제 후 협업 타임라인 AI의 클로드 관리 화면에서 추가 충전</li>
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문 시 답변별 사용량만큼 차감</li>
-              </ul>
-            </div>
-            <div className="shrink-0 mt-4 md:mt-0">
-              {claudeActive ? (
-                <div className="w-full md:w-auto md:text-right">
-                  <div className="px-5 py-3 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                    ✓ 클로드 플랜 이용 중
-                  </div>
-                  {claudeBalance != null && (
-                    <div className="mt-2 rounded-xl border border-orange-200 bg-white/80 px-4 py-3 text-center md:text-right">
-                      <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest">남은 포인트</p>
-                      <p className="text-2xl font-black text-orange-700">{claudeBalance.toLocaleString()}<span className="text-xs font-bold ml-1">크레딧</span></p>
-                      <p className="text-[11px] text-slate-500 font-bold mt-1">
-                        크레딧 소진 시 클로드 관리 화면에서 추가 충전
-                      </p>
-                      {claudeRefunded > 0 && (
-                        <p className="text-[11px] text-slate-500 font-bold mt-1">
-                          환불 반영 −{claudeRefunded.toLocaleString()} 크레딧
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        onClick={refreshClaude}
-                        disabled={claudeSyncing}
-                        className="mt-2 text-[11px] font-bold text-orange-700 hover:text-orange-800 underline disabled:opacity-50"
-                      >
-                        {claudeSyncing ? '결제 내역 확인 중...' : '결제·환불 내역 새로고침'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => { setClaudeError(null); setClaudeOpen(true); }}
-                    className="w-full md:w-auto px-6 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 transition-all shadow-md hover:shadow-lg"
-                  >
-                    {ACTIVATION_PRICE_KRW.toLocaleString()}원으로 클로드 플랜 시작
-                  </button>
-                  <p className="text-[11px] text-slate-400 font-medium mt-2 text-center md:text-right">신용/체크카드 단건 결제</p>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
       </section>
 
       <section className="max-w-2xl">
@@ -1191,73 +1054,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
                     : payMethod === 'CARD'
                       ? `${TIER_PRICE[selectedTier].toLocaleString()}원 결제하고 자동결제 시작`
                       : `${TIER_PRICE[selectedTier].toLocaleString()}원으로 구독 시작`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {claudeOpen && (
-        <div className="modal-overlay fixed inset-0 z-[210] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
-          <div className="modal-card bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-            <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div>
-                <p className="text-xs font-black text-orange-500 uppercase tracking-widest">클로드 플랜 · 🤖 Claude</p>
-                <h3 className="text-lg font-black text-slate-900">클로드 플랜 시작</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => { setClaudeOpen(false); setClaudeError(null); }}
-                className="shrink-0 w-11 h-11 md:w-8 md:h-8 -my-1.5 -mr-2 md:my-0 md:mr-0 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-2xl md:text-xl"
-                aria-label="닫기"
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body p-5 space-y-4">
-              {claudeError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
-                  {claudeError}
-                </div>
-              )}
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                <p className="text-xs font-black text-orange-500 uppercase tracking-widest mb-1">결제 금액</p>
-                <p className="text-3xl font-black text-orange-700">{ACTIVATION_PRICE_KRW.toLocaleString()}<span className="text-sm font-bold ml-1">원</span></p>
-                <p className="text-xs font-bold text-orange-500 mt-2">결제 즉시 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧 충전 · 단건 결제</p>
-              </div>
-
-              <div>
-                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-                <div className="rounded-xl border-2 border-orange-500 bg-orange-50 px-4 py-3 text-sm font-black text-orange-700 flex items-center justify-center gap-2">
-                  <span>💳</span>
-                  <span>신용/체크카드 전용</span>
-                </div>
-                <p className="text-[11px] text-slate-400 font-medium mt-2">
-                  클로드 플랜은 네이버페이, 페이코, 카카오페이 등 간편결제를 지원하지 않습니다.
-                </p>
-              </div>
-              <div className="text-xs text-slate-500 space-y-1">
-                <p>✓ 결제 즉시 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전됩니다.</p>
-                <p>✓ 협업 타임라인 AI에서 Claude를 선택해 사용할 수 있습니다.</p>
-                <p>✓ 크레딧이 부족하면 협업 타임라인의 클로드 관리 화면에서 추가 충전할 수 있습니다.</p>
-                <p>✓ 남은 크레딧은 멤버십 플랜 화면과 협업 타임라인 AI 입력창에서 확인할 수 있습니다.</p>
-              </div>
-            </div>
-            <div className="shrink-0 px-5 py-4 border-t border-slate-100 flex gap-2">
-              <button
-                type="button"
-                onClick={() => { setClaudeOpen(false); setClaudeError(null); }}
-                disabled={claudePaying}
-                className="px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={startClaudePlan}
-                disabled={claudePaying}
-                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 transition-all disabled:opacity-50"
-              >
-                {claudePaying ? '처리 중...' : `${ACTIVATION_PRICE_KRW.toLocaleString()}원 결제하기`}
               </button>
             </div>
           </div>

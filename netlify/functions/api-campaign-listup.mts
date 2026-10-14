@@ -895,10 +895,6 @@ export default async (req: Request, context: Context) => {
           success: true,
           collabId: result.collabId,
           created: result.created,
-          threads: {
-            influencerSupport: result.influencerThreadId,
-            brandSupport: result.brandThreadId,
-          },
           listup: await reload("manager"),
         });
       }
@@ -1059,10 +1055,6 @@ export default async (req: Request, context: Context) => {
           success: true,
           collabId: result.collabId,
           created: result.created,
-          threads: {
-            influencerSupport: result.influencerThreadId,
-            brandSupport: result.brandThreadId,
-          },
           listup: await reload(viewer),
         });
       }

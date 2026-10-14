@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect } from 'react';
 import ManagerCampaignsPanel, { isMyTurn } from '../manager/ManagerCampaignsPanel';
 import ManagerBrandPicksPanel from '../manager/ManagerBrandPicksPanel';
 import ManagerInfluencerDirectory from '../manager/ManagerInfluencerDirectory';
-import ManagerChatPanel from '../manager/ManagerChatPanel';
 import { apiService } from '../../services/apiService';
 
 /**
@@ -18,13 +17,12 @@ import { apiService } from '../../services/apiService';
  * 이 화면에서 "맡기"를 누르면 운영자 아이디가 캠페인 담당자로 남는다.
  */
 
-type WorkTab = 'picks' | 'campaigns' | 'influencers' | 'chat';
+type WorkTab = 'picks' | 'campaigns' | 'influencers';
 
 const TABS: { key: WorkTab; label: string; hint: string }[] = [
   { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 금액 확인 후 협업 시작' },
   { key: 'campaigns', label: '캠페인 배정 · 진행', hint: '캠페인을 맡고 · 후보를 명단에 올려 제안하고 · 진행 · 검수 · 정산까지' },
   { key: 'influencers', label: '인플루언서 명부', hint: '카테고리별 전체 명부' },
-  { key: 'chat', label: '대화', hint: '인플루언서 · 브랜드 채널' },
 ];
 
 const AdminManagerWorkspace: React.FC = () => {
@@ -128,9 +126,6 @@ const AdminManagerWorkspace: React.FC = () => {
         />
       )}
       {tab === 'influencers' && <ManagerInfluencerDirectory onNotify={notify} />}
-      {tab === 'chat' && managerUsername && (
-        <ManagerChatPanel managerUsername={managerUsername} onNotify={notify} />
-      )}
 
       {toast && (
         <div

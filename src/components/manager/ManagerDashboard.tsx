@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect } from 'react';
 import ManagerInfluencerDirectory from './ManagerInfluencerDirectory';
 import ManagerCampaignsPanel, { isMyTurn } from './ManagerCampaignsPanel';
 import ManagerBrandPicksPanel from './ManagerBrandPicksPanel';
-import ManagerChatPanel from './ManagerChatPanel';
 import ManagerDmAccessPanel from './ManagerDmAccessPanel';
 import { apiService } from '../../services/apiService';
 
@@ -11,14 +10,14 @@ import { apiService } from '../../services/apiService';
  *
  * 운영자가 일반 계정을 담당자로 배정하면 로그인 후 이 화면이 뜬다. 운영 콘솔과
  * 나눠 둔 이유는 권한 범위다. 담당자는 승인·정산·회원 관리를 하지 않는다. 담당자가
- * 하는 일은 인플루언서를 알고, 캠페인에 배정하고, 대화하는 것이다. 여기에 운영 탭을
+ * 하는 일은 인플루언서를 알고, 캠페인에 배정하고, 진행을 챙기는 것이다. 여기에 운영 탭을
  * 하나씩 얹기 시작하면 결국 운영 콘솔이 두 벌이 된다. 예외는 "자동 디엠 관리" 하나다 —
  * 제안을 계속 거절하는 사람인지는 리스트업을 직접 한 담당자가 가장 잘 판단한다.
  *
  * 첫 탭이 "브랜드 선택"인 이유는 그것이 유일하게 답을 기다리는 일이기 때문이다.
  * 브랜드가 명단에서 사람을 고르면 그 요청은 캠페인 안쪽 명단에만 남아, 담당자가
  * 캠페인을 하나씩 열어 보기 전에는 아무 데도 뜨지 않았다. 그동안 브랜드 화면에는
- * 아무 변화가 없다. 나머지 탭(인플루언서·캠페인·대화)은 담당자가 찾아가는 자료지만,
+ * 아무 변화가 없다. 나머지 탭(인플루언서·캠페인)은 담당자가 찾아가는 자료지만,
  * 이 탭은 담당자를 찾아온 일이다.
  *
  * 인플루언서가 올린 가이드·대본·영상 확인은 별도 메뉴가 아니라 캠페인 안에 있다.
@@ -38,13 +37,12 @@ interface ManagerDashboardProps {
   onNavigateCreator?: () => void;
 }
 
-type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'chat' | 'dm-access';
+type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'dm-access';
 
 const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 진행하기' },
   { key: 'influencers', label: '인플루언서', hint: '카테고리별 전체 명부' },
   { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정과 검수' },
-  { key: 'chat', label: '대화', hint: '인플루언서 · 브랜드 채널' },
   { key: 'dm-access', label: '자동 디엠 관리', hint: '매칭 등록자 · 제안 거절 · 이용 중단' },
 ];
 
@@ -55,11 +53,9 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   onNavigateCreator,
 }) => {
   const initialParams = new URLSearchParams(window.location.search);
-  const initialProposalId = initialParams.get('proposal') || '';
   const requestedTab = initialParams.get('tab');
   const [tab, setTab] = useState<ManagerTab>(
-    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'chat' ||
-      requestedTab === 'dm-access'
+    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'dm-access'
       ? requestedTab
       : 'picks',
   );
@@ -152,7 +148,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
       {/* 캠페인 탭만 폭을 넓게 쓴다. 그 안의 진행 보드가 단계를 가로로 늘어놓은
           형태라(BrandCollabProgress) 1280px 에 맞추면 다섯 칸 중 두어 칸만 보이고
           나머지는 가로로 밀어 봐야 한다 — 브랜드 화면이 1560px 를 쓰는 것과 같은
-          이유다. 나머지 탭(명부 · 대화)은 지금 폭에 맞춰 만든 목록이라 그대로 둔다. */}
+          이유다. 나머지 탭(명부 · 디엠 관리)은 지금 폭에 맞춰 만든 목록이라 그대로 둔다. */}
       <div
         className={`mx-auto px-4 md:px-8 py-6 ${tab === 'campaigns' ? 'max-w-[1560px]' : 'max-w-7xl'}`}
       >
@@ -200,7 +196,6 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
             initialCampaignId={openCampaignId}
           />
         )}
-        {tab === 'chat' && <ManagerChatPanel managerUsername={username} onNotify={notify} initialProposalId={initialProposalId} />}
       </div>
 
       {toast && (

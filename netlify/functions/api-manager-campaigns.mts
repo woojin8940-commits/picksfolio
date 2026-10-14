@@ -3,7 +3,6 @@ import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { isManagerListupMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { shapeListup } from "./_shared/campaign-listup.mts";
-import { reassignSupportThreads } from "./_shared/collab-workflow.mts";
 
 /**
  * 담당자가 보는 브랜드 캠페인 목록.
@@ -231,18 +230,14 @@ export default async (req: Request) => {
           );
         }
         // 맡기 전에 생긴 협업(담당자가 비어 있던 사이 선정된 지원자 등)도 함께 가져온다.
-        // 캠페인만 옮기면 그 협업과 대화방은 "내 담당" 화면 어디에도 뜨지 않는다.
+        // 캠페인만 옮기면 그 협업은 "내 담당" 화면 어디에도 뜨지 않는다.
         // 다른 담당자가 이미 붙어 있는 협업은 건드리지 않는다(위 주석과 같은 이유).
-        const moved = (await db.sql`
+        await db.sql`
           UPDATE campaign_collabs
           SET manager_username = ${me}, updated_at = NOW()
           WHERE campaign_id = ${campaignId}
             AND (COALESCE(manager_username, '') = '' OR LOWER(manager_username) = ${me})
-          RETURNING id
-        `) as any[];
-        for (const row of moved) {
-          await reassignSupportThreads(db, String(row.id), me).catch(() => {});
-        }
+        `;
       } else if (action === "release") {
         await db.sql`
           UPDATE campaigns
