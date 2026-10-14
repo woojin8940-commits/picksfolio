@@ -472,7 +472,7 @@ export async function getReelInsights(
   if (!fresh.ok) {
     // 토큰이 죽은 것이 확인되면 다른 화면들도 같은 사실을 알아야 한다. 표시를
     // 남기는 것은 기존 규칙(instagram-metrics)의 함수에 맡긴다.
-    if (fresh.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username, scope);
+    if (fresh.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username, scope, String(link.accessToken || ""));
     // 새로 못 받았어도 지난번에 굳혀 둔 값이 있으면 그것을 보여 준다. 빈 화면보다
     // "몇 시간 전 기준"이 낫다.
     const stale = await readCache(username, 24 * 60);

@@ -505,11 +505,16 @@ const FOLLOW_UP_MAX = 5;
  * 본문 + 버튼을 한 통(버튼 템플릿)으로 보내면 본문 속 링크는 눌리지 않아서, 링크가
  * 있으면 발송기는 본문을 일반 텍스트로 따로 보낸다.
  */
-const LINK_IN_TEXT = /(?:https?:\/\/|www\.)[^\s]|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/[^\s]/i;
+const URL_CHARS = "[A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]";
+const LINK_SOURCE =
+  `(?:https?:\\/\\/|www\\.)${URL_CHARS}+` +
+  `|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.[a-z]{2,}\\/${URL_CHARS}*` +
+  '|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:com|net|org|kr|me|ly|io|co|shop|store|link|app|page|site|xyz|info|biz|tv|gg|to|so)\\b(?![.@-])';
+const LINK_IN_TEXT = new RegExp(LINK_SOURCE, 'i');
 const hasLinkInText = (message: string): boolean => LINK_IN_TEXT.test(message || '');
 
 /** 미리보기에서 본문 속 링크를 인스타그램처럼 파란색으로 보여준다. */
-const LINK_TOKEN = /((?:https?:\/\/|www\.)[^\s]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/[^\s]*)/gi;
+const LINK_TOKEN = new RegExp(`(${LINK_SOURCE})`, 'gi');
 const LinkifiedText: React.FC<{ text: string }> = ({ text }) => (
   <>
     {text.split(LINK_TOKEN).map((part, i) => (i % 2 === 1
@@ -2537,6 +2542,13 @@ const AutomationEditor: React.FC<{
                       {draft.message.trim().length > CARD_TEXT_MAX
                         ? `링크 버튼을 함께 보낼 때는 본문을 ${CARD_TEXT_MAX}자 이내로 작성해 주세요. (현재 ${draft.message.trim().length}자) 인스타그램은 댓글 1건당 DM을 1통만 허용해, 본문과 버튼이 카드 한 장에 담기며 ${CARD_TEXT_MAX}자를 넘는 내용은 작게 표시되거나 잘릴 수 있습니다.`
                         : `링크 버튼을 함께 보낼 때는 본문을 ${CARD_TEXT_MAX}자 이내로 작성해 주세요.`}
+                    </p>
+                  )}
+                  {/* 카드 제목·설명 속 주소는 인스타그램이 링크로 바꾸지 않는다. */}
+                  {!baitOn && draft.buttons.some((b) => b.label.trim() || b.url.trim()) && hasLinkInText(draft.message) && (
+                    <p className="flex items-start gap-1.5 mt-1 text-[11px] font-bold leading-relaxed text-pink-600">
+                      <Info size={12} className="shrink-0 mt-px" />
+                      링크 버튼과 함께 보내면 본문이 카드에 담겨 본문 속 링크 주소는 눌리지 않아요. 링크는 버튼으로 넣거나, 2단계 발송을 켜면 본문을 일반 메시지로 따로 보내 링크가 눌립니다.
                     </p>
                   )}
                   {/* 2단계 본 메시지는 본문 + 링크 버튼이 말풍선 한 통으로 간다(본문 640자까지). */}
