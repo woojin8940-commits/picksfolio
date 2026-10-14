@@ -18,6 +18,7 @@ import ManualDmModal from './ManualDmModal';
 import CollabMatchRegister from './CollabMatchRegister';
 import Toggle from './DmToggle';
 import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmSendStatusSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { instagramPostUrl } from '../utils/instagramPostUrl';
 
 interface DmAutomationProps {
   userName: string;
@@ -661,7 +662,7 @@ const AutomationFeedThumbs: React.FC<{
           return m?.permalink && !isNativeApp() ? (
             <a
               key={id}
-              href={m.permalink}
+              href={instagramPostUrl(m.permalink)}
               target="_blank"
               rel="noopener noreferrer"
               title={label}

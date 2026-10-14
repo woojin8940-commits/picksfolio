@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { apiService, type TaggedMediaItem, type TaggedMediaResponse } from '../services/apiService';
 import { compactCountEn } from '../utils/formatters';
+import { instagramPostUrl } from '../utils/instagramPostUrl';
 
 /**
  * 인사이트 — 브랜드가 "누가 우리를 태그했는지" 보는 화면.
@@ -1243,7 +1244,7 @@ const RankRow: React.FC<{ rank: number; item: TaggedMediaItem; highlight: RankKe
   return (
     <li>
       {item.permalink ? (
-        <a href={item.permalink} target="_blank" rel="noopener noreferrer" className="block">
+        <a href={instagramPostUrl(item.permalink)} target="_blank" rel="noopener noreferrer" className="block">
           {body}
         </a>
       ) : (
@@ -1293,7 +1294,7 @@ const TaggedCard: React.FC<{ item: TaggedMediaItem }> = ({ item }) => {
   );
 
   return item.permalink ? (
-    <a href={item.permalink} target="_blank" rel="noopener noreferrer" className="block">
+    <a href={instagramPostUrl(item.permalink)} target="_blank" rel="noopener noreferrer" className="block">
       {body}
     </a>
   ) : (

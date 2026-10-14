@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatContact, formatNumberWithCommas } from '../../utils/formatters';
+import { instagramPostUrl } from '../../utils/instagramPostUrl';
 
 /**
  * 인플루언서 명부 — 픽스폴리오에 등록된 사람 전체를 카테고리로 본다.
@@ -288,7 +289,7 @@ const ManagerInfluencerDirectory: React.FC<ManagerInfluencerDirectoryProps> = ({
                     return r?.permalink ? (
                       <a
                         key={r.id || i}
-                        href={r.permalink}
+                        href={instagramPostUrl(r.permalink)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="block hover:opacity-80"

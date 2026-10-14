@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { compactCountEn, formatContact, formatNumberWithCommas } from '../../utils/formatters';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
+import { instagramPostUrl } from '../../utils/instagramPostUrl';
 
 /**
  * 인플루언서 DB — 우리에게 누가 있는지 한 표로 정리해 둔다.
@@ -473,7 +474,7 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
                     return (
                       <div key={r?.id || i}>
                         {r?.permalink ? (
-                          <a href={r.permalink} target="_blank" rel="noopener noreferrer" className="block hover:opacity-80">{inner}</a>
+                          <a href={instagramPostUrl(r.permalink)} target="_blank" rel="noopener noreferrer" className="block hover:opacity-80">{inner}</a>
                         ) : inner}
                         <p className="text-[9px] font-bold text-slate-400 mt-1">{compact(r?.views)} 조회</p>
                       </div>
