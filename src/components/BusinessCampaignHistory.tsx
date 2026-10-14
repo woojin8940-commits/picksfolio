@@ -5,6 +5,7 @@ import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import AdBoostModal from './AdBoostModal';
 import CampaignAdResults from './CampaignAdResults';
 import MetaPageEngagementPanel from './MetaPageEngagement';
+import { instagramPostUrl } from '../utils/instagramPostUrl';
 
 /**
  * 캠페인 이력 — 지난 캠페인에서 올라간 게시물의 성과.
@@ -552,7 +553,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
                               {(p.metrics?.permalink || p.uploadUrl) && (
                                 <a
-                                  href={p.metrics?.permalink || p.uploadUrl}
+                                  href={instagramPostUrl(p.metrics?.permalink || p.uploadUrl)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-block mt-1.5 text-[10px] text-blue-600 font-black hover:underline"

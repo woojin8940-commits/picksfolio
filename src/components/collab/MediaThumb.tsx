@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { instagramPostUrl } from '../../utils/instagramPostUrl';
 
 /**
  * 인스타 릴스·피드 그림 한 칸.
@@ -58,7 +59,7 @@ export const MediaLink: React.FC<{
   className?: string;
   children: React.ReactNode;
 }> = ({ permalink, className = '', children }) => {
-  const href = String(permalink || '');
+  const href = instagramPostUrl(permalink);
   if (!href) return <div className={className}>{children}</div>;
   return (
     <a

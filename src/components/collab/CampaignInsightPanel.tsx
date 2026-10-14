@@ -4,6 +4,7 @@ import {
 } from 'recharts';
 import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
+import { instagramPostUrl } from '../../utils/instagramPostUrl';
 
 /**
  * 캠페인 인사이트 — 올라간 게시물이 실제로 얼마나 보였는지.
@@ -485,7 +486,7 @@ const CampaignInsightPanel: React.FC<CampaignInsightPanelProps> = ({
                     ))}
                     {p.permalink && (
                       <a
-                        href={p.permalink}
+                        href={instagramPostUrl(p.permalink)}
                         target="_blank"
                         rel="noreferrer"
                         className="px-2 py-1.5 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-black hover:bg-slate-200"

@@ -26,6 +26,7 @@ import {
   type ReelCoaching,
 } from '../utils/reelCoaching';
 import { compactCountEn } from '../utils/formatters';
+import { instagramPostUrl } from '../utils/instagramPostUrl';
 
 /**
  * 인사이트 — 인플루언서 본인이 자기 계정 성과를 보는 화면.
@@ -2950,7 +2951,7 @@ const TopReelCard: React.FC<{
 
   const className = 'block w-[112px] shrink-0 md:w-auto';
   return reel.permalink ? (
-    <a href={reel.permalink} target="_blank" rel="noopener noreferrer" className={`${className} group`}>
+    <a href={instagramPostUrl(reel.permalink)} target="_blank" rel="noopener noreferrer" className={`${className} group`}>
       {body}
     </a>
   ) : (
@@ -2989,7 +2990,7 @@ const ReelCard: React.FC<{ reel: InsightReel; isEn: boolean }> = ({ reel, isEn }
   );
 
   return reel.permalink ? (
-    <a href={reel.permalink} target="_blank" rel="noopener noreferrer" className="block">
+    <a href={instagramPostUrl(reel.permalink)} target="_blank" rel="noopener noreferrer" className="block">
       {body}
     </a>
   ) : (

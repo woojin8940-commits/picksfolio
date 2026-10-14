@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
 import { compactCountEn, formatContact } from '../../utils/formatters';
+import { instagramPostUrl } from '../../utils/instagramPostUrl';
 
 interface DirApplication {
   id: string;
@@ -501,7 +502,7 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                         {it.instagram_recent_reels.map((reel, index) => (
                           <a
                             key={reel.id || reel.permalink || index}
-                            href={reel.permalink || '#'}
+                            href={instagramPostUrl(reel.permalink) || '#'}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="group overflow-hidden rounded-lg border border-slate-200 bg-white"
