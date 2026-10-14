@@ -55,4 +55,144 @@ CREATE TRIGGER profiles_guard_privileged
   BEFORE INSERT OR UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.profiles_guard_privileged();
 
+LOCK TABLE public.profiles IN SHARE ROW EXCLUSIVE MODE;
+
+CREATE TABLE IF NOT EXISTS public.public_profile_data (
+  id uuid PRIMARY KEY,
+  username text NOT NULL CHECK (btrim(username) <> ''),
+  full_name text NOT NULL DEFAULT '',
+  avatar_url text,
+  bio text,
+  site_data jsonb,
+  updated_at timestamptz
+);
+
+ALTER TABLE public.public_profile_data OWNER TO postgres;
+ALTER TABLE public.public_profile_data ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.public_profile_data FROM PUBLIC, anon, authenticated;
+GRANT SELECT (id, username, full_name, avatar_url, bio, site_data, updated_at)
+  ON public.public_profile_data TO anon, authenticated;
+GRANT ALL ON public.public_profile_data TO service_role;
+
+DROP POLICY IF EXISTS public_profile_data_read ON public.public_profile_data;
+CREATE POLICY public_profile_data_read ON public.public_profile_data
+  FOR SELECT TO anon, authenticated USING (true);
+
+CREATE INDEX IF NOT EXISTS public_profile_data_username_idx ON public.public_profile_data (username);
+
+CREATE OR REPLACE FUNCTION public.sync_public_profile_data()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF TG_OP = 'TRUNCATE' THEN
+    DELETE FROM public.public_profile_data;
+    RETURN NULL;
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM public.public_profile_data WHERE id = OLD.id;
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.id IS DISTINCT FROM NEW.id THEN
+    DELETE FROM public.public_profile_data WHERE id = OLD.id;
+  END IF;
+  IF NEW.username IS NULL OR btrim(NEW.username) = '' THEN
+    DELETE FROM public.public_profile_data WHERE id = NEW.id;
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO public.public_profile_data AS existing
+    (id, username, full_name, avatar_url, bio, site_data, updated_at)
+  VALUES (
+    NEW.id, NEW.username,
+    CASE
+      WHEN jsonb_typeof(NEW.site_data #> '{profile,name}') = 'string' THEN NEW.site_data #>> '{profile,name}'
+      WHEN lower(btrim(COALESCE(NEW.role, ''))) = 'operator' THEN COALESCE(NEW.full_name, '')
+      ELSE ''
+    END,
+    NEW.avatar_url, NEW.bio, NEW.site_data, NEW.updated_at
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    username = EXCLUDED.username, full_name = EXCLUDED.full_name,
+    avatar_url = EXCLUDED.avatar_url, bio = EXCLUDED.bio,
+    site_data = EXCLUDED.site_data, updated_at = EXCLUDED.updated_at
+  WHERE (existing.username, existing.full_name, existing.avatar_url, existing.bio, existing.site_data, existing.updated_at)
+    IS DISTINCT FROM (EXCLUDED.username, EXCLUDED.full_name, EXCLUDED.avatar_url, EXCLUDED.bio, EXCLUDED.site_data, EXCLUDED.updated_at);
+  RETURN NEW;
+END;
+$$;
+
+ALTER FUNCTION public.sync_public_profile_data() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.sync_public_profile_data() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE TRIGGER public_profiles_sync
+  AFTER INSERT OR UPDATE OR DELETE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.sync_public_profile_data();
+CREATE OR REPLACE TRIGGER public_profiles_sync_truncate
+  AFTER TRUNCATE ON public.profiles
+  FOR EACH STATEMENT EXECUTE FUNCTION public.sync_public_profile_data();
+
+INSERT INTO public.public_profile_data AS existing
+  (id, username, full_name, avatar_url, bio, site_data, updated_at)
+SELECT id, username,
+  CASE
+    WHEN jsonb_typeof(site_data #> '{profile,name}') = 'string' THEN site_data #>> '{profile,name}'
+    WHEN lower(btrim(COALESCE(role, ''))) = 'operator' THEN COALESCE(full_name, '')
+    ELSE ''
+  END AS full_name,
+  avatar_url, bio, site_data, updated_at
+FROM public.profiles
+WHERE username IS NOT NULL AND btrim(username) <> ''
+ON CONFLICT (id) DO UPDATE SET
+  username = EXCLUDED.username, full_name = EXCLUDED.full_name,
+  avatar_url = EXCLUDED.avatar_url, bio = EXCLUDED.bio,
+  site_data = EXCLUDED.site_data, updated_at = EXCLUDED.updated_at
+WHERE (existing.username, existing.full_name, existing.avatar_url, existing.bio, existing.site_data, existing.updated_at)
+  IS DISTINCT FROM (EXCLUDED.username, EXCLUDED.full_name, EXCLUDED.avatar_url, EXCLUDED.bio, EXCLUDED.site_data, EXCLUDED.updated_at);
+
+DELETE FROM public.public_profile_data AS projected
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.profiles AS original
+  WHERE original.id = projected.id AND original.username IS NOT NULL AND btrim(original.username) <> ''
+);
+
+CREATE OR REPLACE VIEW public.public_profiles WITH (security_barrier = true, security_invoker = true) AS
+SELECT id, username, full_name, avatar_url, bio, site_data, updated_at
+FROM public.public_profile_data;
+
+REVOKE ALL ON public.public_profiles FROM PUBLIC;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON public.public_profiles FROM anon, authenticated;
+GRANT SELECT ON public.public_profiles TO anon, authenticated, service_role;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.profiles AS original
+    FULL JOIN public.public_profile_data AS projected ON projected.id = original.id
+    WHERE CASE
+      WHEN original.id IS NULL THEN true
+      WHEN original.username IS NULL OR btrim(original.username) = '' THEN projected.id IS NOT NULL
+      ELSE projected.id IS NULL OR
+        (projected.username, projected.full_name, projected.avatar_url, projected.bio, projected.site_data, projected.updated_at)
+        IS DISTINCT FROM (
+          original.username,
+          CASE
+            WHEN jsonb_typeof(original.site_data #> '{profile,name}') = 'string' THEN original.site_data #>> '{profile,name}'
+            WHEN lower(btrim(COALESCE(original.role, ''))) = 'operator' THEN COALESCE(original.full_name, '')
+            ELSE ''
+          END,
+          original.avatar_url, original.bio, original.site_data, original.updated_at
+        )
+      END
+  ) OR EXISTS (
+    SELECT 1 FROM (VALUES ('anon'), ('authenticated')) AS reader(role_name)
+    WHERE has_table_privilege(reader.role_name, 'public.public_profile_data', 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       OR has_table_privilege(reader.role_name, 'public.public_profiles', 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       OR has_function_privilege(reader.role_name, 'public.sync_public_profile_data()', 'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'Public profile synchronization or access validation failed';
+  END IF;
+END;
+$$;
+
+NOTIFY pgrst, 'reload schema';
+
 COMMIT;

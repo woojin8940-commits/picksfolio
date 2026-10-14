@@ -322,12 +322,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
               if (!profileError && profileData) {
                 confirmExisting();
-                // 이 화면의 profile.full_name 은 "표시 이름"이다(위의 API 경로는
-                // site_data 의 profile.name 을 여기에 넣는다). profiles.full_name
-                // 은 가입 폼의 실명이라 그대로 넣으면 site_data 를 못 읽은 방문에만
-                // 커버 사진 위의 이름이 실명으로 바뀐다. 표시 이름의 기본값은
-                // 가입 시점과 같은 아이디다(netlify/functions/auth-signup).
-                setProfile({ ...profileData, full_name: profileData.username || '' });
+                setProfile({ ...profileData, full_name: typeof profileData.full_name === 'string' ? profileData.full_name : '' });
 
                 // Fetch Link Grid Items (New Source of Truth for Blocks)
                 const cloudBlocks = await getLinkGridItems(username);
