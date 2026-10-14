@@ -47,6 +47,28 @@ interface DmSettings {
   webhookFields?: string;
 }
 
+/** 연동을 허용하는 인스타그램 계정 종류(비즈니스 · 크리에이터). */
+const PROFESSIONAL_ACCOUNT_TYPES = new Set(["BUSINESS", "MEDIA_CREATOR"]);
+
+/**
+ * 토큰 주인의 계정 종류(`account_type`)를 읽는다. 대문자로 돌려주고, 응답에 값이
+ * 없으면 빈 문자열, 조회 자체가 실패하면 null 이다. 둘 다 판단 보류로 보고 권한
+ * 목록으로 가린다 — 값이 비었다는 이유만으로 프로페셔널 계정을 막지 않기 위해서다.
+ */
+async function fetchAccountType(token: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://graph.instagram.com/me?fields=user_id,account_type&access_token=${encodeURIComponent(token)}`,
+    );
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as any;
+    if (!data || typeof data !== "object") return null;
+    return String(data.account_type || "").trim().toUpperCase();
+  } catch {
+    return null;
+  }
+}
+
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);
   const origin = url.origin;
@@ -116,6 +138,17 @@ export default async (req: Request, _context: Context) => {
       return fail("token_exchange_failed");
     }
 
+    // 개인 계정(비공개 계정 포함 — 인스타그램은 프로페셔널 계정을 비공개로 둘 수 없다)은
+    // 연동하지 않는다. 개인 계정도 인스타그램 로그인은 통과하지만 기본 권한만 붙고
+    // 메시지·댓글·인사이트가 빠져, 예전에는 "일부 권한을 껐다"는 안내만 보고 같은
+    // 동의 화면을 몇 번이고 다시 지났다(kyelim__ 문의). 계정 종류를 먼저 확인해
+    // 프로페셔널 계정으로 전환하라고 정확히 안내한다.
+    const accountType = await fetchAccountType(shortToken);
+    if (accountType && !PROFESSIONAL_ACCOUNT_TYPES.has(accountType)) {
+      console.warn("[ig-oauth] non-professional account:", accountType);
+      return fail("not_professional_account");
+    }
+
     // 동의 화면에서 사용자가 일부 권한을 끄고 진행할 수 있다. 그래도 토큰은 발급되고
     // 기본 정보·댓글 읽기는 되기 때문에 "연동됨"으로 보이지만, DM·댓글 답글·인사이트가
     // 전부 권한 없음(code 10)으로 막히고 댓글 웹훅도 오지 않는다. 실제로 그렇게 연동된
@@ -125,6 +158,16 @@ export default async (req: Request, _context: Context) => {
     // 쉼표 문자열로 온다. 어느 쪽이든 읽는다. 목록이 없으면 권한 확인 실패로 안내한다.
     if (granted === null) return fail("permissions_unverified");
     const missing = REQUIRED_SCOPES.filter((scope) => !granted.includes(scope));
+    // 계정 종류를 알 수 없어도, 기본 권한만 있고 나머지 셋이 모두 빠졌다면 거의
+    // 언제나 개인 계정이다(그 셋은 프로페셔널 계정에서만 허용된다).
+    if (
+      !accountType &&
+      granted.includes("instagram_business_basic") &&
+      missing.length === REQUIRED_SCOPES.length - 1
+    ) {
+      console.warn("[ig-oauth] only basic permission granted; treating as non-professional account");
+      return fail("not_professional_account");
+    }
     if (missing.length > 0) {
       console.warn("[ig-oauth] permissions declined:", missing.join(","));
       return fail("missing_permissions");
