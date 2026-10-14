@@ -292,7 +292,7 @@ function textButtonsFallback(message: string, buttons: WebUrlButton[]): Record<s
     return genericTemplate([element]);
   }
   const text = [message, ...buttons.map((b) => `${b.title}: ${b.url}`)].join("\n\n");
-  return { text: text.slice(0, TEXT_MAX) };
+  return textMessage(text);
 }
 
 /** 본문 + 버튼 한 통(버튼 템플릿), 거부되면 대체 메시지로. */
@@ -362,7 +362,7 @@ export function buildDmMessages(
   const buttons = toWebUrlButtons(content.buttons);
 
   if (buttons.length === 0) {
-    return message ? [{ text: message.slice(0, TEXT_MAX) }] : [];
+    return message ? [textMessage(message)] : [];
   }
 
   // 2단계 본 메시지 본문에 링크 주소가 있으면 버튼 템플릿에 담지 않는다 — 버튼 템플릿
@@ -370,7 +370,7 @@ export function buildDmMessages(
   // 일반 텍스트(링크가 파랗게 눌린다)로, 버튼은 카드로 이어서 보낸다.
   if (opts.buttonTemplate && message && hasLinkInText(message)) {
     return [
-      { text: message.slice(0, TEXT_MAX) },
+      textMessage(message),
       genericTemplate([{ title: buttonOnlyTitle(buttons), buttons }]),
     ];
   }
@@ -382,7 +382,7 @@ export function buildDmMessages(
     // 버튼 템플릿 한도(640자)를 넘는 본문만 앞부분을 텍스트로 먼저 보내고,
     // 마지막 부분을 버튼과 함께 한 통으로 보낸다.
     const { head, tail } = splitTail(message.slice(0, TEXT_MAX + BUTTON_TEXT_MAX), BUTTON_TEXT_MAX);
-    return [{ text: head.slice(0, TEXT_MAX) }, textWithButtons(tail, buttons)];
+    return [textMessage(head), textWithButtons(tail, buttons)];
   }
 
   // 본문이 카드 제목 한도에 들어가면 본문+버튼을 카드 하나로 합쳐 보낸다.
@@ -394,7 +394,7 @@ export function buildDmMessages(
   // 긴 본문은 전부 텍스트로 먼저 보내고, 버튼 카드는 본문을 옮겨 담지 않고
   // 버튼만 보낸다(카드 제목은 필수라 버튼 이름을 쓴다).
   return [
-    { text: message.slice(0, TEXT_MAX) },
+    textMessage(message),
     genericTemplate([{ title: buttonOnlyTitle(buttons), buttons }]),
   ];
 }
@@ -404,7 +404,34 @@ export function buildDmMessages(
  * 파란 링크로 바꿔 주지만, 버튼 템플릿 본문에서는 그냥 글자로 남아 눌리지 않는다.
  */
 export function hasLinkInText(message: string): boolean {
-  return /(?:https?:\/\/|www\.)[^\s]|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/[^\s]/i.test(message || "");
+  return LINK_IN_TEXT.test(message || "");
+}
+
+/**
+ * 본문 속 링크 주소 하나. 스킴(https://) · www. 로 시작하거나 `도메인/경로` 형태이거나,
+ * 경로 없이 자주 쓰는 최상위 도메인으로 끝나는 주소(`picks-folio.com`)까지 본다.
+ * 화면(DmAutomation.tsx)의 LINK_TOKEN 과 같은 규칙이다. 주소 바로 뒤에 붙여 쓴 한글은
+ * 주소가 아니라서 주소 글자는 ASCII 로만 본다.
+ */
+const URL_CHARS = "[A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]";
+const LINK_SOURCE =
+  `(?:https?:\\/\\/|www\\.)${URL_CHARS}+` +
+  `|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.[a-z]{2,}\\/${URL_CHARS}*` +
+  "|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:com|net|org|kr|me|ly|io|co|shop|store|link|app|page|site|xyz|info|biz|tv|gg|to|so)\\b(?![.@-])";
+const LINK_IN_TEXT = new RegExp(LINK_SOURCE, "i");
+
+/**
+ * 일반 텍스트 메시지로 나가는 본문을 다듬는다. 복사해 붙인 글에 섞인 보이지 않는
+ * 문자(폭 없는 공백 등)만 지운다 — 주소 바로 앞뒤에 있으면 주소가 글자의 일부로 읽혀
+ * 링크가 되지 않는다. 줄바꿈 · 띄어쓰기 · 글자는 작성한 그대로 둔다.
+ */
+export function tidyTextLinks(message: string): string {
+  return String(message || "").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "");
+}
+
+/** 일반 텍스트 메시지 한 통(보이지 않는 문자만 지우고 작성한 그대로). */
+function textMessage(message: string): Record<string, unknown> {
+  return { text: tidyTextLinks(message).slice(0, TEXT_MAX) };
 }
 
 /** 긴 본문을 [앞부분, 마지막 max자 이내]로 나눈다. 가능하면 줄바꿈·공백에서 끊는다. */
@@ -578,7 +605,7 @@ export function buildBaitCommentPlan(
 export function buildMainDmPlan(content: DmContent, intro?: string, followUps?: DmFollowUp[]): DmPlan {
   const messages = buildDmMessages(content, { buttonTemplate: true });
   const lead = (intro || "").trim();
-  if (lead) messages.unshift({ text: lead.slice(0, TEXT_MAX) });
+  if (lead) messages.unshift(textMessage(lead));
   const coreCount = messages.length;
   messages.push(...buildFollowUpMessages(followUps));
   return { messages, bestEffortFrom: messages.length, coreCount };

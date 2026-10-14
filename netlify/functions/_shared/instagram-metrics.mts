@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { mutateBlobJSON } from "./blob-write.mts";
 import { clipText } from "./clip-text.mts";
 import { safeKeyPrefix } from "./upload-media.mts";
 
@@ -413,7 +414,6 @@ export async function loadMetaLink(
 export const isTokenInvalidError = (payload: any): boolean => {
   const err = payload?.error ?? payload;
   if (Number(err?.code) === 190) return true;
-  if (String(err?.type || "") === "OAuthException") return true;
   // 재동의가 필요한 하위 코드: 앱 권한 삭제(458), 비밀번호 변경(460), 만료(463), 무효(467).
   if ([458, 459, 460, 463, 464, 467, 492].includes(Number(err?.error_subcode))) return true;
   const msg = String(err?.message || "").toLowerCase();
@@ -438,17 +438,18 @@ export const isTokenInvalidError = (payload: any): boolean => {
 export async function markLinkNeedsReauth(
   username: string,
   scope: MetaLinkScope = "dm",
+  expectedToken: string,
 ): Promise<void> {
+  if (!expectedToken) return;
   try {
     const at = linkLocation(scope, username);
-    const store = getStore({ name: at.store, consistency: "strong" });
-    const key = at.key;
-    const latest = (await store.get(key, { type: "json" })) as MetaLink | null;
-    if (!latest || latest.needsReauth) return;
-    await store.setJSON(key, {
-      ...latest,
-      needsReauth: true,
-      tokenInvalidAt: new Date().toISOString(),
+    await mutateBlobJSON<MetaLink>(at.store, at.key, (latest) => {
+      if (!latest || latest.accessToken !== expectedToken || latest.needsReauth) return null;
+      return {
+        ...latest,
+        needsReauth: true,
+        tokenInvalidAt: new Date().toISOString(),
+      };
     });
   } catch (e) {
     // 표시를 못 남겨도 이번 호출의 안내는 이미 정확하다. 다음 호출에서 다시 시도된다.
@@ -477,9 +478,7 @@ export async function markSharedLinkNeedsReauth(
   const scopes: MetaLinkScope[] = ["dm", "collab"];
   await Promise.all(
     scopes.map(async (scope) => {
-      const stored = await loadMetaLink(username, scope);
-      if (String(stored?.accessToken || "") !== token) return;
-      await markLinkNeedsReauth(username, scope);
+      await markLinkNeedsReauth(username, scope, token);
     }),
   );
 }
@@ -507,15 +506,16 @@ export async function deleteMetaLink(
 export async function clearLinkReauthFlag(
   username: string,
   scope: MetaLinkScope = "dm",
+  expectedToken: string,
 ): Promise<void> {
+  if (!expectedToken) return;
   try {
     const at = linkLocation(scope, username);
-    const store = getStore({ name: at.store, consistency: "strong" });
-    const key = at.key;
-    const latest = (await store.get(key, { type: "json" })) as MetaLink | null;
-    if (!latest?.needsReauth) return;
-    const { needsReauth, tokenInvalidAt, ...rest } = latest;
-    await store.setJSON(key, rest);
+    await mutateBlobJSON<MetaLink>(at.store, at.key, (latest) => {
+      if (!latest?.needsReauth || latest.accessToken !== expectedToken) return null;
+      const { needsReauth, tokenInvalidAt, ...rest } = latest;
+      return rest;
+    });
   } catch (e) {
     console.warn("[ig-metrics] 재연동 표시 해제 실패:", (e as Error)?.message);
   }
@@ -1180,7 +1180,7 @@ async function refreshOneChannelImages(db: any, row: any, withMedia: boolean): P
     );
     const payload = (await res.json().catch(() => ({}))) as any;
     if (!res.ok) {
-      if (isTokenInvalidError(payload)) await markLinkNeedsReauth(username, scope);
+      if (isTokenInvalidError(payload)) await markLinkNeedsReauth(username, scope, token);
       await stampProfileImageCheck(db, username);
       return false;
     }
@@ -1448,13 +1448,13 @@ export async function syncChannelFromMeta(
 > {
   const fetched = await fetchInstagramMetrics(link);
   if (!fetched.ok) {
-    if (fetched.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username, scope);
+    if (fetched.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username, scope, String(link.accessToken || ""));
     // 물어본 것은 사실이다. 실패에도 도장을 찍어야 순환이 이 계정에서 멈추지 않는다.
     await stampMetricsCheck(db, username);
     return fetched;
   }
   // 토큰이 살아 있는 것이 확인됐다. 지난번 일시 오류로 남은 표시가 있으면 지운다.
-  if (link.needsReauth) await clearLinkReauthFlag(username, scope);
+  if (link.needsReauth) await clearLinkReauthFlag(username, scope, String(link.accessToken || ""));
   // 방금 프로필을 받아 왔으니 지금 인스타 아이디도 알고 있다. 그 사이에 이름을
   // 바꿨으면 여기서 반영한다 — 바로 아래 persistMetrics 가 명단 행의 이름을 같은 값으로
   // 다시 쓰지만, 연동 정보와 협업 등록서의 주소까지 맞추는 것은 이 함수뿐이다.
