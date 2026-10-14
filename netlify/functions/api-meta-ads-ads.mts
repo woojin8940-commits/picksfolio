@@ -1,7 +1,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { randomBytes } from "node:crypto";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { readMetaAdsDiagnosis, readMetaAdsToken, tokenErrorResponse } from "./_shared/meta-ads.mts";
+import { PARTNERSHIP_SCOPES, readMetaAdsDiagnosis, readMetaAdsToken, tokenErrorResponse } from "./_shared/meta-ads.mts";
 import {
   buildTargeting,
   CONVERSION_EVENTS,
@@ -239,51 +239,99 @@ async function runCreative(
   businessId: string,
 ): Promise<GraphResult | Response> {
   if (r.source === "partnership") {
-    // 파트너십 광고 코드 → 게시물 ID. 이 조회에는 instagram_branded_content_ads_brand
-    // 권한과 브랜드 인스타그램 계정이 필요하다. 막히면 메타 문장을 그대로 보여 준다.
-    if (!businessId || !r.instagramUserId) {
+    // 파트너십 광고 코드 부스팅. 메타 문서(Boost Existing Instagram Media as Partnership Ads)
+    // 대로 광고 코드 자체를 소재에 실어 보낸다 — branded_content.instagram_boost_post_access_token.
+    // 코드가 곧 크리에이터의 게시물 단위 허가라서, 게시물 ID(source_instagram_media_id)만
+    // 보내면 크리에이터가 따로 승인할 때까지 광고가 '게재 대기'에 머문다.
+    // 스폰서(브랜드) 인스타그램 계정이 있어야 파트너십 광고의 두 번째 이름으로 나간다.
+    if (!r.instagramUserId) {
       return {
         ok: false,
         status: 400,
         data: {},
-        error:
-          "파트너십 광고 코드를 쓰려면 광고 계정이 비즈니스에 연결돼 있고, 고른 페이지에 인스타그램 프로페셔널 계정이 연결돼 있어야 합니다.",
+        error: "파트너십 광고를 하려면 고른 페이스북 페이지에 브랜드 인스타그램 프로페셔널 계정이 연결돼 있어야 합니다.",
       };
     }
-    const lookup = await graphGet(
-      `${businessId}/partnership-ads-advertisable-content`,
-      token,
-      { ig_user_id: r.instagramUserId, ad_codes: [r.partnershipCode], fields: "content_id,platform,permalink" },
-      proof,
-    );
-    if (!lookup.ok) return lookup;
-    const contentId = String(lookup.data?.data?.[0]?.content_id || "");
-    if (!contentId) {
-      return { ok: false, status: 404, data: lookup.data, error: "이 파트너십 광고 코드로 게시물을 찾지 못했습니다." };
+    const code = String(r.partnershipCode || "");
+
+    // 코드가 유효한지, 광고로 쓸 수 있는 게시물인지 먼저 확인한다(비즈니스가 있을 때만).
+    // 조회 자체가 막히면(권한·비즈니스 소속) 소재 생성에서 메타가 판단하게 둔다 — 조회는
+    // 확인용이고 광고를 만드는 데 꼭 필요한 값이 아니다.
+    let contentId = "";
+    if (businessId) {
+      const lookup = await graphGet(
+        `${businessId}/partnership-ads-advertisable-content`,
+        token,
+        {
+          ig_user_id: r.instagramUserId,
+          ad_codes: [code],
+          fields: "content_id,platform,permalink,partnership_info{ad_eligibility}",
+        },
+        proof,
+      );
+      if (lookup.ok) {
+        const row = lookup.data?.data?.[0];
+        if (!row?.content_id) {
+          return {
+            ok: false,
+            status: 404,
+            data: lookup.data,
+            error: "이 파트너십 광고 코드로 게시물을 찾지 못했습니다. 코드가 만료됐거나 다른 브랜드에 발급된 코드인지 인플루언서에게 확인해 주세요.",
+          };
+        }
+        contentId = String(row.content_id);
+        const eligibility = Array.isArray(row.partnership_info)
+          ? row.partnership_info.map((p: any) => String(p?.ad_eligibility || "")).filter(Boolean)
+          : [];
+        if (eligibility.length && !eligibility.includes("AD_READY")) {
+          r.warnings.push(`메타가 이 게시물의 광고 가능 상태를 ${eligibility.join(", ")}(으)로 표시했습니다.`);
+        }
+      }
     }
-    const base = {
+
+    const base: Record<string, unknown> = {
       name: `${r.name} · 소재`,
       object_id: r.pageId,
-      instagram_user_id: r.instagramUserId,
-      source_instagram_media_id: contentId,
+      branded_content: { instagram_boost_post_access_token: code, ad_format: 1 },
+      instagram_branded_content: { sponsor_id: r.instagramUserId },
+      facebook_branded_content: { sponsor_page_id: r.pageId },
     };
-    if (!r.linkUrl) return graphPost(`${r.adAccountId}/adcreatives`, token, base, proof);
-    // 웹사이트 URL 을 넣었으면 게시물 아래에 CTA 버튼과 URL 매개변수를 붙인다. 이 게시물에
-    // 버튼을 붙일 수 없다고 메타가 거절하면 버튼 없이 만들고 그 사실을 남긴다.
-    const withLink = await graphPost(
-      `${r.adAccountId}/adcreatives`,
-      token,
-      {
-        ...base,
-        call_to_action: { type: metaCta(r.cta), value: { link: r.linkUrl } },
-        url_tags: r.urlTags || undefined,
-      },
-      proof,
-    );
-    if (withLink.ok) return withLink;
-    const plain = await graphPost(`${r.adAccountId}/adcreatives`, token, base, proof);
-    if (plain.ok) r.warnings.push(`웹사이트 버튼을 붙이지 못해 게시물 그대로 만들었습니다. (${withLink.error})`);
-    return plain.ok ? plain : withLink;
+    // 페이스북 노출용 스폰서 값을 메타가 받지 않는 계정이 있다. 그때는 인스타그램 값만 둔다.
+    const igOnly = { ...base, facebook_branded_content: undefined };
+    const link = r.linkUrl
+      ? { call_to_action: { type: metaCta(r.cta), value: { link: r.linkUrl } }, url_tags: r.urlTags || undefined }
+      : {};
+
+    const attempts: Record<string, unknown>[] = [{ ...base, ...link }];
+    if (r.linkUrl) attempts.push(base);
+    attempts.push(igOnly);
+    // 예전 방식(게시물 ID)도 마지막에 시도한다. 크리에이터가 계정 단위로 허가해 둔 경우 이것으로도 나간다.
+    if (contentId) {
+      attempts.push({
+        name: `${r.name} · 소재`,
+        object_id: r.pageId,
+        instagram_user_id: r.instagramUserId,
+        source_instagram_media_id: contentId,
+      });
+    }
+
+    let first: GraphResult | null = null;
+    for (let i = 0; i < attempts.length; i++) {
+      const res = await graphPost(`${r.adAccountId}/adcreatives`, token, attempts[i], proof);
+      if (res.ok) {
+        if (r.linkUrl && !("call_to_action" in attempts[i])) {
+          r.warnings.push(`웹사이트 버튼을 붙이지 못해 게시물 그대로 만들었습니다. (${first?.error || ""})`);
+        }
+        if ("source_instagram_media_id" in attempts[i]) {
+          r.warnings.push("광고 코드로 소재를 만들지 못해 게시물 ID로 만들었습니다. 크리에이터 허가 전까지 게재 대기일 수 있습니다.");
+        }
+        return res;
+      }
+      first = first || res;
+      // 권한·토큰 문제(10, 200, 190)는 값을 바꿔 다시 보내도 같다.
+      if (res.errorCode === 10 || res.errorCode === 200 || res.errorCode === 190) break;
+    }
+    return first!;
   }
 
   if (r.creativeKind === "video" && r.videoId) {
@@ -594,6 +642,18 @@ async function buildRecord(
   );
   if (!page.ok) return graphErrorResponse(page, "이 페이지에 접근할 수 없습니다.", 400);
 
+  // 파트너십 광고는 브랜드 인스타그램 계정이 스폰서로 들어가야 한다. 캠페인·세트를 먼저
+  // 만들고 소재 단계에서 막히면 빈 캠페인이 남으므로 여기서 거른다.
+  if (source === "partnership" && !page.data?.instagram_business_account?.id) {
+    return Response.json(
+      {
+        error:
+          "고른 페이스북 페이지에 브랜드 인스타그램 프로페셔널 계정이 연결돼 있지 않습니다. 인스타그램 계정이 연결된 페이지를 골라 주세요.",
+      },
+      { status: 400 },
+    );
+  }
+
   const thumbnail = String(draft.thumbnailUrl || "");
   const now = new Date().toISOString();
   const headline = clean(draft.headline, 100);
@@ -662,6 +722,25 @@ async function buildRecord(
   return record;
 }
 
+/**
+ * 파트너십 광고 권한이 토큰에 있는지. 연동할 때 받은 권한(/me/permissions)으로 판단한다.
+ * 권한 목록을 못 읽은 옛 진단이면 막지 않고 메타가 판단하게 둔다.
+ */
+function partnershipScopeError(granted: string[] | undefined): Response | null {
+  if (!Array.isArray(granted) || granted.length === 0) return null;
+  const missing = PARTNERSHIP_SCOPES.filter((s) => !granted.includes(s));
+  if (missing.length === 0) return null;
+  return Response.json(
+    {
+      error:
+        `파트너십 광고 권한(${missing.join(", ")})이 연동에 없습니다. 광고 현황에서 메타 광고 계정을 다시 연동하고 ` +
+        "동의 화면에서 해당 권한을 허용해 주세요.",
+      missingScopes: missing,
+    },
+    { status: 403 },
+  );
+}
+
 /** 메타 캠페인을 지운다. 이미 없으면 지운 것으로 본다. 실패하면 오류 응답을 돌려준다. */
 async function deleteCampaign(token: string, proof: string, campaignId: string): Promise<Response | null> {
   const res = await graphPost(campaignId, token, { status: "DELETED" }, proof);
@@ -727,6 +806,10 @@ export default async (req: Request, context: Context) => {
     if (action === "resume") {
       if (record.step === "done") return Response.json({ error: "이미 다 만들어진 광고입니다." }, { status: 400 });
       if (!account) return Response.json({ error: "이 광고의 광고 계정이 연동되어 있지 않습니다." }, { status: 400 });
+      if (record.source === "partnership") {
+        const denied = partnershipScopeError(diagnosis?.granted);
+        if (denied) return denied;
+      }
       // 소재의 출처(이력의 어느 게시물인지)는 기록에 있는 값을 그대로 잇는다. 고칠 수 있는
       // 것은 창에 보이는 설정(문구·페이지·예산·기간·타겟·노출 위치)뿐이다.
       const draft: Draft = {
@@ -779,6 +862,10 @@ export default async (req: Request, context: Context) => {
   const draft = (body?.draft || {}) as Draft;
   const account = accounts.find((a) => a.id === draft.adAccountId);
   if (!account) return Response.json({ error: "연동된 광고 계정을 골라 주세요." }, { status: 400 });
+  if (draft.source === "partnership") {
+    const denied = partnershipScopeError(diagnosis?.granted);
+    if (denied) return denied;
+  }
 
   const record = await buildRecord(draft, account, token, proof);
   if (record instanceof Response) return record;
