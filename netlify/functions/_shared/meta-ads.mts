@@ -53,11 +53,22 @@ const BASE_SCOPES = [
   "pages_read_engagement",
 ];
 
-const extraScopes = (): string[] =>
-  String(process.env.META_ADS_EXTRA_SCOPES || "")
+/**
+ * 파트너십 광고(광고 코드 부스팅)에 필요한 권한.
+ *
+ * 메타 문서상 instagram_branded_content_ads_brand 는 instagram_basic 없이 받으면 광고 코드
+ * 조회가 403 으로 막힌다. 그래서 하나만 적어도 둘을 같이 요청한다.
+ */
+export const PARTNERSHIP_SCOPES = ["instagram_basic", "instagram_branded_content_ads_brand"];
+
+const extraScopes = (): string[] => {
+  const list = String(process.env.META_ADS_EXTRA_SCOPES || "")
     .split(",")
     .map((s) => s.trim())
-    .filter((s) => s && !BASE_SCOPES.includes(s));
+    .filter(Boolean);
+  if (list.includes("instagram_branded_content_ads_brand")) list.push(...PARTNERSHIP_SCOPES);
+  return [...new Set(list)].filter((s) => !BASE_SCOPES.includes(s));
+};
 
 export const META_ADS_SCOPES = BASE_SCOPES;
 
