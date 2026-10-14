@@ -487,6 +487,10 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
         ? (isEn
           ? 'The connection was approved in a different browser or app than the one where it started. Please try again from the same place.'
           : '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.')
+        : failed === 'not_professional_account'
+          ? (isEn
+            ? "Personal or private Instagram accounts can't be connected. In the Instagram app, go to Settings → Account type and tools, switch to a professional account (Creator or Business), then connect again."
+            : '개인 계정이나 비공개 계정은 연동할 수 없어요. 인스타그램 앱의 설정 → 계정 유형 및 도구에서 프로페셔널 계정(크리에이터 또는 비즈니스)으로 전환한 뒤 다시 연동해 주세요.')
         : failed === 'missing_permissions'
           ? (isEn
             ? "Some permissions were turned off on Instagram's consent screen, so the account wasn't connected. Please connect again and allow every item, including messages and comments."

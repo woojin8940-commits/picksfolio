@@ -3089,6 +3089,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
             ? '연동 시간이 지나 연동하지 않았어요. 연동하기를 다시 눌러 처음부터 진행해 주세요.'
           : ['access_denied', 'user_denied'].includes(params.get('ig_error') || '')
             ? '인스타그램 동의 화면에서 취소해 연동하지 않았어요. 다시 연동하면서 마지막 화면의 "허용"까지 눌러 주세요.'
+          : params.get('ig_error') === 'not_professional_account'
+            ? '개인 계정이나 비공개 계정은 연동할 수 없어요. 인스타그램 앱의 설정 → 계정 유형 및 도구에서 프로페셔널 계정(크리에이터 또는 비즈니스)으로 전환한 뒤 다시 연동해 주세요.'
           : params.get('ig_error') === 'missing_permissions'
             ? '인스타그램 동의 화면에서 일부 권한이 꺼진 채로 진행돼 연동하지 않았어요. 다시 연동하면서 메시지·댓글 관리 등 모든 항목을 허용해 주세요.'
             : params.get('ig_error') === 'permissions_unverified'
