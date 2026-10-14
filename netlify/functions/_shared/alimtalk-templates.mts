@@ -200,35 +200,6 @@ export function businessProposalAlimtalk(input: {
   };
 }
 
-/**
- * 협업 타임라인 메시지 알림.
- *
- * 이 템플릿에는 메시지 본문이 들어가지 않는다 — 대화 내용을 알림톡으로 흘리지 않고
- * "누가 어느 협업에 말을 걸었다"만 알린다. 본문은 앱 푸시와 협업방에서 읽는다.
- */
-export function timelineMessageAlimtalk(input: {
-  recipient: string;
-  senderName?: string;
-  projectName?: string;
-}): AlimtalkTemplate {
-  const recipient = person(input.recipient);
-  const sender = filled(input.senderName, "협업 상대");
-  const project = filled(input.projectName, "협업 프로젝트");
-
-  return {
-    templateId: "KA01TP2608311436298357D6QCmduX61",
-    variables: {
-      "#{발신자명}": sender,
-      "#{고객명}": recipient,
-      "#{협업명}": project,
-    },
-    message:
-      `[픽스폴리오] ${sender} 새 메시지가 도착했어요\n\n` +
-      `${recipient}님, ${sender}님이 협업 타임라인에 새 메시지를 보냈어요.\n` +
-      `협업명: ${project}\n\n픽스폴리오 앱에서 확인해 주세요.`,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // 진단
 // ---------------------------------------------------------------------------
@@ -291,10 +262,6 @@ export const ALIMTALK_TEMPLATE_CATALOG: { label: string; template: AlimtalkTempl
     {
       label: "비즈니스 제안 도착 (인플루언서)",
       template: businessProposalAlimtalk({ influencer: "예시", companyName: "예시업체", proposalTitle: "예시 제안" }),
-    },
-    {
-      label: "협업 타임라인 새 메시지 (양쪽)",
-      template: timelineMessageAlimtalk({ recipient: "예시", senderName: "예시업체", projectName: "예시 협업" }),
     },
     ...(contactRequestEnabled()
       ? [{ label: "담당자 연락 요청 (인플루언서)", template: contactRequestAlimtalk({ influencer: "예시" }) }]

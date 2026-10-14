@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, formatPhone } from '../utils/formatters';
+import { copyText } from '../utils/clipboard';
 import { apiService } from '../services/apiService';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import {
@@ -266,21 +267,43 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
             </div>
           )}
 
-          {/* 협업 타임라인 — 수락을 기다리는 제안도 열어 둔다. 조건을
-              물어볼 창구가 없으면 확인 없이 수락하거나 그냥 거절된다. */}
-          {(proposal.status === 'pending' || proposal.status === 'accepted' || proposal.status === 'completed') && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId: proposal.id } }));
-              }}
-              className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 rounded-xl font-black text-sm shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-              {proposal.status === 'pending' ? '타임라인에서 조건 상의하기' : '타임라인에서 대화하기'}
-            </button>
+          {/* 수락할 때 인플루언서가 이 브랜드에게 넘긴 연락처. 이후 연락은 카카오톡으로 한다. */}
+          {(proposal.status === 'accepted' || proposal.status === 'completed') && (
+            proposal.influencer_kakao_id || proposal.influencer_phone ? (
+              <div className="px-4 py-3 bg-green-50 rounded-xl border border-green-100">
+                <p className="text-[11px] font-black text-green-500 uppercase tracking-widest mb-2">인플루언서 연락처</p>
+                <div className="space-y-1.5">
+                  {proposal.influencer_kakao_id && (
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm text-green-900 font-bold truncate">카카오톡 아이디 · {proposal.influencer_kakao_id}</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void copyText(proposal.influencer_kakao_id || '').then(ok => ok && alert('카카오톡 아이디를 복사했습니다.')); }}
+                        className="shrink-0 text-[11px] font-black text-green-700 bg-white border border-green-200 rounded-lg px-2.5 py-1 hover:bg-green-100"
+                      >
+                        복사
+                      </button>
+                    </div>
+                  )}
+                  {proposal.influencer_phone && (
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm text-green-900 font-bold">휴대폰 · {formatPhone(proposal.influencer_phone)}</p>
+                      <a
+                        href={`tel:${proposal.influencer_phone}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0 text-[11px] font-black text-green-700 bg-white border border-green-200 rounded-lg px-2.5 py-1 hover:bg-green-100"
+                      >
+                        전화
+                      </a>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[10px] text-green-600 font-bold mt-2">협업 진행 목적으로만 사용해 주세요.</p>
+              </div>
+            ) : (
+              proposal.status === 'accepted' && !String(proposal.id).startsWith('campaign_') && (
+                <p className="text-[11px] text-slate-400 font-bold">이 제안은 연락처 전달 기능이 생기기 전에 수락되어 인플루언서 연락처가 없습니다. 필요하면 픽스폴리오에 문의해 주세요.</p>
+              )
+            )
           )}
 
           <div className="flex items-center justify-between gap-3 pt-1">

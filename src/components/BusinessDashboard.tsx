@@ -31,6 +31,21 @@ const writeProposalCache = (username: string, proposals: BusinessProposal[]): vo
   try { localStorage.setItem(proposalCacheKey(username), JSON.stringify(proposals)); } catch {}
 };
 
+// 수락할 때 브랜드에게 넘기는 연락처. 다음 수락 때 다시 쓰지 않도록 이 기기에만
+// 기억해 두고, 매번 창에서 확인을 받은 뒤에 보낸다.
+const shareContactKey = (username: string) => `picks_share_contact_${(username || '').toLowerCase()}`;
+
+const readShareContact = (username: string): { kakaoId: string; phone: string } => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(shareContactKey(username)) || '{}');
+    return { kakaoId: String(parsed?.kakaoId || ''), phone: String(parsed?.phone || '') };
+  } catch {
+    return { kakaoId: '', phone: '' };
+  }
+};
+
+const isValidPhone = (raw: string) => /^01\d{8,9}$/.test(raw.replace(/\D/g, ''));
+
 const REJECTION_PRESETS_KO = [
   '제안 단가가 낮아요',
   '진행 일정이 맞지 않아요',
@@ -68,6 +83,11 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
   // 거절 사유 창도 뒤로가기로 닫힌다.
   useCloseOnBack(!!rejectingId, () => { setRejectingId(null); setRejectionReason(''); });
   const [rejectionReason, setRejectionReason] = useState('');
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [shareKakaoId, setShareKakaoId] = useState('');
+  const [sharePhone, setSharePhone] = useState('');
+  const [shareConsent, setShareConsent] = useState(false);
+  useCloseOnBack(!!acceptingId, () => setAcceptingId(null));
 
   const fetchProposals = async () => {
     if (proposals.length === 0) setLoading(true);
@@ -81,21 +101,55 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     fetchProposals();
   }, [userName]);
 
-  const handleStatusUpdate = async (proposalId: string, status: 'accepted' | 'rejected', rejectionReasonText?: string) => {
+  const handleStatusUpdate = async (
+    proposalId: string,
+    status: 'accepted' | 'rejected',
+    rejectionReasonText?: string,
+    contact?: { kakaoId: string; phone: string },
+  ) => {
     setUpdatingId(proposalId);
-    const success = await apiService.updateProposalStatus(userName, proposalId, status, rejectionReasonText);
+    const success = await apiService.updateProposalStatus(userName, proposalId, status, rejectionReasonText, contact);
     if (success) {
+      const now = new Date().toISOString();
       setProposals(prev => {
-        const next = prev.map(p => p.id === proposalId ? { ...p, status, rejection_reason: rejectionReasonText, updated_at: new Date().toISOString() } : p);
+        const next = prev.map(p => p.id === proposalId ? {
+          ...p,
+          status,
+          rejection_reason: rejectionReasonText,
+          updated_at: now,
+          ...(contact ? { influencer_kakao_id: contact.kakaoId, influencer_phone: contact.phone, contact_shared_at: now } : {}),
+        } : p);
         writeProposalCache(userName, next);
         return next;
       });
+      if (contact) {
+        try { localStorage.setItem(shareContactKey(userName), JSON.stringify(contact)); } catch {}
+      }
       setRejectingId(null);
       setRejectionReason('');
+      setAcceptingId(null);
     } else {
       alert(isEn ? 'Failed to update status.' : '상태 업데이트에 실패했습니다.');
     }
     setUpdatingId(null);
+  };
+
+  const handleAcceptClick = (proposalId: string) => {
+    const saved = readShareContact(userName);
+    setShareKakaoId(saved.kakaoId);
+    setSharePhone(saved.phone);
+    setShareConsent(false);
+    setAcceptingId(proposalId);
+  };
+
+  const canConfirmAccept = !!shareKakaoId.trim() && isValidPhone(sharePhone) && shareConsent;
+
+  const handleAcceptConfirm = () => {
+    if (!acceptingId || !canConfirmAccept) return;
+    handleStatusUpdate(acceptingId, 'accepted', undefined, {
+      kakaoId: shareKakaoId.trim().replace(/^@+/, ''),
+      phone: sharePhone.replace(/\D/g, ''),
+    });
   };
 
   const handleRejectClick = (proposalId: string) => {
@@ -377,7 +431,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           {proposal.status === 'pending' && (
             <div className="flex gap-3 pt-2">
               <button
-                onClick={(e) => { e.stopPropagation(); handleStatusUpdate(proposal.id, 'accepted'); }}
+                onClick={(e) => { e.stopPropagation(); handleAcceptClick(proposal.id); }}
                 disabled={updatingId === proposal.id}
                 className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 rounded-xl font-black text-sm shadow-lg shadow-green-500/30 hover:shadow-green-500/50 transition-all disabled:opacity-60 active:scale-[0.98]"
               >
@@ -393,23 +447,23 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
             </div>
           )}
 
-          {(proposal.status === 'pending' || proposal.status === 'accepted' || proposal.status === 'completed') && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId: proposal.id } }));
-              }}
-              className={`w-full py-3 rounded-xl font-black text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-2 ${
-                proposal.status === 'pending'
-                  ? 'bg-white text-blue-600 border-2 border-blue-200 hover:bg-blue-50'
-                  : 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50'
-              }`}
-            >
-              <span>💬</span>
-              {proposal.status === 'pending'
-                ? (isEn ? 'Discuss terms before accepting' : '수락 전에 조건 상의하기')
-                : (isEn ? 'Chat in Timeline' : '타임라인에서 대화하기')}
-            </button>
+          {/* 수락 전 문의는 제안서에 적힌 브랜드 연락처로 한다. 협업 타임라인은 없어졌다. */}
+          {proposal.status === 'pending' && (
+            <p className="text-[11px] text-slate-400 font-bold pt-1">
+              {isEn
+                ? 'Questions before accepting? Contact the brand using the details above.'
+                : '수락 전에 궁금한 점은 위 브랜드 연락처로 문의해 주세요.'}
+            </p>
+          )}
+
+          {(proposal.status === 'accepted' || proposal.status === 'completed') && proposal.influencer_kakao_id && (
+            <div className="px-3 py-2.5 bg-green-50 rounded-xl border border-green-100">
+              <p className="text-[10px] font-black text-green-500 uppercase tracking-widest mb-1">{isEn ? 'Contact shared with the brand' : '브랜드에게 전달한 연락처'}</p>
+              <p className="text-sm text-green-800 font-bold">
+                {isEn ? 'KakaoTalk ID' : '카카오톡 아이디'} {proposal.influencer_kakao_id}
+                {proposal.influencer_phone && ` · ${formatPhone(proposal.influencer_phone)}`}
+              </p>
+            </div>
           )}
 
           {proposal.status === 'rejected' && proposal.rejection_reason && (
@@ -623,6 +677,70 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
       ) : (
         <div className="space-y-3">
           {filteredProposals.map(proposal => renderProposalCard(proposal))}
+        </div>
+      )}
+
+      {/* 수락 창. 수락하면 이 브랜드에게 카카오톡 아이디와 휴대폰 번호가 넘어가고,
+          이후 대화는 카카오톡으로 이어진다. 넘기기 전에 동의를 받는다. */}
+      {acceptingId && (
+        <div className="modal-overlay fixed inset-0 bg-black/50 z-[210] flex items-start justify-center overflow-y-auto overscroll-contain" onClick={() => setAcceptingId(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full my-auto p-5 md:p-6 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <h3 className="font-black text-slate-900 text-lg mb-2">{isEn ? 'Accept and share your contact' : '수락하고 연락처 전달하기'}</h3>
+            <p className="text-slate-400 text-sm font-bold mb-4">
+              {isEn
+                ? 'The brand will reach you on KakaoTalk with the contact below.'
+                : '수락하면 아래 연락처로 브랜드가 카카오톡으로 연락드려요.'}
+            </p>
+            <label className="block text-[11px] font-black text-slate-500 mb-1">{isEn ? 'KakaoTalk ID' : '카카오톡 아이디'}</label>
+            <input
+              value={shareKakaoId}
+              onChange={e => setShareKakaoId(e.target.value)}
+              placeholder={isEn ? 'Your KakaoTalk ID' : '카카오톡 아이디'}
+              maxLength={80}
+              autoComplete="off"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:border-green-500 mb-3"
+            />
+            <label className="block text-[11px] font-black text-slate-500 mb-1">{isEn ? 'Mobile number' : '휴대폰 번호'}</label>
+            <input
+              value={sharePhone}
+              onChange={e => setSharePhone(e.target.value)}
+              placeholder="010-0000-0000"
+              inputMode="tel"
+              autoComplete="tel"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:border-green-500 mb-1"
+            />
+            {sharePhone.trim() && !isValidPhone(sharePhone) && (
+              <p className="text-[11px] font-bold text-red-500 mb-2">{isEn ? 'Please enter a valid mobile number.' : '휴대폰 번호를 정확히 입력해 주세요.'}</p>
+            )}
+            <label className="flex items-start gap-2 mt-3 mb-4 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={shareConsent}
+                onChange={e => setShareConsent(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-green-600 shrink-0"
+              />
+              <span className="text-[12px] font-bold text-slate-600 leading-relaxed">
+                {isEn
+                  ? `I agree to provide my KakaoTalk ID and mobile number to ${proposals.find(p => p.id === acceptingId)?.company_name || 'this brand'} for this collaboration.`
+                  : `협업 진행을 위해 카카오톡 아이디와 휴대폰 번호를 ${proposals.find(p => p.id === acceptingId)?.company_name || '이 브랜드'}에 제공하는 데 동의합니다.`}
+              </span>
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setAcceptingId(null)}
+                className="flex-1 py-3 rounded-xl font-black text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+              >
+                {isEn ? 'Cancel' : '취소'}
+              </button>
+              <button
+                onClick={handleAcceptConfirm}
+                disabled={updatingId === acceptingId || !canConfirmAccept}
+                className="flex-1 py-3 rounded-xl font-black text-sm bg-green-600 text-white hover:bg-green-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {updatingId === acceptingId ? (isEn ? 'Processing...' : '처리 중...') : (isEn ? 'Accept' : '수락하기')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

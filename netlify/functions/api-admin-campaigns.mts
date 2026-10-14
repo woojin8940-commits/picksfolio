@@ -1,7 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { requireAdmin } from "./_shared/admin-auth.mts";
-import { reassignSupportThreads } from "./_shared/collab-workflow.mts";
 
 export default async (req: Request, context: Context) => {
   const admin = await requireAdmin(req);
@@ -174,17 +173,11 @@ export default async (req: Request, context: Context) => {
         `;
         // 이미 진행 중인 협업의 담당자도 함께 옮긴다 — 캠페인 담당자와 협업 담당자가
         // 갈리면 지원자는 누구에게 물어야 할지 알 수 없다.
-        const moved = (await db.sql`
+        await db.sql`
           UPDATE campaign_collabs
           SET manager_username = ${target}, updated_at = NOW()
           WHERE campaign_id = ${id}
-          RETURNING id
-        `) as any[];
-        // 협업의 담당자 대화방도 함께 옮긴다. 옮기지 않으면 대화방에는 예전 담당자가
-        // 남아, 새 담당자의 대화 목록에 그 방이 뜨지 않는다.
-        for (const row of moved) {
-          await reassignSupportThreads(db, String(row.id), target).catch(() => {});
-        }
+        `;
         return Response.json({ success: true, managerUsername: target });
       }
 

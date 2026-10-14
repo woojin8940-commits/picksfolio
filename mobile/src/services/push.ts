@@ -11,8 +11,9 @@ import { config } from '@/constants/config';
  * that reaches the user when the app is closed. This module registers the
  * device's Expo push token against the logged-in user (the web app calls
  * `PicksFolioNative.registerPush` once signed in) so the server can deliver an
- * immediate alert when a new collaboration-timeline message arrives. Tapping a
- * notification deep-links the WebView straight to the conversation.
+ * immediate alert for new proposals and collaboration events. Tapping a
+ * notification deep-links the WebView to the `path` in the payload (e.g.
+ * `/admin?tab=proposals`, `/business-admin?tab=inbox`).
  */
 
 // Show alerts (and play a sound / badge) even while the app is foregrounded.

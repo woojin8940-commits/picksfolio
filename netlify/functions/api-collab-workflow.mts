@@ -15,18 +15,15 @@ import { resolveBrandAmount } from "./_shared/brand-billing.mts";
 import {
   canTransitionStage,
   daysUntil,
-  ensureSupportThread,
   isProcessV1,
   logCollabEvent,
   netAfterWithholding,
   newId,
   norm,
   progressOf,
-  reassignSupportThreads,
   roleInCollab,
   roleMayTransition,
   settlementDateFrom,
-  supportThreadId,
   templateByKey,
   type CollabRole,
 } from "./_shared/collab-workflow.mts";
@@ -1374,14 +1371,6 @@ export default async (req: Request, context: Context) => {
             : role === "brand"
               ? { received: Boolean((brandSettlementRows as any[])?.[0]?.received_at) }
               : null,
-        threads: {
-          influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
-          // 브랜드↔담당자 방은 만들지 않는다. 브랜드의 의견은 단계별 피드백으로
-          // 받고 담당자가 정리해 인플루언서에게 옮긴다. 예전에 만들어진 방은
-          // 담당자 대화 목록에 그대로 남아 있다.
-          brandSupport: null,
-          legacy: collab.proposal_id || "",
-        },
         stages: stages.map((s) => ({
           id: s.id,
           stageKey: s.stage_key,
@@ -2762,7 +2751,7 @@ export default async (req: Request, context: Context) => {
       // 일정 변경 (협업당 1회) -------------------------------------------
       case "change_schedule": {
         if (role !== "manager") {
-          return jsonError("일정 변경은 담당자가 확정합니다. 담당자 채널로 요청해 주세요.", 403);
+          return jsonError("일정 변경은 담당자가 확정합니다. 픽스폴리오 카카오톡 채널로 요청해 주세요.", 403);
         }
         const stageKey = String((body as any).stageKey || "").slice(0, 80);
         const nextDue = String((body as any).nextDue || "");
@@ -2934,7 +2923,6 @@ export default async (req: Request, context: Context) => {
         await db.sql`
           UPDATE campaign_collabs SET manager_username = ${target}, updated_at = NOW() WHERE id = ${collabId}
         `;
-        await reassignSupportThreads(db, collabId, target);
         await logCollabEvent(db, {
           collabId,
           type: "manager_assigned",
@@ -3020,24 +3008,6 @@ export default async (req: Request, context: Context) => {
           VALUES (${collabId}, ${norm(caller.username)}, NOW())
           ON CONFLICT (collab_id, username) DO UPDATE SET seen_at = NOW()
         `;
-        return Response.json({ success: true });
-      }
-
-      // 담당자 채널 복구 (예전 협업에 채널이 없을 때) ---------------------
-      case "ensure_threads": {
-        if (role !== "manager") return jsonError("담당자만 처리할 수 있습니다.", 403);
-        const manager = collab.manager_username || caller.username;
-        // 인플루언서 채널만 복구한다. 브랜드↔담당자 방은 더 이상 만들지 않는다 —
-        // 브랜드의 요청은 진행사항의 단계별 피드백으로 받는다.
-        await ensureSupportThread({
-          db,
-          kind: "influencer_support",
-          collabId,
-          counterpartUsername: collab.creator_username,
-          managerUsername: manager,
-          companyName: collab.company_name || "",
-          title: collab.campaign_title || "",
-        });
         return Response.json({ success: true });
       }
 

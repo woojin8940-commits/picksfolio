@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { openExternalUrl } from '../utils/externalLink';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
-import { apiService, authHeaders, setActiveBusinessAccount } from '../services/apiService';
+import { apiService, setActiveBusinessAccount } from '../services/apiService';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 // 홈 상단 숫자는 크리에이터 대시보드와 같은 것을 본다 — 내 개인페이지 방문자 수와
 // 참여율. 그래서 데이터도 같은 곳에서(분석 API · 사이트 설정) 가져온다.
@@ -22,7 +22,6 @@ const AITrendAnalysis = lazyWithRetry(() => import('./AITrendAnalysis'));
 const DmAutomation = lazyWithRetry(() => import('./DmAutomation'));
 const OpenScheduleManagement = lazyWithRetry(() => import('./OpenScheduleManagement'));
 const MembershipPlan = lazyWithRetry(() => import('./MembershipPlan'));
-const BusinessTimeline = lazyWithRetry(() => import('./BusinessTimeline'));
 const CampaignCollabManagement = lazyWithRetry(() => import('./CampaignCollabManagement'));
 const BusinessCampaignHistory = lazyWithRetry(() => import('./BusinessCampaignHistory'));
 // 광고 현황 — 이력에서 고른 콘텐츠를 광고로 돌린 결과를 보는 화면. 목록·상태·지표는
@@ -38,8 +37,8 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status';
-const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'timeline', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status'];
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status';
+const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status'];
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
@@ -52,10 +51,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     rememberTab('business', 'picksBizSubView', currentSubView);
   }, [currentSubView]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
   /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabCampaignId, setCollabCampaignId] = useState<string | null>(null);
-  const [timelineUnread, setTimelineUnread] = useState(0);
   /**
    * 캠페인 협업 진행사항의 안 읽은 수.
    *
@@ -71,7 +68,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get('tab');
-    const proposalId = params.get('proposal');
     const campaignId = params.get('campaign');
     const tabs: Record<string, BizSubView> = {
       dashboard: 'dashboard',
@@ -82,14 +78,15 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       calendar: 'calendar',
       schedule: 'open-schedule',
       membership: 'membership',
-      timeline: 'timeline',
+      // 협업 타임라인은 없어졌다. 예전 알림톡에 남은 ?tab=timeline 링크는 제안함으로
+      // 받는다 — 수락한 인플루언서의 연락처가 거기 있다.
+      timeline: 'inbox',
       campaigns: 'campaign-collab',
       insights: 'tagged-insights',
       history: 'campaign-history',
       ads: 'ad-status',
     };
     if (tab && tabs[tab]) setCurrentSubView(tabs[tab]);
-    if (tab === 'timeline' && proposalId) setTimelineProposalId(proposalId);
     if (tab === 'campaigns' && campaignId) setCollabCampaignId(campaignId);
   }, []);
 
@@ -151,7 +148,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       import('./CampaignCollabManagement').catch(() => {});
       import('./BusinessCampaignHistory').catch(() => {});
       import('./BusinessAdStatus').catch(() => {});
-      import('./BusinessTimeline').catch(() => {});
       apiService.getCollabs('brand').catch(() => undefined);
       apiService.getBusinessTaggedMedia(cleanUsername).catch(() => undefined);
     });
@@ -172,7 +168,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       import('./MembershipPlan').catch(() => {});
       import('./OpenScheduleManagement').catch(() => {});
       apiService.getSellerVerification(cleanUsername).catch(() => undefined);
-      apiService.getClaudeCredits(cleanUsername).catch(() => undefined);
     });
 
     return () => {
@@ -294,27 +289,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         clicks: 0,
       })) : []);
 
-  useVisiblePolling(async signal => {
-    const timelineCacheKey = `picks_timelines_business_${cleanUsername}`;
-    try {
-      const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business&unread=1`, {
-        headers: await authHeaders(),
-        signal,
-      });
-      const data = await res.json();
-      if (signal.aborted || !res.ok) return;
-      if (typeof data.unreadTotal === 'number' || data.timelines) {
-        const total = typeof data.unreadTotal === 'number'
-          ? data.unreadTotal
-          : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
-        setTimelineUnread(total);
-        if (data.timelines) {
-          try { localStorage.setItem(timelineCacheKey, JSON.stringify(data.timelines)); } catch {}
-        }
-      }
-    } catch {}
-  }, 120000, !!cleanUsername && currentSubView !== 'timeline', cleanUsername, 4000);
-
   // 진행사항의 빨간 표시. 캠페인 협업 화면에 들어가 있는 동안에는 묻지 않는다 —
   // 그 화면이 협업을 열 때마다 읽음을 남기므로, 나온 뒤에 다시 세는 것이 맞다.
   useVisiblePolling(async signal => {
@@ -338,13 +312,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   }, []);
 
   useEffect(() => {
-    const handleNavigateTimeline = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.proposalId) {
-        setTimelineProposalId(detail.proposalId);
-      }
-      setCurrentSubView('timeline');
-    };
     const handleNavigateMembership = () => setCurrentSubView('membership');
     /**
      * 현황 화면 → 캠페인 진행사항. 진행사항 보드는 캠페인 협업 화면 안에만 있고,
@@ -355,11 +322,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       if (detail?.campaignId) setCollabCampaignId(String(detail.campaignId));
       setCurrentSubView('campaign-collab');
     };
-    window.addEventListener('navigate-timeline', handleNavigateTimeline);
     window.addEventListener('navigate-membership', handleNavigateMembership);
     window.addEventListener('navigate-campaign-collab', handleNavigateCampaignCollab);
     return () => {
-      window.removeEventListener('navigate-timeline', handleNavigateTimeline);
       window.removeEventListener('navigate-membership', handleNavigateMembership);
       window.removeEventListener('navigate-campaign-collab', handleNavigateCampaignCollab);
     };
@@ -426,13 +391,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       break;
     case 'calendar':
       subComponent = <LazyRoute><BusinessEntCalendar businessUsername={businessUsername} /></LazyRoute>;
-      break;
-    case 'timeline':
-      subComponent = (
-        <LazyRoute>
-          <BusinessTimeline userName={businessUsername} userType="business" initialProposalId={timelineProposalId || undefined} />
-        </LazyRoute>
-      );
       break;
     case 'campaign-collab':
       subComponent = (
@@ -571,20 +529,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             </LazyRoute>
           </section>
 
-          {/* Collaboration Timeline CTA (AI 협업 도우미) — mirrors the user
-              dashboard's prominent 협업 entry point. */}
-          <button
-            onClick={() => setCurrentSubView('timeline')}
-            className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3 relative"
-          >
-            <span className="text-xl">💬</span>
-            협업 타임라인 열기
-            {timelineUnread > 0 && (
-              <span className="bg-white text-blue-600 text-[10px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full">{timelineUnread > 99 ? '99+' : timelineUnread}</span>
-            )}
-            <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-          </button>
-
           {/* Feature Cards (matching user dashboard) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-8">
             <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[360px] shadow-xl">
@@ -596,10 +540,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             </div>
             <div className="bg-slate-900 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[360px] shadow-xl">
               <div>
-                <h3 className="text-sm md:text-2xl font-black mb-1">협업 타임라인</h3>
-                <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">인플루언서와의 협업 메시지를 확인하세요.</p>
+                <h3 className="text-sm md:text-2xl font-black mb-1">제안함</h3>
+                <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">수락한 인플루언서의 카카오톡 연락처를 확인하세요.</p>
               </div>
-              <button onClick={() => setCurrentSubView('timeline')} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">타임라인 열기</button>
+              <button onClick={() => setCurrentSubView('inbox')} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">제안함 열기</button>
             </div>
           </div>
 
@@ -661,7 +605,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   );
 
   return (
-    <div className={`flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 md:pb-0 ${currentSubView === 'timeline' ? '' : 'pb-20'}`}>
+    <div className={`flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 md:pb-0 pb-20`}>
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-60 bg-[#0b1221] text-white fixed h-full flex-col p-6 z-50">
         <div
@@ -683,7 +627,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           {/* 광고 현황은 이력에서 고른 콘텐츠의 다음 단계라, 이력 바로 아래에 둔다. */}
           <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
-          <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
         </nav>
@@ -713,7 +656,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📊" label="캠페인이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           <MobileNavItem icon="📣" label="광고현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
-          <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <MobileNavItem icon="📅" label="협업현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
           {!isNativeApp() && (
@@ -740,7 +682,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => { setCurrentSubView('campaign-history'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => { setCurrentSubView('ad-status'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { setCurrentSubView('timeline'); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => { setCurrentSubView('calendar'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
             </nav>
@@ -757,7 +698,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       )}
 
       {/* Main Content */}
-      <div className={`flex-1 md:ml-60 w-full ${currentSubView === 'timeline' ? 'md:min-h-screen' : 'min-h-screen'}`}>
+      <div className={`flex-1 md:ml-60 w-full min-h-screen`}>
         {subComponent ? (
           /* key 를 메뉴로 둔다. 경계는 한 번 오류를 잡으면 그 상태로 굳으므로, key 가
              없으면 한 메뉴에서 난 오류가 다른 메뉴로 옮겨 가도 계속 오류 화면으로

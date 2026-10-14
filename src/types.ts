@@ -144,6 +144,10 @@ export interface BusinessProposal {
   business_username?: string;
   status: ProposalStatus;
   rejection_reason?: string;
+  // 수락할 때 인플루언서가 이 브랜드에게 넘긴 연락처.
+  influencer_kakao_id?: string;
+  influencer_phone?: string;
+  contact_shared_at?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -175,8 +179,7 @@ export interface SellerVerification {
   // (카드 = 나이스정보통신 수기 빌링키, 간편결제 = 카카오페이 빌링키).
   billing_provider?: string | null;
   membership_payment_method?: string | null;
-  // Recurring (anniversary) billing state for the paid memberships. The Claude
-  // plan is billed separately and does not use these fields.
+  // Recurring (anniversary) billing state for the paid memberships.
   membership_amount_krw?: number | null;
   last_billing_at?: string | null;
   next_billing_date?: string | null;

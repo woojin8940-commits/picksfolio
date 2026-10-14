@@ -10,9 +10,8 @@
 /**
  * True when the web app is running inside the native app's WebView.
  *
- * Used to hide in-app purchases of *digital* goods — membership subscriptions
- * and Claude AI credits — and any payment-inducing UI (upsell banners, plan
- * menus, "구독/충전" buttons). Apple App Store and Google Play require digital
+ * Used to hide in-app purchases of *digital* goods — membership subscriptions —
+ * and any payment-inducing UI (upsell banners, plan menus, "구독/충전" buttons). Apple App Store and Google Play require digital
  * goods to be sold through their own in-app purchase systems, so PICKS Folio
  * sells them on the website only. Physical-product checkout in live commerce is
  * a real-world good and is unaffected.

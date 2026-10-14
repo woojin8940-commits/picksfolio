@@ -1200,38 +1200,6 @@ export interface InstagramMediaResult {
   stale: boolean;
 }
 
-// Claude plan credit wallet — public shape returned by /api/claude-credits.
-export interface ClaudeCreditUsage {
-  at: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens: number;
-  // Raw inference cost in ₩ (operator bookkeeping); the member is charged in credits.
-  costKrw: number;
-  chargedCredits: number;
-}
-
-export interface ClaudeCreditsResponse {
-  success?: boolean;
-  credits: {
-    planActive: boolean;
-    planActivatedAt: string | null;
-    // Wallet balance in credits (the unit shown to the member), not ₩.
-    balanceCredits: number;
-    recentUsage: ClaudeCreditUsage[];
-    // 환불(결제 취소)로 회수된 누적 크레딧/금액. 잔액이 줄어든 이유를 안내하는 데 쓴다.
-    refundedCredits?: number;
-    refundedKrw?: number;
-  };
-  activationPriceKrw: number;
-  activationGrantCredits: number;
-  rechargePacksKrw: number[];
-  // Credits granted per ₩ paid (used to show how many credits a ₩ pack buys).
-  creditsPerKrw: number;
-  marginMultiplier?: number;
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // Client-side caches. Site data and seller verification are fetched on every
 // dashboard navigation; without caching each menu switch re-hits the network
@@ -1499,11 +1467,21 @@ export const apiService = {
     })) || [];
   },
 
-  async updateProposalStatus(username: string, proposalId: string, status: 'accepted' | 'rejected' | 'completed', rejectionReason?: string): Promise<boolean> {
+  async updateProposalStatus(
+    username: string,
+    proposalId: string,
+    status: 'accepted' | 'rejected' | 'completed',
+    rejectionReason?: string,
+    contact?: { kakaoId: string; phone: string },
+  ): Promise<boolean> {
     try {
       const body: any = { status };
       if (status === 'rejected' && rejectionReason) {
         body.rejection_reason = rejectionReason;
+      }
+      if (status === 'accepted' && contact) {
+        body.influencer_kakao_id = contact.kakaoId;
+        body.influencer_phone = contact.phone;
       }
       const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}/${proposalId}`, {
         method: 'PATCH',
@@ -2114,58 +2092,6 @@ export const apiService = {
     }
   },
 
-  // ── Claude plan credit wallet ───────────────────────────────────────────
-  // The premium Claude model in the collaboration AI is metered by a prepaid
-  // credit wallet, sold separately from the memberships. These methods read the
-  // wallet and grant credits after a verified PortOne payment. The Claude plan is
-  // single-payment only (no recurring/auto billing). The public credit shape
-  // mirrors `publicCredits` server-side.
-  async getClaudeCredits(
-    username: string,
-    options: { refresh?: boolean } = {},
-  ): Promise<ClaudeCreditsResponse | null> {
-    const key = normalizeAccount(username);
-    return readMemory(`claudeCredits:${key}:${options.refresh ? 'refresh' : 'normal'}`, 60_000, async () => {
-      try {
-        // refresh=1 은 조회 간격을 무시하고 결제 취소(환불) 여부를 즉시 PG 에 확인한다.
-        const query = options.refresh ? '?refresh=1' : '';
-        const res = await fetch(
-          `/api/claude-credits/${encodeURIComponent(username.toLowerCase())}${query}`,
-          { headers: await authHeaders() },
-        );
-        if (!res.ok) return null;
-        return (await res.json()) as ClaudeCreditsResponse;
-      } catch (e) {
-        console.error('[API] Failed to get Claude credits:', e);
-        return null;
-      }
-    }, options.refresh);
-  },
-
-  async payClaudeCredits(
-    username: string,
-    payload: {
-      kind: 'activation' | 'recharge';
-      amountKrw: number;
-      paymentId: string;
-      payMethod?: string;
-    },
-  ): Promise<ClaudeCreditsResponse & { success: boolean; error?: string }> {
-    try {
-      const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`, {
-        method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { success: false, error: data?.error || '크레딧 적립에 실패했습니다.' } as any;
-      return data;
-    } catch (e) {
-      console.error('[API] Failed to pay Claude credits:', e);
-      return { success: false, error: '네트워크 오류로 처리에 실패했습니다.' } as any;
-    }
-  },
-
   // ───────────────────── Site Data Snapshots & Restore ─────────────────────
   async getSiteDataSnapshots(username: string): Promise<{ snapshots: { id: number; snapshot_reason: string; created_at: string; block_count: number; portfolio_count: number }[] }> {
     try {
@@ -2620,7 +2546,6 @@ export const apiService = {
   ): Promise<{
     success?: boolean;
     collabId?: string;
-    threads?: any;
     managerUsername?: string;
     error?: string;
     code?: string;
@@ -2642,112 +2567,6 @@ export const apiService = {
       return json;
     } catch (e) {
       console.error('[API] Failed to decide applicant:', e);
-      return { error: '네트워크 오류' };
-    }
-  },
-
-  /**
-   * 담당자 채널 대화 읽기.
-   *
-   * 담당자는 운영 콘솔(Netlify Identity)로 로그인해 있어서 서비스 화면의 대화 UI를
-   * 그대로 쓸 수 없다. 운영 콘솔 안에서 답장할 수 있도록 같은 대화 API 를 관리자
-   * 토큰으로 호출한다.
-   */
-  async getTimelineThread(
-    proposalId: string,
-    token?: string,
-    options: { signal?: AbortSignal; etag?: string } = {},
-  ): Promise<any> {
-    try {
-      const headers = new Headers(await collabHeaders(token));
-      if (options.etag) headers.set('If-None-Match', options.etag);
-      const res = await fetch(`/api/timeline/detail/${encodeURIComponent(proposalId)}`, {
-        credentials: 'same-origin',
-        cache: 'no-store',
-        signal: options.signal,
-        headers,
-      });
-      if (res.status === 304) return { notModified: true };
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: json?.error || '대화를 불러오지 못했습니다.' };
-      return { ...json, etag: res.headers.get('etag') || '' };
-    } catch (e) {
-      if (options.signal?.aborted) return { aborted: true };
-      console.error('[API] Failed to get timeline thread:', e);
-      return { error: '네트워크 오류' };
-    }
-  },
-
-  async markTimelineRead(proposalId: string, token?: string): Promise<boolean> {
-    try {
-      const res = await fetch(`/api/timeline/read/${encodeURIComponent(proposalId)}`, {
-        method: 'PATCH',
-        credentials: 'same-origin',
-        headers: await collabHeaders(token),
-        body: '{}',
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  },
-
-  /** 담당자 채널에 답장. 작성자는 서버가 토큰에서 확인한 본인으로 기록된다. */
-  async postTimelineComment(
-    proposalId: string,
-    content: string,
-    token?: string,
-  ): Promise<{ success?: boolean; comment?: any; error?: string }> {
-    try {
-      const res = await fetch(`/api/timeline/comment/${encodeURIComponent(proposalId)}`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: await collabHeaders(token),
-        body: JSON.stringify({ content }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: json?.error || '메시지를 보내지 못했습니다.' };
-      return json;
-    } catch (e) {
-      console.error('[API] Failed to post timeline comment:', e);
-      return { error: '네트워크 오류' };
-    }
-  },
-
-  /**
-   * 협업 대화를 내 목록에서 내린다(삭제).
-   *
-   * 방과 메시지는 지우지 않는다 — 상대와 함께 쓰는 기록이라 한쪽이 지우면 상대의
-   * 내역까지 사라진다. 내 목록에서만 감추고, 내린 뒤 상대가 새 메시지를 보내면
-   * 서버가 다시 살려 준다.
-   */
-  async hideTimeline(proposalId: string): Promise<{ success?: boolean; error?: string }> {
-    try {
-      const res = await fetch(`/api/timeline/hide/${encodeURIComponent(proposalId)}`, {
-        method: 'DELETE',
-        headers: await authHeaders(),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: json?.error || '대화를 삭제하지 못했습니다.' };
-      return { success: true };
-    } catch (e) {
-      console.error('[API] Failed to hide timeline:', e);
-      return { error: '네트워크 오류' };
-    }
-  },
-
-  /** 방금 내린 대화를 되돌린다("되돌리기"). */
-  async restoreTimeline(proposalId: string): Promise<{ success?: boolean; error?: string }> {
-    try {
-      const res = await fetch(`/api/timeline/hide/${encodeURIComponent(proposalId)}`, {
-        method: 'POST',
-        headers: await authHeaders(),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: json?.error || '대화를 되돌리지 못했습니다.' };
-      return { success: true };
-    } catch (e) {
-      console.error('[API] Failed to restore timeline:', e);
       return { error: '네트워크 오류' };
     }
   },
@@ -3352,29 +3171,6 @@ export const apiService = {
     } catch (e) {
       console.error(`[API] Manager campaign action failed (${action}):`, e);
       return { error: '네트워크 오류' };
-    }
-  },
-
-  /** 대화방 목록. 담당자는 `type='manager'` 로 배정된 협업의 두 채널을 함께 본다. */
-  async getTimelineList(
-    username: string,
-    type: 'influencer' | 'business' | 'manager' = 'influencer',
-    opts: { mine?: boolean; token?: string; signal?: AbortSignal } = {},
-  ): Promise<{ timelines?: any[]; error?: string }> {
-    try {
-      const params = new URLSearchParams({ type });
-      if (opts.mine) params.set('mine', '1');
-      const res = await fetch(
-        `/api/timeline/list/${encodeURIComponent(username)}?${params.toString()}`,
-        { credentials: 'same-origin', cache: 'no-store', signal: opts.signal, headers: await collabHeaders(opts.token) },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { timelines: [], error: json?.error || '대화 목록을 불러오지 못했습니다.' };
-      return json;
-    } catch (e) {
-      if (opts.signal?.aborted) return {};
-      console.error('[API] Failed to get timeline list:', e);
-      return { timelines: [], error: '네트워크 오류' };
     }
   },
 

@@ -1,5 +1,3 @@
-import { getStore } from "@netlify/blobs";
-import { mutateBlobJSON } from "./blob-write.mts";
 import { todayInSeoul } from "./campaign-recruit.mts";
 
 /**
@@ -371,144 +369,6 @@ export async function logCollabEvent(db: any, input: CollabEventInput): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// 담당자 채널
-// ---------------------------------------------------------------------------
-
-const TIMELINE_STORE = "timelines";
-
-export type SupportChannelKind = "influencer_support" | "brand_support";
-
-/** 담당자 채널의 대화방 ID. 기존 브랜드↔인플루언서 방과 겹치지 않는 접두사를 쓴다. */
-export function supportThreadId(kind: SupportChannelKind, collabId: string): string {
-  return kind === "influencer_support" ? `support_inf_${collabId}` : `support_biz_${collabId}`;
-}
-
-export type EnsureThreadInput = {
-  db: any;
-  kind: SupportChannelKind;
-  collabId: string;
-  counterpartUsername: string;
-  managerUsername: string;
-  companyName: string;
-  title: string;
-  firstMessage?: string;
-};
-
-/**
- * 담당자 채널을 만든다. 저장은 기존 타임라인과 같은 자리(Blobs + SQL 미러)를 쓴다 —
- * 대화 UI 와 읽음 표시, 첨부, 알림을 그대로 재사용할 수 있기 때문이다.
- *
- * 브랜드 채널에는 influencer_username 을, 인플루언서 채널에는 business_username 을
- * 비워 둔다. 그래야 각 채널에서 상대편 당사자가 열 수 없다 — 담당자가 중간에
- * 있다는 구조가 권한으로도 표현돼야 의미가 있다.
- */
-export async function ensureSupportThread(input: EnsureThreadInput): Promise<string> {
-  const { db, kind, collabId, counterpartUsername, managerUsername, companyName, title } = input;
-  const proposalId = supportThreadId(kind, collabId);
-  const nowISO = new Date().toISOString();
-  const influencerUsername = kind === "influencer_support" ? norm(counterpartUsername) : "";
-  const businessUsername = kind === "brand_support" ? norm(counterpartUsername) : "";
-
-  const firstComment = input.firstMessage
-    ? {
-        id: newId("tc"),
-        proposalId,
-        authorType: "manager",
-        authorName: "픽스폴리오 담당자",
-        authorUsername: norm(managerUsername) || "picksfolio",
-        content: input.firstMessage,
-        createdAt: nowISO,
-        readBy: [norm(managerUsername) || "picksfolio"],
-      }
-    : null;
-
-  await mutateBlobJSON<any>(TIMELINE_STORE, `detail_${proposalId}`, (current) => {
-    if (current) return null; // 이미 있으면 건드리지 않는다.
-    return {
-      proposalId,
-      kind,
-      collabId,
-      influencerUsername,
-      businessUsername,
-      managerUsername: norm(managerUsername),
-      companyName,
-      proposalTitle: title,
-      comments: firstComment ? [firstComment] : [],
-      createdAt: nowISO,
-    };
-  });
-
-  const indexEntry = {
-    proposalId,
-    kind,
-    collabId,
-    influencerUsername,
-    businessUsername,
-    managerUsername: norm(managerUsername),
-    companyName,
-    proposalTitle: title,
-    createdAt: nowISO,
-  };
-
-  const ensureIndex = async (type: string, username: string) => {
-    if (!username) return;
-    await mutateBlobJSON<any[]>(TIMELINE_STORE, `index_${type}_${username}`, (current) => {
-      const list = Array.isArray(current) ? current : [];
-      if (list.some((t: any) => t?.proposalId === proposalId)) return null;
-      return [indexEntry, ...list];
-    });
-  };
-
-  await ensureIndex(kind === "influencer_support" ? "influencer" : "business", norm(counterpartUsername));
-  await ensureIndex("manager", norm(managerUsername));
-
-  try {
-    await db.sql`
-      INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at, kind, manager_username, collab_id)
-      VALUES (${proposalId}, ${influencerUsername}, ${businessUsername}, ${companyName}, ${title}, ${nowISO}, ${kind}, ${norm(managerUsername)}, ${collabId})
-      ON CONFLICT (proposal_id) DO UPDATE
-        SET manager_username = EXCLUDED.manager_username,
-            kind = EXCLUDED.kind,
-            collab_id = EXCLUDED.collab_id
-    `;
-    if (firstComment) {
-      await db.sql`
-        INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, read_by, created_at)
-        SELECT ${firstComment.id}, ${proposalId}, ${firstComment.authorType}, ${firstComment.authorName}, ${firstComment.authorUsername}, ${firstComment.content}, ${firstComment.readBy}, ${nowISO}
-        WHERE NOT EXISTS (
-          SELECT 1 FROM timeline_messages
-          WHERE proposal_id = ${proposalId}
-            AND author_type = ${firstComment.authorType}
-            AND content = ${firstComment.content}
-        )
-        ON CONFLICT (id) DO NOTHING
-      `;
-    }
-  } catch (err) {
-    console.error("[collab-workflow] 담당자 채널 SQL 저장 실패:", err);
-  }
-
-  return proposalId;
-}
-
-/** 담당자가 바뀌면 채널의 담당자 표기도 따라가야 한다(대화 내용은 유지). */
-export async function reassignSupportThreads(db: any, collabId: string, managerUsername: string) {
-  const manager = norm(managerUsername);
-  for (const kind of ["influencer_support", "brand_support"] as SupportChannelKind[]) {
-    const proposalId = supportThreadId(kind, collabId);
-    await mutateBlobJSON<any>(TIMELINE_STORE, `detail_${proposalId}`, (current) => {
-      if (!current || current.managerUsername === manager) return null;
-      return { ...current, managerUsername: manager };
-    });
-  }
-  try {
-    await db.sql`UPDATE timelines SET manager_username = ${manager} WHERE collab_id = ${collabId}`;
-  } catch (err) {
-    console.error("[collab-workflow] 담당자 채널 재배정 실패:", err);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // 협업 생성
 // ---------------------------------------------------------------------------
 
@@ -538,8 +398,8 @@ export type CreateCollabInput = {
    * 누가 이 지원자를 수락했는지.
    *
    * 광고비 지급형은 담당자가 고르고, 제품 협찬형·공동구매는 브랜드가 지원자 중에서
-   * 직접 고른다. 첫 메시지를 하나로 두면 브랜드가 방금 자기 손으로 누른 수락을
-   * "선정했습니다"라고 통보받는 모양이 되어, 담당자가 대신 결정한 것처럼 읽힌다.
+   * 직접 고른다. 협업 시작 이벤트의 행위자를 여기서 정한다 — 하나로 두면 브랜드가
+   * 방금 자기 손으로 누른 수락이 담당자가 대신 결정한 것처럼 기록된다.
    */
   selectedBy?: "manager" | "brand";
   rewardType?: string | null;
@@ -569,9 +429,6 @@ export type CreatedCollab = {
   id: string;
   templateKey: string;
   firstStageKey: string;
-  influencerThreadId: string;
-  /** 더 이상 만들지 않는다. 호출부 호환을 위해 빈 문자열로 남겨 둔다. */
-  brandThreadId: string;
   created: boolean;
 };
 
@@ -581,7 +438,8 @@ export type CreatedCollab = {
  * 지금까지 `campaign_collabs` 표는 존재만 하고 아무도 쓰지 않았다(캠페인 삭제 시
  * 정리 대상으로만 등장했다). 그래서 "선정됐다" 이후의 상태를 담을 곳이 없었고,
  * 진행 상황은 대화 내용을 사람이 읽어야만 알 수 있었다. 여기서 협업 본체와 단계,
- * 조건 초안, 인플루언서↔담당자 채널을 한꺼번에 만든다.
+ * 조건 초안을 한꺼번에 만든다. 담당자와 인플루언서 사이 연락은 앱 안 대화방이 아니라
+ * 카카오톡 채널(연락 요청 알림톡)과 전화로 한다.
  *
  * 이미 있으면(재수락, 중복 호출) 그대로 두고 created=false 로 알린다.
  */
@@ -614,7 +472,6 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
       SET manager_username = ${managerUsername}, updated_at = NOW()
       WHERE id = ${collabId}
     `;
-    await reassignSupportThreads(db, collabId, managerUsername);
   } else {
     const inserted = await db.sql`
       INSERT INTO campaign_collabs (
@@ -646,7 +503,6 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
         SET manager_username = ${managerUsername}, updated_at = NOW()
         WHERE id = ${collabId}
       `;
-      await reassignSupportThreads(db, collabId, managerUsername);
     }
   }
 
@@ -726,35 +582,6 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
 
   const byBrand = input.selectedBy === "brand";
 
-  const influencerThreadId = await ensureSupportThread({
-    db,
-    kind: "influencer_support",
-    collabId,
-    counterpartUsername: creatorUsername,
-    managerUsername,
-    companyName: input.companyName,
-    title: input.campaignTitle,
-    firstMessage:
-      (byBrand
-        ? `"${input.campaignTitle}" 캠페인에 선정되셨습니다. 브랜드가 지원자 중에서 직접 수락했어요.\n`
-        : `"${input.campaignTitle}" 캠페인에 선정되셨습니다.\n`) +
-      `지금부터 진행은 픽스폴리오 담당자가 함께 챙깁니다. 단계별 할 일과 마감일은 협업 화면에서 ` +
-      `확인하실 수 있고, 궁금한 점은 여기로 편하게 남겨 주세요.`,
-  });
-
-  // 브랜드 채널(brand_support)은 더 이상 만들지 않는다.
-  //
-  // 브랜드가 담당자에게 할 말은 전부 특정 인플루언서의 특정 단계에 대한 것이다
-  // ("이 대본 3번 씬 고쳐 주세요", "영상 승인합니다"). 그 말이 별도 대화방으로
-  // 빠지면 어느 협업의 어느 단계 이야기인지 다시 적어야 하고, 진행 화면에는
-  // 아무 흔적도 남지 않는다. 그래서 브랜드의 의견은 진행사항의 단계별 피드백
-  // (collab_feedbacks)으로만 받는다 — 담당자가 그것을 정리해 인플루언서에게
-  // 전달하는 흐름은 그대로다.
-  //
-  // 이미 만들어진 방은 지우지 않는다. 지난 대화가 사라지기 때문이다. 다만
-  // 비즈니스 목록에서는 감춘다(api-timeline-list).
-  const brandThreadId = "";
-
   await logCollabEvent(db, {
     id: `ce_collab_created_${collabId}`,
     collabId,
@@ -770,8 +597,6 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
     id: collabId,
     templateKey: template.key,
     firstStageKey: resultStageKey,
-    influencerThreadId,
-    brandThreadId,
     created,
   };
 }
@@ -783,5 +608,3 @@ export function progressOf(stages: { status: string }[]): number {
   return Math.round((done / stages.length) * 100);
 }
 
-/** 첨부 저장 위치는 기존 타임라인과 같은 스토어를 쓴다. */
-export const timelineStore = () => getStore(TIMELINE_STORE);

@@ -51,7 +51,6 @@ const BusinessSignupPage = lazyWithRetry(() => import('./components/BusinessSign
 const BusinessLoginPage = lazyWithRetry(() => import('./components/BusinessLoginPage'));
 const BusinessEnterpriseDashboard = lazyWithRetry(() => import('./components/BusinessEnterpriseDashboard'));
 const UserSettlement = lazyWithRetry(() => import('./components/UserSettlement'));
-const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeline'));
 // 담당자 대시보드. 운영자가 배정한 일반 계정만 들어온다.
 const ManagerDashboard = lazyWithRetry(() => import('./components/manager/ManagerDashboard'));
 import { openExternalUrl } from './utils/externalLink';
@@ -99,10 +98,10 @@ const clearAllLinkCacheLazy = () => {
 };
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
-type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
+type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs';
 
 /** 다시 뜬 페이지가 되살려도 되는 탭(utils/resumeTab). */
-const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'timeline', 'campaigns', 'my-collabs'];
+const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'campaigns', 'my-collabs'];
 
 const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   dashboard: 'dashboard',
@@ -115,7 +114,9 @@ const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   membership: 'membership',
   schedule: 'open-schedule',
   settlement: 'settlement',
-  timeline: 'timeline',
+  // 협업 타임라인은 없어졌다. 예전 알림톡·푸시에 남은 ?tab=timeline 링크는 제안함으로
+  // 받는다 — 수락한 제안의 연락처(카카오톡 아이디 · 휴대폰)가 거기 있다.
+  timeline: 'business',
   campaigns: 'campaigns',
   collab: 'my-collabs',
 };
@@ -1431,8 +1432,8 @@ const App: React.FC = () => {
 
   // Register the device for native push notifications once a user is signed in.
   // Only the WebView shell exposes PicksFolioNative.registerPush; on the web it
-  // is a no-op. This lets the app deliver immediate alerts for new collaboration
-  // (chat) messages even when the app is closed.
+  // is a no-op. This lets the app deliver immediate alerts for new proposals and
+  // collaboration events even when the app is closed.
   useEffect(() => {
     const native = (window as unknown as {
       PicksFolioNative?: { registerPush?: (username: string, userType: string, accessToken: string) => void };
@@ -1550,7 +1551,6 @@ const App: React.FC = () => {
     later(1300, () => import('./components/BusinessCalendar').catch(() => {}));
     later(1600, () => import('./components/UserCampaignBrowse').catch(() => {}));
     later(1900, () => import('./components/CreatorCampaignCollabs').catch(() => {}));
-    later(2200, () => import('./components/BusinessTimeline').catch(() => {}));
     later(2500, () => import('./components/UserSettlement').catch(() => {}));
     later(2800, () => import('./components/BusinessDashboard').catch(() => {}));
     later(1200, () => {
@@ -1582,7 +1582,6 @@ const App: React.FC = () => {
       getApiService()
         .then(async (api) => {
           await api.getSellerVerification(userName).catch(() => undefined);
-          await api.getClaudeCredits(userName).catch(() => undefined);
         })
         .catch(() => undefined);
     });
@@ -1608,15 +1607,11 @@ const App: React.FC = () => {
   // subView 는 URL 이 아니라 상태로만 관리되므로 연동 후 페이지가 새로 뜨면 기본
   // 대시보드로 돌아간다. 그러면 작성 중이던 등록서를 되살릴 화면 자체가 뜨지 않는다.
   // (등록서 복원과 안내 배너는 CollabMatchRegister 가 같은 파라미터를 읽어 처리한다.)
-  const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requestedSubView = QUERY_TAB_TO_SUBVIEW[params.get('tab') || ''];
     if (requestedSubView) {
-      const proposalId = params.get('proposal');
       const collabId = params.get('collab');
-      if (requestedSubView === 'timeline' && proposalId) setTimelineProposalId(proposalId);
       if (requestedSubView === 'my-collabs' && collabId) setCollabFocusId(collabId);
       applySubView(requestedSubView);
       return;
@@ -1659,19 +1654,6 @@ const App: React.FC = () => {
     };
     window.addEventListener('navigate-campaign-collab', handler);
     return () => window.removeEventListener('navigate-campaign-collab', handler);
-  }, []);
-
-  // Listen for navigate-timeline custom events from BusinessDashboard
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.proposalId) {
-        setTimelineProposalId(detail.proposalId);
-      }
-      setSubView('timeline');
-    };
-    window.addEventListener('navigate-timeline', handler);
-    return () => window.removeEventListener('navigate-timeline', handler);
   }, []);
 
   // 자동 디엠 화면의 "브랜드 매칭받기 등록하기" — 등록 카드가 있는 캠페인 목록으로 보낸다.
@@ -2166,11 +2148,6 @@ const App: React.FC = () => {
       case 'settlement':
         subComponent = <UserSettlement userName={userName} />;
         break;
-      case 'timeline':
-        subComponent = (
-          <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
-        );
-        break;
       case 'membership':
         subComponent = <MembershipPlan userName={userName} />;
         break;
@@ -2230,7 +2207,6 @@ const App: React.FC = () => {
         onNavigateBusiness={() => setSubView('business')}
         onNavigateCalendar={() => setSubView('calendar')}
         onNavigateOpenSchedule={() => setSubView('open-schedule')}
-        onNavigateTimeline={() => setSubView('timeline')}
         onNavigateMembership={() => setSubView('membership')}
         onNavigateCampaigns={() => setSubView('campaigns')}
         onNavigateMyCollabs={() => setSubView('my-collabs')}
