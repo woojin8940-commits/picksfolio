@@ -155,12 +155,23 @@ export default async (req: Request, context: Context) => {
       if (supabase) {
         const { data: profile } = await supabase
           .from("profiles")
-          .select("*")
+          .select("id, username, role, full_name, avatar_url, bio, site_data")
           .eq("username", username)
           .maybeSingle();
 
         if (profile) {
-          const legacySiteData = profile.site_data;
+          const legacySiteData = isRecord(profile.site_data) ? profile.site_data : null;
+          const savedProfile = isRecord(legacySiteData?.profile) ? legacySiteData.profile : {};
+          const publicProfile = {
+            ...savedProfile,
+            name: typeof savedProfile.name === "string"
+              ? savedProfile.name
+              : String(profile.role || "").trim().toLowerCase() === "operator" && typeof profile.full_name === "string"
+                ? profile.full_name
+                : "",
+            bio: typeof savedProfile.bio === "string" ? savedProfile.bio : profile.bio || "",
+            avatar_url: typeof savedProfile.avatar_url === "string" ? savedProfile.avatar_url : profile.avatar_url || "",
+          };
           const hasLegacyContent =
             legacySiteData &&
             typeof legacySiteData === "object" &&
@@ -173,21 +184,10 @@ export default async (req: Request, context: Context) => {
           const initialData: Record<string, any> = hasLegacyContent
             ? {
                 ...legacySiteData,
-                profile: legacySiteData.profile || {
-                  // 표시 이름은 사람이 적은 것만 담는다. 예전에는 비어 있으면 로그인
-                  // 아이디를 대신 넣었는데, 그 값이 커버 사진 위에 큰 글씨로 올라가고
-                  // 링크 관리에서 지워도 다시 채워졌다. 비면 이름 줄 자체가 없다.
-                  name: profile.full_name || "",
-                  bio: profile.bio || "",
-                  avatar_url: profile.avatar_url || "",
-                },
+                profile: publicProfile,
               }
             : {
-                profile: {
-                  name: profile.full_name || "",
-                  bio: profile.bio || "",
-                  avatar_url: profile.avatar_url || "",
-                },
+                profile: publicProfile,
                 design: {},
                 socials: {},
                 blocks: [],

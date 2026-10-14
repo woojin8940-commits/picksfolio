@@ -47,11 +47,32 @@ export const getPublicProfileByUsername = async (
 
   if (!result.error || !publicProfilesViewMissing(result.error)) return result;
 
-  return await supabase
+  const publicColumns = ['id', 'username', 'full_name', 'avatar_url', 'bio', 'site_data', 'updated_at'];
+  const requestedColumns = columns.trim() === '*' ? publicColumns : columns.split(',').map(column => column.trim());
+  if (requestedColumns.some(column => !publicColumns.includes(column))) return result;
+
+  const fallback: any = await supabase
     .from('profiles')
-    .select(columns)
+    .select('id, username, role, full_name, avatar_url, bio, site_data, updated_at')
     .eq('username', normalizedUsername)
-    .maybeSingle() as any;
+    .maybeSingle();
+
+  if (fallback.error || !fallback.data) return { data: null, error: fallback.error };
+
+  const { role, ...profile } = fallback.data;
+  const name = profile.site_data?.profile?.name;
+  const publicProfile = {
+    ...profile,
+    full_name: typeof name === 'string'
+      ? name
+      : String(role || '').trim().toLowerCase() === 'operator' && typeof profile.full_name === 'string'
+        ? profile.full_name
+        : ''
+  };
+  return {
+    data: Object.fromEntries(requestedColumns.map(column => [column, publicProfile[column]])),
+    error: null
+  };
 };
 
 // In-process fallback lock: serializes concurrent calls within this tab without

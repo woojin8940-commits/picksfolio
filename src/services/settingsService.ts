@@ -45,6 +45,17 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
 
       if (!error && profileData) {
         const legacy = profileData.site_data;
+        const savedProfile = legacy?.profile && typeof legacy.profile === 'object' && !Array.isArray(legacy.profile)
+          ? legacy.profile
+          : {};
+        const publicProfile = {
+          ...savedProfile,
+          name: typeof savedProfile.name === 'string'
+            ? savedProfile.name
+            : typeof profileData.full_name === 'string' ? profileData.full_name : '',
+          bio: typeof savedProfile.bio === 'string' ? savedProfile.bio : profileData.bio || '',
+          avatar_url: typeof savedProfile.avatar_url === 'string' ? savedProfile.avatar_url : profileData.avatar_url || ''
+        };
         const hasLegacy = legacy && typeof legacy === 'object' &&
           ((Array.isArray(legacy.blocks) && legacy.blocks.length > 0) ||
            (Array.isArray(legacy.portfolio) && legacy.portfolio.length > 0));
@@ -58,11 +69,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
             portfolio: legacy.portfolio,
             design: legacy.design,
             socials: legacy.socials,
-            profile: legacy.profile || {
-              name: profileData.full_name || '',
-              bio: profileData.bio || '',
-              avatar_url: profileData.avatar_url || ''
-            }
+            profile: publicProfile
           };
         }
 
@@ -71,11 +78,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
           templateType: TemplateType.SHOPPABLE_GRID,
           blocks: [],
           source: 'profile',
-          profile: {
-            name: profileData.full_name || '',
-            bio: profileData.bio || '',
-            avatar_url: profileData.avatar_url || ''
-          }
+          profile: publicProfile
         };
       }
     }
