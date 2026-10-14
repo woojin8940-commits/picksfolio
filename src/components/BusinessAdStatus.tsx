@@ -24,6 +24,7 @@ import AdCreateModal from './AdCreateModal';
 import AdBoostModal from './AdBoostModal';
 import MetaAdDeleteDialog from './MetaAdDeleteDialog';
 import MetaPageEngagementPanel from './MetaPageEngagement';
+import MetaApprovedCreators from './MetaApprovedCreators';
 import AdOverview, { OverviewView } from './AdOverview';
 import AdPixelPanel from './AdPixelPanel';
 
@@ -1244,6 +1245,11 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
           {/* 고른 페이지의 게시물 반응(pages_read_engagement). */}
           <div className="mt-6">
             <MetaPageEngagementPanel username={cleanUsername} enabled={connected} />
+          </div>
+
+          {/* 파트너십 광고 크리에이터 목록(instagram_branded_content_ads_brand). */}
+          <div className="mt-6">
+            <MetaApprovedCreators username={cleanUsername} enabled={connected} />
           </div>
         </>
       )}

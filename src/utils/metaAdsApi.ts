@@ -575,3 +575,35 @@ export const estimateMetaAudience = (username: string, adAccountId: string, draf
     method: 'POST',
     body: JSON.stringify({ action: 'estimate', adAccountId, draft }),
   });
+
+/* ---------------------------------------------------------------------------------------- */
+/* 승인된 크리에이터(파트너십 광고)                                                          */
+/* ---------------------------------------------------------------------------------------- */
+
+export type ApprovedCreator = {
+  id: string;
+  username: string;
+  profilePictureUrl: string;
+  /** 메타가 돌려준 상태(APPROVED, PENDING 등). 없으면 빈 문자열. */
+  status: string;
+  permissionType: string;
+};
+
+type ApprovedCreatorList = { creators: ApprovedCreator[]; fetchedAt: string; source: string };
+
+const creatorsPath = (username: string, igUserId: string) =>
+  `/api/meta-ads/creators/${encodeURIComponent(normalize(username))}/${encodeURIComponent(igUserId)}`;
+
+export const fetchApprovedCreators = (username: string, igUserId: string) =>
+  call<ApprovedCreatorList>(username, creatorsPath(username, igUserId));
+
+export const changeApprovedCreator = (
+  username: string,
+  igUserId: string,
+  action: 'add' | 'remove',
+  creatorUsername: string,
+) =>
+  call<ApprovedCreatorList>(username, creatorsPath(username, igUserId), {
+    method: 'POST',
+    body: JSON.stringify({ action, creatorUsername }),
+  });
