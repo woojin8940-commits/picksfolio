@@ -305,9 +305,15 @@ async function runCreative(
         }
       : null;
 
+    // 고른 버튼 종류를 메타가 이 게시물에 받지 않으면 '더 알아보기'로 바꿔 버튼은 살린다.
+    const fallbackCta = r.linkUrl && metaCta(r.cta) !== "LEARN_MORE"
+      ? { call_to_action: { type: "LEARN_MORE", value: { link: r.linkUrl } }, url_tags: r.urlTags || undefined }
+      : null;
+
     const attempts: Record<string, unknown>[] = [];
     if (captioned) attempts.push({ ...base, ...captioned });
     attempts.push({ ...base, ...link });
+    if (fallbackCta) attempts.push({ ...base, ...fallbackCta });
     if (r.linkUrl) attempts.push(base);
     attempts.push(igOnly);
     // 예전 방식(게시물 ID)도 마지막에 시도한다. 크리에이터가 계정 단위로 허가해 둔 경우 이것으로도 나간다.
@@ -324,7 +330,10 @@ async function runCreative(
     for (let i = 0; i < attempts.length; i++) {
       const res = await graphPost(`${r.adAccountId}/adcreatives`, token, attempts[i], proof);
       if (res.ok) {
-        if (captioned && i > 0 && "call_to_action" in attempts[i]) {
+        const usedCta = (attempts[i].call_to_action as { type?: string } | undefined)?.type;
+        if (fallbackCta && usedCta === "LEARN_MORE") {
+          r.warnings.push("고른 버튼을 Meta가 이 게시물에 받지 않아 '더 알아보기' 버튼으로 만들었습니다.");
+        } else if (captioned && i > 0 && "call_to_action" in attempts[i]) {
           r.warnings.push("표시 링크를 Meta가 받지 않아 버튼과 웹사이트 URL만 붙였습니다.");
         }
         if (r.linkUrl && !("call_to_action" in attempts[i])) {

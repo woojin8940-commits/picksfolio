@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Loader2, MapPin, X } from 'lucide-react';
+import { Check, CheckCircle2, ChevronDown, Circle, Loader2, MapPin, X } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas, stripCommas, todayInSeoul } from '../utils/formatters';
 import {
   AD_AGE_MAX,
@@ -269,17 +269,30 @@ export const Segmented = <T extends string>({
 );
 
 /** 광고 관리자의 한 덩어리(캠페인 · 광고 세트 · 광고 안의 소제목). */
-export const AdSection: React.FC<{ title: string; badge?: string; children: React.ReactNode }> = ({
-  title,
-  badge,
-  children,
-}) => (
+export const AdSection: React.FC<{
+  title: string;
+  badge?: string;
+  /** 광고 관리자처럼 제목 아래 한 줄 설명. 이 칸에서 무엇을 정하는지 먼저 알려 준다. */
+  desc?: string;
+  /** 넘기면 제목 앞에 체크 표시를 그린다(채웠으면 초록, 아직이면 회색). */
+  done?: boolean;
+  children: React.ReactNode;
+}> = ({ title, badge, desc, done, children }) => (
   <section className="rounded-2xl border border-slate-100 bg-white p-4 space-y-4">
-    <div className="flex items-center gap-2">
-      <p className="text-[13px] font-black text-slate-900">{title}</p>
-      {badge && (
-        <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-[10px] font-black text-slate-500">{badge}</span>
-      )}
+    <div>
+      <div className="flex items-center gap-2">
+        {done !== undefined &&
+          (done ? (
+            <CheckCircle2 className="w-[18px] h-[18px] text-emerald-600 flex-shrink-0" />
+          ) : (
+            <Circle className="w-[18px] h-[18px] text-slate-300 flex-shrink-0" />
+          ))}
+        <p className="text-[14px] font-black text-slate-900">{title}</p>
+        {badge && (
+          <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-[10px] font-black text-slate-500">{badge}</span>
+        )}
+      </div>
+      {desc && <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed">{desc}</p>}
     </div>
     {children}
   </section>
@@ -541,14 +554,40 @@ export const AdDeliveryFields: React.FC<{
   idPrefix: string;
   username?: string;
   adAccountId?: string;
-}> = ({ delivery: d, idPrefix, username, adAccountId }) => {
+  /**
+   * 'basic' 은 예산 · 기간 · 연령 · 성별 · 관심사만, 'advanced' 는 입찰 · Advantage+ 타겟 ·
+   * 맞춤 타겟 · 노출 위치만 그린다. 파트너십 광고 창은 basic 을 펼쳐 두고 advanced 를
+   * '고급 설정' 안에 접어 둔다 — 대부분은 기본값 그대로가 맞는 값이다.
+   */
+  part?: 'all' | 'basic' | 'advanced';
+}> = ({ delivery: d, idPrefix, username, adAccountId, part = 'all' }) => {
+  const basic = part !== 'advanced';
+  const advantageToggle = (
+        <label className="flex items-start gap-3 rounded-xl bg-slate-50 px-3 py-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={d.advantageAudience}
+            onChange={(e) => d.setAdvantageAudience(e.target.checked)}
+            className="mt-0.5 w-4 h-4 accent-blue-600"
+          />
+          <span>
+            <span className="block text-[12px] font-black text-slate-800">Advantage+ 타겟</span>
+            <span className="block text-[10px] text-slate-500 font-bold mt-0.5 leading-relaxed">
+              켜면 아래 연령 · 관심사를 '제안'으로 쓰고, 성과가 더 나을 것 같은 사람에게도 넓혀 노출합니다(성별 제한은 쓰지 않습니다).
+              지역과 제외 타겟은 그대로 지킵니다.
+            </span>
+          </span>
+        </label>
+  );
+  const advanced = part !== 'basic';
   const igPlacements = AD_PLACEMENTS.filter((p) => p.group === 'instagram');
   const fbPlacements = AD_PLACEMENTS.filter((p) => p.group === 'facebook');
   const bid = BID_STRATEGIES.find((b) => b.value === d.bidStrategy);
 
   return (
     <>
-      <AdSection title="예산 및 일정">
+      {basic && (
+      <AdSection title="예산 및 일정" desc="광고에 쓸 금액과 광고가 게재될 기간을 정합니다.">
         <div>
           <p className={labelCls}>예산</p>
           <Segmented
@@ -603,52 +642,12 @@ export const AdDeliveryFields: React.FC<{
           </div>
         </div>
 
-        <div>
-          <label className={labelCls} htmlFor={`${idPrefix}-bid`}>입찰 전략</label>
-          <div className="relative mt-1.5">
-            <select
-              id={`${idPrefix}-bid`}
-              value={d.bidStrategy}
-              onChange={(e) => d.setBidStrategy(e.target.value as BidStrategy)}
-              className={selectCls}
-            >
-              {BID_STRATEGIES.map((b) => (
-                <option key={b.value} value={b.value}>{b.label}</option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
-          {d.bidStrategy !== 'lowest_cost' && (
-            <input
-              aria-label={d.bidStrategy === 'cost_cap' ? '결과당 비용 목표' : '입찰가 한도'}
-              inputMode="numeric"
-              value={d.bidAmount}
-              onChange={(e) => d.setBidAmount(formatNumberWithCommas(stripCommas(e.target.value)))}
-              placeholder={d.bidStrategy === 'cost_cap' ? '결과당 목표 비용 (예: 15,000)' : '최대 입찰가 (예: 3,000)'}
-              className={inputCls}
-            />
-          )}
-          <p className={hintCls}>{bid?.hint}</p>
-        </div>
       </AdSection>
+      )}
 
-      <AdSection title="타겟">
-        <label className="flex items-start gap-3 rounded-xl bg-slate-50 px-3 py-2.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={d.advantageAudience}
-            onChange={(e) => d.setAdvantageAudience(e.target.checked)}
-            className="mt-0.5 w-4 h-4 accent-blue-600"
-          />
-          <span>
-            <span className="block text-[12px] font-black text-slate-800">Advantage+ 타겟</span>
-            <span className="block text-[10px] text-slate-500 font-bold mt-0.5 leading-relaxed">
-              켜면 아래 연령 · 관심사를 '제안'으로 쓰고, 성과가 더 나을 것 같은 사람에게도 넓혀 노출합니다(성별 제한은 쓰지 않습니다).
-              지역과 제외 타겟은 그대로 지킵니다.
-            </span>
-          </span>
-        </label>
-
+      {basic && (
+      <AdSection title="타겟" desc="광고를 보여 줄 사람을 정합니다. 그대로 두면 대한민국 18세 이상 전체에게 노출됩니다.">
+        {part === 'all' && advantageToggle}
         <div>
           <p className={labelCls}>지역</p>
           <div className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black border bg-blue-50 border-blue-200 text-blue-700">
@@ -697,12 +696,51 @@ export const AdDeliveryFields: React.FC<{
         </div>
 
         {username && <InterestCategories username={username} delivery={d} />}
-        {username && adAccountId && (
+        {part === 'all' && username && adAccountId && (
           <AudiencePicker username={username} adAccountId={adAccountId} delivery={d} idPrefix={idPrefix} />
         )}
       </AdSection>
+      )}
 
-      <AdSection title="노출 위치">
+      {advanced && (
+      <AdSection title={part === 'advanced' ? '입찰 · 타겟 확장' : '입찰 전략'}>
+        <div>
+          <label className={labelCls} htmlFor={`${idPrefix}-bid`}>입찰 전략</label>
+          <div className="relative mt-1.5">
+            <select
+              id={`${idPrefix}-bid`}
+              value={d.bidStrategy}
+              onChange={(e) => d.setBidStrategy(e.target.value as BidStrategy)}
+              className={selectCls}
+            >
+              {BID_STRATEGIES.map((b) => (
+                <option key={b.value} value={b.value}>{b.label}</option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+          {d.bidStrategy !== 'lowest_cost' && (
+            <input
+              aria-label={d.bidStrategy === 'cost_cap' ? '결과당 비용 목표' : '입찰가 한도'}
+              inputMode="numeric"
+              value={d.bidAmount}
+              onChange={(e) => d.setBidAmount(formatNumberWithCommas(stripCommas(e.target.value)))}
+              placeholder={d.bidStrategy === 'cost_cap' ? '결과당 목표 비용 (예: 15,000)' : '최대 입찰가 (예: 3,000)'}
+              className={inputCls}
+            />
+          )}
+          <p className={hintCls}>{bid?.hint}</p>
+        </div>
+        {part === 'advanced' && advantageToggle}
+
+        {part === 'advanced' && username && adAccountId && (
+          <AudiencePicker username={username} adAccountId={adAccountId} delivery={d} idPrefix={idPrefix} />
+        )}
+      </AdSection>
+      )}
+
+      {advanced && (
+      <AdSection title="노출 위치" desc="광고가 보일 곳입니다. 자동으로 두면 Meta가 성과가 좋은 위치에 예산을 나눠 씁니다.">
         <Segmented
           value={d.placementMode}
           onChange={d.setPlacementMode}
@@ -755,6 +793,7 @@ export const AdDeliveryFields: React.FC<{
           </div>
         )}
       </AdSection>
+      )}
     </>
   );
 };
