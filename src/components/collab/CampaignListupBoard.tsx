@@ -417,7 +417,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                         {snap.avgViews ? formatCountKo(snap.avgViews) : '—'}
                       </p>
                       {snap.reelsCount > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold truncate">릴스 {snap.reelsCount}편 기준</p>
+                        <p className="text-[10px] text-slate-400 font-bold truncate">{`릴스 ${snap.reelsCount}편 기준`}</p>
                       )}
                     </div>
                     <div className="min-w-0">

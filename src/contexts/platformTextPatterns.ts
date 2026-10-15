@@ -1,6 +1,62 @@
 // Generated from platform template literals with dynamic values preserved.
 export const platformTextPatterns = [
   {
+    "source": "^@(.+?) 님을 수락하시겠습니까\\? (.+)$",
+    "replacement": "Accept @$1? $2"
+  },
+  {
+    "source": "^수락했습니다\\. 담당자 \\(@(.+?)\\)가 연락드립니다\\.$",
+    "replacement": "Accepted. Your manager (@$1) will contact you."
+  },
+  {
+    "source": "^지원자를 수락하면 픽스폴리오 담당자 \\(@(.+?)\\)가 배정되어 브랜드와 인플루언서 양쪽에 연락해 조건과 일정을 정리합니다\\.$",
+    "replacement": "When you accept an applicant, PICKSfolio manager @$1 is assigned and contacts both the brand and the influencer to settle the terms and schedule."
+  },
+  {
+    "source": "^함께할 인플루언서는 브랜드가 직접 수락하고, 그 뒤는 픽스폴리오 담당자 \\(@(.+?)\\)가 배정되어 연락드립니다\\.$",
+    "replacement": "The brand accepts the influencers it wants to work with, and then PICKSfolio manager @$1 is assigned and gets in touch."
+  },
+  {
+    "source": "^수락 완료\\. 담당자 \\(@(.+?)\\)가 배정되어 연락드립니다\\.$",
+    "replacement": "Accepted. Manager @$1 is assigned and will contact you."
+  },
+  {
+    "source": "^담당자 \\(@(.+?)\\)가 연락해 진행합니다\\.$",
+    "replacement": "Manager @$1 will contact you to proceed."
+  },
+  {
+    "source": "^(.+?)[가] 아직 끝나지 않았습니다\\. (.+?) 검토가 완료되면 이 단계를 진행할 수 있습니다\\.$",
+    "replacement": "$1 is not finished yet. You can proceed with this step once the $2 review is complete."
+  },
+  {
+    "source": "^(.+?)[가] 아직 끝나지 않았습니다\\. 순서대로 진행해 주세요\\.$",
+    "replacement": "$1 is not finished yet. Please proceed in order."
+  },
+  {
+    "source": "^(.+?)[에]게 연락 요청 보내기$",
+    "replacement": "Send a contact request to $1"
+  },
+  {
+    "source": "^자막·로고 없는 원본 영상 · mp4 · mov · webm · 최대 (\\d+)MB$",
+    "replacement": "Original video without captions or logos · mp4 · mov · webm · up to $1MB"
+  },
+  {
+    "source": "^· 캠페인 ID (.+)$",
+    "replacement": "· Campaign ID $1"
+  },
+  {
+    "source": "^· (.+?:.+?) 조회$",
+    "replacement": "· Fetched $1"
+  },
+  {
+    "source": "^발송 현황을 불러오지 못했습니다\\. \\(HTTP (\\d+)\\)$",
+    "replacement": "Could not load the delivery status. (HTTP $1)"
+  },
+  {
+    "source": "^최근 (\\d+)일$",
+    "replacement": "Last $1 days"
+  },
+  {
     "source": "^지금 같은 규모로 등록된 계정이 (.+?)명입니다\\. 평균이 뜻을 가지려면 최소 (.+?)명이 필요해서, 그 전에는 평균을 그리지 않습니다\\. 아래는 내 값이고, 등록이 쌓이면 이 자리에 비교 그래프가 저절로 켜집니다\\.$",
     "replacement": "There are $1 accounts registered at the same scale right now. An average needs at least $2 to mean anything, so we do not draw one before that. Below is your own value; once more accounts register, the comparison graph turns on here by itself."
   },
