@@ -118,45 +118,57 @@ export const DEFAULT_AD_OBJECTIVE: AdObjective = 'conversions';
 export const findObjective = (value: string | undefined) =>
   AD_OBJECTIVES.find((o) => o.value === value) || null;
 
-/** CTA 버튼 문구. 메타 광고의 call_to_action 과 같은 선택지만 둔다. */
+/**
+ * CTA 버튼 문구. 메타 광고의 call_to_action 값 중 브랜드가 실제로 쓰는 다섯 개만 둔다.
+ *
+ * 예전에는 광고 관리자의 '웹사이트' 도착 위치에서 고를 수 있는 버튼을 다 늘어놓아 스무 개가
+ * 넘었고, 상영 시간 보기 · 지금 기부하기처럼 브랜드 광고와 상관없는 문구가 섞여 고르기 어려웠다.
+ * '자세히 보기'는 메타의 LEARN_MORE 로 보낸다 — 모든 도착 위치에서 받는 기본 버튼이다.
+ */
 export const AD_CTAS = [
-  { value: 'learn_more', label: '더 알아보기' },
-  { value: 'see_more', label: '자세히 보기' },
-  { value: 'shop_now', label: '지금 구매' },
-  { value: 'sign_up', label: '가입하기' },
-  { value: 'book_now', label: '지금 예약' },
+  { value: 'learn_more', label: '자세히 보기' },
   { value: 'contact_us', label: '문의하기' },
-  // 아래는 광고 관리자의 '웹사이트' 도착 위치에서 고를 수 있는 나머지 버튼이다.
-  { value: 'order_now', label: '지금 주문하기' },
-  { value: 'buy_now', label: '지금 구매하기' },
-  { value: 'get_offer', label: '혜택 받기' },
-  { value: 'apply_now', label: '지금 신청하기' },
-  { value: 'subscribe', label: '구독하기' },
-  { value: 'download', label: '다운로드' },
-  { value: 'get_quote', label: '견적 받기' },
-  { value: 'see_menu', label: '메뉴 보기' },
-  { value: 'watch_more', label: '더 보기' },
-  { value: 'buy_tickets', label: '티켓 구매' },
-  { value: 'request_time', label: '시간 요청' },
-  { value: 'get_showtimes', label: '상영 시간 보기' },
-  { value: 'listen_now', label: '지금 듣기' },
-  { value: 'donate_now', label: '지금 기부하기' },
-  { value: 'inquire_now', label: '지금 문의하기' },
+  { value: 'shop_now', label: '구매하기' },
+  { value: 'sign_up', label: '가입하기' },
+  { value: 'book_now', label: '지금 예약하기' },
 ] as const;
 
 export type AdCta = (typeof AD_CTAS)[number]['value'];
 
+/** 목록에서 뺀 예전 버튼. 이미 만든 광고의 카드 · 요약에 이름이 비지 않게 이름만 남긴다. */
+const LEGACY_CTA_LABELS: Record<string, string> = {
+  see_more: '자세히 보기',
+  order_now: '지금 주문하기',
+  buy_now: '구매하기',
+  get_offer: '혜택 받기',
+  apply_now: '지금 신청하기',
+  subscribe: '구독하기',
+  download: '다운로드',
+  get_quote: '견적 받기',
+  see_menu: '메뉴 보기',
+  watch_more: '더 보기',
+  buy_tickets: '티켓 구매',
+  request_time: '시간 요청',
+  get_showtimes: '상영 시간 보기',
+  listen_now: '지금 듣기',
+  donate_now: '지금 기부하기',
+  inquire_now: '문의하기',
+};
+
+/** 고를 수 있는 버튼인지. 예전 광고를 이어 만들 때 목록에 없는 값을 걸러 낸다. */
+export const isAdCta = (value: unknown): value is AdCta => AD_CTAS.some((c) => c.value === value);
+
 /**
  * 목적에 맞는 문구가 위로 오는 순서.
  *
- * 다섯 개를 늘 같은 순서로 두면 브랜드는 목적과 어울리지 않는 문구(인지도 광고에
- * '지금 구매')를 맨 위에서 집는다. 목록에서 빼지는 않는다 — 목적과 문구를 다르게
- * 가는 판단은 브랜드 쪽에 있다.
+ * 늘 같은 순서로 두면 브랜드는 목적과 어울리지 않는 문구(인지도 광고에 '구매하기')를
+ * 맨 위에서 집는다. 목록에서 빼지는 않는다 — 목적과 문구를 다르게 가는 판단은 브랜드
+ * 쪽에 있다.
  */
 const CTA_ORDER: Record<AdObjective, AdCta[]> = {
-  awareness: ['learn_more', 'see_more', 'contact_us', 'sign_up', 'book_now', 'shop_now'],
-  traffic: ['see_more', 'learn_more', 'shop_now', 'book_now', 'sign_up', 'contact_us'],
-  conversions: ['shop_now', 'buy_now', 'order_now', 'see_more', 'get_offer', 'learn_more', 'sign_up', 'book_now', 'contact_us'],
+  awareness: ['learn_more', 'contact_us', 'sign_up', 'book_now', 'shop_now'],
+  traffic: ['learn_more', 'shop_now', 'book_now', 'sign_up', 'contact_us'],
+  conversions: ['shop_now', 'learn_more', 'book_now', 'sign_up', 'contact_us'],
 };
 
 export const ctasForObjective = (objective: AdObjective) => {
@@ -169,8 +181,8 @@ export const ctasForObjective = (objective: AdObjective) => {
   return [...AD_CTAS].sort((a, b) => rank(a.value) - rank(b.value));
 };
 
-export const ctaLabel = (value: AdCta | undefined): string =>
-  AD_CTAS.find((c) => c.value === value)?.label || '';
+export const ctaLabel = (value: AdCta | string | undefined): string =>
+  AD_CTAS.find((c) => c.value === value)?.label || (value ? LEGACY_CTA_LABELS[value] || '' : '');
 
 /* ---------------------------------------------------------------------------------------- */
 /* 광고 관리자와 같은 이름의 세부 설정                                                       */

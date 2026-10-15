@@ -655,8 +655,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           collabId={boostTarget.post.collabId}
           creatorHandle={boostTarget.post.instagramHandle || boostTarget.post.creatorUsername}
           partnershipCode={boostTarget.post.partnershipCode}
-          // 게시물 썸네일이 아직 안 맞춰졌으면 캠페인 썸네일로 대신한다.
-          thumbnailUrl={boostTarget.post.metrics?.thumbnailUrl || boostTarget.campaign.thumbnailUrl}
+          // 미리보기는 창이 업로드 주소로 실제 게시물 이미지를 받아 그린다. 캠페인 대표 이미지는
+          // 다른 사진이라 대신 쓰지 않는다 — 광고로 나갈 게시물과 다르게 보인다.
+          thumbnailUrl={boostTarget.post.metrics?.thumbnailUrl || ''}
           onViewAdStatus={onViewAdStatus}
         />
       )}

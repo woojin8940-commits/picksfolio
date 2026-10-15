@@ -24,6 +24,7 @@ import {
   MetaAdRecord,
   createMetaAd,
   estimateMetaAudience,
+  fetchCollabPostImage,
   notifyMetaAdsChanged,
   resumeMetaAd,
   runRemainingSteps,
@@ -37,6 +38,7 @@ import {
   PERFORMANCE_GOALS,
   ctaLabel,
   ctasForObjective,
+  isAdCta,
   placementSummary,
   targetSummary,
 } from '../utils/adBoosts';
@@ -107,6 +109,10 @@ interface AdBoostModalProps {
   collabId: string;
   creatorHandle: string;
   partnershipCode: string;
+  /**
+   * 이력 화면이 맞춰 둔 게시물 썸네일. 미리보기는 업로드 주소로 찾은 실제 이미지를 먼저 쓰고,
+   * 그것을 못 찾았을 때만 이 값을 쓴다.
+   */
   thumbnailUrl: string;
   /** 메타에 광고 기록이 만들어졌을 때(중간 실패 포함). */
   onSubmitted?: (record: MetaAdRecord) => void;
@@ -128,11 +134,36 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   collabId,
   creatorHandle,
   partnershipCode,
-  thumbnailUrl,
+  thumbnailUrl: fallbackThumbnailUrl,
   onSubmitted,
   onViewAdStatus,
   resume: resumeProp,
 }) => {
+  /**
+   * 미리보기 이미지 — 인플루언서가 올린 업로드 주소의 그 게시물에서 받아 온다.
+   *
+   * 예전에는 이력 화면이 넘겨준 썸네일을 그렸는데, 게시물이 맞춰지지 않으면 캠페인 대표
+   * 이미지가 대신 들어가 광고로 나갈 게시물과 다른 사진이 보였다. 받는 동안에는 다른
+   * 사진을 먼저 보여 주지 않는다(잠깐이라도 틀린 게시물이 보이면 그게 소재로 읽힌다).
+   */
+  const [postImage, setPostImage] = useState<{ url: string; loading: boolean }>({ url: '', loading: !!collabId });
+  useEffect(() => {
+    if (!open || !collabId) {
+      setPostImage({ url: '', loading: false });
+      return;
+    }
+    let alive = true;
+    setPostImage({ url: '', loading: true });
+    void fetchCollabPostImage(businessUsername, collabId).then((res) => {
+      if (!alive) return;
+      setPostImage({ url: res.ok ? res.imageUrl : '', loading: false });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open, businessUsername, collabId]);
+  const thumbnailUrl = postImage.url || (postImage.loading ? '' : fallbackThumbnailUrl);
+
   // 예산 · 기간 · 타겟 · 노출 위치는 '새 광고 만들기' 창과 같은 값·같은 검증을 쓴다.
   const delivery = useAdDelivery();
   const [objective, setObjective] = useState<BoostObjective>('conversions');
@@ -165,7 +196,6 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   const [fixing, setFixing] = useState(false);
   const resume = resumeProp || (fixing && record && record.step !== 'done' ? record : null);
   const [runError, setRunError] = useState('');
-  const [showAllCtas, setShowAllCtas] = useState(false);
   /** 광고 관리자 세부 값(성과 목표 · 입찰 · 노출 위치 · 이름 …). 대부분 기본값이 맞아서 접어 둔다. */
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -231,7 +261,8 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     setDestination(resume.linkUrl ? 'website' : 'post');
     setLinkUrl(resume.linkUrl || '');
     setDisplayLink(resume.displayLink || '');
-    if (resume.cta) setCta(resume.cta);
+    // 목록에서 뺀 예전 버튼으로 만든 광고는 맨 앞 버튼으로 바꿔서 연다.
+    if (resume.cta) setCta(isAdCta(resume.cta) ? resume.cta : 'shop_now');
     setUrlTags(resume.urlTags || '');
     setFreqOn(!!resume.frequencyCap);
     if (resume.frequencyCap) {
@@ -245,7 +276,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   const changeObjective = (next: BoostObjective) => {
     setObjective(next);
     setOptimizationGoal(PERFORMANCE_GOALS[next][0].value);
-    setCta(next === 'conversions' ? 'shop_now' : next === 'traffic' ? 'see_more' : 'learn_more');
+    setCta(next === 'conversions' ? 'shop_now' : 'learn_more');
     // 판매 · 트래픽은 웹사이트로 보내야 성과가 측정된다. 다른 목표는 고른 도착 위치를 둔다.
     if (next === 'conversions' || next === 'traffic') setDestination('website');
   };
@@ -461,15 +492,8 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   if (!open) return null;
 
 
-  /** 처음에는 목표에 어울리는 버튼만 보여 주고, 고른 버튼이 뒤쪽이면 같이 둔다. */
-  const visibleCtas = showAllCtas
-    ? ctaOptions
-    : (() => {
-        const top = ctaOptions.slice(0, 6);
-        const picked = ctaOptions.find((c) => c.value === cta);
-        return picked && !top.includes(picked) ? [...top, picked] : top;
-      })();
-  const recommendedCtas = new Set(ctaOptions.slice(0, 3).map((c) => c.value));
+  /** 버튼은 다섯 개뿐이라 다 보여 주고, 목표에 맞는 맨 앞 하나에 '추천'을 단다. */
+  const recommendedCtas = new Set(ctaOptions.slice(0, 1).map((c) => c.value));
   const urlReady = /^https?:\/\/\S+\.\S+/i.test(finalUrl);
   const defaultName = `[PICKSfolio] ${campaignTitle || '부스팅'} · ${delivery.startDate}`;
 
@@ -481,7 +505,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
           <div className="relative w-9 h-8 flex-shrink-0">
             <div className="absolute left-0 top-0 w-7 h-7 rounded-full bg-gradient-to-br from-fuchsia-400 to-amber-300 p-[2px]">
               <div className="w-full h-full rounded-full bg-slate-200 overflow-hidden">
-                {thumbnailUrl && <img src={thumbnailUrl} alt="" className="w-full h-full object-cover" />}
+                {thumbnailUrl && <img src={thumbnailUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />}
               </div>
             </div>
             <div className="absolute right-0 bottom-0 w-5 h-5 rounded-full bg-slate-300 border-2 border-white overflow-hidden">
@@ -497,10 +521,17 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
           </div>
         </div>
         {thumbnailUrl ? (
-          <img src={thumbnailUrl} alt="" className="w-full aspect-[4/5] object-cover bg-slate-100" />
+          <img src={thumbnailUrl} alt="" referrerPolicy="no-referrer" className="w-full aspect-[4/5] object-cover bg-slate-100" />
         ) : (
-          <div className="w-full aspect-[4/5] bg-slate-100 flex items-center justify-center text-[10px] text-slate-400 font-black">
-            게시물 소재
+          <div className="w-full aspect-[4/5] bg-slate-100 flex flex-col items-center justify-center gap-1.5 text-[10px] text-slate-400 font-black">
+            {postImage.loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                업로드한 게시물을 불러오는 중
+              </>
+            ) : (
+              '게시물 소재'
+            )}
           </div>
         )}
         {toWebsite && (
@@ -701,6 +732,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                         src={thumbnailUrl}
                         alt=""
                         loading="lazy"
+                        referrerPolicy="no-referrer"
                         className="w-12 aspect-[9/16] rounded-xl object-cover bg-slate-200 flex-shrink-0"
                       />
                     ) : (
@@ -834,7 +866,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                         <div>
                           <p className={labelCls}>버튼 문구</p>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">
-                            {visibleCtas.map((c) => {
+                            {ctaOptions.map((c) => {
                               const on = cta === c.value;
                               return (
                                 <button
@@ -863,14 +895,6 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                               );
                             })}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setShowAllCtas((v) => !v)}
-                            className="mt-2 inline-flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-700"
-                          >
-                            {showAllCtas ? '추천 버튼만 보기' : `다른 버튼 문구 보기 (${ctaOptions.length}개)`}
-                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAllCtas ? 'rotate-180' : ''}`} />
-                          </button>
                         </div>
 
                         <div>

@@ -10,6 +10,7 @@ import {
   DEFAULT_AD_OBJECTIVE,
   ctaLabel,
   ctasForObjective,
+  isAdCta,
   findObjective,
 } from '../utils/adBoosts';
 import { MetaAdAccount } from '../utils/adAccounts';
@@ -93,7 +94,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   const [headline, setHeadline] = useState(resumeProp?.headline || '');
   const [bodyText, setBodyText] = useState(resumeProp?.bodyText || '');
   const [cta, setCta] = useState<AdCta>(
-    resumeProp?.cta || ctasForObjective(resumeObjective)[0].value,
+    isAdCta(resumeProp?.cta) ? resumeProp.cta : ctasForObjective(resumeObjective)[0].value,
   );
   /** 브랜드가 CTA 를 직접 골랐는지. 고른 뒤에는 목적을 바꿔도 그 문구를 지킨다. */
   const [ctaPicked, setCtaPicked] = useState(!!resumeProp?.cta);
