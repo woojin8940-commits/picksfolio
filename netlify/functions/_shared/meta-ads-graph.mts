@@ -497,6 +497,7 @@ export const CONVERSION_EVENTS = [
 /** 화면의 CTA 값 → 메타 call_to_action type. */
 const META_CTAS = new Set([
   "LEARN_MORE",
+  "SEE_MORE",
   "SHOP_NOW",
   "SIGN_UP",
   "BOOK_NOW",

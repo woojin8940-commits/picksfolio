@@ -121,6 +121,7 @@ export const findObjective = (value: string | undefined) =>
 /** CTA 버튼 문구. 메타 광고의 call_to_action 과 같은 선택지만 둔다. */
 export const AD_CTAS = [
   { value: 'learn_more', label: '더 알아보기' },
+  { value: 'see_more', label: '자세히 보기' },
   { value: 'shop_now', label: '지금 구매' },
   { value: 'sign_up', label: '가입하기' },
   { value: 'book_now', label: '지금 예약' },
@@ -153,9 +154,9 @@ export type AdCta = (typeof AD_CTAS)[number]['value'];
  * 가는 판단은 브랜드 쪽에 있다.
  */
 const CTA_ORDER: Record<AdObjective, AdCta[]> = {
-  awareness: ['learn_more', 'contact_us', 'sign_up', 'book_now', 'shop_now'],
-  traffic: ['learn_more', 'book_now', 'sign_up', 'shop_now', 'contact_us'],
-  conversions: ['shop_now', 'sign_up', 'book_now', 'learn_more', 'contact_us'],
+  awareness: ['learn_more', 'see_more', 'contact_us', 'sign_up', 'book_now', 'shop_now'],
+  traffic: ['see_more', 'learn_more', 'shop_now', 'book_now', 'sign_up', 'contact_us'],
+  conversions: ['shop_now', 'buy_now', 'order_now', 'see_more', 'get_offer', 'learn_more', 'sign_up', 'book_now', 'contact_us'],
 };
 
 export const ctasForObjective = (objective: AdObjective) => {
