@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Check, ChevronDown, Loader2, RotateCcw, Users } from 'lucide-react';
+import { X, Check, ChevronDown, ExternalLink, Globe, Instagram, Loader2, RotateCcw, Users } from 'lucide-react';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import { useMetaPages } from '../hooks/useMetaPages';
@@ -13,13 +13,14 @@ import {
   runRemainingSteps,
 } from '../utils/metaAdsApi';
 import {
-  AD_CTAS,
   AdCta,
   BID_STRATEGIES,
   BOOST_OBJECTIVES,
   BoostObjective,
   CONVERSION_EVENTS,
   PERFORMANCE_GOALS,
+  ctaLabel,
+  ctasForObjective,
   placementSummary,
   targetSummary,
 } from '../utils/adBoosts';
@@ -38,6 +39,12 @@ import ResumeNotice from './MetaAdResumeNotice';
  * CTA · URL 매개변수). 마케터가 광고 관리자에서 자주 만지는 값만 옮겨 왔고, 모두
  * 광고 관리자의 기본값으로 채워져 있어서 예산만 넣어도 집행된다. 맨 아래 요약은 광고
  * 관리자 오른쪽의 '타겟 규모'와 설정 요약 자리다.
+ *
+ * 광고 단계는 광고 관리자의 광고 화면 순서를 따른다 — 광고 이름 → 아이덴티티(페이지 ·
+ * 인스타그램 계정) → 도착 위치(웹사이트 / 게시물) → 웹사이트 URL · 표시 링크 · CTA ·
+ * URL 매개변수 → 미리보기. 도착 위치를 먼저 고르게 해서 CTA 버튼이 붙는지, 누르면 어디로
+ * 가는지가 입력하기 전부터 보이게 한다(예전처럼 URL 을 넣어야 CTA 칸이 나타나면 브랜드는
+ * 버튼을 붙일 수 있다는 것 자체를 모른다).
  *
  * 무엇을 광고할지(콘텐츠)와 누구 이름으로 나갈지(인플루언서)는 이미 정해져 있다 —
  * 이력에서 그 게시물을 눌러 들어왔고, 브랜디드 콘텐츠 광고는 게시물 소유자가 고정이다.
@@ -103,7 +110,12 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   const [conversionEvent, setConversionEvent] = useState('PURCHASE');
   const [pixelId, setPixelId] = useState('');
   const [campaignName, setCampaignName] = useState('');
+  const [adSetName, setAdSetName] = useState('');
+  const [adName, setAdName] = useState('');
+  /** 광고 관리자의 '도착 위치'. 웹사이트면 CTA 버튼이 붙고, 게시물이면 버튼 없이 게시물 그대로 나간다. */
+  const [destination, setDestination] = useState<'website' | 'post'>('website');
   const [linkUrl, setLinkUrl] = useState('');
+  const [displayLink, setDisplayLink] = useState('');
   const [cta, setCta] = useState<AdCta>('shop_now');
   const [urlTags, setUrlTags] = useState('');
   const [freqOn, setFreqOn] = useState(false);
@@ -175,7 +187,11 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     setConversionEvent(resume.conversionEvent || 'PURCHASE');
     setPixelId(resume.pixelId || '');
     setCampaignName(resume.campaignName || '');
+    setAdSetName(resume.adSetName || '');
+    setAdName(resume.adName || '');
+    setDestination(resume.linkUrl ? 'website' : 'post');
     setLinkUrl(resume.linkUrl || '');
+    setDisplayLink(resume.displayLink || '');
     if (resume.cta) setCta(resume.cta);
     setUrlTags(resume.urlTags || '');
     setFreqOn(!!resume.frequencyCap);
@@ -191,6 +207,8 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     setObjective(next);
     setOptimizationGoal(PERFORMANCE_GOALS[next][0].value);
     setCta(next === 'conversions' ? 'shop_now' : 'learn_more');
+    // 판매 · 트래픽은 웹사이트로 보내야 성과가 측정된다. 다른 목표는 고른 도착 위치를 둔다.
+    if (next === 'conversions' || next === 'traffic') setDestination('website');
   };
 
   const goals = PERFORMANCE_GOALS[objective];
@@ -209,6 +227,21 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
    */
   const pixelMode = objective === 'conversions' ? 'optimize' : 'track';
 
+  /** 웹사이트로 보낼 때만 URL · CTA 를 싣는다. 게시물로 보내면 버튼 없이 나간다. */
+  const toWebsite = destination === 'website';
+  const cleanUrl = toWebsite ? linkUrl.trim() : '';
+  const cleanTags = urlTags.trim().replace(/^\?/, '');
+  /** 버튼을 눌렀을 때 실제로 열리는 주소 — 메타가 URL 매개변수를 붙인 결과와 같다. */
+  const finalUrl = cleanUrl ? `${cleanUrl}${cleanTags ? `${cleanUrl.includes('?') ? '&' : '?'}${cleanTags}` : ''}` : '';
+  const urlDomain = (() => {
+    try {
+      return cleanUrl ? new URL(cleanUrl).hostname.replace(/^www\./, '') : '';
+    } catch {
+      return '';
+    }
+  })();
+  const ctaOptions = ctasForObjective(objective === 'engagement' ? 'awareness' : objective);
+
   /** 광고 관리자와 같은 설정 묶음. 집행 · 이어서 만들기 · 타겟 규모 추정이 같은 값을 쓴다. */
   const settings = () => ({
     objective,
@@ -216,9 +249,12 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     conversionEvent: goal.value === 'OFFSITE_CONVERSIONS' ? conversionEvent : goal.value === 'VALUE' ? 'PURCHASE' : undefined,
     pixelId: pixelId || undefined,
     campaignName: campaignName.trim() || undefined,
-    linkUrl: linkUrl.trim() || undefined,
-    cta: linkUrl.trim() ? cta : undefined,
-    urlTags: urlTags.trim().replace(/^\?/, '') || undefined,
+    adSetName: adSetName.trim() || undefined,
+    adName: adName.trim() || undefined,
+    linkUrl: cleanUrl || undefined,
+    displayLink: (cleanUrl && displayLink.trim()) || undefined,
+    cta: cleanUrl ? cta : undefined,
+    urlTags: (cleanUrl && cleanTags) || undefined,
     frequencyCap: canCapFrequency && freqOn ? { impressions: freqImpressions, days: freqDays } : null,
     ...delivery.payload(),
   });
@@ -299,15 +335,17 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
         k: '노출 위치',
         v: delivery.placementMode === 'auto' ? 'Advantage+ 노출 위치' : placementSummary(delivery),
       },
-      {
-        k: '연결',
-        v: linkUrl.trim()
-          ? `${AD_CTAS.find((c) => c.value === cta)?.label} · ${linkUrl.trim()}${urlTags.trim() ? `?${urlTags.trim().replace(/^\?/, '')}` : ''}`
-          : '게시물로 연결(웹사이트 URL 없음)',
-      },
+      { k: '도착 위치', v: toWebsite ? '웹사이트' : '인스타그램 게시물(버튼 없음)' },
+      ...(toWebsite
+        ? [
+            { k: 'CTA 버튼', v: ctaLabel(cta) },
+            { k: '이동 주소', v: finalUrl || '-' },
+            ...(displayLink.trim() ? [{ k: '표시 링크', v: displayLink.trim() }] : []),
+          ]
+        : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [objectiveLabel, goal, conversionEvent, delivery, linkUrl, cta, urlTags],
+    [objectiveLabel, goal, conversionEvent, delivery, toWebsite, finalUrl, cta, displayLink],
   );
 
   const runSteps = async (from: MetaAdRecord) => {
@@ -336,11 +374,15 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
       setError(invalid);
       return;
     }
-    if (linkUrl.trim() && !/^https?:\/\/\S+\.\S+/i.test(linkUrl.trim())) {
+    if (toWebsite && !cleanUrl) {
+      setError('도착 위치가 웹사이트면 웹사이트 URL을 입력해 주세요. 버튼 없이 내보내려면 도착 위치를 게시물로 바꿔 주세요.');
+      return;
+    }
+    if (cleanUrl && !/^https?:\/\/\S+\.\S+/i.test(cleanUrl)) {
       setError('웹사이트 URL은 https:// 로 시작하는 주소로 입력해 주세요.');
       return;
     }
-    if (goal.value === 'LANDING_PAGE_VIEWS' && !linkUrl.trim()) {
+    if (goal.value === 'LANDING_PAGE_VIEWS' && !cleanUrl) {
       setError('랜딩 페이지 조회 최적화는 웹사이트 URL이 있어야 합니다.');
       return;
     }
@@ -608,6 +650,18 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
               <AdSection title="광고 세트">
                 <div>
+                  <label className={labelCls} htmlFor="boost-adset-name">광고 세트 이름</label>
+                  <input
+                    id="boost-adset-name"
+                    value={adSetName}
+                    onChange={(e) => setAdSetName(e.target.value)}
+                    maxLength={150}
+                    placeholder={`${campaignName.trim() || `[PICKSfolio] ${campaignTitle || '부스팅'} · ${delivery.startDate}`} · 광고 세트`}
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
                   <label className={labelCls} htmlFor="boost-goal">성과 목표</label>
                   <div className="relative mt-1.5">
                     <select
@@ -705,60 +759,145 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
               />
 
               <AdSection title="광고">
-                {connected && (
                 <div>
-                  <p className={labelCls}>광고 페이지</p>
-                  <MetaPagePicker
-                    pages={pagesState.pages}
-                    selectedId={page?.id}
-                    onSelect={selectPage}
-                    loading={pagesState.loading}
-                    error={pagesState.error}
-                    onRetry={pagesState.refresh}
-                  />
-                  <p className="text-[10px] text-slate-400 font-bold mt-1">
-                    브랜드 쪽으로 표시될 페이스북 페이지입니다(연동한 Meta 계정이 관리하는 페이지)
-                  </p>
-                </div>
-              )}
-
-
-                <div>
-                  <label className={labelCls} htmlFor="boost-url">
-                    웹사이트 URL{needsUrl ? '' : ' (선택)'}
-                  </label>
+                  <label className={labelCls} htmlFor="boost-ad-name">광고 이름</label>
                   <input
-                    id="boost-url"
-                    type="url"
-                    value={linkUrl}
-                    onChange={(e) => setLinkUrl(e.target.value)}
-                    placeholder="https://brand.com/product"
+                    id="boost-ad-name"
+                    value={adName}
+                    onChange={(e) => setAdName(e.target.value)}
+                    maxLength={150}
+                    placeholder={campaignName.trim() || `[PICKSfolio] ${campaignTitle || '부스팅'} · ${delivery.startDate}`}
                     className={inputCls}
                   />
-                  <p className="text-[10px] text-slate-400 font-bold mt-1">
-                    {linkUrl.trim()
-                      ? '파트너십 광고 아래에 버튼이 붙고, 누르면 이 주소로 이동합니다'
-                      : needsUrl
-                      ? '비워 두면 인플루언서 게시물로 연결됩니다. 판매 · 트래픽은 URL을 넣어야 성과가 측정됩니다'
-                      : '넣으면 게시물 아래에 버튼이 붙습니다'}
+                </div>
+
+                {/* 아이덴티티 — 광고 관리자처럼 브랜드 페이지와 인스타그램 계정을 먼저 정한다. */}
+                {connected && (
+                  <div>
+                    <p className={labelCls}>아이덴티티 · 페이스북 페이지</p>
+                    <MetaPagePicker
+                      pages={pagesState.pages}
+                      selectedId={page?.id}
+                      onSelect={selectPage}
+                      loading={pagesState.loading}
+                      error={pagesState.error}
+                      onRetry={pagesState.refresh}
+                    />
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      {page
+                        ? page.instagramUsername
+                          ? `인스타그램 계정 @${page.instagramUsername} · 파트너십 광고에 @${creatorHandle}와 함께 표시됩니다`
+                          : '이 페이지에 연결된 인스타그램 프로페셔널 계정이 없어 파트너십 광고를 만들 수 없습니다'
+                        : '브랜드 쪽으로 표시될 페이스북 페이지입니다(연동한 Meta 계정이 관리하는 페이지)'}
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <p className={labelCls}>광고 설정</p>
+                  <p className="mt-1.5 text-[12px] font-bold text-slate-700 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    기존 게시물 사용 · 파트너십 광고(@{creatorHandle})
                   </p>
                 </div>
 
-                {linkUrl.trim() && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <p className={labelCls}>도착 위치</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mt-1.5">
+                    {(
+                      [
+                        { value: 'website', label: '웹사이트', hint: 'CTA 버튼을 누르면 입력한 URL로 이동', Icon: Globe },
+                        { value: 'post', label: '인스타그램 게시물', hint: '버튼 없이 게시물 그대로 노출', Icon: Instagram },
+                      ] as const
+                    ).map((d) => {
+                      const on = destination === d.value;
+                      const locked = d.value === 'post' && needsUrl;
+                      return (
+                        <button
+                          key={d.value}
+                          type="button"
+                          onClick={() => !locked && setDestination(d.value)}
+                          disabled={locked}
+                          aria-pressed={on}
+                          className={`text-left px-3 py-2.5 rounded-xl border transition-colors flex items-start gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                            on ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200' : 'bg-white border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <d.Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${on ? 'text-blue-600' : 'text-slate-400'}`} />
+                          <span>
+                            <span className={`block text-[12px] font-black ${on ? 'text-blue-700' : 'text-slate-800'}`}>{d.label}</span>
+                            <span className="block text-[10px] text-slate-400 font-bold mt-0.5 leading-snug">{d.hint}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {needsUrl && (
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      판매 · 트래픽 목표는 웹사이트로 보내야 성과가 측정됩니다
+                    </p>
+                  )}
+                </div>
+
+                {toWebsite ? (
+                  <>
+                    <div>
+                      <label className={labelCls} htmlFor="boost-url">웹사이트 URL *</label>
+                      <div className="flex gap-1.5 mt-1.5">
+                        <input
+                          id="boost-url"
+                          type="url"
+                          value={linkUrl}
+                          onChange={(e) => setLinkUrl(e.target.value)}
+                          placeholder="https://brand.com/product"
+                          className={`${inputCls} !mt-0 flex-1 min-w-0`}
+                        />
+                        <a
+                          href={/^https?:\/\/\S+\.\S+/i.test(finalUrl) ? finalUrl : undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-disabled={!/^https?:\/\/\S+\.\S+/i.test(finalUrl)}
+                          className={`flex-shrink-0 inline-flex items-center gap-1 px-3 rounded-xl border text-[11px] font-black ${
+                            /^https?:\/\/\S+\.\S+/i.test(finalUrl)
+                              ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                              : 'border-slate-100 text-slate-300 pointer-events-none'
+                          }`}
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          URL 미리보기
+                        </a>
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-bold mt-1">CTA 버튼과 게시물을 누르면 이 주소로 이동합니다</p>
+                    </div>
+
+                    <div>
+                      <label className={labelCls} htmlFor="boost-display-link">표시 링크 (선택)</label>
+                      <input
+                        id="boost-display-link"
+                        value={displayLink}
+                        onChange={(e) => setDisplayLink(e.target.value)}
+                        maxLength={100}
+                        placeholder={urlDomain || 'brand.com'}
+                        className={inputCls}
+                      />
+                      <p className="text-[10px] text-slate-400 font-bold mt-1">
+                        버튼 옆에 보이는 주소입니다. 실제로 이동하는 주소는 위 웹사이트 URL입니다
+                      </p>
+                    </div>
+
                     <div>
                       <label className={labelCls} htmlFor="boost-cta">클릭 유도 문구(CTA)</label>
                       <div className="relative mt-1.5">
                         <select id="boost-cta" value={cta} onChange={(e) => setCta(e.target.value as AdCta)} className={selectCls}>
-                          {AD_CTAS.map((c) => (
+                          {ctaOptions.map((c) => (
                             <option key={c.value} value={c.value}>{c.label}</option>
                           ))}
                         </select>
                         <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       </div>
                     </div>
+
                     <div>
-                      <label className={labelCls} htmlFor="boost-utm">URL 매개변수</label>
+                      <label className={labelCls} htmlFor="boost-utm">URL 매개변수 (선택)</label>
                       <input
                         id="boost-utm"
                         value={urlTags}
@@ -766,22 +905,67 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                         placeholder="utm_source=meta&utm_medium=paid"
                         className={inputCls}
                       />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setUrlTags(
+                            `utm_source=meta&utm_medium=paid_social&utm_campaign=${encodeURIComponent(
+                              (campaignTitle || 'boost').replace(/\s+/g, '_').slice(0, 40),
+                            )}&utm_content=${encodeURIComponent(creatorHandle)}`,
+                          )
+                        }
+                        className="mt-1 text-[10px] font-black text-blue-600 hover:text-blue-700"
+                      >
+                        UTM 기본값 채우기
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setUrlTags(
-                          `utm_source=meta&utm_medium=paid_social&utm_campaign=${encodeURIComponent(
-                            (campaignTitle || 'boost').replace(/\s+/g, '_').slice(0, 40),
-                          )}&utm_content=${encodeURIComponent(creatorHandle)}`,
-                        )
-                      }
-                      className="sm:col-span-2 justify-self-start text-[10px] font-black text-blue-600 hover:text-blue-700"
-                    >
-                      UTM 기본값 채우기
-                    </button>
-                  </div>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-slate-500 font-bold rounded-xl bg-slate-50 px-3 py-2.5 leading-relaxed">
+                    CTA 버튼 없이 인플루언서 게시물 그대로 나갑니다. 광고를 누르면 인스타그램 게시물 · 프로필로 이동합니다.
+                  </p>
                 )}
+
+                {/* 광고 미리보기 — 버튼 문구와 누르면 열리는 주소를 집행 전에 확인한다. */}
+                <div>
+                  <p className={labelCls}>광고 미리보기</p>
+                  <div className="mt-1.5 mx-auto max-w-[280px] rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <div className="w-7 h-7 rounded-full bg-slate-200 overflow-hidden flex-shrink-0">
+                        {page?.pictureUrl && <img src={page.pictureUrl} alt="" className="w-full h-full object-cover" />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-black text-slate-900 truncate">
+                          @{creatorHandle}
+                          {page?.instagramUsername ? ` 및 @${page.instagramUsername}` : ''}
+                        </p>
+                        <p className="text-[9px] text-slate-400 font-bold">광고 · 파트너십</p>
+                      </div>
+                    </div>
+                    {thumbnailUrl ? (
+                      <img src={thumbnailUrl} alt="" className="w-full aspect-[4/5] object-cover bg-slate-100" />
+                    ) : (
+                      <div className="w-full aspect-[4/5] bg-slate-100 flex items-center justify-center text-[10px] text-slate-400 font-black">
+                        게시물 소재
+                      </div>
+                    )}
+                    {toWebsite && (
+                      <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-blue-600 text-white">
+                        <span className="text-[10px] font-bold truncate opacity-90">
+                          {displayLink.trim() || urlDomain || '웹사이트 URL을 입력하세요'}
+                        </span>
+                        <span className="text-[11px] font-black flex-shrink-0">{ctaLabel(cta)} ›</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold mt-2 text-center break-all leading-relaxed">
+                    {toWebsite
+                      ? finalUrl
+                        ? `버튼을 누르면 이동: ${finalUrl}`
+                        : '웹사이트 URL을 입력하면 버튼을 눌렀을 때 이동할 주소가 여기에 표시됩니다'
+                      : '버튼 없음 · 게시물로 연결'}
+                  </p>
+                </div>
               </AdSection>
 
 

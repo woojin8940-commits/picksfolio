@@ -215,7 +215,7 @@ async function runAdSet(token: string, proof: string, r: MetaAdRecord): Promise<
     token,
     proof,
     {
-      name: `${r.name} · 광고 세트`,
+      name: r.adSetName || `${r.name} · 광고 세트`,
       campaign_id: r.campaignId,
       status: r.initialStatus,
       ...(r.budgetType === "daily" ? { daily_budget: budget } : { lifetime_budget: budget }),
@@ -297,8 +297,17 @@ async function runCreative(
     const link = r.linkUrl
       ? { call_to_action: { type: metaCta(r.cta), value: { link: r.linkUrl } }, url_tags: r.urlTags || undefined }
       : {};
+    // 표시 링크는 버튼 옆에 보이는 주소일 뿐이라, 메타가 받지 않으면 빼고 다시 보낸다.
+    const captioned = r.linkUrl && r.displayLink
+      ? {
+          call_to_action: { type: metaCta(r.cta), value: { link: r.linkUrl, link_caption: r.displayLink } },
+          url_tags: r.urlTags || undefined,
+        }
+      : null;
 
-    const attempts: Record<string, unknown>[] = [{ ...base, ...link }];
+    const attempts: Record<string, unknown>[] = [];
+    if (captioned) attempts.push({ ...base, ...captioned });
+    attempts.push({ ...base, ...link });
     if (r.linkUrl) attempts.push(base);
     attempts.push(igOnly);
     // 예전 방식(게시물 ID)도 마지막에 시도한다. 크리에이터가 계정 단위로 허가해 둔 경우 이것으로도 나간다.
@@ -315,6 +324,9 @@ async function runCreative(
     for (let i = 0; i < attempts.length; i++) {
       const res = await graphPost(`${r.adAccountId}/adcreatives`, token, attempts[i], proof);
       if (res.ok) {
+        if (captioned && i > 0 && "call_to_action" in attempts[i]) {
+          r.warnings.push("표시 링크를 Meta가 받지 않아 버튼과 웹사이트 URL만 붙였습니다.");
+        }
         if (r.linkUrl && !("call_to_action" in attempts[i])) {
           r.warnings.push(`웹사이트 버튼을 붙이지 못해 게시물 그대로 만들었습니다. (${first?.error || ""})`);
         }
@@ -346,7 +358,10 @@ async function runCreative(
     }
   }
 
-  const cta = { type: metaCta(r.cta), value: { link: r.linkUrl } };
+  const cta = {
+    type: metaCta(r.cta),
+    value: { link: r.linkUrl, ...(r.displayLink ? { link_caption: r.displayLink } : {}) },
+  };
   const storySpec = (withInstagram: boolean): Record<string, unknown> => ({
     page_id: r.pageId,
     ...(withInstagram && r.instagramUserId ? { instagram_user_id: r.instagramUserId } : {}),
@@ -400,7 +415,7 @@ async function runCreative(
  * 측정 하나 때문에 광고 자체를 못 만들면 안 된다.
  */
 async function runAd(token: string, proof: string, r: MetaAdRecord): Promise<GraphResult> {
-  const base = { name: r.name, adset_id: r.adSetId, creative: { creative_id: r.creativeId }, status: r.initialStatus };
+  const base = { name: r.adName || r.name, adset_id: r.adSetId, creative: { creative_id: r.creativeId }, status: r.initialStatus };
   if (!r.pixelId) return graphPost(`${r.adAccountId}/ads`, token, base, proof);
   const tracked = await graphPost(
     `${r.adAccountId}/ads`,
@@ -717,6 +732,9 @@ async function buildRecord(
         ? { impressions: Math.floor(Number(freq.impressions)), days: Math.floor(Number(freq.days)) }
         : null,
     urlTags: urlTags || undefined,
+    adSetName: clean(draft.adSetName, 200) || undefined,
+    adName: clean(draft.adName, 200) || undefined,
+    displayLink: (linkUrl && clean(draft.displayLink, 200)) || undefined,
   };
 
   return record;

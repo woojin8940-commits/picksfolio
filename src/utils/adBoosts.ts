@@ -125,6 +125,22 @@ export const AD_CTAS = [
   { value: 'sign_up', label: '가입하기' },
   { value: 'book_now', label: '지금 예약' },
   { value: 'contact_us', label: '문의하기' },
+  // 아래는 광고 관리자의 '웹사이트' 도착 위치에서 고를 수 있는 나머지 버튼이다.
+  { value: 'order_now', label: '지금 주문하기' },
+  { value: 'buy_now', label: '지금 구매하기' },
+  { value: 'get_offer', label: '혜택 받기' },
+  { value: 'apply_now', label: '지금 신청하기' },
+  { value: 'subscribe', label: '구독하기' },
+  { value: 'download', label: '다운로드' },
+  { value: 'get_quote', label: '견적 받기' },
+  { value: 'see_menu', label: '메뉴 보기' },
+  { value: 'watch_more', label: '더 보기' },
+  { value: 'buy_tickets', label: '티켓 구매' },
+  { value: 'request_time', label: '시간 요청' },
+  { value: 'get_showtimes', label: '상영 시간 보기' },
+  { value: 'listen_now', label: '지금 듣기' },
+  { value: 'donate_now', label: '지금 기부하기' },
+  { value: 'inquire_now', label: '지금 문의하기' },
 ] as const;
 
 export type AdCta = (typeof AD_CTAS)[number]['value'];
@@ -144,7 +160,12 @@ const CTA_ORDER: Record<AdObjective, AdCta[]> = {
 
 export const ctasForObjective = (objective: AdObjective) => {
   const order = CTA_ORDER[objective] || [];
-  return [...AD_CTAS].sort((a, b) => order.indexOf(a.value) - order.indexOf(b.value));
+  // 순서에 없는 문구는 원래 순서대로 뒤에 둔다(indexOf 가 -1 이면 맨 앞으로 올라간다).
+  const rank = (v: AdCta) => {
+    const i = order.indexOf(v);
+    return i < 0 ? order.length + AD_CTAS.findIndex((c) => c.value === v) : i;
+  };
+  return [...AD_CTAS].sort((a, b) => rank(a.value) - rank(b.value));
 };
 
 export const ctaLabel = (value: AdCta | undefined): string =>
