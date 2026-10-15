@@ -206,6 +206,11 @@ export interface MetaAdRecord {
   frequencyCap?: { impressions: number; days: number } | null;
   urlTags?: string;
   campaignName?: string;
+  /** 광고 관리자의 광고 세트 이름 · 광고 이름. 비어 있으면 캠페인 이름에서 만든다. */
+  adSetName?: string;
+  adName?: string;
+  /** 표시 링크 — 버튼 옆에 보이는 주소(link_caption). 실제로 이동하는 주소는 linkUrl 이다. */
+  displayLink?: string;
 }
 
 const RECORD_STORE = "meta-ads";
@@ -490,16 +495,34 @@ export const CONVERSION_EVENTS = [
 ];
 
 /** 화면의 CTA 값 → 메타 call_to_action type. */
-export const metaCta = (cta?: string): string =>
-  (
-    {
-      learn_more: "LEARN_MORE",
-      shop_now: "SHOP_NOW",
-      sign_up: "SIGN_UP",
-      book_now: "BOOK_NOW",
-      contact_us: "CONTACT_US",
-    } as Record<string, string>
-  )[cta || ""] || "LEARN_MORE";
+const META_CTAS = new Set([
+  "LEARN_MORE",
+  "SHOP_NOW",
+  "SIGN_UP",
+  "BOOK_NOW",
+  "CONTACT_US",
+  "ORDER_NOW",
+  "BUY_NOW",
+  "GET_OFFER",
+  "APPLY_NOW",
+  "SUBSCRIBE",
+  "DOWNLOAD",
+  "GET_QUOTE",
+  "SEE_MENU",
+  "WATCH_MORE",
+  "BUY_TICKETS",
+  "REQUEST_TIME",
+  "GET_SHOWTIMES",
+  "LISTEN_NOW",
+  "DONATE_NOW",
+  "INQUIRE_NOW",
+]);
+
+/** 화면의 CTA 값(shop_now) → 메타의 call_to_action.type(SHOP_NOW). 모르는 값은 '더 알아보기'. */
+export const metaCta = (cta?: string): string => {
+  const type = String(cta || "").toUpperCase();
+  return META_CTAS.has(type) ? type : "LEARN_MORE";
+};
 
 /** 서울 기준 날짜 → 메타가 받는 시각. 시작일이 오늘이면 지금으로 둔다(과거 시각은 거절된다). */
 export function scheduleTimes(startDate: string, endDate: string): { start_time?: string; end_time: string } {

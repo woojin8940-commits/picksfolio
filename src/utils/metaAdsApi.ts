@@ -340,6 +340,11 @@ export type AdAdvancedSettings = {
   frequencyCap?: { impressions: number; days: number } | null;
   urlTags?: string;
   campaignName?: string;
+  /** 광고 관리자의 광고 세트 이름 · 광고 이름. 비어 있으면 캠페인 이름에서 만든다. */
+  adSetName?: string;
+  adName?: string;
+  /** 표시 링크 — 버튼 옆에 보이는 주소. 실제로 이동하는 주소는 linkUrl 이다. */
+  displayLink?: string;
 };
 
 /** 목록 조회 때 메타에서 새로 읽은 값. */
