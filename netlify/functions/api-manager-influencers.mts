@@ -92,15 +92,22 @@ export default async (req: Request, context: Context) => {
         LIMIT 400
       `,
 
+      // 등록서는 사람마다 여러 장일 수 있다(예전에 수정이 새 접수로 쌓였다). 계정마다
+      // 가장 최근 것만 본다 — 여러 장을 그대로 읽으면 아래에서 한 명으로 겹칠 때
+      // 마지막에 읽힌 옛 등록서의 단가가 남는다.
       db.sql`
-        SELECT id, applicant_username, name, instagram_url, category, note,
-               ad_price, post_price, short_price, contact,
-               COALESCE(NULLIF(instagram_followers, 0), follower_count) AS followers,
-               created_at
-        FROM collab_directory_applications
-        WHERE role = 'influencer'
-          AND COALESCE(applicant_username, '') <> ''
-          AND (${q} = '' OR applicant_username ILIKE ${like} OR name ILIKE ${like}
+        SELECT * FROM (
+          SELECT DISTINCT ON (LOWER(REGEXP_REPLACE(applicant_username, '^biz/', '')))
+                 id, applicant_username, name, instagram_url, category, note,
+                 ad_price, post_price, short_price, contact,
+                 COALESCE(NULLIF(instagram_followers, 0), follower_count) AS followers,
+                 created_at
+          FROM collab_directory_applications
+          WHERE role = 'influencer'
+            AND COALESCE(applicant_username, '') <> ''
+          ORDER BY LOWER(REGEXP_REPLACE(applicant_username, '^biz/', '')), created_at DESC
+        ) latest
+        WHERE (${q} = '' OR applicant_username ILIKE ${like} OR name ILIKE ${like}
                OR category ILIKE ${like})
           AND (${category} = '' OR category ILIKE ${catLike})
         ORDER BY followers DESC NULLS LAST
@@ -280,11 +287,15 @@ export default async (req: Request, context: Context) => {
       FROM creator_channels
       WHERE COALESCE(username, '') <> '' AND COALESCE(categories, '') <> ''
       UNION ALL
-      SELECT applicant_username AS person, category AS tags
-      FROM collab_directory_applications
-      WHERE role = 'influencer'
-        AND COALESCE(applicant_username, '') <> ''
-        AND COALESCE(category, '') <> ''
+      SELECT person, tags FROM (
+        SELECT DISTINCT ON (LOWER(REGEXP_REPLACE(applicant_username, '^biz/', '')))
+               applicant_username AS person, category AS tags
+        FROM collab_directory_applications
+        WHERE role = 'influencer'
+          AND COALESCE(applicant_username, '') <> ''
+        ORDER BY LOWER(REGEXP_REPLACE(applicant_username, '^biz/', '')), created_at DESC
+      ) latest
+      WHERE COALESCE(tags, '') <> ''
     `) as any[];
 
     const tagsByPerson = new Map<string, Set<string>>();
