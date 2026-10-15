@@ -258,6 +258,7 @@ async function runCreative(
     // 조회 자체가 막히면(권한·비즈니스 소속) 소재 생성에서 메타가 판단하게 둔다 — 조회는
     // 확인용이고 광고를 만드는 데 꼭 필요한 값이 아니다.
     let contentId = "";
+    let lookupEmpty = false;
     if (businessId) {
       const lookup = await graphGet(
         `${businessId}/partnership-ads-advertisable-content`,
@@ -271,16 +272,11 @@ async function runCreative(
       );
       if (lookup.ok) {
         const row = lookup.data?.data?.[0];
-        if (!row?.content_id) {
-          return {
-            ok: false,
-            status: 404,
-            data: lookup.data,
-            error: "이 파트너십 광고 코드로 게시물을 찾지 못했습니다. 코드가 만료됐거나 다른 브랜드에 발급된 코드인지 인플루언서에게 확인해 주세요.",
-          };
-        }
-        contentId = String(row.content_id);
-        const eligibility = Array.isArray(row.partnership_info)
+        // 조회가 비어도 여기서 멈추지 않는다. 이 조회는 비즈니스·인스타그램 계정 조합에 따라
+        // 유효한 코드에도 빈 목록을 돌려줄 때가 있다 — 코드를 실은 소재 생성에서 메타가 판단한다.
+        if (!row?.content_id) lookupEmpty = true;
+        else contentId = String(row.content_id);
+        const eligibility = Array.isArray(row?.partnership_info)
           ? row.partnership_info.map((p: any) => String(p?.ad_eligibility || "")).filter(Boolean)
           : [];
         if (eligibility.length && !eligibility.includes("AD_READY")) {
@@ -330,6 +326,10 @@ async function runCreative(
       first = first || res;
       // 권한·토큰 문제(10, 200, 190)는 값을 바꿔 다시 보내도 같다.
       if (res.errorCode === 10 || res.errorCode === 200 || res.errorCode === 190) break;
+    }
+    // 메타도 거절했고 사전 조회에서도 게시물이 안 나왔으면 코드 자체를 의심할 근거가 있다.
+    if (lookupEmpty && first) {
+      first.error = `${first.error || "소재를 만들지 못했습니다."} (광고 코드로 게시물을 찾지 못했습니다. 코드가 만료됐거나 다른 브랜드 인스타그램 계정에 발급된 코드인지 인플루언서에게 확인해 주세요.)`;
     }
     return first!;
   }
