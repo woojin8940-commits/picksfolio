@@ -85,7 +85,7 @@ export const shortcodeOf = (permalink: unknown): string => {
 const norm = (raw: unknown) =>
   String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
 
-const thumbOf = (media: any) =>
+export const thumbOf = (media: any) =>
   String(media?.media_type || "").toUpperCase() === "VIDEO"
     ? String(media?.thumbnail_url || media?.media_url || "")
     : String(media?.media_url || media?.thumbnail_url || "");
@@ -97,7 +97,7 @@ const thumbOf = (media: any) =>
  * 실패하므로, 실패하면 조회수 없는 조합으로 한 번 더 부른다 — 목록을 놓치면
  * 좋아요 · 댓글까지 함께 잃는다.
  */
-async function findMediaByPermalink(
+export async function findMediaByPermalink(
   link: MetaLink,
   permalink: string,
 ): Promise<{ media: any | null; error: string; tokenDead: boolean }> {
@@ -148,7 +148,7 @@ async function findMediaByPermalink(
 }
 
 /** 이미 찾아 둔 media_id 로 바로 조회한다. 목록을 훑지 않는 빠른 길. */
-async function fetchMediaById(
+export async function fetchMediaById(
   link: MetaLink,
   mediaId: string,
 ): Promise<{ media: any | null; error: string; tokenDead: boolean }> {

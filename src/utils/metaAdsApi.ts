@@ -85,6 +85,18 @@ export const fetchMetaPages = (username: string) =>
     `/api/meta-ads/pages/${encodeURIComponent(normalize(username))}`,
   );
 
+/**
+ * 협업 게시물의 실제 이미지. 인플루언서가 업로드 단계에 적은 게시물 주소로 찾는다 —
+ * 부스팅 미리보기가 광고로 나갈 그 게시물을 그리게 하기 위해서다.
+ */
+export const fetchCollabPostImage = (username: string, collabId: string) =>
+  call<{ imageUrl: string; uploadUrl: string; source: string }>(
+    username,
+    `/api/business/post-image/${encodeURIComponent(normalize(username))}?collabId=${encodeURIComponent(collabId)}`,
+    {},
+    12_000,
+  );
+
 export type MetaPagePost = {
   id: string;
   message: string;
