@@ -357,7 +357,7 @@ const CampaignInsightPanel: React.FC<CampaignInsightPanelProps> = ({
         <div className="flex items-center justify-between">
           <p className="text-xs font-black text-slate-900">일자별 조회수 추이</p>
           <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 text-[10px] font-black">
-            {(data?.series?.length || 0) >= 2 ? `${data!.series.length}일` : '집계 중'}
+            {(data?.series?.length || 0) >= 2 ? `최근 ${data!.series.length}일` : '집계 중'}
           </span>
         </div>
         {(data?.series?.length || 0) >= 2 ? (
