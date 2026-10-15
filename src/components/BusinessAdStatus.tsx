@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
-import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Search, Settings2, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Search, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { ctaLabel, placementSummary, targetSummary } from '../utils/adBoosts';
 import { AD_STATUS_LABEL, AdResult, AdStatus, EVENT_LABEL, OBJECTIVE_LABEL, resultKind, resultOf } from '../utils/adResults';
@@ -24,7 +24,6 @@ import AdCreateModal from './AdCreateModal';
 import AdBoostModal from './AdBoostModal';
 import MetaAdDeleteDialog from './MetaAdDeleteDialog';
 import MetaPageEngagementPanel from './MetaPageEngagement';
-import MetaApprovedCreators from './MetaApprovedCreators';
 import AdOverview, { OverviewView } from './AdOverview';
 import AdPixelPanel from './AdPixelPanel';
 
@@ -594,25 +593,18 @@ const LiveNotice: React.FC<{ fetchedAt: string; loading: boolean; onRefresh: () 
   loading,
   onRefresh,
 }) => (
-  <div className="mt-5 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-start justify-between gap-3">
-    <div>
-      <p className="text-[12px] font-black text-emerald-800">Meta Marketing API 실시간 데이터</p>
-      <p className="text-[11px] text-emerald-700 font-medium mt-1 leading-relaxed">
-        광고 상태(effective_status)와 지표(노출 · 클릭 · 도달 · 지출 · 전환)는 Meta 광고 계정에서 바로
-        읽은 값입니다. 지표는 메타 광고 관리자와 같은 이름·같은 계산식으로 보여 줍니다
-        {fetchedAt ? ` · ${new Date(fetchedAt).toLocaleString()} 조회` : ''}.
-      </p>
-    </div>
-    <button
-      type="button"
-      onClick={onRefresh}
-      disabled={loading}
-      aria-label="새로고침"
-      className="w-8 h-8 rounded-full hover:bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0 disabled:opacity-50"
-    >
-      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-    </button>
-  </div>
+  <button
+    type="button"
+    onClick={onRefresh}
+    disabled={loading}
+    title="광고 상태와 지표는 Meta 광고 계정에서 바로 읽은 값이며, 메타 광고 관리자와 같은 이름·계산식을 씁니다"
+    className="flex-shrink-0 self-start md:self-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-black text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 transition-colors"
+  >
+    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+    {fetchedAt
+      ? `${new Date(fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 조회`
+      : '새로고침'}
+  </button>
 );
 
 /**
@@ -660,6 +652,10 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const [range, setRange] = useState<AdDateRange>('maximum');
   const rangeLabel = AD_DATE_RANGES.find((r) => r.value === range)?.label || '전체 기간';
   const [summaryOpen, setSummaryOpen] = useState(false);
+  /** 묶어 보기 · 목적 · 인플루언서 필터를 펼쳤는지. */
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  /** 픽셀 · 페이지 반응 패널을 펼쳤는지. */
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const [metaAds, setMetaAds] = useState<MetaAdWithLive[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
   const [adsError, setAdsError] = useState('');
@@ -865,6 +861,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const spendPct = totals.budget > 0 ? Math.round((totals.spend / totals.budget) * 100) : 0;
   // 검토 중인 광고는 아직 노출이 없다. 건수에 같이 들어가므로 몇 건인지 적는다.
   const reviewCount = visible.filter((ad) => ad.status === 'review').length;
+  /** '상세 필터' 안에 걸린 조건 수. 접혀 있어도 걸려 있다는 걸 버튼에 적는다. */
+  const extraFilterCount = (objectiveFilter ? 1 : 0) + (creatorFilter ? 1 : 0) + (view !== 'ads' ? 1 : 0);
 
   /**
    * 연동 안내로 화면을 바꾸는 조건.
@@ -967,17 +965,19 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
         </>
       ) : (
         <>
-          {/* 어느 계정의 숫자를 보고 있는지를 요약 바로 위에 둔다. */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-3">
-            <label className="text-[11px] font-black text-slate-500" htmlFor="ad-account-select">
-              연동된 광고 계정
-            </label>
-            <div className="relative mt-1.5">
+          {/*
+            보는 조건 한 줄 — 어느 계정의, 어느 기간 숫자인지. 요약 · 목록 · 픽셀 성과가 모두
+            이 두 값을 따른다(상태와 예산은 기간과 무관하다). 기간은 광고 관리자의 날짜 선택과 같은 값이다.
+          */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 mb-3 flex flex-col md:flex-row md:items-center gap-2.5">
+            <div className="relative md:w-72 flex-shrink-0">
               <select
                 id="ad-account-select"
+                aria-label="광고 계정"
                 value={account.id}
                 onChange={(e) => selectAccount(e.target.value)}
-                className="w-full appearance-none pl-3 pr-9 py-2.5 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                title={`${account.businessName} · ${account.currency}`}
+                className="w-full appearance-none pl-3 pr-9 py-2 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -987,40 +987,54 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
               </select>
               <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
-            <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
-              {account.businessName} · {account.currency} · 이 계정의 광고만 아래에 표시되고, 집행도 이 계정으로 들어갑니다.
-            </p>
+            <div className="flex items-center gap-1.5 overflow-x-auto md:flex-1">
+              {AD_DATE_RANGES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setRange(r.value)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition-colors ${
+                    range === r.value ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <LiveNotice fetchedAt={fetchedAt} loading={adsLoading} onRefresh={() => void loadAds()} />
           </div>
+
+          {adsError && (
+            <div className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+              <p className="text-[12px] font-black text-rose-700">Meta에서 광고를 불러오지 못했습니다</p>
+              <p className="text-[11px] text-rose-600 font-medium mt-1 leading-relaxed break-words">{adsError}</p>
+              {adsNeedReconnect && (
+                <button
+                  type="button"
+                  onClick={() => void connect()}
+                  disabled={connecting}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-black hover:bg-rose-700 disabled:opacity-60"
+                >
+                  Meta 계정 다시 연동하기
+                </button>
+              )}
+            </div>
+          )}
+
+          {actionError && (
+            <div className="mb-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+              <p className="text-[12px] font-black text-rose-700">Meta 응답</p>
+              <p className="text-[11px] text-rose-600 font-medium mt-1 leading-relaxed break-words">{actionError}</p>
+            </div>
+          )}
 
           {/*
-            지표 기간. 광고 관리자 오른쪽 위의 날짜 선택과 같은 값이다. 요약 · 표 · 픽셀 성과가 모두
-            이 기간의 숫자로 바뀐다(상태와 예산은 기간과 무관하다).
+            핵심 숫자 넷 — 쓴 돈, 보여진 횟수, 들어온 사람, 팔린 것. 나머지 지표는 접어 둔다.
+            광고 개수는 목록 제목에 붙인다.
           */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-3">
-            <span className="text-[11px] font-black text-slate-500 flex-shrink-0 mr-1">기간</span>
-            {AD_DATE_RANGES.map((r) => (
-              <button
-                key={r.value}
-                type="button"
-                onClick={() => setRange(r.value)}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition-colors ${
-                  range === r.value ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Kpi
-              label="광고"
-              value={formatNumberWithCommas(totals.ads)}
-              unit="개"
-              hint={`게재 중 ${totals.live}개${reviewCount > 0 ? ` · Meta 검토 중 ${reviewCount}개` : ''}`}
-            />
-            <Kpi
-              label={range === 'maximum' ? '지출 · 예산 대비' : `지출 · ${rangeLabel}`}
+              label={range === 'maximum' ? '지출' : `지출 · ${rangeLabel}`}
               value={totals.spend > 0 ? formatNumberWithCommas(totals.spend) : '—'}
               unit={totals.spend > 0 ? '원' : undefined}
               pending={totals.spend === 0}
@@ -1035,14 +1049,14 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
               value={totals.impressions > 0 ? formatNumberWithCommas(totals.impressions) : '—'}
               unit={totals.impressions > 0 ? '회' : undefined}
               pending={totals.impressions === 0}
-              hint={avgCpm > 0 ? `CPM ${formatNumberWithCommas(avgCpm)}원` : '노출 1,000회당 비용은 노출 후 표시'}
+              hint={avgCpm > 0 ? `CPM ${formatNumberWithCommas(avgCpm)}원` : '노출 후 표시'}
             />
             <Kpi
               label="링크 클릭"
               value={totals.linkClicks > 0 ? formatNumberWithCommas(totals.linkClicks) : '—'}
               unit={totals.linkClicks > 0 ? '회' : undefined}
               pending={totals.linkClicks === 0}
-              hint={avgCpc > 0 ? `CTR ${avgCtr.toFixed(2)}% · CPC ${formatNumberWithCommas(avgCpc)}원` : 'CTR · CPC(링크 기준)'}
+              hint={avgCpc > 0 ? `CTR ${avgCtr.toFixed(2)}% · CPC ${formatNumberWithCommas(avgCpc)}원` : '클릭 후 표시'}
             />
             <Kpi
               label="구매 · ROAS"
@@ -1060,8 +1074,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
           <MoreToggle
             open={summaryOpen}
             onClick={() => setSummaryOpen((v) => !v)}
-            openLabel="전체 지표 더보기"
-            closeLabel="전체 지표 접기"
+            openLabel="지표 더보기"
+            closeLabel="지표 접기"
           />
 
           {summaryOpen && (
@@ -1097,52 +1111,18 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             </div>
           )}
 
-          {/* 숫자가 어디서, 언제 읽은 값인지 숫자 바로 아래에 적는다. */}
-          <LiveNotice fetchedAt={fetchedAt} loading={adsLoading} onRefresh={() => void loadAds()} />
-
-          {adsError && (
-            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
-              <p className="text-[12px] font-black text-rose-700">Meta에서 광고를 불러오지 못했습니다</p>
-              <p className="text-[11px] text-rose-600 font-medium mt-1 leading-relaxed break-words">{adsError}</p>
-              {adsNeedReconnect && (
-                <button
-                  type="button"
-                  onClick={() => void connect()}
-                  disabled={connecting}
-                  className="mt-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-black hover:bg-rose-700 disabled:opacity-60"
-                >
-                  Meta 계정 다시 연동하기
-                </button>
-              )}
-            </div>
-          )}
-
-          {actionError && (
-            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
-              <p className="text-[12px] font-black text-rose-700">Meta 응답</p>
-              <p className="text-[11px] text-rose-600 font-medium mt-1 leading-relaxed break-words">{actionError}</p>
-            </div>
-          )}
-
-          {/* 묶어 보기 · 필터. 표 위에 한 줄로 둔다. */}
-          <div className="mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-            <div className="inline-flex rounded-xl bg-slate-100 p-1 self-start" role="tablist" aria-label="묶어 보기">
-              {([['ads', '광고별'], ['creator', '인플루언서별'], ['objective', '목적별']] as [OverviewView, string][]).map(
-                ([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    role="tab"
-                    aria-selected={view === key}
-                    onClick={() => setView(key)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
-                      view === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ),
-              )}
+          {/*
+            광고 목록. 제목 줄에는 개수 · 상태 · 검색만 두고, 묶어 보기와 목적 · 인플루언서 필터는
+            '상세 필터' 안에 접어 둔다 — 대부분은 상태와 검색만으로 찾는다.
+          */}
+          <div className="mt-8 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-[15px] font-black text-slate-900">
+                광고 {formatNumberWithCommas(totals.ads)}개
+              </h3>
+              <span className="text-[11px] font-bold text-slate-400">
+                게재 중 {totals.live}개{reviewCount > 0 ? ` · Meta 검토 중 ${reviewCount}개` : ''}
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               {([['', '전체'], ['running', '진행 중'], ['ended', '종료·중지']] as ['' | 'running' | 'ended', string][]).map(
@@ -1160,6 +1140,53 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
                   </button>
                 ),
               )}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="광고 · 캠페인 · ID 검색"
+                  aria-label="광고 검색"
+                  className="pl-7 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 w-44 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((v) => !v)}
+                aria-expanded={filtersOpen}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                  filtersOpen || extraFilterCount > 0
+                    ? 'bg-blue-50 text-blue-600'
+                    : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                상세 필터{extraFilterCount > 0 ? ` ${extraFilterCount}` : ''}
+              </button>
+            </div>
+          </div>
+
+          {filtersOpen && (
+            <div className="mt-2 bg-slate-50 rounded-xl p-2.5 flex flex-wrap items-center gap-1.5 animate-in fade-in duration-200">
+              <span className="text-[11px] font-black text-slate-500 mr-0.5">묶어 보기</span>
+              <div className="inline-flex rounded-lg bg-white border border-slate-200 p-0.5 mr-2" role="tablist" aria-label="묶어 보기">
+                {([['ads', '광고별'], ['creator', '인플루언서별'], ['objective', '목적별']] as [OverviewView, string][]).map(
+                  ([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="tab"
+                      aria-selected={view === key}
+                      onClick={() => setView(key)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${
+                        view === key ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ),
+                )}
+              </div>
               <select
                 value={objectiveFilter}
                 onChange={(e) => setObjectiveFilter(e.target.value)}
@@ -1182,26 +1209,16 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="광고 · 캠페인 · ID 검색"
-                  aria-label="광고 검색"
-                  className="pl-7 pr-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 w-44 focus:outline-none focus:border-blue-500"
-                />
-              </div>
             </div>
-          </div>
+          )}
 
           {adsLoading && metaAds.length === 0 ? (
-            <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 flex items-center justify-center gap-2 text-sm text-slate-400 font-bold">
+            <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-10 flex items-center justify-center gap-2 text-sm text-slate-400 font-bold">
               <Loader2 className="w-4 h-4 animate-spin" />
               Meta에서 광고 상태를 불러오는 중
             </div>
           ) : visible.length === 0 ? (
-            <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 text-center">
+            <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-10 text-center">
               {accountAds.length === 0 ? (
                 <>
                   <p className="text-sm text-slate-400 font-bold">이 광고 계정으로 집행한 광고가 아직 없습니다.</p>
@@ -1237,19 +1254,27 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             />
           )}
 
-          {/* 데이터 세트(픽셀) — 광고가 만든 웹사이트 전환과 픽셀이 받은 전체 이벤트. */}
-          {accountAds.length > 0 || !adsLoading ? (
-            <AdPixelPanel username={cleanUsername} adAccountId={account.id} ads={visible} rangeLabel={rangeLabel} />
-          ) : null}
-
-          {/* 고른 페이지의 게시물 반응(pages_read_engagement). */}
-          <div className="mt-6">
-            <MetaPageEngagementPanel username={cleanUsername} enabled={connected} />
-          </div>
-
-          {/* 파트너십 광고 크리에이터 목록(instagram_branded_content_ads_brand). */}
-          <div className="mt-6">
-            <MetaApprovedCreators username={cleanUsername} enabled={connected} />
+          {/*
+            심화 분석 — 픽셀 전환 퍼널과 페이지 게시물 반응. 매번 보는 숫자가 아니라서 접어 둔다.
+            접으면 패널을 그리지 않으므로 그 사이엔 Meta 호출도 하지 않는다.
+          */}
+          <div className="mt-8">
+            <MoreToggle
+              open={insightsOpen}
+              onClick={() => setInsightsOpen((v) => !v)}
+              openLabel="심화 분석 보기 · 픽셀 전환 · 페이지 게시물 반응"
+              closeLabel="심화 분석 접기"
+            />
+            {insightsOpen && (
+              <div className="animate-in fade-in duration-200">
+                {accountAds.length > 0 || !adsLoading ? (
+                  <AdPixelPanel username={cleanUsername} adAccountId={account.id} ads={visible} rangeLabel={rangeLabel} />
+                ) : null}
+                <div className="mt-6">
+                  <MetaPageEngagementPanel username={cleanUsername} enabled={connected} />
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
