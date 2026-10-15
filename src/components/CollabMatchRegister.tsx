@@ -834,7 +834,11 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           setApplication(saved);
           applicationVerified.current = true;
         }
-        const nextStatus = editing ? submittedStatus || 'pending' : 'pending';
+        // 이미 등록서가 있던 계정이면 서버가 새 줄 대신 그 등록서를 고치고 원래 상태를
+        // 돌려준다. 그 상태를 그대로 쓴다 — 검토 중이던 사람이 대기로 보이면 안 된다.
+        const nextStatus = editing
+          ? submittedStatus || 'pending'
+          : String((result as { status?: string }).status || 'pending');
         if (editing) {
           // 수정은 접수 상태를 건드리지 않는다. 검토 중이던 등록서가 수정했다고
           // 다시 대기로 돌아가면, 본인은 순서를 잃은 것처럼 보인다.
@@ -842,7 +846,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           setNotice({ type: 'ok', text: '수정되었습니다.' });
         } else {
           reset();
-          setSubmittedStatus('pending');
+          setSubmittedStatus(nextStatus);
           // 확인 대화상자로 알리지 않는다. 대화상자는 방금 바뀐 화면을 가린 채
           // 확인을 누를 때까지 기다리게 하는데, 정작 알려 줄 내용은 그 뒤에 있는
           // 접수 완료 카드에 이미 다 적혀 있다.

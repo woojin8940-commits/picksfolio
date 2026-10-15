@@ -440,6 +440,69 @@ export default async (req: Request) => {
           crawledFollowers: crawled,
         });
 
+        /**
+         * 이미 등록서가 있는 계정이면 새 줄을 만들지 않고 그 등록서를 고친다.
+         *
+         * 화면은 "이미 접수했는지"를 먼저 물어보고 수정(PATCH)과 접수(POST)를 고른다.
+         * 그 확인이 실패하면(연동하고 돌아온 직후 로그인이 아직 붙지 않은 순간 등)
+         * 화면은 미접수로 읽고 수정한 내용을 접수로 보냈다 — 같은 사람의 등록서가
+         * 단가만 다른 채로 한 장 더 쌓였고, 명단마다 서로 다른 단가가 보였다.
+         * 화면의 판단에 기대지 않고 여기서 한 사람 한 장을 지킨다.
+         *
+         * 접수 순서(created_at)는 그대로 두고, 보관된 등록서만 다시 대기로 돌린다.
+         */
+        const applicantKey = norm(applicantUsername);
+        const existing = applicantKey
+          ? ((await db.sql`
+              SELECT id, status FROM collab_directory_applications
+              WHERE role = 'influencer'
+                AND LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')) = ${applicantKey}
+              ORDER BY created_at DESC
+              LIMIT 1
+            `) as any[])[0]
+          : null;
+
+        if (existing) {
+          const nextStatus = existing.status === "archived" ? "pending" : existing.status || "pending";
+          const updated = (await db.sql`
+            UPDATE collab_directory_applications SET
+              name = ${name},
+              contact = ${contact},
+              kakao_id = ${kakao_id},
+              instagram_url = ${instagram_url},
+              youtube_url = ${youtube_url},
+              tiktok_url = ${tiktok_url},
+              naver_blog_url = ${naver_blog_url},
+              instagram_followers = ${instagram_followers},
+              youtube_followers = ${youtube_followers},
+              tiktok_followers = ${tiktok_followers},
+              ad_price = ${ad_price},
+              post_price = ${post_price},
+              short_price = ${short_price},
+              category = ${(b.category || "").toString()},
+              follower_count = ${follower_count},
+              follower_source = ${follower_source},
+              note = ${(b.note || "").toString()},
+              status = ${nextStatus},
+              updated_at = now()
+            WHERE id = ${existing.id}
+            RETURNING *
+          `) as any[];
+
+          await mirrorCategories(db, applicantUsername, (b.category || "").toString());
+
+          return Response.json({
+            success: true,
+            id: existing.id,
+            updated: true,
+            follower_count,
+            follower_source,
+            instagram_connected: !!linked,
+            status: updated?.[0]?.status || nextStatus,
+            application: shapeOwnApplication(updated?.[0]),
+          });
+        }
+
         const inserted = (await db.sql`
           INSERT INTO collab_directory_applications
             (id, role, applicant_username, name, contact, kakao_id,
@@ -763,7 +826,18 @@ export default async (req: Request) => {
               c.recent_reels AS instagram_recent_reels,
               c.categories AS channel_categories,
               c.synced_at AS instagram_synced_at
-            FROM collab_directory_applications a
+            FROM (
+              -- 한 사람 한 장. 예전에 쌓인 같은 계정의 등록서는 가장 최근 것만 보인다
+              -- (본인 화면·리스트업과 같은 규칙). 계정 이름 없는 접수는 각각 한 장이다.
+              SELECT DISTINCT ON (
+                COALESCE(NULLIF(LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')), ''), id::text)
+              ) *
+              FROM collab_directory_applications
+              WHERE role='influencer'
+              ORDER BY
+                COALESCE(NULLIF(LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')), ''), id::text),
+                created_at DESC
+            ) a
             LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
             WHERE a.role='influencer'
             ORDER BY COALESCE(c.followers, a.follower_count) DESC, a.created_at DESC
@@ -782,7 +856,18 @@ export default async (req: Request) => {
               c.recent_reels AS instagram_recent_reels,
               c.categories AS channel_categories,
               c.synced_at AS instagram_synced_at
-            FROM collab_directory_applications a
+            FROM (
+              -- 한 사람 한 장. 예전에 쌓인 같은 계정의 등록서는 가장 최근 것만 보인다
+              -- (본인 화면·리스트업과 같은 규칙). 계정 이름 없는 접수는 각각 한 장이다.
+              SELECT DISTINCT ON (
+                COALESCE(NULLIF(LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')), ''), id::text)
+              ) *
+              FROM collab_directory_applications
+              WHERE role='influencer'
+              ORDER BY
+                COALESCE(NULLIF(LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')), ''), id::text),
+                created_at DESC
+            ) a
             LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
             WHERE a.role='influencer'
             ORDER BY a.created_at DESC
