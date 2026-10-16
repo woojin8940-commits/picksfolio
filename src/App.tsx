@@ -1218,6 +1218,10 @@ const App: React.FC = () => {
     };
   }, []); // Only run once on mount
 
+  // 이 페이지에서 로그아웃 상태를 거쳤는지. 거친 뒤 로그인 상태가 되면 새 로그인이다.
+  const userSawLoggedOutRef = useRef(false);
+  const businessSawLoggedOutRef = useRef(false);
+
   // Persistent auto-logout after 2 hours of inactivity — desktop only, with no
   // opt-out: the login screen offers no "stay signed in" option, so this applies
   // to Kakao and ID/password logins alike (see utils/loginPersistence).
@@ -1231,8 +1235,19 @@ const App: React.FC = () => {
   // "now". The timer is refreshed by real user interaction (mousemove/keydown/
   // scroll/touchstart/click), so passively sitting on any view — public or
   // protected — counts as inactivity once those events stop firing.
+  //
+  // 방금 로그인했으면 남아 있는 타임스탬프를 믿지 않는다. 로그아웃 상태에서 다시
+  // 로그인하면, 앞 세션이 지우지 못하고 남긴 몇 시간 전 값을 그대로 읽어 로그인하자마자
+  // "2시간 동안 활동이 없어 자동 로그아웃됩니다"가 뜨고 한 번 더 로그인해야 했다.
+  // 새 로그인은 두 가지로 알아본다 — 이 페이지에서 로그아웃 상태였다가 로그인으로
+  // 바뀌었거나(아이디·운영자 로그인, 링크 설정 완료), 이번 페이지가 카카오 로그인
+  // 콜백으로 열렸거나. 저장된 세션을 이어 쓰는 새로고침은 여기에 해당하지 않으므로
+  // 컴퓨터를 오래 비워 둔 경우의 자동 로그아웃은 그대로 남는다.
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn) {
+      userSawLoggedOutRef.current = true;
+      return;
+    }
     if (isPersistentLoginEnv()) {
       sessionRemove('picks_last_activity');
       return;
@@ -1244,6 +1259,11 @@ const App: React.FC = () => {
     const updateActivity = () => {
       sessionSet('picks_last_activity', Date.now().toString());
     };
+
+    if (userSawLoggedOutRef.current || isOAuthCallbackRef.current) {
+      userSawLoggedOutRef.current = false;
+      updateActivity();
+    }
 
     const publicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'business-login'];
 
@@ -1351,8 +1371,12 @@ const App: React.FC = () => {
 
   // Business account inactivity timer (separate from regular user timer).
   // Same rule as above: desktop only, mobile logins stay signed in.
+  // 방금 로그인한 경우 남은 타임스탬프를 버리는 것도 위와 같다.
   useEffect(() => {
-    if (!isBusinessLoggedIn) return;
+    if (!isBusinessLoggedIn) {
+      businessSawLoggedOutRef.current = true;
+      return;
+    }
     if (isPersistentLoginEnv()) {
       localStorage.removeItem('picks_business_last_activity');
       return;
@@ -1364,6 +1388,11 @@ const App: React.FC = () => {
     const updateActivity = () => {
       localStorage.setItem('picks_business_last_activity', Date.now().toString());
     };
+
+    if (businessSawLoggedOutRef.current) {
+      businessSawLoggedOutRef.current = false;
+      updateActivity();
+    }
 
     const silentBusinessLogout = () => {
       setIsBusinessLoggedIn(false);
