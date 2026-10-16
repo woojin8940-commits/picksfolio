@@ -77,7 +77,14 @@ export async function sendKakaoAlimtalk(body: KakaoMessageRequest): Promise<Kaka
         },
       });
       return { success: true, type: "alimtalk" };
-    } catch {}
+    } catch (e) {
+      // 알림톡이 거절되면 같은 문구가 버튼 없는 문자로 나간다. 화면에는 "문자로 보냈다"만
+      // 뜨므로, 왜 알림톡이 안 됐는지(템플릿 · 변수 · 채널)는 로그에만 남는다.
+      console.warn(
+        `[kakao-message] 알림톡 실패, 문자로 대체 (template ${templateId}):`,
+        (e as Error)?.message || e,
+      );
+    }
   }
 
   try {
