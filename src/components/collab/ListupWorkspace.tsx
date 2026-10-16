@@ -8,7 +8,8 @@ import InfluencerCandidateCard, {
   registeredPriceOf,
 } from './InfluencerCandidateCard';
 import KakaoMessageButton from './KakaoMessageButton';
-import { CONTENT_FORMATS } from '../../utils/campaignBrief';
+import ProposalAlimtalkButton, { type ProposalDefaults } from './ProposalAlimtalkButton';
+import { CONTENT_FORMATS, contentFormatLabel } from '../../utils/campaignBrief';
 import { parseCategoryList } from '../../utils/creatorCategories';
 
 /**
@@ -752,6 +753,22 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ko'));
   }, [pool, poolCategory]);
 
+  /**
+   * "제안하기" 알림톡에 미리 채울 값. 캠페인 브리프에서 가져오고, 보내기 전에 창에서
+   * 고칠 수 있다. 업로드 일정은 게시 기간(시작 ~ 끝)을 그대로 적는다.
+   */
+  const proposalDefaults: ProposalDefaults = (() => {
+    const day = (raw: any) => String(raw || '').slice(0, 10).replace(/-/g, '.');
+    const from = day(campaign?.uploadFrom);
+    const to = day(campaign?.uploadTo);
+    return {
+      brand: String(campaign?.brandName || '').trim(),
+      campaignTitle: String(campaign?.title || '').trim(),
+      uploadSchedule: from && to && from !== to ? `${from} ~ ${to}` : from || to,
+      contentType: contentFormatLabel(campaign?.contentFormat),
+    };
+  })();
+
   const poolFormatName =
     formatKindOf(campaign?.contentFormat) === 'post'
       ? '피드'
@@ -1003,6 +1020,16 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                     onNotify={notify}
                   />
                 );
+                const proposalButton = (
+                  <ProposalAlimtalkButton
+                    username={p.username}
+                    campaignId={campaignId}
+                    label={`@${metricsFrom(p).instagramHandle || p.username}`}
+                    defaults={proposalDefaults}
+                    token={token}
+                    onNotify={notify}
+                  />
+                );
                 const applicantBadge = p.isApplicant ? (
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-600 flex-shrink-0">
                     이 캠페인 지원자
@@ -1052,6 +1079,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                         </span>
                         {applicantBadge}
                         <span className="ml-auto flex items-center gap-2 flex-shrink-0">
+                          {proposalButton}
                           {selectButton}
                         </span>
                       </div>
@@ -1125,8 +1153,11 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                       </>
                     }
                   >
-                    {/* 카드에서도 바로 연락할 수 있게 카카오톡 버튼을 겉에 둔다. */}
-                    <div className="flex justify-end">{kakaoButton}</div>
+                    {/* 카드에서도 바로 연락할 수 있게 제안하기 · 카카오톡 버튼을 겉에 둔다. */}
+                    <div className="flex justify-end items-center gap-1.5">
+                      {proposalButton}
+                      {kakaoButton}
+                    </div>
                   </InfluencerCandidateCard>
                 );
               })

@@ -200,6 +200,42 @@ export function businessProposalAlimtalk(input: {
   };
 }
 
+/**
+ * 광고 협업 제안 · 담당자가 캠페인 후보 풀에서 "제안하기"를 눌렀을 때.
+ *
+ * 템플릿에는 "제안 확인하기"(웹 링크)와 "담당자와 대화하기"(상담톡 전환) 버튼이
+ * 붙어 있다. 버튼은 템플릿에 고정이라 발송할 때 따로 싣지 않는다. 인플루언서가
+ * "담당자와 대화하기"를 누르면 채널 채팅방이 열리고, 담당자는 채널 관리자센터에서
+ * 이어서 안내한다.
+ */
+export function campaignProposalAlimtalk(input: {
+  brand?: string;
+  campaignTitle?: string;
+  uploadSchedule?: string;
+  contentType?: string;
+}): AlimtalkTemplate {
+  const brand = filled(input.brand, "브랜드").slice(0, 60);
+  const campaign = filled(input.campaignTitle, "협업 캠페인").slice(0, 100);
+  const schedule = filled(input.uploadSchedule, "협의").slice(0, 60);
+  const contentType = filled(input.contentType, "협의").slice(0, 60);
+
+  return {
+    templateId: "KA01TP261012131535885S903R8LZhnt",
+    variables: {
+      "#{브랜드명}": brand,
+      "#{캠페인명}": campaign,
+      "#{업로드일정}": schedule,
+      "#{콘텐츠유형}": contentType,
+    },
+    message:
+      `[픽스폴리오] 협업 제안이 도착했어요!\n\n` +
+      `픽스폴리오를 통해 ${brand}에서 협업을 제안드렸습니다.\n\n` +
+      `▪ 제안 내용 : ${campaign}\n▪ 업로드 일정 : ${schedule}\n▪ 콘텐츠 유형 : ${contentType}\n\n` +
+      `제안 확인: https://picks-folio.com/admin\n` +
+      `담당자와 대화: https://pf.kakao.com/_ziZxhX/chat`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 진단
 // ---------------------------------------------------------------------------
@@ -262,6 +298,15 @@ export const ALIMTALK_TEMPLATE_CATALOG: { label: string; template: AlimtalkTempl
     {
       label: "비즈니스 제안 도착 (인플루언서)",
       template: businessProposalAlimtalk({ influencer: "예시", companyName: "예시업체", proposalTitle: "예시 제안" }),
+    },
+    {
+      label: "광고 협업 제안 (인플루언서)",
+      template: campaignProposalAlimtalk({
+        brand: "예시브랜드",
+        campaignTitle: "예시 캠페인",
+        uploadSchedule: "10/20 ~ 10/31",
+        contentType: "숏폼 (릴스)",
+      }),
     },
     ...(contactRequestEnabled()
       ? [{ label: "담당자 연락 요청 (인플루언서)", template: contactRequestAlimtalk({ influencer: "예시" }) }]

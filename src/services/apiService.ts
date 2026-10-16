@@ -2623,6 +2623,36 @@ export const apiService = {
     }
   },
 
+  /**
+   * 후보 풀의 "제안하기" — 광고 협업 제안 알림톡을 보낸다. 담당자 전용.
+   * 네 값은 템플릿 문구에 그대로 들어간다.
+   */
+  async sendKakaoProposal(
+    payload: {
+      username: string;
+      campaignId: string;
+      brand: string;
+      campaignTitle: string;
+      uploadSchedule: string;
+      contentType: string;
+    },
+    token?: string,
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/manager-kakao-message', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ ...payload, kind: 'proposal' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '제안을 보내지 못했습니다.' };
+      return json;
+    } catch {
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getCampaignListup(
     campaignId: string,
     opts: { token?: string; pool?: boolean; q?: string } = {},

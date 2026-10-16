@@ -3,7 +3,11 @@ import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { loadManagerContacts } from "./_shared/campaign-listup.mts";
 import { phoneForUsername, sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
-import { contactRequestAlimtalk, contactRequestEnabled } from "./_shared/alimtalk-templates.mts";
+import {
+  campaignProposalAlimtalk,
+  contactRequestAlimtalk,
+  contactRequestEnabled,
+} from "./_shared/alimtalk-templates.mts";
 import { checkRateLimit } from "./_shared/rate-limit.mts";
 
 /**
@@ -12,6 +16,9 @@ import { checkRateLimit } from "./_shared/rate-limit.mts";
  *   GET                 연락 요청을 쓸 수 있는지(템플릿 승인 여부). 버튼을 그릴지 정한다.
  *   GET  ?username=..   보낼 수 있는 사람인지 확인.
  *   POST { username }   보내기
+ *   POST { username, kind: "proposal", campaignId, brand, campaignTitle,
+ *          uploadSchedule, contentType }
+ *                       광고 협업 제안 알림톡 보내기 (후보 풀의 "제안하기")
  *
  * 처음에는 담당자가 쓴 자유 문장을 브랜드 메시지로 보냈다. 그런데 브랜드 메시지는
  * 채널 친구에게만 닿아서 대부분 문자로 떨어졌다. 그래서 정해진 문구의 알림톡
@@ -67,14 +74,16 @@ export default async (req: Request) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  if (!contactRequestEnabled()) {
+  const body = (await req.json().catch(() => ({}))) as any;
+  const isProposal = body?.kind === "proposal";
+
+  if (!isProposal && !contactRequestEnabled()) {
     return Response.json(
       { error: "연락 요청 알림톡 템플릿이 아직 승인되지 않았습니다." },
       { status: 503 },
     );
   }
 
-  const body = (await req.json().catch(() => ({}))) as any;
   const username = norm(body?.username);
   if (!username) {
     return Response.json({ error: "받는 사람을 지정해 주세요." }, { status: 400 });
@@ -99,17 +108,28 @@ export default async (req: Request) => {
     );
   }
 
-  // 같은 사람에게 연달아 누르면 같은 알림톡이 여러 통 쌓인다.
+  // 같은 사람에게 연달아 누르면 같은 알림톡이 여러 통 쌓인다. 제안은 캠페인마다
+  // 따로 세어, 다른 캠페인으로 같은 사람에게 제안하는 것은 막지 않는다.
+  const campaignId = String(body?.campaignId || "").trim().slice(0, 100);
   const repeated = await checkRateLimit({
-    bucket: "manager-kakao-contact-request",
-    key: `${manager.managerUsername || "manager"}:${username}`,
+    bucket: isProposal ? "manager-kakao-proposal" : "manager-kakao-contact-request",
+    key: `${manager.managerUsername || "manager"}:${username}${isProposal ? `:${campaignId}` : ""}`,
     limit: 1,
     windowSeconds: 10 * 60,
-    message: "이 인플루언서에게는 방금 연락 요청을 보냈습니다. 잠시 후 다시 시도해 주세요.",
+    message: isProposal
+      ? "이 인플루언서에게는 방금 이 캠페인 제안을 보냈습니다. 잠시 후 다시 시도해 주세요."
+      : "이 인플루언서에게는 방금 연락 요청을 보냈습니다. 잠시 후 다시 시도해 주세요.",
   });
   if (!repeated.ok) return repeated.response;
 
-  const template = contactRequestAlimtalk({ influencer: name || username });
+  const template = isProposal
+    ? campaignProposalAlimtalk({
+        brand: body?.brand,
+        campaignTitle: body?.campaignTitle,
+        uploadSchedule: body?.uploadSchedule,
+        contentType: body?.contentType,
+      })
+    : contactRequestAlimtalk({ influencer: name || username });
   const result = await sendKakaoAlimtalk({ phone, ...template });
   if (result.success && result.paused) {
     return Response.json(
@@ -126,7 +146,9 @@ export default async (req: Request) => {
   }
 
   console.log(
-    `[manager-kakao-message] ${manager.managerUsername} → ${username} 연락 요청 (${result.type})`,
+    `[manager-kakao-message] ${manager.managerUsername} → ${username} ${
+      isProposal ? `협업 제안 ${campaignId}` : "연락 요청"
+    } (${result.type})`,
   );
   return Response.json({ success: true, type: result.type });
 };
