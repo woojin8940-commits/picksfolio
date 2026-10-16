@@ -501,7 +501,7 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelet
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-black hover:bg-emerald-700 disabled:opacity-60 transition-colors"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-            재개
+            광고 진행
           </button>
         )}
         {record.campaignId && (
@@ -661,7 +661,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const [adsError, setAdsError] = useState('');
   const [adsNeedReconnect, setAdsNeedReconnect] = useState(false);
   const [fetchedAt, setFetchedAt] = useState('');
-  /** 카드 버튼(일시중지·재개·이어서 만들기)을 누른 광고. 그 카드만 잠근다. */
+  /** 카드 버튼(일시중지·광고 진행·이어서 만들기)을 누른 광고. 그 카드만 잠근다. */
   const [busyId, setBusyId] = useState('');
   const [actionError, setActionError] = useState('');
   // 직접 올린 소재로 광고를 만드는 창.
@@ -767,6 +767,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
     setBusyId(ad.id);
     setActionError('');
     const res = await setMetaAdStatus(cleanUsername, ad.id, next);
+    // 광고 관리자에서 이미 지운 광고면 서버가 기록을 지웠다 — 목록에서 바로 뺀다.
+    if (!res.ok && (res as { removed?: boolean }).removed) setMetaAds((prev) => prev.filter((a) => a.id !== ad.id));
     if (!res.ok) setActionError(res.error);
     setBusyId('');
     await loadAds();

@@ -32,7 +32,7 @@ import {
  *   POST /api/meta-ads/ads/:username
  *        { action: 'create', draft }      기록을 만들고 첫 단계(캠페인)를 실행한다.
  *        { action: 'continue', id }       다음 단계(광고 세트 → 소재 → 광고)를 실행한다.
- *        { action: 'status', id, status } ACTIVE / PAUSED 로 바꾼다.
+ *        { action: 'status', id, status } ACTIVE(진행) / PAUSED(일시중지)로 바꾼다.
  *        { action: 'resume', id, draft }  멈춘 광고를 고친 설정으로 다시 만든다.
  *        { action: 'delete', id, removeFromMeta } 기록을 지운다(메타 캠페인도 같이 지울 수 있다).
  *
@@ -484,11 +484,39 @@ const DATE_PRESETS = ["today", "yesterday", "last_7d", "last_14d", "last_30d", "
 
 const liveFields = (preset: string) =>
   "id,effective_status,configured_status,ad_review_feedback,issues_info," +
-  "adset{id,start_time,end_time,lifetime_budget,effective_status}," +
-  "campaign{id,effective_status}," +
+  "adset{id,start_time,end_time,lifetime_budget,effective_status,configured_status}," +
+  "campaign{id,effective_status,configured_status}," +
   `insights.date_preset(${preset}){impressions,clicks,inline_link_clicks,reach,spend,actions,action_values,video_thruplay_watched_actions}`;
 
-const DRAFT_FIELDS = "id,effective_status";
+const DRAFT_FIELDS = "id,effective_status,configured_status";
+
+/**
+ * 지표 없이 상태만 읽는 필드. 지워진 광고는 insights 를 붙여 읽으면 '없음' 이 아닌 다른
+ * 오류로 돌아오는 일이 있어, 그때 상태만 다시 읽어 지워졌는지 가린다.
+ */
+const STATUS_FIELDS =
+  "id,effective_status,configured_status,adset{effective_status,configured_status},campaign{effective_status,configured_status}";
+
+/**
+ * 광고 관리자에서 지운(또는 보관한) 객체인지. 지운 광고는 DELETED, 위 객체를 지우면
+ * ADSET_DELETED · CAMPAIGN_DELETED 처럼 이름에 DELETED 가 붙어 돌아온다. 보관(ARCHIVED)한
+ * 광고도 광고 관리자 기본 목록에서 빠지므로 여기서도 지운 것으로 본다.
+ */
+const isGoneStatus = (status: unknown) => {
+  const s = String(status || "");
+  return s === "ARCHIVED" || s.includes("DELETED");
+};
+
+const isGoneRow = (row: any) =>
+  !!row &&
+  [
+    row.effective_status,
+    row.configured_status,
+    row.adset?.effective_status,
+    row.adset?.configured_status,
+    row.campaign?.effective_status,
+    row.campaign?.configured_status,
+  ].some(isGoneStatus);
 
 /**
  * 여러 ID 를 한 번에 읽는다. 그중 하나라도 메타에서 지워졌으면 묶음 전체가 '없음' 으로
@@ -498,23 +526,32 @@ async function readMany(token: string, proof: string, ids: string[], fields: str
   const rows: Record<string, any> = {};
   const missing: string[] = [];
   const errors: string[] = [];
+  /** 하나씩 읽는다. 지표까지 붙인 읽기가 실패하면 상태만 다시 읽어 지워졌는지 가린다. */
+  const readOne = async (id: string) => {
+    const one = await graphGet(id, token, { fields }, proof);
+    if (one.ok) return void (rows[id] = one.data);
+    if (isMissingObject(one)) return void missing.push(id);
+    if (fields !== DRAFT_FIELDS) {
+      const bare = await graphGet(id, token, { fields: STATUS_FIELDS }, proof);
+      if (bare.ok && isGoneRow(bare.data)) return void (rows[id] = bare.data);
+      if (isMissingObject(bare)) return void missing.push(id);
+    }
+    errors.push(one.error || "광고 상태를 불러오지 못했습니다.");
+  };
   for (let i = 0; i < ids.length; i += 50) {
     const batch = ids.slice(i, i + 50);
     const res = await graphGet("", token, { ids: batch.join(","), fields }, proof);
     if (res.ok) {
       Object.assign(rows, res.data || {});
+      // 묶음 응답에서 빠진 ID 는 지워졌을 수 있다 — 하나씩 다시 확인한다.
+      for (const id of batch) if (!rows[id]) await readOne(id);
       continue;
     }
     if (!isMissingObject(res)) {
       errors.push(res.error || "광고 상태를 불러오지 못했습니다.");
       continue;
     }
-    for (const id of batch) {
-      const one = await graphGet(id, token, { fields }, proof);
-      if (one.ok) rows[id] = one.data;
-      else if (isMissingObject(one)) missing.push(id);
-      else errors.push(one.error || "광고 상태를 불러오지 못했습니다.");
-    }
+    for (const id of batch) await readOne(id);
   }
   return { rows, missing, errors };
 }
@@ -523,8 +560,8 @@ async function readMany(token: string, proof: string, ids: string[], fields: str
  * 기록마다 메타의 지금 상태를 붙인다.
  *
  * 광고 관리자에서 지운 광고는 여기서 기록도 지운다 — 메타에는 없는데 이 화면에만 남아
- * 있으면 브랜드는 지운 광고를 또 찾게 된다. 광고가 DELETED 이거나, 광고 세트·캠페인이
- * DELETED 이거나(위를 지우면 아래 광고가 같이 지워진다), 조회 자체가 '없는 객체' 로 돌아오면
+ * 있으면 브랜드는 지운 광고를 또 찾게 된다. 광고나 광고 세트·캠페인이 지워졌거나 보관됐거나
+ * (위를 지우면 아래 광고가 같이 지워진다 — isGoneRow), 조회 자체가 '없는 객체' 로 돌아오면
  * 지워진 것으로 본다. 광고까지 못 만든 기록은 만들어 둔 캠페인으로 같은 판단을 한다.
  */
 async function liveStatus(token: string, proof: string, records: MetaAdRecord[], preset = "maximum") {
@@ -539,17 +576,11 @@ async function liveStatus(token: string, proof: string, records: MetaAdRecord[],
   for (const r of records) {
     if (r.adId) {
       const row = live[r.adId];
-      if (
-        ads.missing.includes(r.adId) ||
-        row?.effective_status === "DELETED" ||
-        row?.configured_status === "DELETED" ||
-        row?.adset?.effective_status === "DELETED" ||
-        row?.campaign?.effective_status === "DELETED"
-      ) {
+      if (ads.missing.includes(r.adId) || isGoneRow(row)) {
         deleted.add(r.id);
       }
     } else if (r.campaignId) {
-      if (drafts.missing.includes(r.campaignId) || drafts.rows[r.campaignId]?.effective_status === "DELETED") {
+      if (drafts.missing.includes(r.campaignId) || isGoneRow(drafts.rows[r.campaignId])) {
         deleted.add(r.id);
       }
     }
@@ -875,13 +906,20 @@ export default async (req: Request, context: Context) => {
       return Response.json({ error: "status는 ACTIVE 또는 PAUSED여야 합니다." }, { status: 400 });
     }
     // 다시 켤 때는 셋 다 켠다 — 일시중지로 만든 광고는 캠페인·세트·광고가 모두 꺼져 있다.
-    // 끌 때는 캠페인만 꺼도 되지만, 광고 관리자에서 보이는 상태를 맞추려고 같은 순서로 끈다.
-    for (const id of [record.campaignId, record.adSetId, record.adId]) {
-      if (!id) continue;
+    // 켤 때는 광고부터 위로, 끌 때는 캠페인부터 아래로 바꾼다. 중간에 실패해도 켜는 쪽은
+    // 캠페인이 꺼진 채라 돈이 나가지 않고, 끄는 쪽은 첫 호출에서 이미 노출이 멈춘다.
+    const chain = [record.campaignId, record.adSetId, record.adId].filter(Boolean) as string[];
+    for (const id of status === "ACTIVE" ? chain.reverse() : chain) {
       const res = await graphPost(id, token, { status }, proof);
-      if (!res.ok) return graphErrorResponse(res, "광고 상태를 바꾸지 못했습니다.");
+      if (res.ok) continue;
+      // 광고 관리자에서 이미 지운 광고면 기록도 지우고 화면이 목록에서 빼게 한다.
+      if (isMissingObject(res)) {
+        await removeAdRecords(username, [record.id]);
+        return Response.json({ error: "Meta 광고 관리자에서 삭제된 광고라 목록에서 뺐습니다.", removed: true }, { status: 410 });
+      }
+      return graphErrorResponse(res, "광고 상태를 바꾸지 못했습니다.");
     }
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, status });
   }
 
   if (action !== "create") return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
