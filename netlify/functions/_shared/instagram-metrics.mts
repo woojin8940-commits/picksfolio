@@ -1554,7 +1554,11 @@ const CHANNEL_RESYNC_BATCH = 2;
  * 곳은 응답을 보낸 뒤(waitUntil)에 이것을 돌리므로, 화면은 이 일을 기다리지 않고
  * 다음 번 열기에서 새 숫자를 본다.
  */
-export async function resyncStaleChannels(db: any, usernames: string[]): Promise<number> {
+export async function resyncStaleChannels(
+  db: any,
+  usernames: string[],
+  batch: number = CHANNEL_RESYNC_BATCH,
+): Promise<number> {
   const names = [
     ...new Set(
       (usernames || []).map((n) => String(n || "").trim().toLowerCase()).filter(Boolean),
@@ -1575,7 +1579,7 @@ export async function resyncStaleChannels(db: any, usernames: string[]): Promise
         AND connected = TRUE
         AND (metrics_checked_at IS NULL OR metrics_checked_at < ${cutoff})
       ORDER BY metrics_checked_at ASC NULLS FIRST
-      LIMIT ${CHANNEL_RESYNC_BATCH}
+      LIMIT ${Math.max(1, Math.min(10, Math.floor(batch) || CHANNEL_RESYNC_BATCH))}
     `) as any[];
   } catch (e) {
     console.warn("[ig-metrics] 지표 재동기화 대상 조회 실패:", (e as Error)?.message);

@@ -8,6 +8,8 @@ import {
 import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { newId, norm } from "./_shared/collab-workflow.mts";
 import { isManagerListupMode } from "./_shared/reward-mode.mts";
+import { influencerAccountsOf } from "./_shared/influencer-accounts.mts";
+import { refreshStaleChannelImages, resyncStaleChannels } from "./_shared/instagram-metrics.mts";
 import {
   acceptListup,
   buildSnapshot,
@@ -205,34 +207,44 @@ export default async (req: Request, context: Context) => {
         const like = `%${q}%`;
 
         const [dirRows, channelRows, applicantRows] = await Promise.all([
+          // 등록서는 사람마다 여러 장일 수 있다. 계정마다 가장 최근 것만 본다 — 옛
+          // 등록서의 단가·팔로워가 새 것을 덮지 않게(담당자 명부와 같은 규칙).
+          //
+          // 아래 두 질의는 넉넉히 읽는다. 브랜드 계정과 회원정보가 없는 이름을 뒤에서
+          // 걸러 내므로, 60명만 읽으면 거르고 나서 풀이 비어 보인다.
           db.sql`
-            SELECT id, applicant_username, name, instagram_url, category,
-                   ad_price, post_price, short_price, note,
-                   COALESCE(NULLIF(instagram_followers, 0), follower_count) AS followers,
-                   created_at
-            FROM collab_directory_applications
-            WHERE role = 'influencer'
-              AND COALESCE(applicant_username, '') <> ''
-              AND (
-                ${q} = ''
-                OR applicant_username ILIKE ${like}
-                OR name ILIKE ${like}
-                OR category ILIKE ${like}
-              )
+            SELECT * FROM (
+              SELECT DISTINCT ON (LOWER(applicant_username))
+                     id, applicant_username, name, instagram_url, category,
+                     ad_price, post_price, short_price, note,
+                     COALESCE(NULLIF(instagram_followers, 0), follower_count) AS followers,
+                     created_at
+              FROM collab_directory_applications
+              WHERE role = 'influencer'
+                AND COALESCE(applicant_username, '') <> ''
+              ORDER BY LOWER(applicant_username), created_at DESC
+            ) latest
+            WHERE (
+              ${q} = ''
+              OR applicant_username ILIKE ${like}
+              OR name ILIKE ${like}
+              OR category ILIKE ${like}
+            )
             ORDER BY followers DESC NULLS LAST
-            LIMIT 60
+            LIMIT 200
           ` as PromiseLike<any[]>,
 
           db.sql`
             SELECT * FROM creator_channels
-            WHERE (
-              ${q} = ''
-              OR username ILIKE ${like}
-              OR instagram_handle ILIKE ${like}
-              OR categories ILIKE ${like}
-            )
+            WHERE COALESCE(username, '') NOT ILIKE 'biz/%'
+              AND (
+                ${q} = ''
+                OR username ILIKE ${like}
+                OR instagram_handle ILIKE ${like}
+                OR categories ILIKE ${like}
+              )
             ORDER BY followers DESC
-            LIMIT 60
+            LIMIT 200
           ` as PromiseLike<any[]>,
 
           db.sql`
@@ -337,7 +349,16 @@ export default async (req: Request, context: Context) => {
           item.applicationStatus = a.status || "";
         }
 
+        // 인플루언서 계정으로 가입한 사람만 남긴다. 브랜드 계정이 연동한 인스타와
+        // 회원정보가 없는 이름(가입 없이 남은 등록서 등)은 제안할 상대가 아니다.
+        // 계정 조회가 실패했을 때는 인플루언서로 등록서·지원서를 낸 사람만 남긴다 —
+        // 채널 지표만 있는 이름에는 브랜드 계정이 섞여 있다.
+        const accounts = await influencerAccountsOf(Array.from(pool.keys()));
+        const isInfluencerAccount = (p: any) =>
+          accounts ? accounts.has(p.username) : p.source !== "manager";
+
         payload.pool = Array.from(pool.values())
+          .filter(isInfluencerAccount)
           .filter((p) => !listed.has(p.username))
           .sort((a, b) => {
             if (a.isApplicant !== b.isApplicant) return a.isApplicant ? -1 : 1;
@@ -348,6 +369,20 @@ export default async (req: Request, context: Context) => {
         // 인스타 사진이 없는 사람(연동 전, 지원서만 낸 사람)은 픽스폴리오 페이지의
         // 아바타로 채운다. 명단에 올릴 때 굳는 스냅샷과 같은 규칙(mergeSnapshot)이라,
         // 후보 풀에서 본 얼굴과 명단 카드의 얼굴이 어긋나지 않는다.
+        // 풀에 뜬 사람의 인스타 지표를 응답을 보낸 뒤에 지금 것으로 맞춘다. creator_channels
+        // 의 숫자·게시물은 연동하는 순간과 매일 도는 순환 배치에서만 바뀌어서, 담당자가
+        // 보는 풀에 지운 게시물과 옛 팔로워 수가 남아 있었다. 지표가 가장 오래된 몇
+        // 계정만 다시 받고(전체 재동기화 → 계정 이름·팔로워·게시물), 이어서 사진만
+        // 오래된 계정의 그림을 갈아 끼운다. 순서는 담당자 명부와 같다.
+        const shownConnected = (payload.pool as any[]).filter((p) => p.connected).map((p) => p.username);
+        if (shownConnected.length) {
+          context.waitUntil(
+            resyncStaleChannels(db, shownConnected, 4)
+              .catch(() => 0)
+              .then(() => refreshStaleChannelImages(db, shownConnected).catch(() => 0)),
+          );
+        }
+
         const noImage = (payload.pool as any[]).filter((p) => !p.profileImage).map((p) => p.username);
         if (noImage.length) {
           const siteRows = (await db.sql`
