@@ -3,7 +3,6 @@ import { authHeaders } from '../services/apiService';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import AdBoostModal from './AdBoostModal';
-import CampaignAdResults from './CampaignAdResults';
 import MetaPageEngagementPanel from './MetaPageEngagement';
 import { instagramPostUrl } from '../utils/instagramPostUrl';
 
@@ -25,9 +24,9 @@ import { instagramPostUrl } from '../utils/instagramPostUrl';
  * 서버가 한 번에 다 보내고 화면에서 추리는 편이, 필터를 누를 때마다 기다리는 것보다
  * 이력을 훑는 동작에 맞는다.
  *
- * 광고를 연동했으면 위쪽에 두 칸이 더 붙는다 — 이력에서 부스팅한 광고의 메타 상태·지표
- * (CampaignAdResults)와 고른 페이스북 페이지의 게시물 반응(MetaPageEngagementPanel,
- * pages_read_engagement). 둘 다 메타 API 에서 방금 읽은 값이다.
+ * 광고를 연동했으면 위쪽에 고른 페이스북 페이지의 게시물 반응(MetaPageEngagementPanel,
+ * pages_read_engagement)이 붙는다. 메타 API 에서 방금 읽은 값이다. 부스팅한 광고의
+ * 성과는 광고 현황에서 보므로 여기서 다시 띄우지 않는다.
  */
 
 interface BusinessCampaignHistoryProps {
@@ -209,7 +208,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   /** 부스팅 창을 연 게시물. 창이 캠페인 제목·인플루언서·썸네일을 그대로 받아 쓴다. */
   const [boostTarget, setBoostTarget] = useState<{ campaign: HistoryCampaign; post: HistoryPost } | null>(null);
   // 광고 현황에서 연동한 메타 계정·광고 계정. 연동 전이면 아래 광고·페이지 칸을 그리지 않는다.
-  const { connected: adsConnected, account: adAccount } = useMetaAdConnection(cleanUsername);
+  const { connected: adsConnected } = useMetaAdConnection(cleanUsername);
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -367,7 +366,6 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
       {adsConnected && (
         <div className="mt-5 space-y-3">
-          <CampaignAdResults username={cleanUsername} accountId={adAccount?.id || ''} onViewAdStatus={onViewAdStatus} />
           <MetaPageEngagementPanel username={cleanUsername} enabled={adsConnected} title="브랜드 페이지 게시물 반응" />
         </div>
       )}
