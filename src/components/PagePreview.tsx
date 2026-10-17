@@ -76,7 +76,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       onSearchQuery={setSearchQuery}
       onSelectBlock={setSelectedBlockId}
     >
-      {/* 실제 페이지의 맨 아래 한 벌(공유 버튼 · 사업자 정보)을 그대로 그린다.
+      {/* 실제 페이지의 맨 아래 한 벌(공유 버튼 · 약관 링크)을 그대로 그린다.
           미리보기를 끝까지 내렸을 때 나오는 것이 실제 페이지와 같아야 한다. */}
       <PublicPageFooter
         design={fullDesign}
