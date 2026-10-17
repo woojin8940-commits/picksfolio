@@ -22,6 +22,7 @@ import {
   isLightBackground,
   normalizeHexColor,
   themeBackgroundOf,
+  themeIsDark,
 } from '../utils/themeColor';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
@@ -2393,7 +2394,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       <div
                         ref={coverPosContainerRef}
                         className="relative overflow-hidden rounded-[2rem] border-2 border-blue-200 bg-slate-50 select-none"
-                        style={{ aspectRatio: editForm.displayType === 'minimal' ? '16/10' : '1/1' }}
+                        style={{ aspectRatio: '1/1' }}
                       >
                         <MediaAuto
                           src={editForm.coverMedia}
@@ -2420,7 +2421,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         )}
                       </div>
                       <p className="text-[10px] text-slate-400 font-bold text-center">
-                        개인페이지에 {editForm.displayType === 'minimal' ? '미니멀(16:10)' : '정사각형(1:1)'} 비율로 표시됩니다
+                        개인페이지에 {editForm.displayType === 'minimal' ? '미니멀 썸네일(정사각형 1:1)' : '정사각형(1:1)'} 비율로 표시됩니다
                       </p>
                     </>
                   ) : (
@@ -2675,14 +2676,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         ref={textEditorRef}
                         contentEditable
                         suppressContentEditableWarning
-                        className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-medium min-h-[100px] focus:border-blue-600 transition-all outline-none whitespace-pre-wrap"
+                        className="w-full border border-[#E2E8F0] rounded-2xl px-6 py-4 font-medium min-h-[100px] focus:border-blue-600 transition-all outline-none whitespace-pre-wrap"
+                        // 개인페이지 바탕색 위에서 그대로 편집한다 — 흰 바탕에 흰 글씨를 고르면
+                        // 아무것도 보이지 않아 고칠 수가 없었다. 기본 글자색도 공개 페이지와 같다.
                         style={{
                           fontSize: `${editForm.fontSizePx || 14}px`,
                           fontWeight: editForm.bold ? 'bold' : undefined,
                           fontStyle: editForm.italic ? 'italic' : undefined,
                           textDecoration: [editForm.underline ? 'underline' : '', editForm.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                          color: editForm.color || '#37352f',
-                          backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : undefined,
+                          color: editForm.color || (themeIsDark(previewDesign) ? 'rgba(255,255,255,0.8)' : '#37352f'),
+                          background: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : themeBackgroundOf(previewDesign),
                         }}
                         onInput={(e) => { setEditForm(prev => ({ ...prev, textContent: (e.target as HTMLDivElement).innerHTML })); rememberTextSelection(); }}
                         onKeyUp={rememberTextSelection}
