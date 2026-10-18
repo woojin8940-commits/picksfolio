@@ -19,6 +19,8 @@ import AdminManagerAccounts from './admin/AdminManagerAccounts';
 import AdminLegacyUsernameTransfer from './admin/AdminLegacyUsernameTransfer';
 import AdminDmQueue from './admin/AdminDmQueue';
 import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
+import AdminAffiliateConsole from './admin/AdminAffiliateConsole';
+import AdminPlatformSettings from './admin/AdminPlatformSettings';
 import { isTestProposal } from '../utils/testData';
 
 /**
@@ -42,13 +44,15 @@ type OperatorTab =
   | 'campaigns'
   | 'listup'
   | 'collabs'
+  | 'affiliate'
   | 'influencerdb'
   | 'directory'
   | 'applicants'
   | 'users'
   | 'managers'
   | 'dmqueue'
-  | 'settlement';
+  | 'settlement'
+  | 'platform-settings';
 
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
@@ -283,6 +287,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'campaigns', label: '1. 캠페인 승인', badge: pendingCampaigns },
         { key: 'listup', label: '2. 인플루언서 배정 · 진행' },
         { key: 'collabs', label: '3. 캠페인 관리' },
+        { key: 'affiliate', label: '판매 연동 캠페인' },
       ],
     },
     {
@@ -300,6 +305,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'managers', label: '담당자 계정' },
         { key: 'dmqueue', label: 'DM 발송' },
         { key: 'settlement', label: '정산·매출' },
+        { key: 'platform-settings', label: '플랫폼 설정' },
       ],
     },
   ];
@@ -739,6 +745,21 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 관리가 표시됩니다." />
         )}
 
+        {/* 판매 연동 캠페인(어필리에이트) */}
+        {activeTab === 'affiliate' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="판매 연동 캠페인 · 심사 · 월 정산 · 미검증 주문"
+                  body="브랜드가 카페24 상품과 수수료율을 올린 판매 캠페인을 심사하고, 매월 1일 지난달 확정 주문을 브랜드별 청구서로 마감합니다. 브랜드 승인 → 입금 확인 → 인플루언서 지급(3.3% 원천징수) 순서로 처리하며, 카페24 API 로 확인되지 않은 주문은 정산에서 빠지므로 '미검증 주문'에서 다시 조회합니다."
+                />
+                <AdminAffiliateConsole token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 판매 연동 캠페인이 표시됩니다." />
+        )}
+
         {/* 인플루언서 DB */}
         {activeTab === 'influencerdb' && (
           adminToken
@@ -812,6 +833,22 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 정산 데이터가 표시됩니다." />
+        )}
+
+        {/* 플랫폼 설정 */}
+        {activeTab === 'platform-settings' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="플랫폼 설정 · 판매 연동 캠페인 수수료와 구매확정"
+                  body="플랫폼 수수료율과 구매확정 간주 일수를 정합니다. 수수료율은 캠페인 등록 시점 값이 고정되므로, 바꿔도 이미 등록된 캠페인에는 영향이 없습니다."
+                  tone="amber"
+                />
+                <AdminPlatformSettings token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 플랫폼 설정이 표시됩니다." />
         )}
       </div>
 

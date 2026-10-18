@@ -7,6 +7,7 @@ import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
 import CampaignAiAssistant from './collab/CampaignAiAssistant';
+import CreatorAffiliateSales from './affiliate/CreatorAffiliateSales';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
@@ -57,8 +58,10 @@ type DetailTab = 'progress' | 'insight' | 'settlement' | 'ai';
  *   active  진행 중. 지원 결과를 기다리는 캠페인도 여기 함께 둔다 — 아직 끝나지
  *           않은 일이고, 선정되면 이 탭 안에서 카드가 옮겨 간다.
  *   closed  완료 · 취소 · 미선정. 지난 집행을 되짚어 보는 자리다.
+ *   affiliate  판매 연동형(어필리에이트) 캠페인. 단계가 있는 협업이 아니라 링크로
+ *           판매하고 수수료를 받는 일이라 카드 목록 대신 CreatorAffiliateSales 를 그린다.
  */
-type ListTab = 'active' | 'closed';
+type ListTab = 'active' | 'closed' | 'affiliate';
 
 /** 끝난 협업인지. 완료와 취소는 더 할 일이 없다는 점에서 같은 칸에 둔다. */
 const isClosedCollab = (c: any): boolean =>
@@ -489,7 +492,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
    * 아직 모르는 동안(null)에는 감추지 않는다. 확인이 안 됐다는 이유로 진행 중인
    * 협업을 가리는 쪽이 더 나쁘다.
    */
-  if (igLinked === false) {
+  if (igLinked === false && listTab !== 'affiliate') {
     return (
       <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
         <header className="mb-6">
@@ -517,6 +520,15 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
           </button>
           {connectNotice && <p className="text-[11px] font-bold text-rose-600 mt-3">{connectNotice}</p>}
         </div>
+        {/* 판매 연동형 캠페인은 연동한 계정과 상관없이 링크로 판매한다. 연동을 끊어
+            둔 동안에도 판매 링크 · 수수료는 볼 수 있어야 한다. */}
+        <button
+          type="button"
+          onClick={() => setListTab('affiliate')}
+          className="mt-4 text-xs font-black text-blue-600 hover:text-blue-700"
+        >
+          {isEn ? 'Open affiliate sales →' : '어필리에이트 판매 링크 · 수수료 보기 →'}
+        </button>
         {toastEl}
       </main>
     );
@@ -824,11 +836,14 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
 
       {/* 진행중 · 마감됨. 끝난 협업은 지워지지 않고 쌓이기만 하므로, 시간이 지나면
           지금 손댈 협업이 지난 기록 사이에 묻힌다. 기본은 진행중이다. */}
-      {!loading && !loadError && (collabs.length > 0 || waiting.length > 0) && (
+      {/* 어필리에이트 탭은 협업이 하나도 없어도 늘 보인다 — 판매 캠페인만 하는
+          사람도 이 메뉴에서 링크를 찾는다. */}
+      {(listTab === 'affiliate' || !loading) && (
         <div className="flex items-center gap-1.5 mb-4 p-1 bg-slate-100 rounded-xl w-full md:w-auto md:inline-flex">
           {([
             { key: 'active' as ListTab, label: isEn ? 'In progress' : '진행중', count: tabCounts.active },
             { key: 'closed' as ListTab, label: isEn ? 'Closed' : '마감됨', count: tabCounts.closed },
+            { key: 'affiliate' as ListTab, label: isEn ? 'Affiliate' : '어필리에이트', count: null as number | null },
           ]).map(t => (
             <button
               key={t.key}
@@ -839,13 +854,17 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
               }`}
             >
               {t.label}
-              <span className={`ml-1.5 ${listTab === t.key ? 'text-blue-600' : 'text-slate-400'}`}>{t.count}</span>
+              {t.count !== null && (
+                <span className={`ml-1.5 ${listTab === t.key ? 'text-blue-600' : 'text-slate-400'}`}>{t.count}</span>
+              )}
             </button>
           ))}
         </div>
       )}
 
-      {loading ? (
+      {listTab === 'affiliate' ? (
+        <CreatorAffiliateSales userName={userName} />
+      ) : loading ? (
         <div className="text-center py-20">
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
           <p className="text-sm text-slate-400 font-bold">{isEn ? 'Loading campaigns...' : '캠페인 불러오는 중...'}</p>

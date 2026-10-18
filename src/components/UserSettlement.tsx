@@ -51,7 +51,7 @@ function isAmountPending(s: Settlement): boolean {
   return !!s.amount_pending && !Number(s.amount || 0);
 }
 
-type SettlementSourceKey = 'campaign' | 'proposal';
+type SettlementSourceKey = 'campaign' | 'proposal' | 'affiliate';
 
 /**
  * 이 정산이 담당자가 관리하는 캠페인에서 온 것인지, 브랜드가 직접 보낸 비즈니스
@@ -65,7 +65,8 @@ type SettlementSourceKey = 'campaign' | 'proposal';
  * 한 번 더 판단한다.
  */
 function sourceOf(s: Settlement): SettlementSourceKey {
-  if (s.source === 'campaign' || s.source === 'proposal') return s.source;
+  if (s.source === 'campaign' || s.source === 'proposal' || s.source === 'affiliate') return s.source;
+  if (s.reward_mode === 'affiliate' || String(s.id || '').startsWith('aff_')) return 'affiliate';
   return String(s.proposal_id || '').startsWith('campaign_') ? 'campaign' : 'proposal';
 }
 
@@ -78,6 +79,16 @@ function sourceOf(s: Settlement): SettlementSourceKey {
  */
 function isGroupbuy(s: Settlement): boolean {
   return s.reward_mode === 'groupbuy';
+}
+
+/**
+ * 판매 연동형(어필리에이트) 월 정산인지.
+ *
+ * 이 줄은 운영 콘솔이 브랜드 입금을 확인하고 원천징수(3.3%)를 뗀 뒤 지급을 마쳐야
+ * 완료로 바뀐다. 인플루언서가 먼저 닫을 수 있는 정산이 아니므로 버튼을 두지 않는다.
+ */
+function isAffiliate(s: Settlement): boolean {
+  return sourceOf(s) === 'affiliate';
 }
 
 function groupbuyRate(s: Settlement): number {
@@ -210,6 +221,11 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
         '비즈니스 제안 직접 협업',
         '브랜드가 직접 지급합니다. 나와 브랜드 중 어느 한쪽이 정산완료를 누르면 완료로 표시됩니다.',
       ),
+      build(
+        'affiliate',
+        '판매 수수료(어필리에이트)',
+        '매달 확정된 판매 수수료를 모아 정산합니다. 원천징수 3.3%를 뗀 금액이 지급 계좌로 들어오고, 지급이 끝나면 자동으로 정산완료로 바뀝니다.',
+      ),
     ].filter(g => g.scheduled.length + g.completed.length > 0);
   }, [scheduledSettlements, completedSettlements]);
 
@@ -219,6 +235,10 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   // 담당자가 아직 금액을 확정하지 않은 협업(공동구매 수수료 등). 합계에는 0원으로
   // 들어가므로, 몇 건이 협의중인지 따로 알려 주지 않으면 합계가 틀린 것처럼 보인다.
   const negotiatingCount = settlements.filter(isAmountPending).length;
+  // 합계에는 판매 수수료(원천징수 전 금액)도 함께 들어간다. 광고비와 판매 수수료가
+  // 한 화면에서 같이 보여야 이번 달 수입을 한 번에 가늠할 수 있다 — 대신 그중
+  // 판매 수수료가 얼마인지는 따로 적어 둔다.
+  const affiliateAmount = settlements.filter(isAffiliate).reduce((sum, s) => sum + Number(s.amount || 0), 0);
 
   const formatDate = (dateStr: string) => {
     const d = parseLocalDate(dateStr);
@@ -270,8 +290,69 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
     );
   };
 
+  /**
+   * 판매 수수료(어필리에이트) 한 줄. 예정 · 완료 모두 같은 모양이다.
+   *
+   * 판매액 → 내 몫(원천징수 전) → 원천징수 3.3% → 실지급 순으로 적는다. 합계 칸과
+   * 같은 기준(원천징수 전)을 맨 위 금액으로 두고, 실제로 통장에 찍히는 돈은 그 아래
+   * 줄에 따로 적는다. 읽기 전용이다 — 지급 완료는 운영 콘솔에서만 바뀐다.
+   */
+  const renderAffiliateCard = (s: Settlement) => {
+    const a = s.affiliate;
+    const done = s.status === 'completed';
+    const gross = Number(a?.gross ?? s.amount ?? 0);
+    const withholding = Number(a?.withholding ?? 0);
+    const net = Number(a?.net ?? gross - withholding);
+    return (
+      <div key={s.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${done ? 'bg-green-100' : 'bg-violet-100'}`}>
+              <span className="text-lg">🔗</span>
+            </div>
+            <div className="min-w-0">
+              <p className="font-black text-slate-900 text-sm truncate">{s.title}</p>
+              <p className="text-slate-400 text-[10px] font-bold mt-0.5 truncate">
+                {s.company_name}{a?.period ? ` · ${a.period}` : ''}
+                {done && ` · 완료일: ${formatDate(s.completed_at || s.updated_at || '')}`}
+              </p>
+            </div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className={`font-black text-base ${done ? 'text-green-600' : 'text-violet-600'}`}>{formatFee(gross)}</p>
+            <p className="text-[10px] font-bold text-slate-400 mt-0.5">판매 수수료</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 bg-slate-50 rounded-xl p-3 mt-2">
+          <div>
+            <p className="text-[9px] font-black text-slate-400">판매액</p>
+            <p className="text-xs font-bold text-slate-700">{formatFee(Number(a?.salesAmount || 0))}</p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-400">수수료(세전)</p>
+            <p className="text-xs font-bold text-slate-700">{formatFee(gross)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-400">원천징수 3.3%</p>
+            <p className="text-xs font-bold text-rose-500">-{formatFee(withholding)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-400">실지급</p>
+            <p className="text-xs font-black text-slate-900">{formatFee(net)}</p>
+          </div>
+        </div>
+        <p className={`w-full mt-3 py-2.5 rounded-xl font-black text-[11px] text-center ${
+          done ? 'bg-green-50 text-green-700' : 'bg-violet-50 text-violet-700'
+        }`}>
+          {done ? '지급 완료' : '픽스폴리오가 지급을 마치면 정산완료로 표시됩니다'}
+        </p>
+      </div>
+    );
+  };
+
   /** 아직 지급되지 않은 정산 한 줄. */
   const renderScheduledCard = (s: Settlement) => {
+    if (isAffiliate(s)) return renderAffiliateCard(s);
     const managerManaged = sourceOf(s) === 'campaign';
     return (
       <div key={s.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5">
@@ -346,7 +427,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   };
 
   /** 지급이 끝난 정산 한 줄. */
-  const renderCompletedRow = (s: Settlement) => (
+  const renderCompletedRow = (s: Settlement) => isAffiliate(s) ? renderAffiliateCard(s) : (
     <div key={s.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center justify-between">
       <div className="flex items-center gap-3">
         <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
@@ -387,6 +468,11 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
           <p className="text-[10px] font-bold text-blue-400 mt-1">
             {settlements.length}{language === 'en' ? ' items' : '건'}{negotiatingCount > 0 && (language === 'en' ? ` · In negotiation ${negotiatingCount}` : ` · 협의중 ${negotiatingCount}건`)}
           </p>
+          {affiliateAmount > 0 && (
+            <p className="text-[10px] font-bold text-blue-400 mt-0.5">
+              {language === 'en' ? `Incl. sales commission ${formatFee(affiliateAmount)}` : `판매 수수료 ${formatFee(affiliateAmount)} 포함`}
+            </p>
+          )}
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{language === 'en' ? 'COMPLETED' : '정산 완료'}</p>
@@ -417,7 +503,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
             <section key={group.key}>
               <div className="mb-4">
                 <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${group.key === 'campaign' ? 'bg-indigo-500' : 'bg-sky-500'}`}></span>
+                  <span className={`w-2 h-2 rounded-full ${group.key === 'campaign' ? 'bg-indigo-500' : group.key === 'affiliate' ? 'bg-violet-500' : 'bg-sky-500'}`}></span>
                   {group.title} ({group.scheduled.length + group.completed.length}건)
                 </h3>
                 <p className="text-[11px] font-bold text-slate-400 mt-1.5 pl-4 leading-relaxed">{group.hint}</p>

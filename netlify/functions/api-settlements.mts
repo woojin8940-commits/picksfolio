@@ -472,6 +472,50 @@ export default async (req: Request) => {
         });
       }
 
+      // 판매 연동형 캠페인의 판매 수수료. 인플루언서 수익 화면에서 광고비와 함께 보이도록
+      // 월 지급 내역(affiliate_settlement_lines)을 같은 모양으로 붙인다. 브랜드가 청구서를
+      // 승인하기 전(draft)에는 싣지 않는다 — 승인 전 정산이 먼저 보이지 않게.
+      // 이 줄은 읽기 전용이다. id 가 Blobs 에 없으므로 아래 PATCH 로는 바꿀 수 없다.
+      if (role !== "business" && dbInstance) {
+        try {
+          const lines = (await dbInstance.sql`
+            SELECT l.*, b.status AS batch_status, b.company_name
+            FROM affiliate_settlement_lines l JOIN affiliate_settlement_batches b ON b.id = l.batch_id
+            WHERE l.influencer_username = ${username} AND b.status <> 'draft'
+            ORDER BY l.period DESC
+          `) as any[];
+          for (const l of lines) {
+            annotated.push({
+              id: `aff_${l.id}`,
+              proposal_id: "",
+              source: "affiliate",
+              influencer_username: String(l.influencer_username),
+              business_username: String(l.business_username),
+              company_name: String(l.company_name || ""),
+              title: `${l.period} 판매 수수료${l.company_name ? ` · ${l.company_name}` : ""}`,
+              amount: Number(l.influencer_gross),
+              amount_pending: false,
+              scheduled_date: "",
+              status: l.status === "paid" ? "completed" : "scheduled",
+              completed_at: l.paid_at ? new Date(l.paid_at).toISOString() : null,
+              memo: "",
+              reward_mode: "affiliate",
+              affiliate: {
+                period: String(l.period),
+                salesAmount: Number(l.sales_amount),
+                gross: Number(l.influencer_gross),
+                withholding: Number(l.withholding),
+                net: Number(l.influencer_net),
+                batchStatus: String(l.batch_status),
+              },
+              created_at: new Date(l.created_at).toISOString(),
+            });
+          }
+        } catch {
+          // 표가 아직 없는 환경(마이그레이션 전)에서는 판매 수수료 없이 내려보낸다.
+        }
+      }
+
       return Response.json({ settlements: annotated });
     }
 
@@ -529,6 +573,14 @@ export default async (req: Request) => {
      *     명시 항목으로 굳어, 이후 조건표 변경이 화면에 반영되지 않는다.
      */
     if (req.method === "PATCH" && settlementId && (role === "business" || role === "influencer")) {
+      // 판매 수수료 줄은 월 정산(api-affiliate-settlements)에서만 움직인다. 금액도 상태도
+      // 여기서는 바꿀 수 없다.
+      if (settlementId.startsWith("aff_")) {
+        return Response.json(
+          { error: "판매 수수료 정산은 픽스폴리오가 지급 처리합니다.", code: "AFFILIATE_LOCKED" },
+          { status: 403 },
+        );
+      }
       const body = await req.json();
       const now = new Date().toISOString();
 

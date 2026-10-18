@@ -30,6 +30,10 @@ const BusinessAdStatus = lazyWithRetry(() => import('./BusinessAdStatus'));
 // 브랜드용 인사이트(우리 계정을 태그한 인플루언서 콘텐츠). 인플루언서용 인사이트와는
 // 다른 화면이며, 이 대시보드에서만 열린다.
 const BusinessTaggedContent = lazyWithRetry(() => import('./BusinessTaggedContent'));
+// 판매 연동형(어필리에이트) 캠페인과 그 바닥인 쇼핑몰 연동. 자사몰(카페24) 상품을
+// 인플루언서가 판매하고 수수료를 받는다 — 광고비를 주는 캠페인 협업과는 따로 굴러간다.
+const BrandAffiliateCampaigns = lazyWithRetry(() => import('./affiliate/BrandAffiliateCampaigns'));
+const BrandShopConnection = lazyWithRetry(() => import('./affiliate/BrandShopConnection'));
 
 interface BusinessEnterpriseDashboardProps {
   businessUsername: string;
@@ -37,8 +41,8 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status';
-const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status'];
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status' | 'affiliate' | 'shop-settings';
+const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', 'affiliate', 'shop-settings'];
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
@@ -85,6 +89,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       insights: 'tagged-insights',
       history: 'campaign-history',
       ads: 'ad-status',
+      affiliate: 'affiliate',
+      shop: 'shop-settings',
+      'shop-settings': 'shop-settings',
     };
     if (tab && tabs[tab]) setCurrentSubView(tabs[tab]);
     if (tab === 'campaigns' && campaignId) setCollabCampaignId(campaignId);
@@ -428,6 +435,20 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         </LazyRoute>
       );
       break;
+    case 'affiliate':
+      subComponent = (
+        <LazyRoute>
+          <BrandAffiliateCampaigns
+            businessUsername={businessUsername}
+            companyName={companyName}
+            onOpenShopSettings={() => setCurrentSubView('shop-settings')}
+          />
+        </LazyRoute>
+      );
+      break;
+    case 'shop-settings':
+      subComponent = <LazyRoute><BrandShopConnection /></LazyRoute>;
+      break;
     default:
       subComponent = null;
   }
@@ -623,6 +644,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
           <div className="my-3 border-t border-white/10" />
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
+          {/* 판매 수수료형은 광고비 캠페인과 다른 메뉴다. 캠페인 협업 바로 아래에 둔다. */}
+          <NavItem icon="🛍️" label="판매 캠페인" active={currentSubView === 'affiliate'} onClick={() => setCurrentSubView('affiliate')} />
           <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           {/* 광고 현황은 이력에서 고른 콘텐츠의 다음 단계라, 이력 바로 아래에 둔다. */}
           <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
@@ -632,6 +655,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
+          {/* 쇼핑몰 연동은 한 번 해 두면 다시 찾을 일이 적은 설정이라 아래 묶음에 둔다. */}
+          <NavItem icon="🏪" label="쇼핑몰 연동" active={currentSubView === 'shop-settings'} onClick={() => setCurrentSubView('shop-settings')} />
           {!isNativeApp() && (
             <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
           )}
@@ -653,11 +678,13 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📩" label="DM자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <MobileNavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
+          <MobileNavItem icon="🛍️" label="판매캠페인" active={currentSubView === 'affiliate'} onClick={() => setCurrentSubView('affiliate')} />
           <MobileNavItem icon="📊" label="캠페인이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           <MobileNavItem icon="📣" label="광고현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="📅" label="협업현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
+          <MobileNavItem icon="🏪" label="쇼핑몰연동" active={currentSubView === 'shop-settings'} onClick={() => setCurrentSubView('shop-settings')} />
           {!isNativeApp() && (
             <MobileNavItem icon="💎" label="멤버십" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
           )}
@@ -679,6 +706,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => { setCurrentSubView('tagged-insights'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+              <NavItem icon="🛍️" label="판매 캠페인" active={currentSubView === 'affiliate'} onClick={() => { setCurrentSubView('affiliate'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => { setCurrentSubView('campaign-history'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => { setCurrentSubView('ad-status'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
@@ -686,6 +714,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
+              <NavItem icon="🏪" label="쇼핑몰 연동" active={currentSubView === 'shop-settings'} onClick={() => { setCurrentSubView('shop-settings'); setIsMobileMenuOpen(false); }} />
               {!isNativeApp() && (
                 <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { setCurrentSubView('membership'); setIsMobileMenuOpen(false); }} />
               )}
