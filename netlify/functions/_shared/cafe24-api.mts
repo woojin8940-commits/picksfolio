@@ -11,7 +11,8 @@
  * 토큰은 암호화돼 저장된다(_shared/cafe24-credentials.mts). 행을 읽을 때 푼다.
  * 표가 아직 없는 환경(마이그레이션 전)에서는 "미연결"로 처리하고 오류를 올리지 않는다.
  *
- * 로그 원칙: 토큰·응답 원문·고객 정보는 남기지 않는다. 실패 시 상태 코드와 경로만 남긴다.
+ * 로그 원칙: 토큰·응답 원문·고객 정보는 남기지 않는다. 실패 시 상태 코드 · 경로와, 카페24 오류
+ * 응답의 error.code · error.message(일반 안내 문구라 몰·고객 정보가 없다)만 남긴다.
  */
 import { getDatabase } from "@picks/netlify-database";
 import {
@@ -125,11 +126,40 @@ export function connectionHealth(conn: Cafe24Connection | null): { usable: boole
 export class Cafe24Error extends Error {
   /** true 면 갱신까지 실패했다 — 브랜드가 다시 연동해야 한다. */
   public reconnect: boolean;
-  constructor(public status: number, public path: string, reconnect = false) {
+  /** 카페24 오류 응답의 error.code · error.message. 응답이 없었으면 code 가 timeout · network 다. */
+  public apiCode: string;
+  public apiMessage: string;
+  constructor(
+    public status: number,
+    public path: string,
+    reconnect = false,
+    detail: { code?: string; message?: string } = {},
+  ) {
     super(`cafe24 ${status} ${path}`);
     this.reconnect = reconnect;
+    this.apiCode = detail.code || "";
+    this.apiMessage = detail.message || "";
   }
 }
+
+/** 로그 · 화면에 남길 오류 문구. 혹시 섞여 온 토큰 모양 문자열은 지우고 짧게 자른다. */
+const clipDetail = (v: unknown) =>
+  String(v ?? "")
+    .replace(/Bearer\s+\S+/gi, "[redacted]")
+    .replace(/[A-Za-z0-9_\-]{32,}/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+
+/** 실패 응답 본문 → { code, message }. 본문 원문은 돌려주지 않는다. */
+async function readApiError(res: Response): Promise<{ code: string; message: string }> {
+  const json = await res.json().catch(() => null);
+  const err = json?.error && typeof json.error === "object" ? json.error : {};
+  return { code: clipDetail(err.code), message: clipDetail(err.message) };
+}
+
+const describeApiError = (d: { code: string; message: string }) =>
+  d.code || d.message ? ` error.code=${d.code || "-"} error.message="${d.message}"` : "";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -290,6 +320,7 @@ export async function cafe24Request(
   init: { method?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<any> {
   const cleanPath = path.split("?")[0];
+  const method = init.method || "GET";
   const url = `https://${conn.mallId}.cafe24api.com/api/v2/admin${path}`;
   await ensureFreshToken(conn, cleanPath);
   let retried401 = false;
@@ -300,7 +331,7 @@ export async function cafe24Request(
     let res: Response;
     try {
       res = await fetch(url, {
-        method: init.method || "GET",
+        method,
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -309,14 +340,20 @@ export async function cafe24Request(
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         signal: controller.signal,
       });
+    } catch (e) {
+      // 응답 자체가 없었다(시간 초과 · 네트워크). 상태 코드 0 으로 올려 화면이 사유를 알 수 있게 한다.
+      const kind = e instanceof Error && e.name === "AbortError" ? "timeout" : "network";
+      console.warn(`[cafe24] ${method} ${cleanPath} → ${kind} (mall ${conn.mallId})`);
+      throw new Cafe24Error(0, cleanPath, false, { code: kind });
     } finally {
       clearTimeout(timer);
     }
     if (res.status === 401 && !retried401) {
       retried401 = true;
       if (await refreshAfterUnauthorized(conn, token)) continue;
-      console.warn(`[cafe24] ${init.method || "GET"} ${cleanPath} → 401, refresh failed (mall ${conn.mallId})`);
-      throw new Cafe24Error(401, cleanPath, true);
+      const detail = await readApiError(res);
+      console.warn(`[cafe24] ${method} ${cleanPath} → 401, refresh failed (mall ${conn.mallId})${describeApiError(detail)}`);
+      throw new Cafe24Error(401, cleanPath, true, detail);
     }
     if (res.status === 429 && attempt < 2) {
       await sleep(600 * 2 ** attempt);
@@ -324,9 +361,10 @@ export async function cafe24Request(
       continue;
     }
     if (!res.ok) {
-      // 응답 본문에는 몰 정보가 섞일 수 있어 남기지 않는다.
-      console.warn(`[cafe24] ${init.method || "GET"} ${cleanPath} → ${res.status} (mall ${conn.mallId})`);
-      throw new Cafe24Error(res.status, cleanPath, res.status === 401);
+      // 본문 원문은 남기지 않고 error.code · error.message 만 남긴다.
+      const detail = await readApiError(res);
+      console.warn(`[cafe24] ${method} ${cleanPath} → ${res.status} (mall ${conn.mallId})${describeApiError(detail)}`);
+      throw new Cafe24Error(res.status, cleanPath, res.status === 401, detail);
     }
     return await res.json().catch(() => ({}));
   }
@@ -413,12 +451,103 @@ export async function fetchProductsByIds(conn: Cafe24Connection, ids: string[]):
 
 // ── 스크립트(ScriptTags) ─────────────────────────────────────────────────────
 
+/** 카페24에 넘기기 전에 본 스크립트 주소 문제. 카페24 오류와 구분해 "스크립트 주소 오류"로 보인다. */
+export class ScriptSrcError extends Error {
+  constructor(public problem: string) {
+    super(`script src: ${problem}`);
+  }
+}
+
+/**
+ * 스크립트 주소가 https 절대 주소이고 밖에서 실제로 JS 로 열리는지 본다. 문제가 없으면 "".
+ * 파일이 빠진 배포에서는 SPA catch-all 이 index.html 을 200 으로 돌려주므로 형식까지 본다.
+ */
+export async function checkScriptSrc(src: string): Promise<string> {
+  let url: URL;
+  try {
+    url = new URL(src);
+  } catch {
+    return "절대 주소가 아닙니다";
+  }
+  if (url.protocol !== "https:") return "https 주소가 아닙니다";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return `주소가 HTTP ${res.status} 를 돌려줍니다`;
+    const type = String(res.headers.get("content-type") || "");
+    if (!/javascript|ecmascript/i.test(type)) return `JS 파일이 아닌 응답입니다(${type.split(";")[0] || "형식 없음"})`;
+    return "";
+  } catch {
+    return "주소에 연결하지 못했습니다";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 몰 전체 페이지(display_location: all)에 스크립트를 심는다. 카페24 규격(2026-09-01):
+ * shop_no + request.{ src(절대 주소), display_location(필수) }. skin_no 를 빼면 모든 스킨,
+ * integrity(SRI)는 선택이라 보내지 않는다 — 파일이 바뀔 때마다 해시를 다시 등록해야 해서다.
+ */
 export async function installScriptTag(conn: Cafe24Connection, src: string): Promise<string> {
+  const problem = await checkScriptSrc(src);
+  if (problem) throw new ScriptSrcError(problem);
+  const shopNo = Number(conn.shopNo) > 0 ? Number(conn.shopNo) : 1;
   const json = await cafe24Request(conn, "/scripttags", {
     method: "POST",
-    body: { shop_no: 1, request: { src, display_location: ["all"] } },
+    body: { shop_no: shopNo, request: { src, display_location: ["all"] } },
   });
-  return String(json?.scripttag?.script_no || "");
+  const scriptNo = String(json?.scripttag?.script_no || "");
+  if (!scriptNo) {
+    console.warn(`[cafe24] POST /scripttags → ok but no script_no (mall ${conn.mallId})`);
+    throw new Cafe24Error(200, "/scripttags", false, { code: "no_script_no", message: "응답에 script_no 가 없습니다" });
+  }
+  return scriptNo;
+}
+
+/**
+ * 스크립트 설치 · 제거 실패 → 화면 문구. "[사유] 안내 (카페24 상태 · error.code · error.message)" 모양이다.
+ * 화면은 대괄호 안을 사유 배지로 보인다. 카페24 오류는 cafe24Request 가 이미 로그를 남겼고,
+ * 그 밖의 오류만 여기서 남긴다.
+ */
+export function scriptTagFailure(e: unknown, mallId: string, op: "install" | "remove" = "install"): string {
+  const manual = op === "install"
+    ? "아래 코드를 쇼핑몰 공통 영역에 직접 붙여 주세요."
+    : "카페24 관리자 > 앱 > 스크립트 관리에서 직접 삭제해 주세요.";
+  if (e instanceof ScriptSrcError) {
+    console.warn(`[cafe24] script ${op} skipped — src check failed: ${e.problem} (mall ${mallId})`);
+    return `[스크립트 주소 오류] 추적 스크립트 주소를 열 수 없습니다(${e.problem}). 잠시 후 다시 시도하거나 ${manual}`;
+  }
+  if (!(e instanceof Cafe24Error)) {
+    const name = e instanceof Error ? e.name : "error";
+    const msg = e instanceof Error ? clipDetail(e.message) : "";
+    console.warn(`[cafe24] script ${op} failed — ${name}${msg ? `: ${msg}` : ""} (mall ${mallId})`);
+    return `[내부 오류] 처리 중 오류가 났습니다. 잠시 후 다시 시도해 주세요. 계속되면 ${manual}`;
+  }
+  const parts = [e.status ? String(e.status) : "", e.apiCode === String(e.status) ? "" : e.apiCode, e.apiMessage].filter(Boolean);
+  const detail = parts.length ? ` (카페24 ${parts.join(" · ")})` : "";
+  const text = `${e.apiCode} ${e.apiMessage}`.toLowerCase();
+  if (e.reconnect || e.status === 401) {
+    return `[연동 만료] 카페24 연동이 만료되었습니다. 다시 연동한 뒤 설치해 주세요.${detail}`;
+  }
+  if (e.status === 403) {
+    return `[권한 부족] 앱 권한(mall.write_application)이 없어 처리하지 못했습니다. 재연동하거나 ${manual}${detail}`;
+  }
+  if (e.status === 400 || e.status === 422) {
+    if (/src|url|uri|domain|script/.test(text)) {
+      return `[스크립트 주소 오류] 카페24가 스크립트 주소를 받아들이지 않았습니다. ${manual}${detail}`;
+    }
+    if (/display_location|location/.test(text)) {
+      return `[표시 위치 오류] 카페24가 스크립트 표시 위치를 받아들이지 않았습니다. ${manual}${detail}`;
+    }
+    return `[요청 거부] 카페24가 설치 요청을 거부했습니다. ${manual}${detail}`;
+  }
+  if (e.status === 404) return `[대상 없음] 카페24에서 요청한 스크립트 · 쇼핑몰을 찾지 못했습니다. ${manual}${detail}`;
+  if (e.status === 429) return `[요청 한도 초과] 카페24 호출이 잠시 막혔습니다. 1분 뒤 다시 시도해 주세요.${detail}`;
+  if (e.status >= 500) return `[카페24 서버 오류] 카페24 쪽 일시 오류입니다. 잠시 후 다시 시도해 주세요.${detail}`;
+  if (e.status === 0) return `[카페24 응답 없음] 카페24가 응답하지 않았습니다. 잠시 후 다시 시도해 주세요.${detail}`;
+  return `[설치 실패] 카페24 처리에 실패했습니다. ${manual}${detail}`;
 }
 
 export async function removeScriptTag(conn: Cafe24Connection, scriptNo: string): Promise<void> {

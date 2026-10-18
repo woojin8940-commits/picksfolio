@@ -22,6 +22,7 @@ import {
   findScriptTag,
   installScriptTag,
   removeScriptTag,
+  scriptTagFailure,
 } from "./cafe24-api.mts";
 import {
   type Cafe24TokenSet,
@@ -379,7 +380,7 @@ export async function autoInstallScript(db: any, conn: Cafe24Connection, busines
     `) as any[])[0];
     if (existing?.mode === "manual") return "skipped";
     if (!conn.scopes.includes("mall.write_application")) {
-      await saveScript(db, conn.mallId, business, "none", "", "앱 권한(mall.write_application)이 없어 자동 설치하지 못했습니다. 재연동하거나 아래 코드를 직접 붙여 주세요.", "clear");
+      await saveScript(db, conn.mallId, business, "none", "", "[권한 부족] 앱 권한(mall.write_application)이 없어 자동 설치하지 못했습니다. 재연동하거나 아래 코드를 직접 붙여 주세요.", "clear");
       return "failed";
     }
     const found = await findScriptTag(conn, scriptPrefix());
@@ -391,15 +392,9 @@ export async function autoInstallScript(db: any, conn: Cafe24Connection, busines
     await saveScript(db, conn.mallId, business, "auto", scriptNo, "", "now");
     return "installed";
   } catch (e: any) {
-    const status = Number(e?.status || 0);
-    console.warn(`[cafe24-oauth] script auto-install failed → ${status || "error"} (mall ${conn.mallId})`);
-    await saveScript(
-      db, conn.mallId, business, "none", "",
-      status === 403
-        ? "앱 권한(mall.write_application)이 없어 자동 설치하지 못했습니다. 재연동하거나 아래 코드를 직접 붙여 주세요."
-        : "자동 설치에 실패했습니다. 아래 코드를 쇼핑몰 공통 영역에 직접 붙여 주세요.",
-      "clear",
-    ).catch(() => {});
+    const message = scriptTagFailure(e, conn.mallId, "install");
+    console.warn(`[cafe24-oauth] script auto-install failed → ${Number(e?.status || 0) || "error"} (mall ${conn.mallId})`);
+    await saveScript(db, conn.mallId, business, "none", "", message, "clear").catch(() => {});
     return "failed";
   }
 }

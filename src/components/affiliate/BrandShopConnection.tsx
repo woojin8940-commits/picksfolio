@@ -302,11 +302,21 @@ const ConnectionCard: React.FC<{
                 <Clock className="w-3 h-3" /> {formatAt(c.script.installedAt)} 설치
               </p>
             )}
-            {c.script.lastError && (
-              <p className="text-[11px] text-rose-500 font-bold mt-1.5 leading-relaxed break-keep">
-                최근 오류: {c.script.lastError}
-              </p>
-            )}
+            {c.script.lastError && (() => {
+              // 서버 문구는 "[사유] 안내 (카페24 상태 · 코드 · 메시지)" 모양이다. 사유를 배지로 뺀다.
+              const m = c.script.lastError.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
+              return (
+                <div className="mt-1.5 rounded-lg bg-rose-50 px-2.5 py-2">
+                  <p className="text-[11px] font-black text-rose-600 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    {m ? m[1] : '최근 오류'}
+                  </p>
+                  <p className="text-[11px] text-rose-500 font-bold mt-0.5 leading-relaxed break-keep">
+                    {m ? m[2] : c.script.lastError}
+                  </p>
+                </div>
+              );
+            })()}
 
             <div className="mt-3 flex flex-wrap gap-2">
               {c.script.mode !== 'auto' && (
