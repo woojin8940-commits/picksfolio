@@ -260,6 +260,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [activeFilter, setActiveFilter] = useState('');
   const isAffiliateFilter = activeFilter === AFFILIATE_FILTER;
   const [affiliateCount, setAffiliateCount] = useState(0);
+  const [affiliateDetailOpen, setAffiliateDetailOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -997,27 +998,30 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   }
 
   // --- Campaign List View ---
+  // 어필리에이트 상세가 열려 있으면 제품 협찬 상세처럼 그 페이지만 보이게 제목 · 검색 ·
+  // 칩 줄을 숨긴다. AffiliateBrowse 는 같은 자리에 그대로 두어 목록 상태가 유지된다.
+  const hideListChrome = isAffiliateFilter && affiliateDetailOpen;
   return (
-    <div className="p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-4xl mx-auto">
-      {onBack && (
+    <div className={hideListChrome ? 'w-full' : 'p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-4xl mx-auto'}>
+      {!hideListChrome && onBack && (
         <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-700 font-bold text-sm mb-4 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           {isEn ? 'Back' : '뒤로'}
         </button>
       )}
 
-      <div className="mb-6">
+      {!hideListChrome && <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">{isEn ? 'Campaigns' : '캠페인'}</h2>
         <p className="text-sm text-slate-400 font-medium">
           {isEn ? 'Apply directly to product sponsorship & affiliate campaigns to find collaboration opportunities' : '제품 협찬 · 어필리에이트 캠페인에 직접 지원하고 협업 기회를 잡아보세요'}
         </p>
-      </div>
+      </div>}
 
       {/* 이 화면은 새 캠페인을 찾는 자리 하나만 한다. 진행 중인 캠페인의 단계 ·
           인사이트 · 정산은 '협업 캠페인' 메뉴에서 브랜드 화면과 같은 모양
           (CreatorCampaignCollabs)으로 열고, 받은 광고 제안도 여기 얹지 않는다.
           두 곳에 같은 상자를 두면 어느 쪽이 지금 상태인지 매번 맞춰 봐야 한다. */}
-      <div className="flex flex-col gap-3 mb-6">
+      {!hideListChrome && <div className="flex flex-col gap-3 mb-6">
         {/* 연동한 인스타 계정 지표는 검색보다 위, 대신 한 줄로.
             브랜드에게 전달되는 숫자라 화면을 열 때 한 번은 눈에 닿아야 하지만,
             여기서 실제로 하는 일은 캠페인을 찾는 것이다. 카드로 두면 그 숫자를
@@ -1089,7 +1093,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       {isAffiliateFilter ? (
         <AffiliateBrowse
@@ -1097,6 +1101,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           q={searchTerm}
           categoryLabels={categoriesMap}
           onCount={setAffiliateCount}
+          onDetailChange={setAffiliateDetailOpen}
         />
       ) : loading ? (
         <div className="text-center py-16">

@@ -24,7 +24,7 @@ import { todayInSeoul } from '../../utils/formatters';
 /**
  * 판매 캠페인 등록 마법사.
  *
- * ① 쇼핑몰 → ② 상품 → ③ 조건 → ④ 옵션 → ⑤ 가이드 → ⑥ 확인.
+ * ① 쇼핑몰 → ② 상품 → ③ 조건 → ④ 옵션 → ⑤ 확인.
  *
  * 순서는 "무엇을 파는가 → 얼마를 주는가 → 어떻게 홍보하는가"다. 상품은 연동한 몰에서만
  * 고른다 — 손으로 적은 상품은 주문을 몰 API 로 확인할 수 없어 수수료를 셀 근거가 없다.
@@ -47,7 +47,10 @@ interface AffiliateCampaignWizardProps {
   onOpenShopSettings?: () => void;
 }
 
-const STEPS = ['쇼핑몰', '상품', '조건', '옵션', '가이드', '확인'] as const;
+/* 판매 캠페인은 브랜드가 콘텐츠 가이드를 따로 쓰지 않는다 — 상품 자료는 쇼핑몰 상품
+   페이지에 있고, 광고 표기 문구는 픽스폴리오가 자동으로 붙인다. 그래서 '가이드' 단계를 뺐다.
+   예전에 가이드를 적어 둔 캠페인을 고쳐 다시 올릴 때는 그 값을 그대로 보낸다. */
+const STEPS = ['쇼핑몰', '상품', '조건', '옵션', '확인'] as const;
 const MAX_COMMISSION = 90;
 
 /** 서버가 실제 문구를 넣는다. 받기 전까지 보여 줄 미리보기. */
@@ -105,12 +108,13 @@ const AffiliateCampaignWizard: React.FC<AffiliateCampaignWizardProps> = ({
   const [platformRate, setPlatformRate] = useState<number | null>(editing?.platformRate ?? null);
   const [disclosureText, setDisclosureText] = useState<string>(editing?.disclosureText || '');
 
-  // ── 옵션 · 가이드 ──
+  // ── 옵션 ──
   const [sampleOffered, setSampleOffered] = useState(!!editing?.sampleOffered);
   const [sampleNote, setSampleNote] = useState(editing?.sampleNote || '');
   const [followerDiscount, setFollowerDiscount] = useState(editing?.followerDiscount || '');
-  const [contentGuide, setContentGuide] = useState(editing?.contentGuide || '');
-  const [bannedPhrases, setBannedPhrases] = useState(editing?.bannedPhrases || '');
+  // 입력 단계는 없다. 고쳐 다시 올리는 캠페인의 예전 값만 그대로 넘긴다.
+  const contentGuide = editing?.contentGuide || '';
+  const bannedPhrases = editing?.bannedPhrases || '';
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -628,57 +632,8 @@ const AffiliateCampaignWizard: React.FC<AffiliateCampaignWizardProps> = ({
           </>
         )}
 
-        {/* ⑤ 가이드 */}
+        {/* ⑤ 확인 */}
         {step === 4 && (
-          <>
-            <div>
-              <label className={LABEL}>콘텐츠 가이드</label>
-              <textarea
-                value={contentGuide}
-                onChange={e => setContentGuide(e.target.value)}
-                rows={4}
-                placeholder="강조할 포인트, 필수 해시태그, 촬영 팁 등을 적어 주세요."
-                className={`${INPUT} resize-none`}
-              />
-            </div>
-            <div>
-              <label className={LABEL}>금지 표현</label>
-              <textarea
-                value={bannedPhrases}
-                onChange={e => setBannedPhrases(e.target.value)}
-                rows={3}
-                placeholder="예) 완치, 100% 효과, 부작용 없음"
-                className={`${INPUT} resize-none`}
-              />
-              <p className={HELP}>
-                효능 과장, 의약품 오인 표현, 타사 비방 등 쓰면 안 되는 표현을 적어 주세요. 인플루언서가 참여 전에 확인합니다.
-              </p>
-            </div>
-            <div>
-              <label className={LABEL}>광고 표기 (자동 포함)</label>
-              <div className="rounded-2xl bg-slate-50 border border-slate-200 px-3.5 py-3">
-                <p className="text-[12px] font-bold text-slate-700 leading-relaxed">
-                  {disclosureText || DISCLOSURE_PREVIEW}
-                </p>
-              </div>
-              <p className={HELP}>
-                표시광고법에 따라 모든 참여 인플루언서에게 광고 표기 안내가 자동으로 붙습니다. 실제 문구는
-                픽스폴리오가 정합니다.
-              </p>
-            </div>
-            {trackingNotice && (
-              <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-2xl px-3.5 py-3">
-                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                <p className="text-[11px] text-amber-700 font-medium leading-relaxed whitespace-pre-line break-keep">
-                  {trackingNotice}
-                </p>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ⑥ 확인 */}
-        {step === 5 && (
           <div className="space-y-3">
             <div className="rounded-2xl border border-slate-100 divide-y divide-slate-100">
               {[
@@ -709,6 +664,18 @@ const AffiliateCampaignWizard: React.FC<AffiliateCampaignWizardProps> = ({
                 </div>
               ))}
             </div>
+            <div className="rounded-2xl bg-slate-50 border border-slate-200 px-3.5 py-3">
+              <p className="text-[10px] font-black text-slate-400 mb-1">광고 표기 (자동 포함)</p>
+              <p className="text-[12px] font-bold text-slate-700 leading-relaxed">{disclosureText || DISCLOSURE_PREVIEW}</p>
+            </div>
+            {trackingNotice && (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-2xl px-3.5 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-700 font-medium leading-relaxed whitespace-pre-line break-keep">
+                  {trackingNotice}
+                </p>
+              </div>
+            )}
             <p className="text-[11px] text-slate-500 font-bold leading-relaxed">
               {editing ? '재심사를 요청하면' : '등록하면'} 픽스폴리오 관리자가 내용을 확인합니다. 관리자 승인 후 공개됩니다.
             </p>
