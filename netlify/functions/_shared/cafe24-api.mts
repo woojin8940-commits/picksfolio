@@ -1,17 +1,28 @@
 /**
  * 카페24 Admin API 호출부.
  *
- * 몰 연결(OAuth · 토큰 저장 · 자동 갱신)은 별도 연동 작업이 `cafe24_connections` 에
- * 갖는다. 이 파일은 그 행을 읽어 쓰기만 한다 — 토큰을 새로 받거나 갱신하지 않는다.
- * 갱신까지 여기서 하면 두 곳이 같은 refresh token 을 동시에 쓰게 되고, 카페24 는
- * refresh token 을 한 번 쓰면 바꿔 주므로 한쪽의 토큰이 곧바로 무효가 된다.
+ * 몰 연결은 연동 흐름(cafe24-oauth-start → cafe24-callback, _shared/cafe24-oauth.mts)이
+ * `cafe24_connections` 에 만든다. 이 파일은 그 행을 읽어 API 를 부르고, **토큰 갱신은
+ * 이 파일 한 곳에서만** 한다(refreshConnection). 카페24 는 refresh token 을 한 번 쓰면
+ * 바꿔 주고 이전 것을 바로 폐기하므로, 두 곳이 같은 refresh token 을 쓰면 한쪽 토큰이
+ * 곧바로 무효가 된다. 같은 몰의 갱신은 행 잠금(SELECT … FOR UPDATE)으로 줄을 세우고,
+ * 잠금을 기다린 요청은 앞 요청이 바꿔 둔 토큰을 다시 읽어 쓴다.
  *
- * 연결 표의 컬럼 이름은 그 작업이 정한다. 그래서 행을 JSON 으로 읽고 흔히 쓰는 이름
- * 몇 가지를 차례로 본다(connectionFromRow). 이름이 확정되면 그 함수만 고치면 된다.
- * 표가 아직 없는 환경(연동 작업 배포 전)에서는 "미연결"로 처리하고 오류를 올리지 않는다.
+ * 토큰은 암호화돼 저장된다(_shared/cafe24-credentials.mts). 행을 읽을 때 푼다.
+ * 표가 아직 없는 환경(마이그레이션 전)에서는 "미연결"로 처리하고 오류를 올리지 않는다.
  *
  * 로그 원칙: 토큰·응답 원문·고객 정보는 남기지 않는다. 실패 시 상태 코드와 경로만 남긴다.
  */
+import { getDatabase } from "@picks/netlify-database";
+import {
+  decryptToken,
+  encryptToken,
+  isGrantFailure,
+  parseScopeList,
+  parseTokenResponse,
+  postOAuth,
+  tokenKeyReady,
+} from "./cafe24-credentials.mts";
 
 export const CAFE24_REQUIRED_SCOPES = [
   "mall.read_order",
@@ -28,45 +39,41 @@ export type Cafe24Connection = {
   businessUsername: string;
   accessToken: string;
   expiresAt: number | null;
+  refreshExpiresAt: number | null;
   scopes: string[];
+  status: "active" | "expired" | "revoked";
   active: boolean;
+  shopNo: string;
   shopName: string;
   shopDomain: string;
 };
 
 const norm = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
 
-const pick = (row: Record<string, any>, keys: string[]): any => {
-  for (const k of keys) {
-    const v = row?.[k];
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
-  return undefined;
+const time = (raw: unknown): number | null => {
+  const t = raw ? Date.parse(String(raw)) : NaN;
+  return Number.isFinite(t) ? t : null;
 };
 
-function parseScopes(raw: unknown): string[] {
-  if (Array.isArray(raw)) return raw.map(String);
-  if (typeof raw === "string") return raw.split(/[\s,]+/).filter(Boolean);
-  return [];
-}
-
+/** `cafe24_connections` 행(to_jsonb) → 연결. 토큰은 여기서 복호화한다. */
 export function connectionFromRow(row: Record<string, any> | null | undefined): Cafe24Connection | null {
   if (!row) return null;
-  const mallId = String(pick(row, ["mall_id", "mallid", "mall"]) || "").trim();
+  const mallId = String(row.mall_id || "").trim().toLowerCase();
   if (!mallId) return null;
-  const expiresRaw = pick(row, ["access_token_expires_at", "expires_at", "token_expires_at"]);
-  const expiresAt = expiresRaw ? Date.parse(String(expiresRaw)) : NaN;
-  const status = String(pick(row, ["status", "state"]) || "active").toLowerCase();
-  const revoked = Boolean(pick(row, ["revoked_at", "disconnected_at", "deleted_at"]));
+  const raw = String(row.status || "active").toLowerCase();
+  const status = raw === "expired" || raw === "revoked" ? raw : "active";
   return {
     mallId,
-    businessUsername: norm(pick(row, ["business_username", "username", "owner_username"])),
-    accessToken: String(pick(row, ["access_token", "token"]) || ""),
-    expiresAt: Number.isFinite(expiresAt) ? expiresAt : null,
-    scopes: parseScopes(pick(row, ["scopes", "scope"])),
-    active: !revoked && !["revoked", "disconnected", "inactive", "error", "expired"].includes(status),
-    shopName: String(pick(row, ["shop_name", "mall_name", "store_name"]) || ""),
-    shopDomain: String(pick(row, ["primary_domain", "shop_domain", "domain", "base_domain"]) || ""),
+    businessUsername: norm(row.business_username),
+    accessToken: decryptToken(row.access_token, mallId),
+    expiresAt: time(row.access_token_expires_at),
+    refreshExpiresAt: time(row.refresh_token_expires_at),
+    scopes: parseScopeList(row.scopes),
+    status,
+    active: status === "active",
+    shopNo: String(row.shop_no || "1"),
+    shopName: "",
+    shopDomain: "",
   };
 }
 
@@ -110,38 +117,192 @@ export function connectionHealth(conn: Cafe24Connection | null): { usable: boole
     ? CAFE24_REQUIRED_SCOPES.filter((s) => !conn.scopes.includes(s))
     : [];
   if (!conn.active || !conn.accessToken) return { usable: false, missingScopes, reason: "reconnect" };
-  // 갱신은 연동 작업이 한다. 만료된 토큰을 그대로 쓰면 401 이 되므로 "재연동 필요"로 본다.
-  if (conn.expiresAt && conn.expiresAt < Date.now()) return { usable: false, missingScopes, reason: "token_expired" };
+  // 액세스 토큰 만료는 호출 직전에 갱신된다(cafe24Request). 리프레시 토큰까지 지나면 재연동뿐이다.
+  if (conn.refreshExpiresAt && conn.refreshExpiresAt < Date.now()) return { usable: false, missingScopes, reason: "token_expired" };
   return { usable: true, missingScopes, reason: "" };
 }
 
 export class Cafe24Error extends Error {
-  constructor(public status: number, public path: string) {
+  /** true 면 갱신까지 실패했다 — 브랜드가 다시 연동해야 한다. */
+  public reconnect: boolean;
+  constructor(public status: number, public path: string, reconnect = false) {
     super(`cafe24 ${status} ${path}`);
+    this.reconnect = reconnect;
   }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// ── 토큰 갱신 ───────────────────────────────────────────────────────────────
+
+/** 액세스 토큰이 이 시간 안에 만료되면 호출 전에 미리 갱신한다. */
+const REFRESH_AHEAD_MS = 5 * 60 * 1000;
+
+export type RefreshOutcome =
+  | { ok: true; conn: Cafe24Connection; refreshed: boolean }
+  | { ok: false; reason: "not_connected" | "reconnect" | "unavailable" };
+
+/**
+ * 몰 하나의 토큰을 갱신한다. 이 함수 밖에서는 refresh token 을 쓰지 않는다.
+ *
+ * 행을 FOR UPDATE 로 잠근 뒤 `needsRefresh` 를 **잠금 안에서 다시** 본다. 잠금을 기다리는
+ * 동안 앞선 요청이 이미 갱신했다면 여기서 false 가 되고, 새로 읽은 토큰을 그대로 돌려준다.
+ * 카페24 응답의 새 access/refresh token · 만료 시각은 같은 트랜잭션 안에서 교체 저장한다.
+ *
+ * 갱신 거부(invalid_grant) · 리프레시 만료면 status='expired' 로 바꾸고 재연동을 요구한다.
+ * 네트워크 · 5xx 같은 일시 오류는 상태를 바꾸지 않는다(다음 호출에서 다시 시도).
+ */
+export async function refreshConnection(
+  mallId: string,
+  needsRefresh: (current: Cafe24Connection) => boolean,
+  db: any = getDatabase(),
+): Promise<RefreshOutcome> {
+  const mall = String(mallId || "").trim().toLowerCase();
+  if (!mall) return { ok: false, reason: "not_connected" };
+  const client = await db.pool.connect();
+  let finished = false;
+  const end = async (sql: "COMMIT" | "ROLLBACK") => {
+    finished = true;
+    await client.query(sql).catch(() => {});
+  };
+  try {
+    await client.query("BEGIN");
+    // 다른 요청이 카페24 응답을 기다리며 잠금을 쥐고 있을 수 있다. 무한정 기다리지 않는다.
+    await client.query("SET LOCAL lock_timeout = '20s'");
+    const row = (await client.query(
+      "SELECT to_jsonb(c) AS row, c.refresh_token FROM cafe24_connections c WHERE c.mall_id = $1 FOR UPDATE",
+      [mall],
+    )).rows[0];
+    const current = connectionFromRow(row?.row);
+    if (!current) {
+      await end("ROLLBACK");
+      return { ok: false, reason: "not_connected" };
+    }
+    if (!current.active) {
+      await end("ROLLBACK");
+      return { ok: false, reason: "reconnect" };
+    }
+    if (!needsRefresh(current)) {
+      await end("COMMIT");
+      return { ok: true, conn: current, refreshed: false };
+    }
+    // 키가 빠진 배포에서는 토큰을 풀 수도 새로 저장할 수도 없다. 연결을 만료시키지 않는다.
+    if (!tokenKeyReady()) {
+      await end("ROLLBACK");
+      console.error("[cafe24] AFFILIATE_PII_KEY 미설정 — 토큰을 갱신하지 않는다");
+      return { ok: false, reason: "unavailable" };
+    }
+
+    const markExpired = async (why: string) => {
+      await client.query(
+        "UPDATE cafe24_connections SET status = 'expired', updated_at = NOW() WHERE mall_id = $1",
+        [mall],
+      );
+      await end("COMMIT");
+      console.warn(`[cafe24] token refresh failed (${why}) — mall ${mall} marked expired`);
+      return { ok: false as const, reason: "reconnect" as const };
+    };
+
+    const refreshToken = decryptToken(row.refresh_token, mall);
+    if (!refreshToken) return await markExpired("no_refresh_token");
+    if (current.refreshExpiresAt && current.refreshExpiresAt <= Date.now()) return await markExpired("refresh_expired");
+
+    const res = await postOAuth(mall, "token", { grant_type: "refresh_token", refresh_token: refreshToken });
+    const tokens = res.status === 200 ? parseTokenResponse(res.json) : null;
+    if (!tokens || (tokens.mallId && tokens.mallId !== mall)) {
+      if (res.status !== 200 && isGrantFailure(res)) return await markExpired(`status_${res.status}`);
+      await end("ROLLBACK");
+      console.warn(`[cafe24] token refresh → ${res.status || "network"} (mall ${mall})`);
+      return { ok: false, reason: "unavailable" };
+    }
+
+    const scopes = tokens.scopes.length ? tokens.scopes : current.scopes;
+    const updated = (await client.query(
+      `UPDATE cafe24_connections SET
+         access_token = $2, refresh_token = $3,
+         access_token_expires_at = $4, refresh_token_expires_at = $5,
+         scopes = $6, issued_at = COALESCE($7, NOW()), status = 'active', updated_at = NOW()
+       WHERE mall_id = $1
+       RETURNING to_jsonb(cafe24_connections) AS row`,
+      [
+        mall,
+        encryptToken(tokens.accessToken, mall),
+        encryptToken(tokens.refreshToken, mall),
+        tokens.accessExpiresAt.toISOString(),
+        tokens.refreshExpiresAt.toISOString(),
+        scopes,
+        tokens.issuedAt ? tokens.issuedAt.toISOString() : null,
+      ],
+    )).rows[0];
+    await end("COMMIT");
+    const conn = connectionFromRow(updated?.row);
+    return conn ? { ok: true, conn, refreshed: true } : { ok: false, reason: "unavailable" };
+  } catch (e) {
+    if (!finished) await client.query("ROLLBACK").catch(() => {});
+    console.warn(`[cafe24] token refresh error (mall ${mall}):`, e instanceof Error ? e.name : "error");
+    return { ok: false, reason: "unavailable" };
+  } finally {
+    client.release();
+  }
+}
+
+/** 갱신된 값을 호출부가 쥐고 있는 연결 객체에 반영한다(이후 호출도 새 토큰을 쓰게). */
+const adopt = (conn: Cafe24Connection, fresh: Cafe24Connection) =>
+  Object.assign(conn, {
+    accessToken: fresh.accessToken,
+    expiresAt: fresh.expiresAt,
+    refreshExpiresAt: fresh.refreshExpiresAt,
+    scopes: fresh.scopes,
+    status: fresh.status,
+    active: fresh.active,
+  });
+
+/** 호출 전: 액세스 토큰이 5분 안에 만료되면 갱신한다. */
+async function ensureFreshToken(conn: Cafe24Connection, path: string): Promise<void> {
+  const dueSoon = (c: Cafe24Connection) => !c.accessToken || !c.expiresAt || c.expiresAt - Date.now() <= REFRESH_AHEAD_MS;
+  if (!dueSoon(conn)) return;
+  const out = await refreshConnection(conn.mallId, dueSoon);
+  if (out.ok) {
+    adopt(conn, out.conn);
+    return;
+  }
+  if (out.reason === "unavailable" && conn.accessToken && conn.expiresAt && conn.expiresAt > Date.now()) return;
+  conn.active = false;
+  throw new Cafe24Error(401, path, true);
+}
+
+/** 401 을 받은 뒤: 그 토큰이 아직 저장돼 있는 토큰일 때만 갱신한다(다른 요청이 이미 바꿨으면 그걸 쓴다). */
+async function refreshAfterUnauthorized(conn: Cafe24Connection, stale: string): Promise<boolean> {
+  const out = await refreshConnection(conn.mallId, (c) => c.accessToken === stale);
+  if (!out.ok) return false;
+  adopt(conn, out.conn);
+  return out.conn.accessToken !== stale;
+}
+
 /**
  * Admin API 호출. 호출 한도(초당 2회 회복, 버킷 40)를 넘기면 429 가 오므로 간격을
- * 늘려 두 번까지 다시 시도한다.
+ * 늘려 두 번까지 다시 시도한다. 401 이면 토큰을 한 번 갱신해 다시 부르고, 그래도
+ * 안 되면 재연동이 필요한 오류(reconnect)로 올린다.
  */
 export async function cafe24Request(
   conn: Cafe24Connection,
   path: string,
   init: { method?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<any> {
+  const cleanPath = path.split("?")[0];
   const url = `https://${conn.mallId}.cafe24api.com/api/v2/admin${path}`;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  await ensureFreshToken(conn, cleanPath);
+  let retried401 = false;
+  for (let attempt = 0; attempt < 3; ) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 8000);
+    const token = conn.accessToken;
     let res: Response;
     try {
       res = await fetch(url, {
         method: init.method || "GET",
         headers: {
-          Authorization: `Bearer ${conn.accessToken}`,
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
           "X-Cafe24-Api-Version": API_VERSION,
         },
@@ -151,18 +312,25 @@ export async function cafe24Request(
     } finally {
       clearTimeout(timer);
     }
+    if (res.status === 401 && !retried401) {
+      retried401 = true;
+      if (await refreshAfterUnauthorized(conn, token)) continue;
+      console.warn(`[cafe24] ${init.method || "GET"} ${cleanPath} → 401, refresh failed (mall ${conn.mallId})`);
+      throw new Cafe24Error(401, cleanPath, true);
+    }
     if (res.status === 429 && attempt < 2) {
       await sleep(600 * 2 ** attempt);
+      attempt++;
       continue;
     }
     if (!res.ok) {
       // 응답 본문에는 몰 정보가 섞일 수 있어 남기지 않는다.
-      console.warn(`[cafe24] ${init.method || "GET"} ${path.split("?")[0]} → ${res.status} (mall ${conn.mallId})`);
-      throw new Cafe24Error(res.status, path.split("?")[0]);
+      console.warn(`[cafe24] ${init.method || "GET"} ${cleanPath} → ${res.status} (mall ${conn.mallId})`);
+      throw new Cafe24Error(res.status, cleanPath, res.status === 401);
     }
     return await res.json().catch(() => ({}));
   }
-  throw new Cafe24Error(429, path.split("?")[0]);
+  throw new Cafe24Error(429, cleanPath);
 }
 
 // ── 상점 · 상품 ────────────────────────────────────────────────────────────
