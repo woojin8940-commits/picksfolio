@@ -4,6 +4,7 @@ import {
   won,
   PARTICIPATION_STATUS_LABEL,
   CHANNEL_LINK_LABEL,
+  CREATOR_PAYOUT_NOTICE,
   type ChannelLinkType,
   type AffiliateCampaign,
   type AffiliateEligibility,
@@ -747,6 +748,13 @@ const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ userName, category, q
                       이 캠페인의 브랜드에게 인스타그램 프로필 · 채널 링크와 성함 · 연락처를 전달하는 데 동의합니다. (참여 심사 · 샘플 발송 · 판매 안내 목적)
                     </span>
                   </label>
+
+                  <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-2.5">
+                    <p className="text-[11px] font-black text-blue-800">수수료 지급 일정</p>
+                    <p className="text-[11px] font-bold text-blue-700 leading-relaxed mt-0.5 break-keep">
+                      {CREATOR_PAYOUT_NOTICE} (예: 3월 수익 → 4월 말일 지급, 원천징수 3.3% 공제)
+                    </p>
+                  </div>
 
                   <p className="text-[11px] text-slate-400 font-bold">
                     {selected.joinMode === 'open' ? '즉시 참여 캠페인이라 신청과 동시에 판매 링크가 생겨요.' : '승인제 캠페인이에요. 브랜드가 승인하면 판매 링크가 생겨요.'}

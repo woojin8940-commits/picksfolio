@@ -6,9 +6,11 @@ import {
   affiliateService,
   BATCH_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
+  TERMS_STATE_LABEL,
   won,
   type AffiliateCampaign,
   type AffiliateCampaignStatus,
+  type AdminBrandTerms,
   type AffiliateOrder,
   type BatchStatus,
   type SettlementBatch,
@@ -19,6 +21,7 @@ import {
  * 판매 연동 캠페인(어필리에이트) 운영 콘솔.
  *
  *   캠페인 심사 — 금지 표현 · 비정상 수수료율을 보고 승인/반려
+ *   브랜드 약관 — 판매 수수료 이용약관 동의 상태 · 동의일 · 버전
  *   월 정산     — 집계(draft) → 브랜드 승인 → 입금 확인 → 인플루언서 지급 → 완료
  *   미검증 주문 — 카페24 API 로 확인되지 않은 주문(정산 제외)을 다시 조회
  */
@@ -27,9 +30,11 @@ interface Props {
   token: string;
 }
 
-type SubTab = 'review' | 'settlement' | 'orders';
+type SubTab = 'review' | 'terms' | 'settlement' | 'orders';
 
 const fmtDate = (s?: string | null) => (s ? new Date(s).toLocaleDateString('ko-KR') : '-');
+/** 오늘(한국 시간) YYYY-MM-DD. */
+const todayKst = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 const fmtDateTime = (s?: string | null) => (s ? new Date(s).toLocaleString('ko-KR') : '-');
 
 const Spinner: React.FC<{ label: string }> = ({ label }) => (
@@ -48,6 +53,7 @@ const AdminAffiliateConsole: React.FC<Props> = ({ token }) => {
   const [tab, setTab] = useState<SubTab>('review');
   const tabs: { key: SubTab; label: string }[] = [
     { key: 'review', label: '캠페인 심사' },
+    { key: 'terms', label: '브랜드 약관' },
     { key: 'settlement', label: '월 정산' },
     { key: 'orders', label: '미검증 주문' },
   ];
@@ -67,6 +73,7 @@ const AdminAffiliateConsole: React.FC<Props> = ({ token }) => {
         ))}
       </div>
       {tab === 'review' && <CampaignReview token={token} />}
+      {tab === 'terms' && <BrandTerms token={token} />}
       {tab === 'settlement' && <MonthlySettlement token={token} />}
       {tab === 'orders' && <UnverifiedOrders token={token} />}
     </div>
@@ -539,6 +546,8 @@ const BatchCard: React.FC<{
   onReload: () => void;
 }> = ({ batch: b, token, onChange, onReload }) => {
   const [amount, setAmount] = useState(String(b.paidInAmount || b.billedTotal || 0));
+  const [paidDate, setPaidDate] = useState(() => todayKst());
+  const [paidMemo, setPaidMemo] = useState('');
   const [memo, setMemo] = useState(b.memo || '');
   const [invoiceNo, setInvoiceNo] = useState(b.invoiceNo || '');
   const [busy, setBusy] = useState<string | null>(null);
@@ -572,7 +581,7 @@ const BatchCard: React.FC<{
   const apply = async (
     key: string,
     action: 'mark_paid_in' | 'pay_line' | 'save_memo',
-    payload: { batchId?: string; lineId?: string; amount?: number; memo?: string; invoiceNo?: string },
+    payload: { batchId?: string; lineId?: string; amount?: number; paidDate?: string; memo?: string; invoiceNo?: string },
   ) => {
     setBusy(key);
     setError('');
@@ -586,15 +595,25 @@ const BatchCard: React.FC<{
     else onReload();
   };
 
+  const amountNum = Number(amount);
+  const mismatch = Number.isFinite(amountNum) && amountNum > 0 && amountNum !== b.billedTotal;
+
   const markPaidIn = () => {
-    const n = Number(amount);
-    if (!Number.isFinite(n) || n <= 0) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidDate)) {
+      setError('입금일을 입력해 주세요.');
+      return;
+    }
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setError('입금액을 입력해 주세요.');
       return;
     }
-    const diff = n !== b.billedTotal ? `\n\n청구 합계 ${won(b.billedTotal)}와 다릅니다.` : '';
-    if (!confirm(`${b.companyName || b.businessUsername} 입금 ${won(n)}을 확인 처리합니다.${diff}\n\n확인 후 인플루언서 지급을 진행할 수 있습니다. 계속할까요?`)) return;
-    apply('paid_in', 'mark_paid_in', { batchId: b.id, amount: n });
+    if (mismatch && !paidMemo.trim()) {
+      setError('입금액이 청구액과 다릅니다. 사유를 메모로 남겨 주세요.');
+      return;
+    }
+    const diff = mismatch ? `\n\n⚠ 청구 합계 ${won(b.billedTotal)}와 ${won(Math.abs(amountNum - b.billedTotal))} 차이가 납니다.` : '';
+    if (!confirm(`${b.companyName || b.businessUsername} ${paidDate} 입금 ${won(amountNum)}을 확인 처리합니다.${diff}\n\n확인 후 인플루언서 지급을 진행할 수 있습니다. 계속할까요?`)) return;
+    apply('paid_in', 'mark_paid_in', { batchId: b.id, amount: amountNum, paidDate, memo: paidMemo.trim() });
   };
 
   const payLine = (l: SettlementLine) => {
@@ -615,6 +634,7 @@ const BatchCard: React.FC<{
           <div className="flex items-center gap-2">
             <h4 className="font-black text-slate-900 truncate">{b.companyName || b.businessUsername}</h4>
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${BATCH_STATUS_CLS[b.status]}`}>{BATCH_STATUS_LABEL[b.status]}</span>
+            {b.overdue && <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-red-100 text-red-700">연체</span>}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-0.5">
             @{b.businessUsername} · {b.period} · 주문 {b.orderCount}건 · 인플루언서 {b.lines.length}명 (지급 {paidCount})
@@ -644,6 +664,8 @@ const BatchCard: React.FC<{
       <div className="px-4 pb-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold text-slate-400">
         <span>브랜드 승인 {fmtDateTime(b.brandApprovedAt)}</span>
         <span>입금 확인 {fmtDateTime(b.paidInAt)}{b.paidInAt ? ` · ${won(b.paidInAmount)}` : ''}</span>
+        <span className={b.overdue ? 'text-red-600' : ''}>입금 기한 {b.dueDate}{b.overdue ? ' (연체)' : ''}</span>
+        <span>인플루언서 지급 예정 {b.creatorPayoutDate}</span>
       </div>
 
       <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -653,24 +675,61 @@ const BatchCard: React.FC<{
           {b.status === 'draft' ? (
             <p className="text-[11px] font-bold text-slate-500">브랜드가 청구서를 확인·승인한 뒤 입금 확인을 할 수 있습니다.</p>
           ) : b.status === 'brand_approved' ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-black"
-              />
-              <button
-                onClick={markPaidIn}
-                disabled={busy !== null}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-800 disabled:opacity-40 shrink-0"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" /> {busy === 'paid_in' ? '처리 중...' : '입금 확인'}
-              </button>
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-[9px] font-black text-slate-400">입금일</span>
+                  <input
+                    type="date"
+                    value={paidDate}
+                    max={todayKst()}
+                    onChange={e => setPaidDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-black"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[9px] font-black text-slate-400">입금액 (청구 {won(b.billedTotal)})</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-black ${mismatch ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`}
+                  />
+                </label>
+              </div>
+              {mismatch && (
+                <p className="flex items-center gap-1 text-[10px] font-black text-amber-700">
+                  <AlertTriangle className="w-3 h-3" /> 청구액과 {won(Math.abs(amountNum - b.billedTotal))} {amountNum > b.billedTotal ? '많습니다' : '적습니다'} — 사유 메모 필수
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <input
+                  value={paidMemo}
+                  onChange={e => setPaidMemo(e.target.value)}
+                  placeholder={mismatch ? '차액 사유(필수)' : '입금 메모(입금자명 등, 선택)'}
+                  className={`flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border text-xs font-bold ${mismatch && !paidMemo.trim() ? 'border-amber-400' : 'border-slate-200'}`}
+                />
+                <button
+                  onClick={markPaidIn}
+                  disabled={busy !== null || (mismatch && !paidMemo.trim())}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-800 disabled:opacity-40 shrink-0"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" /> {busy === 'paid_in' ? '처리 중...' : '입금 확인'}
+                </button>
+              </div>
+              <p className={`text-[10px] font-bold ${b.overdue ? 'text-red-600' : 'text-slate-400'}`}>
+                입금 기한 {b.dueDate}{b.overdue ? ' · 연체' : ''}
+              </p>
             </div>
           ) : (
-            <p className="text-[11px] font-bold text-green-700">입금 확인됨 · {won(b.paidInAmount)}</p>
+            <div className="space-y-0.5">
+              <p className="text-[11px] font-bold text-green-700">
+                입금 확인됨 · {b.paidInDate || fmtDate(b.paidInAt)} · {won(b.paidInAmount)}
+                {b.paidInAmount !== b.billedTotal && <span className="ml-1 text-amber-700">(청구 {won(b.billedTotal)})</span>}
+              </p>
+              <p className="text-[10px] font-bold text-slate-500">확인 {b.paidInBy || '-'}{b.paidInMemo ? ` · ${b.paidInMemo}` : ''}</p>
+            </div>
           )}
         </div>
 
@@ -928,6 +987,111 @@ const UnverifiedOrders: React.FC<{ token: string }> = ({ token }) => {
         <button onClick={() => load(orders.length)} className="w-full py-2.5 border-t border-slate-100 text-[11px] font-black text-slate-500 hover:bg-slate-50">
           더 보기
         </button>
+      )}
+    </div>
+  );
+};
+
+// ───────────────────────────── 브랜드 약관 ─────────────────────────────
+
+const TERMS_CLS: Record<string, string> = {
+  none: 'bg-red-100 text-red-700',
+  agreed: 'bg-green-100 text-green-700',
+  outdated: 'bg-amber-100 text-amber-700',
+};
+
+const BrandTerms: React.FC<{ token: string }> = ({ token }) => {
+  const [brands, setBrands] = useState<AdminBrandTerms[]>([]);
+  const [version, setVersion] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState<'all' | 'pending'>('all');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await affiliateService.listTermsForAdmin(token);
+    setLoading(false);
+    if (res.error) { setError(res.error); return; }
+    setError('');
+    setBrands(res.brands || []);
+    setVersion(res.currentVersion || '');
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const shown = filter === 'all' ? brands : brands.filter(b => !b.valid);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border px-3 py-2.5 text-[11px] font-bold bg-slate-50 border-slate-100 text-slate-500">
+        현재 약관 버전 {version}. 브랜드는 판매 캠페인 심사 요청 전에 이 약관에 동의해야 하며, 버전이 바뀌면 다음 캠페인 등록 때 다시 동의합니다.
+        입금 계좌 · 미정산 한도는 플랫폼 설정에서 바꿀 수 있습니다.
+      </div>
+
+      <div className="flex items-center gap-1">
+        {([['all', '전체'], ['pending', '미동의 · 재동의 필요']] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setFilter(k)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${filter === k ? 'bg-slate-900 text-white' : 'bg-white border border-slate-100 text-slate-500'}`}
+          >
+            {label}
+          </button>
+        ))}
+        <button onClick={load} className="ml-auto p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" title="새로고침">
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      <ErrorBar message={error} />
+
+      {loading && brands.length === 0 ? (
+        <Spinner label="약관 동의 상태를 불러오는 중..." />
+      ) : shown.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-sm font-bold text-slate-400">
+          {filter === 'pending' ? '미동의 브랜드가 없습니다.' : '판매 캠페인을 시작한 브랜드가 없습니다.'}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-x-auto">
+          <table className="w-full text-xs min-w-[760px]">
+            <thead>
+              <tr className="bg-slate-50/50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                <th className="text-left px-4 py-2.5">브랜드</th>
+                <th className="text-left px-2 py-2.5">상태</th>
+                <th className="text-left px-2 py-2.5">동의일 · 버전</th>
+                <th className="text-left px-2 py-2.5">사업자 · 대표자</th>
+                <th className="text-left px-4 py-2.5">정산 담당자</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {shown.map(b => {
+                const a = b.agreement;
+                return (
+                  <tr key={b.businessUsername} className="align-top">
+                    <td className="px-4 py-2.5">
+                      <p className="font-black text-slate-900">{a?.companyName || b.companyName || b.businessUsername}</p>
+                      <p className="text-[10px] font-bold text-slate-400">@{b.businessUsername} · 캠페인 {b.campaigns}</p>
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${TERMS_CLS[b.state] || TERMS_CLS.none}`}>
+                        {TERMS_STATE_LABEL[b.state]}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2.5 font-bold text-slate-600">
+                      {a ? <>{fmtDateTime(a.agreedAt)}<p className="text-[9px] text-slate-400">v{a.termsVersion}</p></> : '-'}
+                    </td>
+                    <td className="px-2 py-2.5 font-bold text-slate-600">
+                      {a ? <>{a.businessNumber}<p className="text-[9px] text-slate-400">{a.representative}</p></> : '-'}
+                    </td>
+                    <td className="px-4 py-2.5 font-bold text-slate-600">
+                      {a ? <>{a.contactName} · {a.contactPhone}<p className="text-[9px] text-slate-400">{a.contactEmail}</p></> : '-'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

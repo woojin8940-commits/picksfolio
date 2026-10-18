@@ -2,7 +2,8 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireOperator } from "./_shared/manager-auth.mts";
-import { closePeriod, decryptPii, isPeriod, jsonError, norm, previousPeriod, withTransaction } from "./_shared/affiliate.mts";
+import { closePeriod, decryptPii, isPeriod, jsonError, norm, previousPeriod, todayKst, withTransaction } from "./_shared/affiliate.mts";
+import { creatorPayoutDate, loadBillingSettings, paymentDueDate } from "./_shared/affiliate-terms.mts";
 
 /**
  * 판매 수수료 월 정산.
@@ -12,7 +13,8 @@ import { closePeriod, decryptPii, isPeriod, jsonError, norm, previousPeriod, wit
  *   GET   /api/affiliate-settlements?scope=admin&period=      운영자: 전체 + 지급 계좌 제출 여부
  *   PATCH /api/affiliate-settlements { action, ... }
  *           브랜드  brand_approve { batchId }                         draft → brand_approved
- *           운영자  mark_paid_in  { batchId, amount, invoiceNo?, memo? } brand_approved → paid_in
+ *           운영자  mark_paid_in  { batchId, paidDate, amount, memo, invoiceNo? } brand_approved → paid_in
+ *                                 입금액이 청구액과 다르면 memo(사유)가 있어야 한다
  *                   pay_line      { lineId }                          paid_in 일 때만, 지급 정보 제출 필요
  *                   reveal_account { lineId }                         지급 정보 원문(열람 기록이 남는다)
  *                   save_memo     { batchId, memo?, invoiceNo? }
@@ -22,10 +24,16 @@ import { closePeriod, decryptPii, isPeriod, jsonError, norm, previousPeriod, wit
  * 입력이 없다 — 브랜드는 승인만, 운영자는 입금 확인과 지급 처리만 한다. 인플루언서는
  * 읽기만 한다. 상태는 언제나 "이전 상태가 X 일 때만" 바뀐다(조건부 UPDATE).
  *
+ * 입금: 브랜드는 픽스폴리오 계좌(플랫폼 설정)로 정산월 다음 달 15일까지 청구 합계를 보낸다.
+ * 운영자가 통장을 확인하고 입금 확인을 누르면 인플루언서 지급이 열린다. 인플루언서 지급
+ * 예정일은 정산월 다음 달 말일이다.
+ *
  * 세금계산서 자동 발행은 추후 연동한다. 지금은 발행 번호를 메모로 남길 수만 있다.
  */
 
 const iso = (v: unknown) => (v ? new Date(v as any).toISOString() : null);
+const dateOnly = (v: unknown) => (v ? (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10)) : null);
+const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
 
 const shapeLine = (l: any, account?: any) => ({
   id: String(l.id),
@@ -58,6 +66,13 @@ const shapeBatch = (b: any, lines: any[]) => ({
   brandApprovedAt: iso(b.brand_approved_at),
   paidInAt: iso(b.paid_in_at),
   paidInAmount: Number(b.paid_in_amount),
+  paidInDate: dateOnly(b.paid_in_date),
+  paidInBy: String(b.paid_in_by || ""),
+  paidInMemo: String(b.paid_in_memo || ""),
+  // 입금 기한(정산월 다음 달 15일)과 연체 여부. 연체 = 브랜드 승인 이후 기한이 지났는데 입금 확인 전.
+  dueDate: paymentDueDate(String(b.period)),
+  overdue: ["draft", "brand_approved"].includes(String(b.status)) && todayKst() > paymentDueDate(String(b.period)),
+  creatorPayoutDate: creatorPayoutDate(String(b.period)),
   invoiceNo: String(b.invoice_no || ""),
   memo: String(b.memo || ""),
   orderCount: Number(b.order_count),
@@ -147,13 +162,23 @@ export default async (req: Request) => {
           ...shapeBatch(b, lines.filter((l) => l.batch_id === b.id && l.influencer_username === caller.username).map((l) => shapeLine(l))),
           // 인플루언서에게는 브랜드 청구 금액을 보이지 않는다.
           brandFee: 0, vat: 0, billedTotal: 0, platformFee: 0, paidInAmount: 0, invoiceNo: "", memo: "",
+          paidInDate: null, paidInBy: "", paidInMemo: "", dueDate: "", overdue: false,
         })),
       });
     }
 
     const { batches, lines } = await loadBatches(db, { business: caller.username, period, status });
+    const billing = await loadBillingSettings(db);
     return Response.json({
-      batches: batches.map((b) => shapeBatch(b, lines.filter((l) => l.batch_id === b.id).map((l) => shapeLine(l)))),
+      batches: batches.map((b) => ({
+        ...shapeBatch(b, lines.filter((l) => l.batch_id === b.id).map((l) => shapeLine(l))),
+        paidInBy: "",
+        paidInMemo: "",
+      })),
+      // 승인한 청구서에 보여 줄 입금 계좌. 운영자가 플랫폼 설정에서 입력한다.
+      depositAccount: billing.bankName && billing.accountNumber
+        ? { bankName: billing.bankName, accountNumber: billing.accountNumber, accountHolder: billing.accountHolder }
+        : null,
     });
   }
 
@@ -202,13 +227,22 @@ export default async (req: Request) => {
   }
 
   if (action === "mark_paid_in") {
-    const amount = Math.max(0, Math.round(Number(body?.amount || 0)));
+    const paidDate = String(body?.paidDate || "");
+    const amount = Math.round(Number(body?.amount));
+    const memo = String(body?.memo || "").trim().slice(0, 500);
+    if (!isDate(paidDate)) return jsonError("입금일을 입력해 주세요.");
+    if (paidDate > todayKst()) return jsonError("입금일이 오늘보다 늦습니다.");
+    if (!Number.isFinite(amount) || amount <= 0) return jsonError("입금액을 입력해 주세요.");
+    const current = ((await db.sql`SELECT billed_total, status FROM affiliate_settlement_batches WHERE id = ${batchId}`) as any[])[0];
+    if (!current) return jsonError("청구서를 찾을 수 없습니다.", 404);
+    if (amount !== Number(current.billed_total) && !memo) {
+      return jsonError("입금액이 청구액과 다릅니다. 사유를 메모로 남겨 주세요.", 400, { code: "amount_mismatch" });
+    }
     const rows = (await db.sql`
       UPDATE affiliate_settlement_batches
-      SET status = 'paid_in', paid_in_at = NOW(), paid_in_by = ${op.username},
-          paid_in_amount = CASE WHEN ${amount} > 0 THEN ${amount} ELSE billed_total END,
+      SET status = 'paid_in', paid_in_at = NOW(), paid_in_by = ${op.username}, paid_in_amount = ${amount},
+          paid_in_date = ${paidDate}::date, paid_in_memo = ${memo},
           invoice_no = COALESCE(NULLIF(${String(body?.invoiceNo || "").slice(0, 80)}, ''), invoice_no),
-          memo = COALESCE(NULLIF(${String(body?.memo || "").slice(0, 500)}, ''), memo),
           updated_at = NOW()
       WHERE id = ${batchId} AND status = 'brand_approved'
       RETURNING id

@@ -29,7 +29,69 @@ export interface PlatformSettings {
   disclosureText?: string;
   updatedAt?: string | null;
   updatedBy?: string;
+  /** 운영자 응답에만: 브랜드 입금 계좌와 약관의 미정산 한도(원). */
+  billing?: BillingSettings;
   history?: { key: string; oldValue: string; newValue: string; changedBy: string; changedAt: string }[];
+}
+
+export interface BillingSettings {
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  unsettledLimit: number;
+}
+
+// 브랜드 약관 동의 ------------------------------------------------------------
+
+/** none=동의 전 · agreed=지금 약관에 동의 · outdated=이전 약관에만 동의(재동의 필요) */
+export type TermsState = 'none' | 'agreed' | 'outdated';
+
+export interface TermsAgreement {
+  id: string;
+  businessUsername: string;
+  termsVersion: string;
+  companyName: string;
+  representative: string;
+  businessNumber: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  unsettledLimit: number;
+  paymentTerms: string;
+  depositAccount: string;
+  agreedAt: string | null;
+}
+
+export interface TermsInput {
+  companyName: string;
+  representative: string;
+  businessNumber: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+}
+
+export interface TermsSummary {
+  /** 지금 버전 약관에 동의해 심사 요청이 가능한지. */
+  valid: boolean;
+  state: TermsState;
+  currentVersion: string;
+  agreement: TermsAgreement | null;
+  terms: {
+    version: string;
+    sections: { title: string; body: string }[];
+    unsettledLimit: number;
+    paymentTerms: string;
+    depositAccount: string;
+  };
+  /** 브랜드 응답에만: 입력 기본값. */
+  defaults?: TermsInput;
+}
+
+export interface AdminBrandTerms extends Omit<TermsSummary, 'terms' | 'defaults'> {
+  businessUsername: string;
+  companyName: string;
+  campaigns: number;
 }
 
 export interface ShopConnectionStatus {
@@ -280,10 +342,27 @@ export interface SettlementBatch {
   brandApprovedAt: string | null;
   paidInAt: string | null;
   paidInAmount: number;
+  /** 운영자가 확인한 실제 입금일(YYYY-MM-DD). */
+  paidInDate: string | null;
+  paidInBy: string;
+  paidInMemo: string;
+  /** 입금 기한: 정산월 다음 달 15일. */
+  dueDate: string;
+  /** 기한이 지났는데 입금 확인 전. */
+  overdue: boolean;
+  /** 인플루언서 지급 예정일: 정산월 다음 달 말일. */
+  creatorPayoutDate: string;
   invoiceNo: string;
   memo: string;
   orderCount: number;
   lines: SettlementLine[];
+}
+
+/** 브랜드가 청구 금액을 보내는 픽스폴리오 계좌. */
+export interface DepositAccount {
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
 }
 
 /** 판매 수수료 지급 정보. 성명 · 주민등록번호 · 계좌만 받는다(신분증 사본 없음). */
@@ -349,8 +428,23 @@ export const affiliateService = {
     return call<{ settings: PlatformSettings }>('GET', `/api/platform-settings${token ? '?history=1' : ''}`, undefined, token);
   },
   /** 운영자 전용. */
-  updatePlatformSettings(token: string, patch: { platformRate?: number; autoConfirmDays?: number }) {
+  updatePlatformSettings(
+    token: string,
+    patch: { platformRate?: number; autoConfirmDays?: number } & Partial<BillingSettings>,
+  ) {
     return call<{ settings: PlatformSettings }>('PUT', '/api/platform-settings', patch, token);
+  },
+
+  // 브랜드 약관 동의 --------------------------------------------------------
+  getTerms() {
+    return call<TermsSummary>('GET', '/api/affiliate-terms');
+  },
+  agreeTerms(input: TermsInput) {
+    return call<TermsSummary>('POST', '/api/affiliate-terms', { ...input, agree: true });
+  },
+  /** 운영 콘솔: 브랜드별 약관 동의 상태. */
+  listTermsForAdmin(token: string) {
+    return call<{ brands: AdminBrandTerms[]; currentVersion: string }>('GET', '/api/affiliate-terms?scope=admin', undefined, token);
   },
 
   // 쇼핑몰 연동(브랜드) ------------------------------------------------------
@@ -461,7 +555,12 @@ export const affiliateService = {
   // 정산 -------------------------------------------------------------------
   /** brand: 내 월별 청구서 · admin: 전체(기간 필터) · creator: 내 지급 내역. */
   listSettlements(scope: 'brand' | 'admin' | 'creator', opts: { period?: string; status?: BatchStatus } = {}, token?: string) {
-    return call<{ batches: SettlementBatch[] }>('GET', `/api/affiliate-settlements${qs({ scope, ...opts })}`, undefined, token);
+    return call<{ batches: SettlementBatch[]; depositAccount?: DepositAccount | null }>(
+      'GET',
+      `/api/affiliate-settlements${qs({ scope, ...opts })}`,
+      undefined,
+      token,
+    );
   },
   /** 브랜드: 청구서 확인·승인. */
   approveBatch(batchId: string) {
@@ -480,7 +579,16 @@ export const affiliateService = {
   adminSettlementAction(
     token: string,
     action: 'mark_paid_in' | 'pay_line' | 'save_memo' | 'run_close',
-    payload: { batchId?: string; lineId?: string; amount?: number; memo?: string; invoiceNo?: string; period?: string },
+    payload: {
+      batchId?: string;
+      lineId?: string;
+      amount?: number;
+      /** mark_paid_in: 실제 입금일(YYYY-MM-DD) */
+      paidDate?: string;
+      memo?: string;
+      invoiceNo?: string;
+      period?: string;
+    },
   ) {
     return call<{ batch?: SettlementBatch; batches?: SettlementBatch[]; created?: number }>(
       'PATCH',
@@ -525,3 +633,28 @@ export const PARTICIPATION_STATUS_LABEL: Record<ParticipationStatus, string> = {
 
 /** 원 단위 표기. */
 export const won = (n: number) => `₩${Math.round(Number(n) || 0).toLocaleString('ko-KR')}`;
+
+export const TERMS_STATE_LABEL: Record<TermsState, string> = {
+  none: '미동의',
+  agreed: '동의 완료',
+  outdated: '재동의 필요',
+};
+
+/** 인플루언서 지급 일정 안내(참여 신청 · 협업 캠페인 화면 공통). */
+export const CREATOR_PAYOUT_NOTICE = '판매 수수료는 이번 달 확정된 수익을 정산해 다음 달 말일에 지급됩니다.';
+
+/** 'YYYY-MM-DD' → 'M월 D일'. */
+export const monthDay = (ymd: string | null | undefined) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''));
+  return m ? `${Number(m[2])}월 ${Number(m[3])}일` : '';
+};
+
+/** 'YYYY-MM' 정산월의 인플루언서 지급 예정일(다음 달 말일) → 'M월 D일'. */
+export const creatorPayoutLabel = (period: string | null | undefined) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(period || ''));
+  if (!m) return '';
+  const month = Number(m[2]);
+  const next = month === 12 ? 1 : month + 1;
+  const last = new Date(Date.UTC(Number(m[1]), month + 1, 0)).getUTCDate();
+  return `${next}월 ${last}일`;
+};

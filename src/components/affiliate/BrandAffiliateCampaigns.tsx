@@ -11,6 +11,7 @@ import {
 import {
   affiliateService,
   won,
+  monthDay,
   BATCH_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
   PARTICIPATION_STATUS_LABEL,
@@ -21,6 +22,8 @@ import {
   type AffiliateStats,
   type BatchStatus,
   type CommissionStatus,
+  type TermsSummary,
+  type DepositAccount,
   type Participation,
   type ParticipationStatus,
   type SettlementBatch,
@@ -30,6 +33,7 @@ import { todayInSeoul } from '../../utils/formatters';
 import { lazyWithRetry, LazyRoute } from '../../utils/lazyRoute';
 
 const AffiliateCampaignWizard = lazyWithRetry(() => import('./AffiliateCampaignWizard'));
+const BrandAffiliateTerms = lazyWithRetry(() => import('./BrandAffiliateTerms'));
 
 /**
  * 판매 캠페인(어필리에이트) — 브랜드 메뉴.
@@ -38,6 +42,9 @@ const AffiliateCampaignWizard = lazyWithRetry(() => import('./AffiliateCampaignW
  * 계정 전체의 월 청구서를 본다. 정산은 캠페인이 아니라 달로 묶인다 — 한 달 동안 여러
  * 캠페인에서 생긴 확정 수수료가 청구서 한 장이 된다. 그래서 캠페인 상세의 정산 탭도
  * 같은 청구서 목록을 보여 주고, 그 점을 적어 둔다.
+ *
+ * '약관'은 판매 수수료 이용약관이다. 동의 전에는 새 캠페인을 눌러도 마법사 대신
+ * 약관 화면이 열린다 — 서버도 심사 요청을 막는다.
  *
  * 캠페인은 운영자 승인을 거쳐야 공개된다. 반려되면 사유를 보여 주고 같은 마법사로
  * 고쳐 재심사를 요청한다. 판매 중인 캠페인은 브랜드가 직접 종료할 수 있다.
@@ -132,6 +139,7 @@ const SettlementPanel: React.FC<{ campaignScoped?: boolean }> = ({ campaignScope
   const [error, setError] = useState('');
   const [approving, setApproving] = useState('');
   const [openId, setOpenId] = useState('');
+  const [deposit, setDeposit] = useState<DepositAccount | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,6 +147,7 @@ const SettlementPanel: React.FC<{ campaignScoped?: boolean }> = ({ campaignScope
     setLoading(false);
     if (res.error) { setError(res.error); return; }
     setError('');
+    setDeposit(res.depositAccount || null);
     const list = Array.isArray(res.batches) ? res.batches : [];
     // 최근 달이 위로.
     setBatches([...list].sort((a, b) => String(b.period).localeCompare(String(a.period))));
@@ -147,7 +156,7 @@ const SettlementPanel: React.FC<{ campaignScoped?: boolean }> = ({ campaignScope
   useEffect(() => { load(); }, [load]);
 
   const approve = async (b: SettlementBatch) => {
-    if (!confirm(`${periodLabel(b.period)} 청구 금액 ${won(b.billedTotal)}을 확인하고 승인할까요?\n승인 후 입금 안내가 진행됩니다.`)) return;
+    if (!confirm(`${periodLabel(b.period)} 청구 금액 ${won(b.billedTotal)}을 확인하고 승인할까요?\n승인하면 입금 계좌와 기한(${monthDay(b.dueDate)})이 안내됩니다.`)) return;
     setApproving(b.id);
     const res = await affiliateService.approveBatch(b.id);
     setApproving('');
@@ -220,10 +229,41 @@ const SettlementPanel: React.FC<{ campaignScoped?: boolean }> = ({ campaignScope
                   확인·승인
                 </button>
               )}
+              {b.status === 'brand_approved' && (
+                <div className={`mt-3 rounded-xl border p-3 ${b.overdue ? 'bg-rose-50 border-rose-100' : 'bg-blue-50 border-blue-100'}`}>
+                  <p className={`text-[12px] font-black ${b.overdue ? 'text-rose-700' : 'text-blue-800'}`}>
+                    {b.overdue ? `입금 기한(${monthDay(b.dueDate)})이 지났습니다` : '아래 계좌로 입금해 주세요'}
+                  </p>
+                  <dl className="mt-2 grid grid-cols-[72px_1fr] gap-y-1 text-[12px]">
+                    <dt className="font-black text-slate-400">입금 계좌</dt>
+                    <dd className="font-black text-slate-800 break-all">
+                      {deposit ? `${deposit.bankName} ${deposit.accountNumber}` : '운영팀이 별도로 안내드립니다'}
+                    </dd>
+                    {deposit && (
+                      <>
+                        <dt className="font-black text-slate-400">예금주</dt>
+                        <dd className="font-black text-slate-800">{deposit.accountHolder}</dd>
+                      </>
+                    )}
+                    <dt className="font-black text-slate-400">입금 금액</dt>
+                    <dd className="font-black text-slate-800">
+                      {won(b.billedTotal)} <span className="text-[10px] text-slate-400">(수수료 {won(b.brandFee)} + 부가세 {won(b.vat)})</span>
+                    </dd>
+                    <dt className="font-black text-slate-400">입금 기한</dt>
+                    <dd className={`font-black ${b.overdue ? 'text-rose-600' : 'text-slate-800'}`}>{String(b.dueDate).replace(/-/g, '.')}까지</dd>
+                  </dl>
+                  <p className="text-[10px] text-slate-500 font-bold mt-2">입금자명은 상호로 해 주세요. 입금이 확인되면 상태가 '입금 확인'으로 바뀝니다.</p>
+                </div>
+              )}
+              {b.status === 'draft' && (
+                <p className={`text-[10px] font-bold mt-2 ${b.overdue ? 'text-rose-500' : 'text-slate-400'}`}>
+                  입금 기한 {String(b.dueDate).replace(/-/g, '.')} · 승인하면 입금 계좌가 안내됩니다.
+                </p>
+              )}
               {b.brandApprovedAt && (
                 <p className="text-[10px] text-slate-400 font-bold mt-2">
                   {formatDate(b.brandApprovedAt)} 승인
-                  {b.paidInAt && ` · ${formatDate(b.paidInAt)} 입금 확인 ${won(b.paidInAmount)}`}
+                  {b.paidInAt && ` · ${b.paidInDate ? String(b.paidInDate).replace(/-/g, '.') : formatDate(b.paidInAt)} 입금 확인 ${won(b.paidInAmount)}`}
                 </p>
               )}
               {b.memo && <p className="text-[11px] text-slate-500 font-medium mt-1">{b.memo}</p>}
@@ -266,8 +306,9 @@ const SettlementPanel: React.FC<{ campaignScoped?: boolean }> = ({ campaignScope
         })
       )}
       <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-        청구 금액은 확정된 판매 수수료에 부가세를 더한 금액입니다. 인플루언서 개별 지급과 원천징수(3.3%)는 입금 확인 후
-        픽스폴리오가 처리합니다. 세금계산서 발행은 별도로 안내드립니다.
+        매월 말일에 마감해 그달 확정된 수수료로 청구서가 만들어지고, 다음 달 15일까지 입금합니다. 청구 금액은 판매
+        수수료에 부가세를 더한 금액입니다. 인플루언서 개별 지급과 원천징수(3.3%)는 입금 확인 후 픽스폴리오가 처리합니다.
+        세금계산서 발행은 별도로 안내드립니다.
       </p>
     </div>
   );
@@ -775,7 +816,10 @@ const CampaignDetail: React.FC<{
 // ───────────────────────────── 메뉴 본체 ─────────────────────────────
 
 const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ companyName, onOpenShopSettings }) => {
-  const [topTab, setTopTab] = useState<'campaigns' | 'settlement'>('campaigns');
+  const [topTab, setTopTab] = useState<'campaigns' | 'settlement' | 'terms'>('campaigns');
+  const [terms, setTerms] = useState<TermsSummary | null>(null);
+  /** 새 캠페인을 누르다 약관 화면으로 왔는지(체결 후 "등록 계속하기"를 보여 준다). */
+  const [termsGated, setTermsGated] = useState(false);
   const [campaigns, setCampaigns] = useState<AffiliateCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -793,6 +837,20 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    affiliateService.getTerms().then(res => { if (!res.error) setTerms(res); });
+  }, []);
+
+  /** 새 캠페인: 약관에 동의해 있어야 마법사를 연다. 반려 건 수정(재심사)도 같다. */
+  const startWizard = (target: 'new' | AffiliateCampaign) => {
+    if (terms && !terms.valid) {
+      setTermsGated(true);
+      setDetailId(null);
+      setTopTab('terms');
+      return;
+    }
+    setWizard(target);
+  };
 
   const detail = detailId ? campaigns.find(c => c.id === detailId) || null : null;
 
@@ -819,7 +877,7 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
         {topTab === 'campaigns' && !wizard && !detail && (
           <button
             type="button"
-            onClick={() => setWizard('new')}
+            onClick={() => startWizard('new')}
             className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-[12px] md:text-sm font-black hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"
           >
             <Plus className="w-4 h-4" /> 새 판매 캠페인
@@ -829,11 +887,11 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
 
       {!wizard && !detail && (
         <div className="flex gap-1 mb-4">
-          {([['campaigns', '캠페인'], ['settlement', '월별 정산']] as const).map(([k, label]) => (
+          {([['campaigns', '캠페인'], ['settlement', '월별 정산'], ['terms', '약관']] as const).map(([k, label]) => (
             <button
               key={k}
               type="button"
-              onClick={() => setTopTab(k)}
+              onClick={() => { setTopTab(k); if (k !== 'terms') setTermsGated(false); }}
               className={`px-4 py-2 rounded-full text-sm font-black ${
                 topTab === k ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
               }`}
@@ -841,6 +899,23 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
               {label}
             </button>
           ))}
+        </div>
+      )}
+
+      {topTab === 'campaigns' && !wizard && !detail && terms && !terms.valid && (
+        <div className="mb-4 rounded-2xl bg-blue-50 border border-blue-100 p-4 flex items-center gap-3 flex-wrap">
+          <p className="flex-1 min-w-[200px] text-[12px] font-bold text-blue-800 leading-relaxed">
+            {terms.state === 'outdated'
+              ? '판매 수수료 이용약관이 바뀌었습니다. 다음 판매 캠페인을 등록하려면 새 약관에 동의해 주세요.'
+              : '판매 캠페인 심사를 요청하기 전에 판매 수수료 이용약관 동의가 필요합니다.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => { setTermsGated(true); setTopTab('terms'); }}
+            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[12px] font-black hover:bg-blue-700"
+          >
+            약관 확인하고 동의하기
+          </button>
         </div>
       )}
 
@@ -861,12 +936,21 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
         </LazyRoute>
       ) : topTab === 'settlement' ? (
         <SettlementPanel />
+      ) : topTab === 'terms' ? (
+        <LazyRoute>
+          <BrandAffiliateTerms
+            summary={terms}
+            onChange={setTerms}
+            gated={termsGated}
+            onContinue={termsGated ? () => { setTermsGated(false); setTopTab('campaigns'); setWizard('new'); } : undefined}
+          />
+        </LazyRoute>
       ) : detail ? (
         <CampaignDetail
           key={detail.id}
           campaign={detail}
           onBack={() => setDetailId(null)}
-          onEdit={() => setWizard(detail)}
+          onEdit={() => startWizard(detail)}
           onUpdated={upsert}
           onReload={load}
         />
@@ -891,7 +975,7 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <button
               type="button"
-              onClick={() => setWizard('new')}
+              onClick={() => startWizard('new')}
               className="px-5 py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700"
             >
               새 판매 캠페인 만들기
