@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import {
   type Cafe24Connection,
+  Cafe24Error,
   connectionHealth,
   connectionsForBusiness,
   findScriptTag,
@@ -11,15 +12,16 @@ import {
   removeScriptTag,
 } from "./_shared/cafe24-api.mts";
 import { TRACKING_NOTICE, jsonError, publicOrigin } from "./_shared/affiliate.mts";
+import { disconnectConnection } from "./_shared/cafe24-oauth.mts";
 
 /**
  * 브랜드 쇼핑몰 연동 상태와 추적 스크립트.
  *
  *   GET  /api/shop-connection                     연결 상태 · 스크립트 · 최근 24시간 수신
- *   POST /api/shop-connection { action, mallId }  install_script | remove_script | mark_manual
+ *   POST /api/shop-connection { action, mallId }  install_script | remove_script | mark_manual | disconnect
  *   GET  /api/shop-connection/products?mallId=&q=&offset=   카페24 상품 목록
  *
- * 몰 연결(OAuth)은 별도 연동 작업이 맡는다. 여기서는 그 연결로 상품을 읽고, 몰에
+ * 몰 연결(OAuth)은 cafe24-oauth-start · cafe24-callback 이 만든다. 여기서는 그 연결로 상품을 읽고, 몰에
  * 추적 스크립트를 심고(ScriptTags, 전체 페이지), 주문 신호가 들어오고 있는지 보여 준다.
  * 스크립트가 심겨 있어도 신호가 0건이면 브랜드가 바로 알아챌 수 있어야 한다.
  */
@@ -83,7 +85,8 @@ export default async (req: Request) => {
   const business = caller.username;
   const db = getDatabase();
   const url = new URL(req.url);
-  const conns = await connectionsForBusiness(db, business);
+  // 브랜드가 연동 해제한 몰은 목록에서 뺀다('미연결' 카드로 돌아가 다시 연동할 수 있게).
+  const conns = (await connectionsForBusiness(db, business)).filter((c) => c.status !== "revoked");
 
   if (req.method === "GET" && url.pathname.endsWith("/products")) {
     const mallId = String(url.searchParams.get("mallId") || "").trim().toLowerCase();
@@ -96,7 +99,16 @@ export default async (req: Request) => {
         offset: Number(url.searchParams.get("offset") || 0),
       });
       return Response.json(result);
-    } catch {
+    } catch (e) {
+      if (e instanceof Cafe24Error && e.reconnect) return jsonError("쇼핑몰 재연동이 필요합니다.", 409, { code: "RECONNECT" });
+      if (e instanceof Cafe24Error && e.status === 403) {
+        const missing = connectionHealth(conn).missingScopes;
+        return jsonError(
+          `카페24 앱 권한이 부족합니다.${missing.length ? ` (빠진 권한: ${missing.join(", ")})` : ""} 다시 연동해 주세요.`,
+          403,
+          { code: "SCOPE_MISSING", missingScopes: missing },
+        );
+      }
       return jsonError("쇼핑몰 상품을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 502);
     }
   }
@@ -131,6 +143,15 @@ export default async (req: Request) => {
       `;
     };
 
+    if (action === "disconnect") {
+      try {
+        const result = await disconnectConnection(db, conn, business);
+        return Response.json({ disconnected: true, mallId: conn.mallId, scriptRemoved: result.scriptRemoved });
+      } catch {
+        return jsonError("연동을 해제하지 못했습니다. 잠시 후 다시 시도해 주세요.", 502);
+      }
+    }
+
     if (action === "mark_manual") {
       await save("manual", String(existing?.script_no || ""), "", true);
     } else if (action === "install_script" || action === "remove_script") {
@@ -148,8 +169,9 @@ export default async (req: Request) => {
         }
       } catch (e: any) {
         const status = Number(e?.status || 0);
-        const message =
-          status === 403
+        const message = e instanceof Cafe24Error && e.reconnect
+          ? "카페24 연동이 만료되었습니다. 다시 연동한 뒤 설치해 주세요."
+          : status === 403
             ? "앱 권한(mall.write_application)이 없어 자동 설치하지 못했습니다. 재연동하거나 아래 코드를 직접 붙여 주세요."
             : "자동 설치에 실패했습니다. 아래 코드를 쇼핑몰 공통 영역에 직접 붙여 주세요.";
         await save(String(existing?.mode || "none"), String(existing?.script_no || ""), message, Boolean(existing?.installed_at));

@@ -58,6 +58,31 @@
   to = "/index.html"
   status = 200
 
+# 카페24 연동(OAuth) 함수. 개발자센터 등록값(App URL · Redirect URI)과 같은 주소다.
+#   /api/cafe24-oauth-start → cafe24-oauth-start · /api/cafe24/callback → cafe24-callback
+#   /cafe24/app → cafe24-app
+# 각 함수가 config.path 로 같은 주소를 갖고 있고, Netlify 는 path 가 있는 함수를 리다이렉트보다
+# 먼저 매칭하므로 실제 요청은 함수가 바로 받는다(쿼리 원문이 그대로 전달돼야 hmac 검증이 맞다).
+# 아래 규칙은 그 연결을 이 파일에도 드러내고, 혹시 함수 매칭을 벗어나도 SPA catch-all 이
+# index.html 을 대신 돌려주지 않게 막는다. 함수를 가리키는 rewrite 는 그 함수로 이어진다.
+[[redirects]]
+  from = "/api/cafe24-oauth-start"
+  to = "/api/cafe24-oauth-start"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/cafe24/callback"
+  to = "/api/cafe24/callback"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/cafe24/app"
+  to = "/cafe24/app"
+  status = 200
+  force = true
+
 # 해시가 붙은 빌드 산출물은 SPA catch-all 로 넘기지 않는다.
 #
 # 새 배포가 올라가면 브라우저에 열려 있던 예전 index.html 은 사라진 파일명

@@ -58,7 +58,7 @@ export interface ShopConnectionStatus {
 
 export interface ShopConnectionResponse {
   connections: ShopConnectionStatus[];
-  /** 카페24 연동(OAuth) 시작 경로. 별도 연동 작업이 제공한다. */
+  /** 카페24 연동(OAuth) 시작 경로(/api/cafe24-oauth-start). */
   cafe24ConnectUrl: string;
   /** 간편결제 등 추적 한계 안내 문구(화면에 그대로 보여 준다). */
   trackingNotice: string;
@@ -324,6 +324,26 @@ export const affiliateService = {
   /** install_script: ScriptTags 자동 설치 · remove_script: 제거 · mark_manual: 직접 붙였다고 표시 */
   shopConnectionAction(action: 'install_script' | 'remove_script' | 'mark_manual', mallId: string) {
     return call<{ connection: ShopConnectionStatus }>('POST', '/api/shop-connection', { action, mallId });
+  },
+  /**
+   * 카페24 연동 시작. 로그인 확인 후 1회용 state 를 발급받아 이동할 주소(url)를 돌려준다.
+   * launch 는 카페24 관리자에서 앱을 실행했을 때 서버가 넘겨준 서명 값이다.
+   * 이미 문제없이 연결된 몰을 앱에서 다시 열면 alreadyConnected 만 온다.
+   */
+  startCafe24Connect(input: { mallId?: string; launch?: string }) {
+    return call<{ url?: string; alreadyConnected?: boolean; mallId?: string; code?: string }>(
+      'POST',
+      '/api/cafe24-oauth-start',
+      input.launch ? { launch: input.launch } : { mall_id: input.mallId },
+    );
+  },
+  /** 연동 해제: 추적 스크립트 제거 → 카페24 토큰 폐기 → 연결 해제. */
+  disconnectShop(mallId: string) {
+    return call<{ disconnected: boolean; mallId: string; scriptRemoved: boolean }>(
+      'POST',
+      '/api/shop-connection',
+      { action: 'disconnect', mallId },
+    );
   },
   listShopProducts(mallId: string, opts: { q?: string; offset?: number } = {}) {
     return call<{ products: ShopProduct[]; hasMore: boolean }>(
