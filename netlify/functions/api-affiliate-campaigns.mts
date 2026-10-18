@@ -59,15 +59,15 @@ async function productsFor(db: any, ids: string[]) {
 async function brandCounts(db: any, ids: string[]) {
   const map = new Map<string, any>();
   if (ids.length === 0) return map;
-  const [parts, clicks, orders] = await Promise.all([
+  const [parts, clicks, orders, waiting] = await Promise.all([
     db.sql`
       SELECT campaign_id, COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
              COUNT(*) FILTER (WHERE status = 'approved')::int AS approved
       FROM affiliate_participations WHERE campaign_id = ANY(${ids}::text[]) GROUP BY campaign_id
     ` as Promise<any[]>,
     db.sql`
-      SELECT campaign_id, COUNT(*)::int AS n FROM affiliate_clicks
-      WHERE campaign_id = ANY(${ids}::text[]) AND counted GROUP BY campaign_id
+      SELECT campaign_id, COUNT(*) FILTER (WHERE counted)::int AS n, COUNT(*)::int AS all_n FROM affiliate_clicks
+      WHERE campaign_id = ANY(${ids}::text[]) GROUP BY campaign_id
     ` as Promise<any[]>,
     db.sql`
       SELECT campaign_id,
@@ -76,11 +76,17 @@ async function brandCounts(db: any, ids: string[]) {
              COUNT(*) FILTER (WHERE status = 'excluded' AND status_reason = 'cancelled_or_returned')::int AS cancelled
       FROM affiliate_orders WHERE campaign_id = ANY(${ids}::text[]) AND verification = 'verified' GROUP BY campaign_id
     ` as Promise<any[]>,
+    // 들어왔지만 아직 카페24 에서 결제가 확인되지 않은 주문(무통장 입금 대기 등). 집계에는 넣지 않고 건수만 보여 준다.
+    db.sql`
+      SELECT campaign_id, COUNT(*)::int AS n FROM affiliate_orders
+      WHERE campaign_id = ANY(${ids}::text[]) AND verification = 'unverified' GROUP BY campaign_id
+    ` as Promise<any[]>,
   ]);
-  for (const id of ids) map.set(id, { pending: 0, approved: 0, clicks: 0, orders: 0, sales: 0, cancelled: 0 });
+  for (const id of ids) map.set(id, { pending: 0, approved: 0, clicks: 0, allClicks: 0, orders: 0, waitingOrders: 0, sales: 0, cancelled: 0 });
   for (const p of parts) Object.assign(map.get(p.campaign_id), { pending: p.pending, approved: p.approved });
-  for (const c of clicks) map.get(c.campaign_id).clicks = c.n;
+  for (const c of clicks) Object.assign(map.get(c.campaign_id), { clicks: c.n, allClicks: c.all_n });
   for (const o of orders) Object.assign(map.get(o.campaign_id), { orders: o.orders, sales: Number(o.sales), cancelled: o.cancelled });
+  for (const w of waiting) map.get(w.campaign_id).waitingOrders = w.n;
   return map;
 }
 

@@ -15,13 +15,14 @@ import { jsonError, norm } from "./_shared/affiliate.mts";
  *   확정      구매확정됐지만 아직 지급되지 않은 금액
  *   정산 완료  지급 처리된 지급 내역에 들어간 금액(마감 후 반품 차감 포함)
  *   제외      취소·반품 등으로 빠진 주문의 원래 수수료(참고용)
+ * 클릭은 집계 기준(봇 · 같은 기기 30분 안 반복 제외)인 clicks 와, 들어온 그대로의 allClicks 를 함께 준다.
  * 미검증 주문은 어느 칸에도 넣지 않는다. 대신 건수만 waiting 으로 따로 알려 준다
  * (무통장 입금 대기 등 — 주문은 들어왔지만 아직 카페24 에서 결제가 확인되지 않은 주문).
  */
 
 const isDate = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const empty = (key: string, label: string, imageUrl = "") => ({
-  key, label, imageUrl, clicks: 0, orders: 0, sales: 0, cancelled: 0, pendingFee: 0, confirmedFee: 0, settledFee: 0, excludedFee: 0,
+  key, label, imageUrl, clicks: 0, allClicks: 0, orders: 0, sales: 0, cancelled: 0, pendingFee: 0, confirmedFee: 0, settledFee: 0, excludedFee: 0,
 });
 
 export default async (req: Request) => {
@@ -51,9 +52,10 @@ export default async (req: Request) => {
              OR NOT ${brand} AND EXISTS (SELECT 1 FROM affiliate_links l WHERE l.campaign_product_id = cp.id AND l.influencer_username = ${me}))
     ` as unknown as Promise<any[]>,
     db.sql`
-      SELECT k.campaign_product_id, k.campaign_id, k.influencer_username, COUNT(*)::int AS n
+      SELECT k.campaign_product_id, k.campaign_id, k.influencer_username,
+             COUNT(*) FILTER (WHERE k.counted)::int AS n, COUNT(*)::int AS all_n
       FROM affiliate_clicks k JOIN affiliate_campaigns c ON c.id = k.campaign_id
-      WHERE k.counted AND k.clicked_at >= ${from} AND k.clicked_at <= ${to}
+      WHERE k.clicked_at >= ${from} AND k.clicked_at <= ${to}
         AND (${campaignId} = '' OR k.campaign_id = ${campaignId})
         AND (${brand} AND c.business_username = ${me} OR NOT ${brand} AND k.influencer_username = ${me})
       GROUP BY 1, 2, 3
@@ -98,7 +100,10 @@ export default async (req: Request) => {
     return [totals, byProduct.get(productId)!, byCampaign.get(campaignId)!, byInfluencer.get(influencer)!];
   };
 
-  for (const k of clicks) for (const r of rowsFor(k.campaign_product_id, k.campaign_id, k.influencer_username)) r.clicks += k.n;
+  for (const k of clicks) for (const r of rowsFor(k.campaign_product_id, k.campaign_id, k.influencer_username)) {
+    r.clicks += k.n;
+    r.allClicks += k.all_n;
+  }
   for (const o of orders) {
     const fee = Number(brand ? o.brand_fee : o.influencer_fee);
     const paid = Number(o.paid_fee);

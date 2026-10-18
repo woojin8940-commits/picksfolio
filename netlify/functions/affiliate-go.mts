@@ -12,11 +12,12 @@ import { hashValue, todayKst } from "./_shared/affiliate.mts";
  *
  *   · 판매 중이 아닌 링크(참여 중단 · 캠페인 종료 · 상품 내림)는 기록하지 않고 pf 없이
  *     상품 페이지로만 보낸다. 이미 공유된 링크가 죽은 링크가 되지 않게.
- *   · 봇과 같은 방문자의 30분 안 반복 클릭은 기록은 하되 집계에서 뺀다(counted=false).
+ *   · 봇과 같은 기기(IP + 브라우저)의 30분 안 반복 클릭은 기록은 하되 집계에서 뺀다(counted=false).
+ *     IP 만 보면 통신사 공유 IP 뒤의 다른 사람 클릭까지 반복으로 빠진다.
  *   · 원본 IP·UA 는 저장하지 않는다.
  */
 
-const BOT_UA = /bot|crawler|spider|preview|facebookexternalhit|slurp|bingpreview|kakaotalk-scrap|yeti|daum|headless|python|curl|wget/i;
+const BOT_UA = /bot|crawler|spider|preview|facebookexternalhit|slurp|bingpreview|kakaotalk-scrap|yeti|daumoa|headless|python|curl|wget/i;
 
 const redirect = (location: string) =>
   new Response(null, {
@@ -76,7 +77,7 @@ export default async (req: Request) => {
       INSERT INTO affiliate_clicks (code, campaign_id, campaign_product_id, influencer_username, ip_hash, ua_hash, referrer_host, counted)
       SELECT ${code}, ${row.campaign_id}, ${row.campaign_product_id}, ${row.influencer_username}, ${ipHash}, ${uaHash}, ${referrerHost},
              ${!BOT_UA.test(ua)} AND NOT EXISTS (
-               SELECT 1 FROM affiliate_clicks WHERE ip_hash = ${ipHash} AND code = ${code}
+               SELECT 1 FROM affiliate_clicks WHERE ip_hash = ${ipHash} AND ua_hash = ${uaHash} AND code = ${code}
                  AND counted AND clicked_at > NOW() - INTERVAL '30 minutes'
              )
     `;
