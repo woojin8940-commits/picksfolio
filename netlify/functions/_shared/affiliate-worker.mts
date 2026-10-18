@@ -101,9 +101,9 @@ export async function runClose(db: any, period: string): Promise<void> {
 }
 
 /**
- * 매시간: 아직 카페24 에서 확인되지 않은 최근 주문만 다시 본다. 무통장 입금 주문은 주문 뒤
- * 입금될 때까지 "미검증 · 입금 대기"로 있다. 하루 한 번 동기화만 기다리면 입금 후 최대 하루
- * 동안 성과에 안 잡히므로, 미검증 주문은 여기서 한 시간 간격으로 확인한다.
+ * 10분마다: 아직 카페24 에서 확인되지 않은 최근 주문만 다시 본다. 무통장 입금 주문은 주문 뒤
+ * 입금될 때까지 "미검증 · 입금 대기"로 있다. 예전에는 매시간 돌면서 50분 안에 본 주문을
+ * 건너뛰어, 주문 직후 입금해도 다음다음 회차(최대 2시간 뒤)에야 잡혔다. 이제 10분 간격으로 본다.
  */
 export async function runRecheck(db: any): Promise<void> {
   const started = Date.now();
@@ -111,7 +111,10 @@ export async function runRecheck(db: any): Promise<void> {
     SELECT id, mall_id FROM affiliate_orders
     WHERE verification = 'unverified'
       AND received_at > NOW() - INTERVAL '14 days'
-      AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '50 minutes')
+      -- 입금 대기는 10분마다 본다. 그 밖의 실패(API 오류 등)는 시도 횟수가 쌓이므로 예전처럼 한 시간 간격.
+      AND (last_synced_at IS NULL
+           OR last_synced_at < NOW() - INTERVAL '8 minutes' AND status_reason = 'awaiting_payment'
+           OR last_synced_at < NOW() - INTERVAL '50 minutes')
     ORDER BY last_synced_at NULLS FIRST
     LIMIT ${BATCH}
   `) as any[];

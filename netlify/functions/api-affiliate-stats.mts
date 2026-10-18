@@ -15,14 +15,15 @@ import { jsonError, norm } from "./_shared/affiliate.mts";
  *   확정      구매확정됐지만 아직 지급되지 않은 금액
  *   정산 완료  지급 처리된 지급 내역에 들어간 금액(마감 후 반품 차감 포함)
  *   제외      취소·반품 등으로 빠진 주문의 원래 수수료(참고용)
- * 클릭은 집계 기준(봇 · 같은 기기 30분 안 반복 제외)인 clicks 와, 들어온 그대로의 allClicks 를 함께 준다.
- * 미검증 주문은 어느 칸에도 넣지 않는다. 대신 건수만 waiting 으로 따로 알려 준다
- * (무통장 입금 대기 등 — 주문은 들어왔지만 아직 카페24 에서 결제가 확인되지 않은 주문).
+ * 클릭은 들어온 클릭을 모두 센다(같은 사람이 여러 번 눌러도 누른 만큼).
+ * 주문은 주문이 들어오는 즉시 센다 — 아직 카페24 에서 결제가 확인되지 않은 주문(무통장 입금 대기 등)도
+ * 주문 수에 넣는다. 매출 · 수수료는 결제가 확인된 뒤에 더하고, 취소 · 반품되면 주문 수에서 빠진다.
+ * waiting 은 그중 아직 결제 확인 전인 건수다.
  */
 
 const isDate = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const empty = (key: string, label: string, imageUrl = "") => ({
-  key, label, imageUrl, clicks: 0, allClicks: 0, orders: 0, sales: 0, cancelled: 0, pendingFee: 0, confirmedFee: 0, settledFee: 0, excludedFee: 0,
+  key, label, imageUrl, clicks: 0, orders: 0, sales: 0, cancelled: 0, pendingFee: 0, confirmedFee: 0, settledFee: 0, excludedFee: 0,
 });
 
 export default async (req: Request) => {
@@ -52,8 +53,7 @@ export default async (req: Request) => {
              OR NOT ${brand} AND EXISTS (SELECT 1 FROM affiliate_links l WHERE l.campaign_product_id = cp.id AND l.influencer_username = ${me}))
     ` as unknown as Promise<any[]>,
     db.sql`
-      SELECT k.campaign_product_id, k.campaign_id, k.influencer_username,
-             COUNT(*) FILTER (WHERE k.counted)::int AS n, COUNT(*)::int AS all_n
+      SELECT k.campaign_product_id, k.campaign_id, k.influencer_username, COUNT(*)::int AS n
       FROM affiliate_clicks k JOIN affiliate_campaigns c ON c.id = k.campaign_id
       WHERE k.clicked_at >= ${from} AND k.clicked_at <= ${to}
         AND (${campaignId} = '' OR k.campaign_id = ${campaignId})
@@ -61,14 +61,14 @@ export default async (req: Request) => {
       GROUP BY 1, 2, 3
     ` as unknown as Promise<any[]>,
     db.sql`
-      SELECT o.id, o.campaign_id, o.influencer_username, o.status, o.commission_base, o.gross_base,
+      SELECT o.id, o.campaign_id, o.influencer_username, o.verification, o.status, o.commission_base, o.gross_base,
              o.brand_fee, o.influencer_fee, o.commission_rate, o.platform_rate, l.campaign_product_id,
              COALESCE((SELECT SUM(CASE WHEN ${brand} THEN e.brand_fee ELSE e.influencer_fee END)
                        FROM affiliate_settlement_entries e JOIN affiliate_settlement_lines sl ON sl.id = e.line_id
                        WHERE e.order_id = o.id AND sl.status = 'paid'), 0) AS paid_fee
       FROM affiliate_orders o
       JOIN affiliate_links l ON l.code = o.code
-      WHERE o.verification = 'verified'
+      WHERE o.verification IN ('verified', 'unverified')
         AND COALESCE(o.ordered_at, o.received_at) >= ${from} AND COALESCE(o.ordered_at, o.received_at) <= ${to}
         AND (${campaignId} = '' OR o.campaign_id = ${campaignId})
         AND (${brand} AND o.business_username = ${me} OR NOT ${brand} AND o.influencer_username = ${me})
@@ -102,12 +102,16 @@ export default async (req: Request) => {
 
   for (const k of clicks) for (const r of rowsFor(k.campaign_product_id, k.campaign_id, k.influencer_username)) {
     r.clicks += k.n;
-    r.allClicks += k.all_n;
   }
   for (const o of orders) {
     const fee = Number(brand ? o.brand_fee : o.influencer_fee);
     const paid = Number(o.paid_fee);
     for (const r of rowsFor(o.campaign_product_id, o.campaign_id, o.influencer_username)) {
+      // 결제 확인 전 주문은 주문 수에만 넣는다. 금액은 카페24 에서 확인된 뒤에 더한다.
+      if (o.verification === "unverified") {
+        r.orders += 1;
+        continue;
+      }
       if (o.status === "excluded") {
         r.cancelled += 1;
         const rate = brand ? Number(o.commission_rate) : Number(o.commission_rate) - Number(o.platform_rate);

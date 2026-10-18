@@ -5,7 +5,6 @@ import {
   CREATOR_PAYOUT_NOTICE,
   COMMISSION_STATUS_LABEL,
   waitingText,
-  clickText,
   PARTICIPATION_STATUS_LABEL,
   type AffiliateOrder,
   type AffiliateStats,
@@ -344,7 +343,7 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
     const t = stats?.totals;
     const rows = stats?.byProduct || [];
     const cards: { label: string; value: string; cls: string }[] = [
-      { label: '클릭', value: clickText(t?.clicks || 0, t?.allClicks), cls: 'text-slate-900' },
+      { label: '클릭', value: (t?.clicks || 0).toLocaleString('ko-KR'), cls: 'text-slate-900' },
       { label: '주문', value: (t?.orders || 0).toLocaleString('ko-KR'), cls: 'text-slate-900' },
       { label: '예정 수수료', value: won(t?.pendingFee || 0), cls: 'text-blue-600' },
       { label: '확정 수수료', value: won(t?.confirmedFee || 0), cls: 'text-emerald-600' },
