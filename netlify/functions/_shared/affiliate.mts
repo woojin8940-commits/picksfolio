@@ -352,7 +352,7 @@ export async function syncOrder(
 
   const markAttempt = async (reason: string) => {
     // 무통장 입금 대기는 실패가 아니다 — 입금되거나(확인) 입금 기한이 지나 카페24 가 취소하면
-    // (제외) 저절로 끝난다. 매시간 재확인하므로 시도 횟수에 넣으면 하루 만에 포기하게 된다.
+    // (제외) 저절로 끝난다. 10분마다 재확인하므로 시도 횟수에 넣으면 하루 만에 포기하게 된다.
     const attempts = Number(row.verify_attempts || 0) + (reason === "awaiting_payment" ? 0 : 1);
     const giveUp = row.verification === "unverified" && attempts >= MAX_VERIFY_ATTEMPTS;
     await db.sql`
