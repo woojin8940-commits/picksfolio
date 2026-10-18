@@ -285,6 +285,8 @@ export interface AffiliateStats {
   byInfluencer?: StatRow[];
   /** 브랜드 응답에만: 캠페인별 요약. */
   byCampaign?: StatRow[];
+  /** 들어왔지만 아직 쇼핑몰에서 결제가 확인되지 않은 주문 수(위 집계에는 빠져 있다). */
+  waiting?: { orders: number; awaitingPayment: number };
 }
 
 export interface AffiliateOrder {
@@ -615,6 +617,12 @@ export const COMMISSION_STATUS_LABEL: Record<CommissionStatus, string> = {
   settled: '정산 완료',
   unverified: '미검증',
 };
+
+/** 성과 화면의 "아직 집계 전 주문" 안내 문구. */
+export const waitingText = (w: { orders: number; awaitingPayment: number }) =>
+  w.awaitingPayment > 0
+    ? `확인 대기 주문 ${w.orders.toLocaleString('ko-KR')}건 (무통장 입금 대기 ${w.awaitingPayment.toLocaleString('ko-KR')}건) — 쇼핑몰에서 결제가 확인되면 1시간 안에 위 집계에 더해집니다.`
+    : `확인 대기 주문 ${w.orders.toLocaleString('ko-KR')}건 — 쇼핑몰 주문 API 로 확인되면 위 집계에 더해집니다.`;
 
 export const BATCH_STATUS_LABEL: Record<BatchStatus, string> = {
   draft: '브랜드 확인 대기',

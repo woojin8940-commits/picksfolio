@@ -14,6 +14,7 @@ import {
   monthDay,
   BATCH_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
+  waitingText,
   PARTICIPATION_STATUS_LABEL,
   CHANNEL_LINK_LABEL,
   type AffiliateCampaign,
@@ -578,6 +579,11 @@ const PerformanceTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign })
               </div>
             ))}
           </div>
+          {(stats?.waiting?.orders || 0) > 0 && (
+            <p className="mt-2 text-[11px] font-bold text-amber-700 bg-amber-50 rounded-xl px-3.5 py-2.5 leading-relaxed">
+              {waitingText(stats!.waiting!)}
+            </p>
+          )}
           <p className="text-[10px] text-slate-400 font-medium mt-2 leading-relaxed">
             수수료는 브랜드 부담액입니다. 구매확정 전 주문은 '예정'이고, 취소·반품되면 제외됩니다.
           </p>
@@ -644,7 +650,7 @@ const OrdersTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
         ))}
       </div>
       {loading && orders.length === 0 ? <Spinner /> : error && orders.length === 0 ? <Empty title={error} /> : orders.length === 0 ? (
-        <Empty title="주문 내역이 없습니다" desc="인플루언서 링크로 들어와 결제한 주문이 쇼핑몰에서 확인되면 여기에 표시됩니다." />
+        <Empty title="주문 내역이 없습니다" desc="인플루언서 링크로 들어와 주문완료까지 간 주문이 여기에 표시됩니다. 무통장 입금 주문은 '미검증 · 입금 대기'로 먼저 보입니다." />
       ) : (
         <>
           <div className="divide-y divide-slate-100">
@@ -685,7 +691,7 @@ const OrdersTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
         </>
       )}
       <p className="text-[10px] text-slate-400 font-medium mt-3 leading-relaxed">
-        주문번호는 일부를 가려 보여 줍니다. '미검증'은 쇼핑몰 주문 API 로 아직 확인되지 않은 주문으로, 확인되면 상태가 바뀝니다.
+        주문번호는 일부를 가려 보여 줍니다. '미검증'은 쇼핑몰 주문 API 로 아직 확인되지 않은 주문입니다. 무통장 입금 주문은 입금 전까지 '입금 대기'로 남고, 입금되면 1시간 안에 '예정'으로 바뀝니다.
       </p>
     </div>
   );

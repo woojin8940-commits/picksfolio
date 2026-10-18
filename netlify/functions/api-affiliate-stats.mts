@@ -15,7 +15,8 @@ import { jsonError, norm } from "./_shared/affiliate.mts";
  *   확정      구매확정됐지만 아직 지급되지 않은 금액
  *   정산 완료  지급 처리된 지급 내역에 들어간 금액(마감 후 반품 차감 포함)
  *   제외      취소·반품 등으로 빠진 주문의 원래 수수료(참고용)
- * 미검증 주문은 어느 칸에도 넣지 않는다.
+ * 미검증 주문은 어느 칸에도 넣지 않는다. 대신 건수만 waiting 으로 따로 알려 준다
+ * (무통장 입금 대기 등 — 주문은 들어왔지만 아직 카페24 에서 결제가 확인되지 않은 주문).
  */
 
 const isDate = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
@@ -41,7 +42,7 @@ export default async (req: Request) => {
   }
 
   const brand = scope === "brand";
-  const [products, clicks, orders] = await Promise.all([
+  const [products, clicks, orders, waitingRows] = await Promise.all([
     db.sql`
       SELECT cp.id, cp.name, cp.image_url, c.id AS campaign_id, c.title
       FROM affiliate_campaign_products cp JOIN affiliate_campaigns c ON c.id = cp.campaign_id
@@ -70,6 +71,15 @@ export default async (req: Request) => {
         AND (${campaignId} = '' OR o.campaign_id = ${campaignId})
         AND (${brand} AND o.business_username = ${me} OR NOT ${brand} AND o.influencer_username = ${me})
       LIMIT 20000
+    ` as unknown as Promise<any[]>,
+    db.sql`
+      SELECT COUNT(*)::int AS n,
+             COUNT(*) FILTER (WHERE o.status_reason = 'awaiting_payment')::int AS awaiting_payment
+      FROM affiliate_orders o
+      WHERE o.verification = 'unverified'
+        AND o.received_at >= ${from} AND o.received_at <= ${to}
+        AND (${campaignId} = '' OR o.campaign_id = ${campaignId})
+        AND (${brand} AND o.business_username = ${me} OR NOT ${brand} AND o.influencer_username = ${me})
     ` as unknown as Promise<any[]>,
   ]);
 
@@ -111,8 +121,10 @@ export default async (req: Request) => {
   }
 
   const sortBySales = (m: Map<string, any>) => Array.from(m.values()).sort((a, b) => b.sales - a.sales || b.clicks - a.clicks);
+  const waiting = { orders: Number(waitingRows[0]?.n || 0), awaitingPayment: Number(waitingRows[0]?.awaiting_payment || 0) };
   return Response.json({
     totals,
+    waiting,
     byProduct: sortBySales(byProduct),
     ...(brand ? { byInfluencer: sortBySales(byInfluencer), byCampaign: sortBySales(byCampaign) } : {}),
   });
