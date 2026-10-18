@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Info, RefreshCw, Save } from 'lucide-react';
-import { affiliateService, type PlatformSettings } from '../../services/affiliateService';
+import { affiliateService, won, type BillingSettings, type PlatformSettings } from '../../services/affiliateService';
 
 /**
  * 플랫폼 설정 — 판매 연동형 캠페인의 플랫폼 수수료율과 구매확정 간주 일수.
  *
  * 수수료율은 캠페인 등록 시점 값이 그 캠페인에 고정된다. 그래서 여기서 바꿔도
  * 이미 등록된 캠페인의 인플루언서 몫은 그대로이고, 이후 등록되는 캠페인부터 적용된다.
+ *
+ * 입금 계좌 · 미정산 한도는 판매 수수료 이용약관과 승인된 청구서에 나간다. 브랜드가
+ * 동의할 때의 값이 동의 기록에 함께 남는다.
  */
 
 interface Props {
@@ -20,6 +23,87 @@ const KEY_LABEL: Record<string, string> = {
   auto_confirm_days: '구매확정 간주 일수',
   attributionDays: '귀속 기간(일)',
   attribution_days: '귀속 기간(일)',
+  bankName: '입금 은행',
+  accountNumber: '입금 계좌번호',
+  accountHolder: '입금 예금주',
+  unsettledLimit: '미정산 한도(원)',
+};
+
+const BillingCard: React.FC<{ token: string; billing?: BillingSettings; onSaved: () => void }> = ({ token, billing, onSaved }) => {
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountHolder, setAccountHolder] = useState('');
+  const [limit, setLimit] = useState('0');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setBankName(billing?.bankName || '');
+    setAccountNumber(billing?.accountNumber || '');
+    setAccountHolder(billing?.accountHolder || '');
+    setLimit(String(billing?.unsettledLimit ?? 0));
+  }, [billing?.bankName, billing?.accountNumber, billing?.accountHolder, billing?.unsettledLimit]);
+
+  const limitNum = Number(limit);
+  const valid = bankName.trim() && /^[\d-]{6,40}$/.test(accountNumber.trim()) && accountHolder.trim() && Number.isInteger(limitNum) && limitNum >= 0;
+  const patch: Partial<BillingSettings> = {};
+  if (bankName.trim() !== (billing?.bankName || '')) patch.bankName = bankName.trim();
+  if (accountNumber.trim() !== (billing?.accountNumber || '')) patch.accountNumber = accountNumber.trim();
+  if (accountHolder.trim() !== (billing?.accountHolder || '')) patch.accountHolder = accountHolder.trim();
+  if (limitNum !== (billing?.unsettledLimit ?? 0)) patch.unsettledLimit = limitNum;
+  const dirty = Object.keys(patch).length > 0;
+
+  const save = async () => {
+    if (!valid || !dirty) return;
+    if (!confirm('입금 계좌 · 약관 조건을 저장합니다.\n이후 청구서와 이용약관에 이 값이 안내됩니다. 계속할까요?')) return;
+    setSaving(true);
+    setError('');
+    const res = await affiliateService.updatePlatformSettings(token, patch);
+    setSaving(false);
+    if (res.error) { setError(res.error); return; }
+    onSaved();
+  };
+
+  const input = 'mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10';
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="p-4 border-b border-slate-100">
+        <h3 className="font-black text-slate-900">브랜드 입금 계좌 · 약관 조건</h3>
+        <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+          브랜드가 승인한 월 청구서와 판매 수수료 이용약관에 표시됩니다. 입금 기한은 정산월 다음 달 15일로 고정입니다.
+        </p>
+      </div>
+      <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+        <label className="block">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">은행</span>
+          <input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="예: 국민은행" className={input} />
+        </label>
+        <label className="block">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">계좌번호</span>
+          <input value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="숫자와 -" className={input} />
+        </label>
+        <label className="block">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">예금주</span>
+          <input value={accountHolder} onChange={e => setAccountHolder(e.target.value)} placeholder="예: 주식회사 픽스폴리오" className={input} />
+        </label>
+        <label className="block">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">미정산 한도(원)</span>
+          <input type="number" min={0} step={10000} value={limit} onChange={e => setLimit(e.target.value)} className={input} />
+          <span className="block text-[10px] font-bold text-slate-400 mt-1">{limitNum > 0 ? won(limitNum) : '0이면 약관에 "별도 안내"로 표시됩니다'}</span>
+        </label>
+      </div>
+      <div className="px-4 pb-4 flex items-center justify-end gap-2">
+        {error && <span className="text-[11px] font-bold text-red-500 mr-auto">{error}</span>}
+        <button
+          onClick={save}
+          disabled={!dirty || !valid || saving}
+          className="flex items-center gap-1 px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-xs font-black disabled:opacity-40"
+        >
+          <Save className="w-3.5 h-3.5" /> {saving ? '저장 중...' : '저장'}
+        </button>
+      </div>
+    </div>
+  );
 };
 
 const fmtDateTime = (s?: string | null) => (s ? new Date(s).toLocaleString('ko-KR') : '-');
@@ -179,6 +263,8 @@ const AdminPlatformSettings: React.FC<Props> = ({ token }) => {
           </button>
         </div>
       </div>
+
+      <BillingCard token={token} billing={settings?.billing} onSaved={load} />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100">

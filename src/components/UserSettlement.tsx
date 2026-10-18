@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
 import { formatKRW } from '../utils/formatters';
 import { apiService, authHeaders } from '../services/apiService';
+import { creatorPayoutLabel } from '../services/affiliateService';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface UserSettlementProps {
@@ -315,6 +316,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
               <p className="text-slate-400 text-[10px] font-bold mt-0.5 truncate">
                 {s.company_name}{a?.period ? ` · ${a.period}` : ''}
                 {done && ` · 완료일: ${formatDate(s.completed_at || s.updated_at || '')}`}
+                {!done && a?.period && ` · 지급 예정 ${creatorPayoutLabel(a.period)}`}
               </p>
             </div>
           </div>

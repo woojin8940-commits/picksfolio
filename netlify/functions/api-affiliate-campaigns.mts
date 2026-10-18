@@ -13,6 +13,7 @@ import {
   todayKst,
   withTransaction,
 } from "./_shared/affiliate.mts";
+import { termsGate } from "./_shared/affiliate-terms.mts";
 
 /**
  * 판매 연동형 캠페인.
@@ -26,6 +27,8 @@ import {
  *                                                 운영자: approve · reject
  *
  * 수수료율 노출 범위: 브랜드·운영자는 총 수수료율과 플랫폼율을, 인플루언서는 자기 몫만 본다.
+ * 심사 요청(등록 · 재심사)은 브랜드가 판매 수수료 이용약관(지금 버전)에 동의해 있어야 한다.
+ * 약관 버전이 바뀌면 다음 등록 때 다시 동의받는다 — 이미 진행 중인 캠페인은 그대로다.
  * 플랫폼 수수료율은 등록(또는 재심사 요청) 시점의 설정값으로 고정된다. 승인된 뒤에는
  * 수수료율·상품을 바꿀 수 없다 — 이미 링크를 받은 인플루언서의 조건이 바뀌기 때문이다.
  */
@@ -216,6 +219,8 @@ export default async (req: Request) => {
   if (req.method === "POST") {
     const caller = await requireSignedInUser(req);
     if (!caller.ok) return caller.response;
+    const blocked = await termsGate(db, norm(caller.username));
+    if (blocked) return blocked;
     const body = await req.json().catch(() => ({}));
     const settings = await loadSettings(db);
     const checked = await validateInput(db, caller.username, body, settings.platformRate);
@@ -289,6 +294,8 @@ export default async (req: Request) => {
       if (!["rejected", "pending_approval"].includes(current.status)) {
         return jsonError("승인된 캠페인의 조건은 바꿀 수 없습니다. 판매를 종료하고 새로 등록해 주세요.", 409);
       }
+      const blocked = await termsGate(db, norm(caller.username));
+      if (blocked) return blocked;
       // 플랫폼 수수료율은 처음 등록할 때의 값을 그대로 둔다(재심사 요청은 새 등록이 아니다).
       const fixedPlatformRate = Number(current.platform_rate);
       const checked = await validateInput(db, caller.username, { ...body, mallId: body?.mallId || current.mall_id }, fixedPlatformRate);

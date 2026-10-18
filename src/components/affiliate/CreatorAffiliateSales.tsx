@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   affiliateService,
   won,
+  CREATOR_PAYOUT_NOTICE,
   COMMISSION_STATUS_LABEL,
   PARTICIPATION_STATUS_LABEL,
   type AffiliateOrder,
@@ -407,7 +408,7 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
         </div>
         <p className="text-[11px] text-slate-400 font-medium leading-relaxed px-1">
           예정은 주문이 들어왔지만 아직 구매가 확정되지 않은 수수료예요. 구매확정(또는 배송완료 후 일정 기간)이 지나면
-          확정으로 바뀌고, 취소 · 반품된 주문은 제외돼요. 확정 수수료는 매달 모아 다음 달에 정산합니다.
+          확정으로 바뀌고, 취소 · 반품된 주문은 제외돼요. 확정 수수료는 매달 모아 다음 달 말일에 지급합니다.
         </p>
       </div>
     );
@@ -481,7 +482,7 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
         <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
           <p className="text-xs font-black text-blue-800 mb-1">판매 수수료는 이렇게 지급돼요</p>
           <ul className="text-[11px] text-blue-700 font-bold leading-relaxed list-disc pl-4 space-y-0.5">
-            <li>매달 확정된 수수료를 모아 다음 달에 정산합니다.</li>
+            <li>매달 확정된 수수료를 모아 다음 달 말일에 지급합니다.</li>
             <li>사업소득으로 원천징수 3.3%(소득세 3% + 지방소득세 0.3%)를 뗀 금액이 입금돼요.</li>
             <li>원천징수 신고에 성명과 주민등록번호가 필요해요. 계좌 예금주는 입력한 성명과 같아야 해요 — 다르면 은행에서 반송됩니다.</li>
             <li>주민등록번호는 암호화해 보관하고, 지급 · 신고 때만 픽스폴리오 담당자가 확인합니다.</li>
@@ -563,6 +564,13 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
 
   return (
     <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3">
+        <p className="text-xs font-black text-blue-800">판매 수수료 지급일: 다음 달 말일</p>
+        <p className="text-[11px] font-bold text-blue-700 leading-relaxed mt-0.5 break-keep">
+          {CREATOR_PAYOUT_NOTICE} 예를 들어 3월에 확정된 수수료는 4월 말일에 원천징수 3.3%를 뗀 금액으로 입금돼요.
+        </p>
+      </div>
+
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
         {SECTIONS.map(s => (
           <button
