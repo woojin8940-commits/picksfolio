@@ -461,6 +461,7 @@ export class ScriptSrcError extends Error {
 /**
  * 스크립트 주소가 https 절대 주소이고 밖에서 실제로 JS 로 열리는지 본다. 문제가 없으면 "".
  * 파일이 빠진 배포에서는 SPA catch-all 이 index.html 을 200 으로 돌려주므로 형식까지 본다.
+ * 카페24는 src 응답에 `Access-Control-Allow-Origin: *` 가 없으면 422 로 거부하므로 그 헤더도 본다.
  */
 export async function checkScriptSrc(src: string): Promise<string> {
   let url: URL;
@@ -473,10 +474,14 @@ export async function checkScriptSrc(src: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal, headers: { Origin: "https://cafe24.com" } });
     if (!res.ok) return `주소가 HTTP ${res.status} 를 돌려줍니다`;
     const type = String(res.headers.get("content-type") || "");
     if (!/javascript|ecmascript/i.test(type)) return `JS 파일이 아닌 응답입니다(${type.split(";")[0] || "형식 없음"})`;
+    const allowOrigin = String(res.headers.get("access-control-allow-origin") || "").trim();
+    if (allowOrigin !== "*") {
+      return `응답에 CORS 헤더(Access-Control-Allow-Origin: *)가 없습니다(${allowOrigin ? `현재 ${allowOrigin}` : "헤더 없음"})`;
+    }
     return "";
   } catch {
     return "주소에 연결하지 못했습니다";
@@ -535,6 +540,9 @@ export function scriptTagFailure(e: unknown, mallId: string, op: "install" | "re
     return `[권한 부족] 앱 권한(mall.write_application)이 없어 처리하지 못했습니다. 재연동하거나 ${manual}${detail}`;
   }
   if (e.status === 400 || e.status === 422) {
+    if (/cors|access-control-allow-origin/.test(text)) {
+      return `[스크립트 CORS 오류] 카페24가 스크립트 주소의 CORS 헤더(Access-Control-Allow-Origin: *)를 확인하지 못했습니다. 잠시 후 다시 시도하거나 ${manual}${detail}`;
+    }
     if (/src|url|uri|domain|script/.test(text)) {
       return `[스크립트 주소 오류] 카페24가 스크립트 주소를 받아들이지 않았습니다. ${manual}${detail}`;
     }
