@@ -1097,6 +1097,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
       {isAffiliateFilter ? (
         <AffiliateBrowse
+          userName={userName}
           category={activeCategory}
           q={searchTerm}
           categoryLabels={categoriesMap}

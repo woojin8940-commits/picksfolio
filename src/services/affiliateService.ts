@@ -154,6 +154,11 @@ export interface Participation {
   campaignId: string;
   influencerUsername: string;
   message: string;
+  /** 신청할 때 적은 성함 · 연락처(브랜드 · 본인 응답). */
+  applicantName?: string;
+  applicantContact?: string;
+  /** 신청할 때 남긴 틱톡 · 유튜브 등 다른 채널 링크. */
+  channelLinks?: ChannelLink[];
   status: ParticipationStatus;
   rejectReason: string;
   decidedAt: string | null;
@@ -162,8 +167,39 @@ export interface Participation {
   campaign?: AffiliateCampaign;
   links?: AffiliateLink[];
   /** 브랜드 신청자 목록 응답에만: 채널 요약. */
-  profile?: { displayName: string; profileImage: string; followers: number; instagramUrl: string; category: string };
+  profile?: {
+    displayName: string;
+    profileImage: string;
+    followers: number;
+    instagramHandle?: string;
+    instagramUrl: string;
+    category: string;
+  };
 }
+
+/** 판매 캠페인 신청 자격. 브랜드 매칭받기 등록 + 인스타 연동이 모두 있어야 한다. */
+export interface AffiliateEligibility {
+  registered: boolean;
+  instagramConnected: boolean;
+  eligible: boolean;
+  /** 매칭받기 등록서의 성함 · 연락처. 신청서 기본값으로 쓴다. */
+  name: string;
+  contact: string;
+  links: ChannelLink[];
+  instagram: { handle: string; url: string; profileImage: string; followers: number } | null;
+}
+
+export type ChannelLinkType = 'tiktok' | 'youtube' | 'other';
+export interface ChannelLink {
+  type: ChannelLinkType;
+  url: string;
+}
+
+export const CHANNEL_LINK_LABEL: Record<ChannelLinkType, string> = {
+  tiktok: '틱톡',
+  youtube: '유튜브',
+  other: '기타',
+};
 
 export interface StatRow {
   key: string;
@@ -389,8 +425,12 @@ export const affiliateService = {
   campaignParticipants(campaignId: string) {
     return call<{ participations: Participation[] }>('GET', `/api/affiliate-participations${qs({ scope: 'brand', campaignId })}`);
   },
-  apply(campaignId: string, message = '') {
-    return call<{ participation: Participation }>('POST', '/api/affiliate-participations', { campaignId, message });
+  /** 인플루언서: 신청 자격과 신청서 기본값(성함 · 연락처 · 연동한 인스타 프로필). */
+  eligibility() {
+    return call<AffiliateEligibility>('GET', '/api/affiliate-participations?scope=eligibility');
+  },
+  apply(campaignId: string, applicant: { message?: string; name: string; contact: string; links?: ChannelLink[] }) {
+    return call<{ participation: Participation }>('POST', '/api/affiliate-participations', { campaignId, ...applicant });
   },
   /** 브랜드: approve / reject / revoke(참여 중단). */
   decideParticipation(id: string, action: 'approve' | 'reject' | 'revoke', reason = '') {

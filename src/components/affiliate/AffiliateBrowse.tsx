@@ -3,13 +3,18 @@ import {
   affiliateService,
   won,
   PARTICIPATION_STATUS_LABEL,
+  CHANNEL_LINK_LABEL,
+  type ChannelLinkType,
   type AffiliateCampaign,
+  type AffiliateEligibility,
   type AffiliateProduct,
   type ParticipationStatus,
 } from '../../services/affiliateService';
 import { useCloseOnBack } from '../../hooks/useCloseOnBack';
 import Toast from '../Toast';
 import { externalLinkProps } from '../../utils/externalLink';
+import { digitsOnly, formatContact, formatCountKo } from '../../utils/formatters';
+import CollabMatchRegister from '../CollabMatchRegister';
 
 /**
  * 캠페인 찾기 › 어필리에이트.
@@ -25,9 +30,15 @@ import { externalLinkProps } from '../../utils/externalLink';
  * 참여 방식은 둘이다. 승인제(approval)는 브랜드가 신청을 보고 승인해야 링크가 나오고,
  * 즉시 참여(open)는 신청과 동시에 링크가 나온다. 링크는 협업 캠페인 › 어필리에이트
  * 탭에서 확인한다 — 여기는 찾고 신청하는 자리만 한다.
+ *
+ * 신청은 브랜드 매칭받기에 등록한(인스타그램을 연동한) 인플루언서만 할 수 있다.
+ * 신청하면 연동한 인스타 프로필과 신청서에 적은 성함 · 연락처가 브랜드에게 간다.
+ * 등록하지 않은 사람은 신청 시트 안에서 바로 매칭받기 등록을 시작할 수 있다.
  */
 
 interface AffiliateBrowseProps {
+  /** 로그인한 인플루언서 계정. 신청 시트의 매칭받기 등록에 쓴다. */
+  userName: string;
   /** 캠페인 찾기 화면의 카테고리 칩 값. 빈 문자열이면 전체. */
   category: string;
   /** 검색어(디바운스된 값). */
@@ -60,7 +71,7 @@ const formatDate = (value: string) => {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ category, q, categoryLabels, onCount, onDetailChange }) => {
+const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ userName, category, q, categoryLabels, onCount, onDetailChange }) => {
   const [campaigns, setCampaigns] = useState<AffiliateCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -72,6 +83,14 @@ const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ category, q, category
   const detailRef = useRef<HTMLDivElement>(null);
   const [message, setMessage] = useState('');
   const [applying, setApplying] = useState(false);
+  /** 신청 자격. 시트를 열 때 읽는다(null = 읽는 중). */
+  const [eligibility, setEligibility] = useState<AffiliateEligibility | null>(null);
+  const [eligibilityError, setEligibilityError] = useState('');
+  const [applicantName, setApplicantName] = useState('');
+  const [applicantContact, setApplicantContact] = useState('');
+  const [consent, setConsent] = useState(false);
+  /** 인스타그램 말고 다른 채널 링크(선택). */
+  const [channelLinks, setChannelLinks] = useState<Record<ChannelLinkType, string>>({ tiktok: '', youtube: '', other: '' });
   /** 방금 신청한 결과 안내. 승인제/즉시 참여에 따라 문장이 다르다. */
   const [applyResult, setApplyResult] = useState<'pending' | 'approved' | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -101,6 +120,28 @@ const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ category, q, category
 
   useEffect(() => { void load(); }, [load]);
 
+  const loadEligibility = useCallback(async () => {
+    setEligibilityError('');
+    const res = await affiliateService.eligibility();
+    if (res.error) {
+      setEligibilityError(res.error);
+      return;
+    }
+    setEligibility(res);
+    // 매칭받기 등록서에 적어 둔 값으로 채운다. 이미 고쳐 적은 값은 덮지 않는다.
+    setApplicantName(prev => prev || res.name || '');
+    setApplicantContact(prev => prev || formatContact(res.contact || ''));
+    setChannelLinks(prev => {
+      const next = { ...prev };
+      for (const l of res.links || []) if (!next[l.type]) next[l.type] = l.url;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (showApplySheet) void loadEligibility();
+  }, [showApplySheet, loadEligibility]);
+
   /** 캠페인마다 활성 상품을 펼친 카드 목록. */
   const cards = useMemo<ProductCard[]>(
     () =>
@@ -124,10 +165,32 @@ const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ category, q, category
     if (selectedId) detailRef.current?.scrollIntoView({ block: 'start' });
   }, [selectedId]);
 
+  const contactDigits = digitsOnly(applicantContact);
+  const formReady = !!applicantName.trim() && contactDigits.length >= 9 && consent;
+
   const handleApply = async () => {
-    if (!selected) return;
+    if (!selected || !eligibility?.eligible) return;
+    if (!applicantName.trim()) {
+      setToast({ message: '성함을 입력해 주세요.', type: 'error' });
+      return;
+    }
+    if (contactDigits.length < 9) {
+      setToast({ message: '연락처를 정확히 입력해 주세요.', type: 'error' });
+      return;
+    }
+    if (!consent) {
+      setToast({ message: '브랜드에게 정보를 전달하는 데 동의해 주세요.', type: 'error' });
+      return;
+    }
     setApplying(true);
-    const res = await affiliateService.apply(selected.id, message.trim());
+    const res = await affiliateService.apply(selected.id, {
+      message: message.trim(),
+      name: applicantName.trim(),
+      contact: applicantContact.trim(),
+      links: (Object.keys(channelLinks) as ChannelLinkType[])
+        .map(type => ({ type, url: channelLinks[type].trim() }))
+        .filter(l => l.url),
+    });
     setApplying(false);
     if (res.error || !res.participation) {
       setToast({ message: res.error || '참여 신청에 실패했습니다.', type: 'error' });
@@ -140,6 +203,7 @@ const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ category, q, category
     setApplyResult(p.status === 'approved' ? 'approved' : 'pending');
     setShowApplySheet(false);
     setMessage('');
+    setConsent(false);
   };
 
   // ------------------------------------------------------------------ 목록
@@ -551,34 +615,162 @@ const AffiliateBrowse: React.FC<AffiliateBrowseProps> = ({ category, q, category
                   </button>
                 </div>
               </div>
-              <div className="modal-body px-5 py-4 space-y-2">
-                <textarea
-                  value={message}
-                  onChange={e => setMessage(e.target.value.slice(0, 500))}
-                  rows={4}
-                  placeholder={selected.joinMode === 'open' ? '브랜드에게 남길 말 (선택)' : '브랜드에게 남길 말 (선택) — 채널 소개나 판매 계획을 적으면 승인에 도움이 돼요'}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none"
-                />
-                <p className="text-[11px] text-slate-400 font-bold">
-                  {selected.joinMode === 'open' ? '즉시 참여 캠페인이라 신청과 동시에 판매 링크가 생겨요.' : '승인제 캠페인이에요. 브랜드가 승인하면 판매 링크가 생겨요.'}
-                </p>
-              </div>
+              {!eligibility ? (
+                <div className="modal-body px-5 py-10 text-center">
+                  {eligibilityError ? (
+                    <>
+                      <p className="text-sm font-bold text-slate-500">{eligibilityError}</p>
+                      <button type="button" onClick={() => void loadEligibility()} className="mt-3 text-xs font-black text-blue-600 hover:underline">
+                        다시 시도
+                      </button>
+                    </>
+                  ) : (
+                    <div className="w-7 h-7 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" />
+                  )}
+                </div>
+              ) : !eligibility.eligible ? (
+                /* 매칭받기 미등록 · 인스타 연동 해제. 여기서 바로 등록(또는 재연동)을 시작한다. */
+                <div className="modal-body px-5 py-5 space-y-3">
+                  <div className="rounded-2xl bg-violet-50 border border-violet-100 px-4 py-4">
+                    <p className="text-sm font-black text-violet-800">
+                      {eligibility.registered ? '인스타그램을 다시 연동해 주세요' : '브랜드 매칭받기에 등록해야 참여할 수 있어요'}
+                    </p>
+                    <p className="text-xs font-bold text-violet-600 mt-1.5 leading-relaxed break-keep">
+                      {eligibility.registered
+                        ? '판매 캠페인은 연동한 인스타그램 프로필이 브랜드에게 전달돼요. 브랜드 매칭받기에서 인스타그램을 다시 연동한 뒤 신청해 주세요.'
+                        : '판매 캠페인에 신청하면 연동한 인스타그램 프로필(아이디 · 팔로워)이 브랜드에게 전달돼요. 브랜드 매칭받기에 등록하고 인스타그램을 연동하면 바로 신청할 수 있어요.'}
+                    </p>
+                  </div>
+                  <CollabMatchRegister
+                    variant="influencer"
+                    applicantUsername={userName}
+                    onRegisteredChange={() => void loadEligibility()}
+                  />
+                </div>
+              ) : (
+                <div className="modal-body px-5 py-4 space-y-4">
+                  {/* 브랜드에게 전달되는 인스타 프로필 */}
+                  {eligibility.instagram && (
+                    <div>
+                      <p className="text-[11px] font-black text-slate-500 mb-1.5">브랜드에게 전달되는 인스타그램 프로필</p>
+                      <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3.5 py-3">
+                        <div className="w-11 h-11 rounded-full bg-slate-200 overflow-hidden flex-shrink-0">
+                          {eligibility.instagram.profileImage && (
+                            <img src={eligibility.instagram.profileImage} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-black text-slate-900 truncate">
+                            @{eligibility.instagram.handle || userName}
+                          </p>
+                          <p className="text-[11px] font-bold text-slate-400 mt-0.5">
+                            팔로워 {formatCountKo(eligibility.instagram.followers)}
+                          </p>
+                        </div>
+                        {eligibility.instagram.url && (
+                          <a href={eligibility.instagram.url} {...externalLinkProps} className="text-[11px] font-black text-blue-600 hover:underline flex-shrink-0">
+                            보기
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label className="block">
+                      <span className="text-[11px] font-black text-slate-500">성함 <span className="text-rose-500">*</span></span>
+                      <input
+                        type="text"
+                        value={applicantName}
+                        onChange={e => setApplicantName(e.target.value.slice(0, 50))}
+                        placeholder="홍길동"
+                        autoComplete="name"
+                        className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-black text-slate-500">연락처 <span className="text-rose-500">*</span></span>
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        value={applicantContact}
+                        onChange={e => setApplicantContact(formatContact(e.target.value).slice(0, 20))}
+                        placeholder="010-0000-0000"
+                        autoComplete="tel"
+                        className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <span className="text-[11px] font-black text-slate-500">다른 채널 링크 (선택)</span>
+                    <div className="mt-1 space-y-1.5">
+                      {(['tiktok', 'youtube', 'other'] as ChannelLinkType[]).map(type => (
+                        <div key={type} className="flex items-center gap-2">
+                          <span className="w-12 flex-shrink-0 text-[11px] font-black text-slate-500">{CHANNEL_LINK_LABEL[type]}</span>
+                          <input
+                            type="url"
+                            inputMode="url"
+                            value={channelLinks[type]}
+                            onChange={e => setChannelLinks(prev => ({ ...prev, [type]: e.target.value.slice(0, 300) }))}
+                            placeholder={
+                              type === 'tiktok' ? 'https://www.tiktok.com/@아이디'
+                                : type === 'youtube' ? 'https://www.youtube.com/@채널'
+                                : '블로그 · 스레드 등 주소'
+                            }
+                            className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[11px] font-black text-slate-500">브랜드에게 남길 말 (선택)</span>
+                    <textarea
+                      value={message}
+                      onChange={e => setMessage(e.target.value.slice(0, 500))}
+                      rows={3}
+                      placeholder={selected.joinMode === 'open' ? '브랜드에게 남길 말' : '채널 소개나 판매 계획을 적으면 승인에 도움이 돼요'}
+                      className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none"
+                    />
+                  </div>
+
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={e => setConsent(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300 flex-shrink-0"
+                    />
+                    <span className="text-[11px] font-bold text-slate-500 leading-relaxed break-keep">
+                      이 캠페인의 브랜드에게 인스타그램 프로필 · 채널 링크와 성함 · 연락처를 전달하는 데 동의합니다. (참여 심사 · 샘플 발송 · 판매 안내 목적)
+                    </span>
+                  </label>
+
+                  <p className="text-[11px] text-slate-400 font-bold">
+                    {selected.joinMode === 'open' ? '즉시 참여 캠페인이라 신청과 동시에 판매 링크가 생겨요.' : '승인제 캠페인이에요. 브랜드가 승인하면 판매 링크가 생겨요.'}
+                  </p>
+                </div>
+              )}
               <div className="shrink-0 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] border-t border-slate-100 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setShowApplySheet(false)}
                   className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 transition-colors flex-shrink-0"
                 >
-                  취소
+                  {eligibility && !eligibility.eligible ? '닫기' : '취소'}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleApply}
-                  disabled={applying}
-                  className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-60"
-                >
-                  {applying ? '신청하는 중...' : selected.joinMode === 'open' ? '참여하기 · 바로 링크 받기' : '참여 신청하기'}
-                </button>
+                {eligibility?.eligible && (
+                  <button
+                    type="button"
+                    onClick={handleApply}
+                    disabled={applying || !formReady}
+                    className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-60"
+                  >
+                    {applying ? '신청하는 중...' : selected.joinMode === 'open' ? '참여하기 · 바로 링크 받기' : '참여 신청하기'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
