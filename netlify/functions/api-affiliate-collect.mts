@@ -1,5 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { connectionForMall } from "./_shared/cafe24-api.mts";
 import { maskOrderNo, newId, norm, syncOrder } from "./_shared/affiliate.mts";
@@ -17,6 +17,12 @@ import { maskOrderNo, newId, norm, syncOrder } from "./_shared/affiliate.mts";
  *      매일 동기화에서 다시 시도한다.
  *   3) 스크립트 수신 시각을 남겨 브랜드 연동 화면의 "최근 24시간 수신" 에 쓴다.
  *
+ * 무통장 입금 주문은 주문완료 시점에 아직 결제 전이다. 장부에는 바로 "미검증 · 입금 대기"로
+ * 들어가 주문 내역에 보이고, 입금되면 매시간 재확인(scheduled-affiliate-recheck)에서 확인된다.
+ *
+ * 카페24 조회는 응답을 보낸 뒤(waitUntil) 한다. 조회가 늦어도 수신 기록은 먼저 남는다.
+ * 받지 않은 신호는 이유를 로그에 남긴다 — 주문이 안 잡혔을 때 어디서 멈췄는지 보려고.
+ *
  * 브라우저가 sendBeacon 으로 보내므로 본문은 text/plain 일 수 있다(프리플라이트 회피).
  * 응답은 늘 짧게 — 고객 화면을 붙잡지 않는다. 로그에 주문번호 전체를 남기지 않는다.
  */
@@ -29,25 +35,30 @@ const CORS = {
 };
 const done = (status = 204) => new Response(null, { status, headers: CORS });
 
-export default async (req: Request) => {
+const skip = (reason: string, status: number, detail = "") => {
+  console.warn(`[affiliate-collect] skipped: ${reason}${detail ? ` (${detail})` : ""}`);
+  return done(status);
+};
+
+export default async (req: Request, context: Context) => {
   if (req.method === "OPTIONS") return done(204);
   if (req.method !== "POST") return done(405);
 
   const limited = await checkRateLimit({ bucket: "affiliate-collect", key: clientIp(req), limit: 30, windowSeconds: 60 });
-  if (!limited.ok) return done(429);
+  if (!limited.ok) return skip("rate_limited", 429);
 
   let body: any = {};
   try {
     body = JSON.parse((await req.text()).slice(0, 2000));
   } catch {
-    return done(400);
+    return skip("bad_body", 400);
   }
   const mallId = String(body?.m || "").trim().toLowerCase();
   const orderId = String(body?.o || "").trim();
   const code = String(body?.c || "").trim().toLowerCase();
   const reported = Math.max(0, Math.round(Number(body?.a || 0))) || 0;
   if (!/^[a-z0-9_-]{2,40}$/.test(mallId) || !/^[A-Za-z0-9-]{4,40}$/.test(orderId) || !/^[a-z0-9]{6,20}$/.test(code)) {
-    return done(400);
+    return skip("bad_fields", 400, `mall=${mallId ? "ok" : "empty"} order=${/^[A-Za-z0-9-]{4,40}$/.test(orderId) ? "ok" : `len${orderId.length}`} code=${/^[a-z0-9]{6,20}$/.test(code) ? "ok" : "bad"}`);
   }
 
   const db = getDatabase();
@@ -57,11 +68,15 @@ export default async (req: Request) => {
       FROM affiliate_links l JOIN affiliate_campaigns c ON c.id = l.campaign_id
       WHERE l.code = ${code} AND c.deleted_at IS NULL
     `) as any[])[0];
-    if (!link || String(link.mall_id).toLowerCase() !== mallId) return done(202);
+    if (!link) return skip("unknown_code", 202, `mall ${mallId}`);
+    if (String(link.mall_id).toLowerCase() !== mallId) return skip("mall_mismatch", 202, `script ${mallId} · campaign ${link.mall_id}`);
 
     // 몰이 실제로 그 브랜드에 연동돼 있어야 한다. 연결 정보가 없으면 받지 않는다.
     const conn = await connectionForMall(db, mallId);
-    if (!conn || (conn.businessUsername && conn.businessUsername !== norm(link.business_username))) return done(202);
+    if (!conn) return skip("mall_not_connected", 202, `mall ${mallId}`);
+    if (conn.businessUsername && conn.businessUsername !== norm(link.business_username)) {
+      return skip("mall_owner_mismatch", 202, `mall ${mallId}`);
+    }
 
     await db.sql`
       UPDATE affiliate_shop_scripts SET last_received_at = NOW(), updated_at = NOW()
@@ -76,11 +91,18 @@ export default async (req: Request) => {
       ON CONFLICT (shop_type, mall_id, shop_order_id) DO NOTHING
       RETURNING id
     `) as any[];
-    if (!inserted[0]) return done(200); // 같은 주문번호 — 이미 받았다.
+    if (!inserted[0]) return skip("duplicate_order", 200, `mall ${mallId} order ${maskOrderNo(orderId)}`);
+    console.log(`[affiliate-collect] received mall ${mallId} order ${maskOrderNo(orderId)}`);
 
-    const result = await syncOrder(db, inserted[0].id, { conn });
-    console.log(
-      `[affiliate-collect] mall ${mallId} order ${maskOrderNo(orderId)} → ${result.verification}/${result.status} (${result.reason})`,
+    const orderRowId = inserted[0].id;
+    context.waitUntil(
+      syncOrder(db, orderRowId, { conn })
+        .then((result) =>
+          console.log(
+            `[affiliate-collect] mall ${mallId} order ${maskOrderNo(orderId)} → ${result.verification}/${result.status} (${result.reason})`,
+          ),
+        )
+        .catch((e) => console.error("[affiliate-collect] verify failed", e instanceof Error ? e.message : "")),
     );
     return done(202);
   } catch (e) {

@@ -10,7 +10,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { connectionForMall } from "./cafe24-api.mts";
 import { closePeriod, isPeriod, loadSettings, previousPeriod, syncOrder, todayKst } from "./affiliate.mts";
 
-export type AffiliateTask = { task: "sync" } | { task: "close"; period: string };
+export type AffiliateTask = { task: "sync" } | { task: "recheck" } | { task: "close"; period: string };
 
 const secret = () =>
   process.env.AFFILIATE_WORKER_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PORTONE_V2_API_SECRET || "";
@@ -98,4 +98,43 @@ export async function runClose(db: any, period: string): Promise<void> {
   const p = isPeriod(period) ? period : previousPeriod();
   const result = await closePeriod(db, p);
   console.log(`[affiliate-close] ${p} 마감: 새 청구서 ${result.batches}건, 반영 주문 ${result.entries}건`);
+}
+
+/**
+ * 매시간: 아직 카페24 에서 확인되지 않은 최근 주문만 다시 본다. 무통장 입금 주문은 주문 뒤
+ * 입금될 때까지 "미검증 · 입금 대기"로 있다. 하루 한 번 동기화만 기다리면 입금 후 최대 하루
+ * 동안 성과에 안 잡히므로, 미검증 주문은 여기서 한 시간 간격으로 확인한다.
+ */
+export async function runRecheck(db: any): Promise<void> {
+  const started = Date.now();
+  const orders = (await db.sql`
+    SELECT id, mall_id FROM affiliate_orders
+    WHERE verification = 'unverified'
+      AND received_at > NOW() - INTERVAL '14 days'
+      AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '50 minutes')
+    ORDER BY last_synced_at NULLS FIRST
+    LIMIT ${BATCH}
+  `) as any[];
+  if (orders.length === 0) return;
+
+  const settings = await loadSettings(db);
+  const byMall = new Map<string, string[]>();
+  for (const o of orders) byMall.set(o.mall_id, [...(byMall.get(o.mall_id) || []), o.id]);
+
+  const tally: Record<string, number> = {};
+  for (const [mall, ids] of byMall) {
+    const conn = await connectionForMall(db, mall);
+    for (const id of ids) {
+      if (Date.now() - started > TIME_BUDGET_MS) break;
+      try {
+        const r = await syncOrder(db, id, { settings, conn });
+        const key = `${r.verification}/${r.status}${r.reason === "awaiting_payment" ? "/awaiting_payment" : ""}`;
+        tally[key] = (tally[key] || 0) + 1;
+      } catch {
+        tally.error = (tally.error || 0) + 1;
+      }
+      await new Promise((r) => setTimeout(r, 550));
+    }
+  }
+  console.log(`[affiliate-recheck] ${orders.length}건 조회`, JSON.stringify(tally));
 }

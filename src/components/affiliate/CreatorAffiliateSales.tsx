@@ -4,6 +4,7 @@ import {
   won,
   CREATOR_PAYOUT_NOTICE,
   COMMISSION_STATUS_LABEL,
+  waitingText,
   PARTICIPATION_STATUS_LABEL,
   type AffiliateOrder,
   type AffiliateStats,
@@ -134,7 +135,7 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
     setStatsError('');
     const res = await affiliateService.getStats('creator');
     if (res.error) setStatsError(res.error);
-    else setStats({ totals: res.totals, byProduct: Array.isArray(res.byProduct) ? res.byProduct : [] });
+    else setStats({ totals: res.totals, byProduct: Array.isArray(res.byProduct) ? res.byProduct : [], waiting: res.waiting });
     setStatsLoading(false);
   }, []);
 
@@ -362,6 +363,12 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
             <p className="text-base font-black mt-1 text-slate-900">{won(t?.sales || 0)}</p>
           </div>
         </div>
+
+        {(stats?.waiting?.orders || 0) > 0 && (
+          <p className="text-[11px] font-bold text-amber-700 bg-amber-50 rounded-xl px-3.5 py-2.5 leading-relaxed">
+            {waitingText(stats!.waiting!)}
+          </p>
+        )}
 
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100">
