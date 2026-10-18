@@ -177,7 +177,18 @@ export interface AffiliateCampaign {
   products: AffiliateProduct[];
   createdAt: string;
   /** 브랜드 목록 응답에만: 신청 대기 · 승인 인원 · 간단 성과. */
-  counts?: { pending: number; approved: number; clicks: number; orders: number; sales: number; cancelled: number };
+  counts?: {
+    pending: number;
+    approved: number;
+    /** 집계 클릭(봇 · 같은 기기 30분 안 반복 제외). allClicks 는 들어온 클릭 전부. */
+    clicks: number;
+    allClicks?: number;
+    /** 확인된 주문. waitingOrders 는 들어왔지만 아직 쇼핑몰에서 결제가 확인되지 않은 주문(무통장 입금 대기 등). */
+    orders: number;
+    waitingOrders?: number;
+    sales: number;
+    cancelled: number;
+  };
   /** 인플루언서 둘러보기 응답에만: 내 참여 상태. */
   myParticipation?: { id: string; status: ParticipationStatus } | null;
 }
@@ -268,6 +279,8 @@ export interface StatRow {
   label: string;
   imageUrl?: string;
   clicks: number;
+  /** 반복 · 봇 클릭까지 포함한 전체 클릭. */
+  allClicks?: number;
   orders: number;
   sales: number;
   cancelled: number;
@@ -619,6 +632,14 @@ export const COMMISSION_STATUS_LABEL: Record<CommissionStatus, string> = {
 };
 
 /** 성과 화면의 "아직 집계 전 주문" 안내 문구. */
+/** 집계 클릭 표기. 반복 클릭이 있으면 전체 수를 함께 보여 준다 — 테스트로 여러 번 눌러도 기록은 되고 있음을 알 수 있게. */
+export const clickText = (clicks: number, allClicks?: number) =>
+  (allClicks || 0) > clicks
+    ? `${clicks.toLocaleString('ko-KR')} (전체 ${(allClicks || 0).toLocaleString('ko-KR')})`
+    : clicks.toLocaleString('ko-KR');
+
+export const clickNote = '클릭은 봇과 같은 기기에서 30분 안에 다시 누른 클릭을 빼고 셉니다. 괄호 안은 들어온 클릭 전체입니다.';
+
 export const waitingText = (w: { orders: number; awaitingPayment: number }) =>
   w.awaitingPayment > 0
     ? `확인 대기 주문 ${w.orders.toLocaleString('ko-KR')}건 (무통장 입금 대기 ${w.awaitingPayment.toLocaleString('ko-KR')}건) — 쇼핑몰에서 결제가 확인되면 1시간 안에 위 집계에 더해집니다.`

@@ -15,6 +15,8 @@ import {
   BATCH_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
   waitingText,
+  clickText,
+  clickNote,
   PARTICIPATION_STATUS_LABEL,
   CHANNEL_LINK_LABEL,
   type AffiliateCampaign,
@@ -556,8 +558,8 @@ const PerformanceTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign })
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
-              ['클릭', t.clicks.toLocaleString()],
-              ['주문', `${t.orders.toLocaleString()}건`],
+              ['클릭', clickText(t.clicks, t.allClicks)],
+              ['주문', `${t.orders.toLocaleString()}건${stats?.waiting?.orders ? ` · 대기 ${stats.waiting.orders}` : ''}`],
               ['매출', won(t.sales)],
               ['취소', `${t.cancelled.toLocaleString()}건`],
             ].map(([k, v]) => (
@@ -585,7 +587,7 @@ const PerformanceTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign })
             </p>
           )}
           <p className="text-[10px] text-slate-400 font-medium mt-2 leading-relaxed">
-            수수료는 브랜드 부담액입니다. 구매확정 전 주문은 '예정'이고, 취소·반품되면 제외됩니다.
+            수수료는 브랜드 부담액입니다. 구매확정 전 주문은 '예정'이고, 취소·반품되면 제외됩니다. {clickNote}
           </p>
 
           <p className="text-[12px] font-black text-slate-700 mt-5 mb-1">상품별 성과</p>
@@ -1032,8 +1034,8 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
                   <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
                     {[
                       ['참여', `${n.approved}명`],
-                      ['클릭', n.clicks.toLocaleString()],
-                      ['주문', `${n.orders.toLocaleString()}건`],
+                      ['클릭', clickText(n.clicks, n.allClicks)],
+                      ['주문', `${n.orders.toLocaleString()}건${n.waitingOrders ? ` · 대기 ${n.waitingOrders}` : ''}`],
                       ['매출', won(n.sales)],
                       ['취소', `${n.cancelled.toLocaleString()}건`],
                       ['신청 대기', `${n.pending}명`],
