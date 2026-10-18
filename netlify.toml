@@ -137,3 +137,14 @@
   [headers.values]
     cache-control = "public, max-age=86400"
 
+
+# 카페24 몰에 심는 판매 추적 스크립트. 카페24 ScriptTags API 는 src 응답에
+# `Access-Control-Allow-Origin: *` 가 없으면 422 로 설치를 거부한다(parameter.src).
+# 헤더 규칙은 경로로만 매칭하므로 ?m={몰ID} 쿼리가 붙어도 그대로 나간다.
+# 이름이 고정된 파일이라 캐시는 5분으로 짧게 둬서 스크립트 수정이 빨리 반영되게 한다.
+[[headers]]
+  for = "/t/pf.js"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Content-Type = "application/javascript; charset=utf-8"
+    cache-control = "public, max-age=300"
