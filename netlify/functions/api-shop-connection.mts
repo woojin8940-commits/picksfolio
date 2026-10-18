@@ -10,6 +10,7 @@ import {
   installScriptTag,
   listProducts,
   removeScriptTag,
+  scriptTagFailure,
 } from "./_shared/cafe24-api.mts";
 import { TRACKING_NOTICE, jsonError, publicOrigin } from "./_shared/affiliate.mts";
 import { disconnectConnection } from "./_shared/cafe24-oauth.mts";
@@ -156,26 +157,27 @@ export default async (req: Request) => {
       await save("manual", String(existing?.script_no || ""), "", true);
     } else if (action === "install_script" || action === "remove_script") {
       if (!connectionHealth(conn).usable) return jsonError("쇼핑몰 재연동이 필요합니다.", 409, { code: "RECONNECT" });
+      // 카페24 호출만 try 안에 둔다. 저장(DB) 실패를 "설치 실패"로 잘못 보이지 않게 한다.
+      let removed = false;
+      let scriptNo = "";
       try {
         // 이미 심은 것이 있으면 지우고 다시 심는다(같은 스크립트가 두 번 돌면 신호가 두 번 간다).
         const prefix = `${publicOrigin()}/t/pf.js`;
         const current = String(existing?.script_no || "") || (await findScriptTag(conn, prefix));
-        if (current) await removeScriptTag(conn, current);
-        if (action === "install_script") {
-          const scriptNo = await installScriptTag(conn, scriptSrc(conn.mallId));
-          await save("auto", scriptNo, "", true);
-        } else {
-          await save("none", "", "", false);
+        if (current) {
+          await removeScriptTag(conn, current);
+          removed = true;
         }
-      } catch (e: any) {
-        const status = Number(e?.status || 0);
-        const message = e instanceof Cafe24Error && e.reconnect
-          ? "카페24 연동이 만료되었습니다. 다시 연동한 뒤 설치해 주세요."
-          : status === 403
-            ? "앱 권한(mall.write_application)이 없어 자동 설치하지 못했습니다. 재연동하거나 아래 코드를 직접 붙여 주세요."
-            : "자동 설치에 실패했습니다. 아래 코드를 쇼핑몰 공통 영역에 직접 붙여 주세요.";
-        await save(String(existing?.mode || "none"), String(existing?.script_no || ""), message, Boolean(existing?.installed_at));
+        if (action === "install_script") scriptNo = await installScriptTag(conn, scriptSrc(conn.mallId));
+      } catch (e) {
+        const message = scriptTagFailure(e, conn.mallId, action === "install_script" ? "install" : "remove");
+        // 예전 스크립트를 이미 지웠다면 몰에는 아무것도 없다 — 상태도 그에 맞춘다.
+        if (removed) await save("none", "", message, false);
+        else await save(String(existing?.mode || "none"), String(existing?.script_no || ""), message, Boolean(existing?.installed_at));
+        return Response.json({ connection: await statusFor(db, conn, business) });
       }
+      if (action === "install_script") await save("auto", scriptNo, "", true);
+      else await save("none", "", "", false);
     } else {
       return jsonError("알 수 없는 요청입니다.");
     }
