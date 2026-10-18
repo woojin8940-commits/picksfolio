@@ -14,6 +14,7 @@ import {
   BATCH_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
   PARTICIPATION_STATUS_LABEL,
+  CHANNEL_LINK_LABEL,
   type AffiliateCampaign,
   type AffiliateCampaignStatus,
   type AffiliateOrder,
@@ -361,16 +362,34 @@ const ParticipantsTab: React.FC<{ campaign: AffiliateCampaign; onChanged: () => 
                   {p.profile?.category ? ` · ${p.profile.category}` : ''}
                   {` · ${formatDate(p.createdAt)} 신청`}
                 </p>
+                {(p.applicantName || p.applicantContact) && (
+                  <p className="text-[11px] text-slate-700 font-bold mt-1">
+                    {p.applicantName}
+                    {p.applicantName && p.applicantContact ? ' · ' : ''}
+                    {p.applicantContact && (
+                      <a href={`tel:${p.applicantContact.replace(/[^0-9+]/g, '')}`} className="hover:underline">{p.applicantContact}</a>
+                    )}
+                  </p>
+                )}
                 {p.message && (
                   <p className="text-[11px] text-slate-600 font-medium mt-1 leading-relaxed whitespace-pre-line break-keep">{p.message}</p>
                 )}
                 {p.rejectReason && (p.status === 'rejected' || p.status === 'revoked') && (
                   <p className="text-[10px] text-rose-500 font-bold mt-1">사유: {p.rejectReason}</p>
                 )}
-                {p.profile?.instagramUrl && (
-                  <a href={p.profile.instagramUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-blue-600 hover:underline mt-1 inline-block">
-                    인스타그램 보기
-                  </a>
+                {(p.profile?.instagramUrl || (p.channelLinks || []).length > 0) && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                    {p.profile?.instagramUrl && (
+                      <a href={p.profile.instagramUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-blue-600 hover:underline">
+                        인스타그램 보기
+                      </a>
+                    )}
+                    {(p.channelLinks || []).map(l => (
+                      <a key={l.type} href={l.url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-blue-600 hover:underline">
+                        {CHANNEL_LINK_LABEL[l.type] || '링크'} 보기
+                      </a>
+                    ))}
+                  </div>
                 )}
               </div>
               <div className="flex flex-col gap-1.5 flex-shrink-0">
