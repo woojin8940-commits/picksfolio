@@ -856,6 +856,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     const items: CollabListItem[] = [];
 
     settlements.forEach(s => {
+      // 판매 수수료(어필리에이트) 월 지급은 협업 한 건이 아니다 — 정산금 탭에서만 보인다.
+      if (s.source === 'affiliate') return;
       if (s.proposal_id && campaignProposalIds.has(s.proposal_id)) return;
       // 같은 제안에서 나온 정산이 중복 저장돼 있으면 한 번만 센다.
       if (s.proposal_id) {

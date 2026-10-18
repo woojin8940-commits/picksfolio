@@ -4,6 +4,7 @@ import { apiService, authHeaders } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { rewardModeOf, contentFormatLabel } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
+import AffiliateBrowse from './affiliate/AffiliateBrowse';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useDragScroll } from '../hooks/useDragScroll';
@@ -85,6 +86,9 @@ const CATEGORIES_EN: Record<string, string> = {
 const RETIRED_CATEGORIES = new Set(['entertainment']);
 
 const PAGE_SIZE = 12;
+
+/** 진행 방식 칩 중 판매 연동형(어필리에이트) 캠페인을 여는 값. 캠페인 API 의 type 이 아니다. */
+const AFFILIATE_FILTER = 'affiliate';
 
 type CampaignBrowseListCache = {
   campaigns: Campaign[];
@@ -237,7 +241,11 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const rewardFilters = [
     { value: '', label: isEn ? 'All' : '전체' },
     { value: 'ad_collab', label: isEn ? 'Product Sponsorship' : '제품 협찬' },
-    { value: 'group_buy', label: isEn ? 'Commerce' : '커머스' },
+    /* 예전 '커머스'(group_buy) 칩 자리. 담당자가 수수료를 조율하던 공동구매 대신,
+       브랜드가 수수료율을 정해 올린 판매 연동형 캠페인을 보여 준다. 목록은 이 화면의
+       캠페인 API 가 아니라 affiliateService 에서 오므로 아래 목록·페이지 대신
+       AffiliateBrowse 를 그린다. */
+    { value: AFFILIATE_FILTER, label: isEn ? 'Affiliate' : '어필리에이트' },
   ];
 
   /* 칩 줄은 한 줄로 두고 가로로 넘긴다 — 손가락은 그대로, 마우스는 끌어서. */
@@ -250,6 +258,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [loading, setLoading] = useState(() => !initialListCache);
 
   const [activeFilter, setActiveFilter] = useState('');
+  const isAffiliateFilter = activeFilter === AFFILIATE_FILTER;
+  const [affiliateCount, setAffiliateCount] = useState(0);
   const [activeCategory, setActiveCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -327,6 +337,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   }, [userName]);
 
   const fetchCampaignsList = useCallback(async (signal: AbortSignal, useCache = true) => {
+    // 어필리에이트 칩은 다른 API(AffiliateBrowse)에서 목록을 읽는다. 여기서
+    // type=affiliate 로 캠페인 API 를 부르면 빈 목록만 받아 온다.
+    if (activeFilter === AFFILIATE_FILTER) {
+      setLoading(false);
+      return;
+    }
     const key = campaignListCacheKey(userName, activeFilter, activeCategory, searchTerm, page);
     const cached = useCache ? readJson<CampaignBrowseListCache>(key) : null;
     if (cached) {
@@ -993,7 +1009,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">{isEn ? 'Campaigns' : '캠페인'}</h2>
         <p className="text-sm text-slate-400 font-medium">
-          {isEn ? 'Apply directly to product sponsorship & commerce campaigns to find collaboration opportunities' : '제품 협찬 · 커머스 캠페인에 직접 지원하고 협업 기회를 잡아보세요'}
+          {isEn ? 'Apply directly to product sponsorship & affiliate campaigns to find collaboration opportunities' : '제품 협찬 · 어필리에이트 캠페인에 직접 지원하고 협업 기회를 잡아보세요'}
         </p>
       </div>
 
@@ -1037,7 +1053,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               {f.label}
             </button>
           ))}
-          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{total}{isEn ? ' total' : '개'}</span>
+          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{isAffiliateFilter ? affiliateCount : total}{isEn ? ' total' : '개'}</span>
         </div>
 
         {/* 카테고리 칩. 줄을 접지 않고 한 줄로 세운다 — 필터가 화면을 두 줄씩 먹으면
@@ -1075,7 +1091,14 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       </div>
 
-      {loading ? (
+      {isAffiliateFilter ? (
+        <AffiliateBrowse
+          category={activeCategory}
+          q={searchTerm}
+          categoryLabels={categoriesMap}
+          onCount={setAffiliateCount}
+        />
+      ) : loading ? (
         <div className="text-center py-16">
           <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-slate-400 font-bold">{isEn ? 'Loading campaigns...' : '캠페인 불러오는 중...'}</p>
@@ -1174,7 +1197,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       )}
 
-      {!loading && totalPages > 1 && (
+      {!isAffiliateFilter && !loading && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1.5 mt-8">
           <button
             onClick={() => goToPage(page - 1)}

@@ -250,10 +250,29 @@ export interface Settlement {
    *              잡으므로 인플루언서·브랜드 화면에서는 읽기만 한다.
    *   proposal — 브랜드가 직접 보낸 비즈니스 제안. 브랜드가 인플루언서에게 직접
    *              지급하므로 양쪽 중 누가 완료를 누르든 완료다.
+   *   affiliate — 판매 연동형(어필리에이트) 캠페인의 월 정산 한 줄(id 'aff_<lineId>').
+   *              운영 콘솔이 지급을 마쳐야 완료로 바뀌고, 인플루언서는 읽기만 한다.
    */
-  source?: 'campaign' | 'proposal';
+  source?: 'campaign' | 'proposal' | 'affiliate';
   /** 협업의 보수 방식. 공동구매 정산을 금액 대신 수수료율로 보여줄 때 쓴다. */
-  reward_mode?: 'paid' | 'barter' | 'groupbuy';
+  reward_mode?: 'paid' | 'barter' | 'groupbuy' | 'affiliate';
+  /**
+   * 어필리에이트 정산 줄의 세부(source='affiliate' 에만). amount 는 원천징수 전
+   * 금액(gross)이고, 실제로 들어오는 돈은 net 이다.
+   */
+  affiliate?: {
+    /** 정산 월(YYYY-MM). */
+    period: string;
+    /** 그 달 내 링크로 확정된 판매액. */
+    salesAmount: number;
+    /** 내 몫 수수료(원천징수 전). */
+    gross: number;
+    /** 원천징수 3.3%(소득세 3% + 지방소득세 0.3%). */
+    withholding: number;
+    /** 실지급액 = gross − withholding. */
+    net: number;
+    batchStatus: string;
+  };
   /** 공동구매 판매 수수료(%). 공동구매가 아니면 0. */
   groupbuy_rate?: number;
   /**
