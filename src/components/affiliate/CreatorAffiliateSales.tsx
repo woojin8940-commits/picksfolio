@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import {
   affiliateService,
   won,
@@ -130,10 +131,11 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState('');
 
-  const loadStats = useCallback(async () => {
+  // refresh: 새로고침 버튼 — 그때만 서버가 미검증 주문(입금 대기 등)을 카페24 에서 다시 확인한다.
+  const loadStats = useCallback(async (refresh = false) => {
     setStatsLoading(true);
     setStatsError('');
-    const res = await affiliateService.getStats('creator');
+    const res = await affiliateService.getStats('creator', refresh ? { refresh: 1 } : {});
     if (res.error) setStatsError(res.error);
     else setStats({ totals: res.totals, byProduct: Array.isArray(res.byProduct) ? res.byProduct : [], waiting: res.waiting });
     setStatsLoading(false);
@@ -146,10 +148,10 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
   const [ordersError, setOrdersError] = useState('');
   const [ordersHasMore, setOrdersHasMore] = useState(false);
 
-  const loadOrders = useCallback(async (offset = 0) => {
+  const loadOrders = useCallback(async (offset = 0, refresh = false) => {
     setOrdersLoading(true);
     setOrdersError('');
-    const res = await affiliateService.listOrders('creator', { status: orderFilter, limit: ORDER_PAGE, offset });
+    const res = await affiliateService.listOrders('creator', { status: orderFilter, limit: ORDER_PAGE, offset, refresh: refresh ? 1 : undefined });
     if (res.error) {
       setOrdersError(res.error);
     } else {
@@ -339,7 +341,7 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
 
   const renderStats = () => {
     if (statsLoading && !stats) return spinner('성과 불러오는 중...');
-    if (statsError) return errorBox(statsError, loadStats);
+    if (statsError) return errorBox(statsError, () => loadStats(true));
     const t = stats?.totals;
     const rows = stats?.byProduct || [];
     const cards: { label: string; value: string; cls: string }[] = [
@@ -351,6 +353,16 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
     ];
     return (
       <div className="space-y-4">
+        <div className="flex justify-end -mb-2">
+          <button
+            type="button"
+            onClick={() => loadStats(true)}
+            disabled={statsLoading}
+            className="inline-flex items-center gap-1.5 text-[11px] font-black text-slate-400 hover:text-slate-600 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${statsLoading ? 'animate-spin' : ''}`} /> 새로고침
+          </button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
           {cards.map(card => (
             <div key={card.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3.5">
@@ -423,6 +435,16 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
 
   const renderOrders = () => (
     <div className="space-y-3">
+      <div className="flex justify-end -mb-1">
+        <button
+          type="button"
+          onClick={() => loadOrders(0, true)}
+          disabled={ordersLoading}
+          className="inline-flex items-center gap-1.5 text-[11px] font-black text-slate-400 hover:text-slate-600 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${ordersLoading ? 'animate-spin' : ''}`} /> 새로고침
+        </button>
+      </div>
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
         {ORDER_FILTERS.map(f => (
           <button
@@ -438,7 +460,7 @@ const CreatorAffiliateSales: React.FC<CreatorAffiliateSalesProps> = () => {
         ))}
       </div>
       {ordersError ? (
-        errorBox(ordersError, () => loadOrders(0))
+        errorBox(ordersError, () => loadOrders(0, true))
       ) : ordersLoading && orders.length === 0 ? (
         spinner('주문 불러오는 중...')
       ) : orders.length === 0 ? (

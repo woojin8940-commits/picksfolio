@@ -10,7 +10,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { connectionForMall } from "./cafe24-api.mts";
 import { closePeriod, isPeriod, loadSettings, previousPeriod, syncOrder, todayKst } from "./affiliate.mts";
 
-export type AffiliateTask = { task: "sync" } | { task: "recheck" } | { task: "close"; period: string };
+export type AffiliateTask = { task: "sync" } | { task: "close"; period: string };
 
 const secret = () =>
   process.env.AFFILIATE_WORKER_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PORTONE_V2_API_SECRET || "";
@@ -67,7 +67,8 @@ export async function runSync(db: any): Promise<void> {
     WHERE (verification = 'unverified'
        OR (verification = 'verified' AND status = 'pending')
        OR (verification = 'verified' AND status = 'confirmed' AND confirmed_at > NOW() - INTERVAL '30 days'))
-      AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '20 hours')
+      -- 하루 한 번 돈다. 전날 낮에 들어온 주문도 빠지지 않게 몇 시간 안에 본 주문만 건너뛴다.
+      AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '3 hours')
     ORDER BY last_synced_at NULLS FIRST
     LIMIT ${BATCH}
   `) as any[];
@@ -100,23 +101,33 @@ export async function runClose(db: any, period: string): Promise<void> {
   console.log(`[affiliate-close] ${p} 마감: 새 청구서 ${result.batches}건, 반영 주문 ${result.entries}건`);
 }
 
+/** 새로고침 한 번에 다시 볼 주문 수 · 시간. 화면이 기다리는 요청이라 짧게 끊는다. 남은 주문은 다음 새로고침에서 본다. */
+const RECHECK_LIMIT = 20;
+const RECHECK_BUDGET_MS = 12 * 1000;
+
 /**
- * 10분마다: 아직 카페24 에서 확인되지 않은 최근 주문만 다시 본다. 무통장 입금 주문은 주문 뒤
- * 입금될 때까지 "미검증 · 입금 대기"로 있다. 예전에는 매시간 돌면서 50분 안에 본 주문을
- * 건너뛰어, 주문 직후 입금해도 다음다음 회차(최대 2시간 뒤)에야 잡혔다. 이제 10분 간격으로 본다.
+ * 성과 화면의 새로고침: 보는 사람(브랜드 · 인플루언서)의 아직 끝나지 않은 주문을 카페24 에서 바로 다시 본다.
+ *   · 미검증(무통장 입금 대기 등) — 입금되면 예정으로 바뀐다.
+ *   · 예정 — 취소 · 반품되면 주문 수에서 빠지고, 구매확정되면 확정으로 바뀐다.
+ *   · 확정 뒤 30일 안 — 늦은 반품을 잡는다.
+ * 예전에는 10분마다 예약 작업이 미검증만 봤고, 예정 주문은 하루 한 번만 봐서 취소가 다음 날에야 반영됐다.
+ * 연달아 눌러도 카페24 를 두드리지 않게 같은 주문은 30초 안에 다시 보지 않고, 미검증 중 입금 대기가 아닌
+ * 실패(API 오류 등)는 시도 횟수가 쌓이므로 한 시간 간격을 지킨다. 오래 안 본 주문부터 본다.
  */
-export async function runRecheck(db: any): Promise<void> {
+export async function recheckOrders(db: any, who: { brand: boolean; me: string; campaignId: string }): Promise<void> {
   const started = Date.now();
+  const { brand, me, campaignId } = who;
   const orders = (await db.sql`
     SELECT id, mall_id FROM affiliate_orders
-    WHERE verification = 'unverified'
-      AND received_at > NOW() - INTERVAL '14 days'
-      -- 입금 대기는 10분마다 본다. 그 밖의 실패(API 오류 등)는 시도 횟수가 쌓이므로 예전처럼 한 시간 간격.
-      AND (last_synced_at IS NULL
-           OR last_synced_at < NOW() - INTERVAL '8 minutes' AND status_reason = 'awaiting_payment'
-           OR last_synced_at < NOW() - INTERVAL '50 minutes')
+    WHERE (${campaignId} = '' OR campaign_id = ${campaignId})
+      AND (${brand} AND business_username = ${me} OR NOT ${brand} AND influencer_username = ${me})
+      AND (verification = 'unverified' AND received_at > NOW() - INTERVAL '14 days'
+             AND (status_reason = 'awaiting_payment' OR last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '50 minutes')
+           OR verification = 'verified' AND status = 'pending'
+           OR verification = 'verified' AND status = 'confirmed' AND confirmed_at > NOW() - INTERVAL '30 days')
+      AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '30 seconds')
     ORDER BY last_synced_at NULLS FIRST
-    LIMIT ${BATCH}
+    LIMIT ${RECHECK_LIMIT}
   `) as any[];
   if (orders.length === 0) return;
 
@@ -124,20 +135,16 @@ export async function runRecheck(db: any): Promise<void> {
   const byMall = new Map<string, string[]>();
   for (const o of orders) byMall.set(o.mall_id, [...(byMall.get(o.mall_id) || []), o.id]);
 
-  const tally: Record<string, number> = {};
   for (const [mall, ids] of byMall) {
     const conn = await connectionForMall(db, mall);
     for (const id of ids) {
-      if (Date.now() - started > TIME_BUDGET_MS) break;
+      if (Date.now() - started > RECHECK_BUDGET_MS) return;
       try {
-        const r = await syncOrder(db, id, { settings, conn });
-        const key = `${r.verification}/${r.status}${r.reason === "awaiting_payment" ? "/awaiting_payment" : ""}`;
-        tally[key] = (tally[key] || 0) + 1;
+        await syncOrder(db, id, { settings, conn });
       } catch {
-        tally.error = (tally.error || 0) + 1;
+        // 실패한 주문은 다음 새로고침이나 하루 한 번 동기화에서 다시 본다.
       }
       await new Promise((r) => setTimeout(r, 550));
     }
   }
-  console.log(`[affiliate-recheck] ${orders.length}건 조회`, JSON.stringify(tally));
 }

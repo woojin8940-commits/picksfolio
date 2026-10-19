@@ -500,8 +500,9 @@ export const affiliateService = {
     return call<{ campaigns: AffiliateCampaign[] }>('GET', `/api/affiliate-campaigns${qs({ scope: 'browse', ...opts })}`);
   },
   /** 브랜드: 내 판매 캠페인. */
-  listMyCampaigns() {
-    return call<{ campaigns: AffiliateCampaign[] }>('GET', '/api/affiliate-campaigns?scope=brand');
+  /** refresh 면 내 열린 주문(취소 · 반품 · 입금)을 카페24 에서 다시 확인한 뒤 성과를 센다. */
+  listMyCampaigns(refresh = false) {
+    return call<{ campaigns: AffiliateCampaign[] }>('GET', `/api/affiliate-campaigns${qs({ scope: 'brand', refresh: refresh ? 1 : undefined })}`);
   },
   /** 운영 콘솔: 전체(상태 필터). */
   listCampaignsForAdmin(token: string, status?: AffiliateCampaignStatus | 'all') {
@@ -548,13 +549,13 @@ export const affiliateService = {
   },
 
   // 성과 · 주문 -------------------------------------------------------------
-  /** scope=brand(campaignId 선택) · creator. 기간은 YYYY-MM-DD. */
-  getStats(scope: 'brand' | 'creator', opts: { campaignId?: string; from?: string; to?: string } = {}) {
+  /** scope=brand(campaignId 선택) · creator. 기간은 YYYY-MM-DD. refresh 면 미검증 주문을 카페24 에서 다시 확인한 뒤 집계한다. */
+  getStats(scope: 'brand' | 'creator', opts: { campaignId?: string; from?: string; to?: string; refresh?: 1 } = {}) {
     return call<AffiliateStats>('GET', `/api/affiliate-stats${qs({ scope, ...opts })}`);
   },
   listOrders(
     scope: 'brand' | 'creator' | 'admin',
-    opts: { campaignId?: string; status?: CommissionStatus | 'all'; verification?: 'unverified' | 'failed'; limit?: number; offset?: number } = {},
+    opts: { campaignId?: string; status?: CommissionStatus | 'all'; verification?: 'unverified' | 'failed'; limit?: number; offset?: number; refresh?: 1 } = {},
     token?: string,
   ) {
     return call<{ orders: AffiliateOrder[]; hasMore: boolean }>('GET', `/api/affiliate-orders${qs({ scope, ...opts })}`, undefined, token);
@@ -631,8 +632,8 @@ export const COMMISSION_STATUS_LABEL: Record<CommissionStatus, string> = {
 /** 성과 화면의 "아직 집계 전 주문" 안내 문구. */
 export const waitingText = (w: { orders: number; awaitingPayment: number }) =>
   w.awaitingPayment > 0
-    ? `주문 중 ${w.orders.toLocaleString('ko-KR')}건은 결제 확인 전입니다(무통장 입금 대기 ${w.awaitingPayment.toLocaleString('ko-KR')}건). 매출·수수료는 결제가 확인되면 10분 안팎으로 더해지고, 취소되면 주문에서 빠집니다.`
-    : `주문 중 ${w.orders.toLocaleString('ko-KR')}건은 결제 확인 전입니다. 매출·수수료는 쇼핑몰에서 확인되면 더해집니다.`;
+    ? `주문 중 ${w.orders.toLocaleString('ko-KR')}건은 결제 확인 전입니다(무통장 입금 대기 ${w.awaitingPayment.toLocaleString('ko-KR')}건). 입금 여부는 새로고침을 누를 때 쇼핑몰에서 다시 확인해 매출·수수료에 더하고, 취소되면 주문에서 빠집니다.`
+    : `주문 중 ${w.orders.toLocaleString('ko-KR')}건은 결제 확인 전입니다. 매출·수수료는 쇼핑몰에서 확인되면 더해집니다. 새로고침을 누르면 바로 다시 확인합니다.`;
 
 export const BATCH_STATUS_LABEL: Record<BatchStatus, string> = {
   draft: '브랜드 확인 대기',

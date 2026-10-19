@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireOperator } from "./_shared/manager-auth.mts";
 import { jsonError, loadSettings, maskOrderNo, syncOrder } from "./_shared/affiliate.mts";
+import { recheckOrders } from "./_shared/affiliate-worker.mts";
 
 /**
  * 판매 주문 목록.
@@ -61,6 +62,12 @@ export default async (req: Request) => {
     const caller = await requireSignedInUser(req);
     if (!caller.ok) return caller.response;
     me = caller.username;
+    // 새로고침 버튼(&refresh=1): 목록을 읽기 전에 내 열린 주문을 카페24 에서 다시 확인한다(취소 · 반품 · 입금).
+    if (url.searchParams.get("refresh") === "1") {
+      await recheckOrders(db, { brand: scope === "brand", me, campaignId: String(url.searchParams.get("campaignId") || "") }).catch((e) =>
+        console.error("[affiliate-orders] recheck failed", e instanceof Error ? e.message : ""),
+      );
+    }
   }
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));

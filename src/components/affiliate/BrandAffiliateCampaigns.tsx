@@ -481,11 +481,14 @@ const useCampaignStats = (campaign: AffiliateCampaign) => {
   const [stats, setStats] = useState<AffiliateStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 새로고침을 누를 때마다 올린다 — 그때만 서버가 미검증 주문을 카페24 에서 다시 확인한다.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    affiliateService.getStats('brand', { campaignId: campaign.id, from, to }).then(res => {
+    affiliateService.getStats('brand', { campaignId: campaign.id, from, to, refresh: refreshKey > 0 ? 1 : undefined }).then(res => {
       if (!alive) return;
       setLoading(false);
       if (res.error) { setError(res.error); return; }
@@ -493,16 +496,28 @@ const useCampaignStats = (campaign: AffiliateCampaign) => {
       setStats(res);
     });
     return () => { alive = false; };
-  }, [campaign.id, from, to]);
+  }, [campaign.id, from, to, refreshKey]);
 
-  return { from, to, setFrom, setTo, stats, loading, error };
+  return { from, to, setFrom, setTo, stats, loading, error, refresh };
 };
 
-const RangePicker: React.FC<{ from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void }> = ({ from, to, setFrom, setTo }) => (
-  <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl w-fit mb-3">
-    <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} className="bg-transparent text-[11px] font-bold text-slate-700 focus:outline-none" />
-    <span className="text-slate-300 text-xs font-bold">~</span>
-    <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} className="bg-transparent text-[11px] font-bold text-slate-700 focus:outline-none" />
+const RangePicker: React.FC<{
+  from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void; onRefresh: () => void; loading: boolean;
+}> = ({ from, to, setFrom, setTo, onRefresh, loading }) => (
+  <div className="flex items-center justify-between gap-2 mb-3">
+    <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl w-fit">
+      <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} className="bg-transparent text-[11px] font-bold text-slate-700 focus:outline-none" />
+      <span className="text-slate-300 text-xs font-bold">~</span>
+      <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} className="bg-transparent text-[11px] font-bold text-slate-700 focus:outline-none" />
+    </div>
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={loading}
+      className="inline-flex items-center gap-1.5 text-[11px] font-black text-slate-400 hover:text-slate-600 disabled:opacity-50"
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+    </button>
   </div>
 );
 
@@ -547,11 +562,11 @@ const StatTable: React.FC<{ rows: StatRow[]; nameLabel: string; ranked?: boolean
 );
 
 const PerformanceTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
-  const { from, to, setFrom, setTo, stats, loading, error } = useCampaignStats(campaign);
+  const { from, to, setFrom, setTo, stats, loading, error, refresh } = useCampaignStats(campaign);
   const t = stats?.totals;
   return (
     <div>
-      <RangePicker from={from} to={to} setFrom={setFrom} setTo={setTo} />
+      <RangePicker from={from} to={to} setFrom={setFrom} setTo={setTo} onRefresh={refresh} loading={loading} />
       {loading && !stats ? <Spinner /> : error && !stats ? <Empty title={error} /> : t ? (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -599,11 +614,11 @@ const PerformanceTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign })
 };
 
 const RankingTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
-  const { from, to, setFrom, setTo, stats, loading, error } = useCampaignStats(campaign);
+  const { from, to, setFrom, setTo, stats, loading, error, refresh } = useCampaignStats(campaign);
   const rows = stats?.byInfluencer || [];
   return (
     <div>
-      <RangePicker from={from} to={to} setFrom={setFrom} setTo={setTo} />
+      <RangePicker from={from} to={to} setFrom={setFrom} setTo={setTo} onRefresh={refresh} loading={loading} />
       {loading && !stats ? <Spinner /> : error && !stats ? <Empty title={error} /> : rows.length === 0 ? (
         <Empty title="아직 판매한 인플루언서가 없습니다" />
       ) : (
@@ -620,9 +635,12 @@ const OrdersTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
   const [error, setError] = useState('');
   const [status, setStatus] = useState<CommissionStatus | 'all'>('all');
 
-  const load = useCallback(async (reset: boolean, offset: number) => {
+  // refresh: 새로고침 버튼 — 그때만 서버가 열린 주문(취소 · 반품 · 입금)을 카페24 에서 다시 확인한다.
+  const load = useCallback(async (reset: boolean, offset: number, refresh = false) => {
     setLoading(true);
-    const res = await affiliateService.listOrders('brand', { campaignId: campaign.id, status, limit: 50, offset: reset ? 0 : offset });
+    const res = await affiliateService.listOrders('brand', {
+      campaignId: campaign.id, status, limit: 50, offset: reset ? 0 : offset, refresh: refresh ? 1 : undefined,
+    });
     setLoading(false);
     if (res.error) { setError(res.error); return; }
     setError('');
@@ -635,6 +653,16 @@ const OrdersTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
 
   return (
     <div>
+      <div className="flex justify-end mb-1">
+        <button
+          type="button"
+          onClick={() => load(true, 0, true)}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 text-[11px] font-black text-slate-400 hover:text-slate-600 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+        </button>
+      </div>
       <div className="flex gap-1 overflow-x-auto scrollbar-hide pb-1 mb-2">
         {(['all', 'pending', 'confirmed', 'settled', 'excluded', 'unverified'] as const).map(s => (
           <button
@@ -691,7 +719,7 @@ const OrdersTab: React.FC<{ campaign: AffiliateCampaign }> = ({ campaign }) => {
         </>
       )}
       <p className="text-[10px] text-slate-400 font-medium mt-3 leading-relaxed">
-        주문번호는 일부를 가려 보여 줍니다. '미검증'은 쇼핑몰 주문 API 로 아직 확인되지 않은 주문입니다. 무통장 입금 주문은 입금 전까지 '입금 대기'로 남고, 입금되면 10분 안팎으로 '예정'으로 바뀝니다.
+        주문번호는 일부를 가려 보여 줍니다. '미검증'은 쇼핑몰 주문 API 로 아직 확인되지 않은 주문입니다. 무통장 입금 주문은 입금 전까지 '입금 대기'로 남고, 입금되면 새로고침할 때 '예정'으로 바뀝니다. 취소 · 반품도 새로고침하면 쇼핑몰에서 다시 확인해 '제외'로 바뀝니다.
       </p>
     </div>
   );
@@ -833,9 +861,9 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
   const [wizard, setWizard] = useState<'new' | AffiliateCampaign | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
     setLoading(true);
-    const res = await affiliateService.listMyCampaigns();
+    const res = await affiliateService.listMyCampaigns(refresh);
     setLoading(false);
     if (res.error) { setError(res.error); return; }
     setError('');
@@ -965,7 +993,7 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
       ) : error && campaigns.length === 0 ? (
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8 text-center">
           <p className="text-sm font-bold text-rose-500">{error}</p>
-          <button type="button" onClick={load} className="mt-3 px-4 py-2 rounded-xl bg-slate-900 text-white text-[12px] font-black">
+          <button type="button" onClick={() => load()} className="mt-3 px-4 py-2 rounded-xl bg-slate-900 text-white text-[12px] font-black">
             다시 불러오기
           </button>
         </div>
@@ -1051,7 +1079,7 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
           <div className="flex justify-end">
             <button
               type="button"
-              onClick={load}
+              onClick={() => load(true)}
               disabled={loading}
               className="inline-flex items-center gap-1.5 text-[11px] font-black text-slate-400 hover:text-slate-600 disabled:opacity-50"
             >
