@@ -1332,11 +1332,11 @@ export const apiService = {
     return serializeSiteDataSave(username, async () => {
       try {
         const query = opts?.force ? '?force=true' : '';
-        const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}${query}`, {
+        const res = await fetchWithTimeout(`/api/site/${encodeURIComponent(username.toLowerCase())}${query}`, {
           method: 'POST',
-          headers: await authHeaders({ 'Content-Type': 'application/json' }),
+          headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }, { account: username }),
           body: JSON.stringify(data)
-        });
+        }, 30_000);
         if (res.ok) {
           // Keep the cache in sync with what we just persisted so a subsequent
           // navigation doesn't briefly render pre-save data. Create the entry even

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, Move, Lock, Camera, Globe, Briefcase, User, Eye, Search } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -367,12 +367,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | { type: 'cover' } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const pendingFileRef = useRef<File | null>(null);
-  const fullDesignRef = useRef<Record<string, any>>((() => {
+  const [initialDesign] = useState<Record<string, any>>(() => {
     try {
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
       return saved ? JSON.parse(saved) : {};
     } catch { return {}; }
-  })());
+  });
+  const fullDesignRef = useRef<Record<string, any>>(initialDesign);
 
   // 상단 커버 (개인페이지 맨 위 이미지/영상) — design.portfolioHeaderImage 에 저장된다.
   // 별도 메뉴(포트폴리오)로 분리돼 있던 커버/이름/버튼 편집을 이 화면으로 통합했다.
@@ -991,14 +992,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   }) as DesignSettings;
 
   /** 미리보기가 그리는 디자인. 저장 버튼이 올릴 값과 같다. */
-  const previewDesign = buildDesignUpdate();
+  const previewDesign = useMemo(buildDesignUpdate, [
+    fullDesignRef.current, layoutTemplate, themePreset, accentColor, columns, customGradient,
+    customBg, buttonTextColor, profileTextColors, homePriority, portfolioFontSize, coverImage, coverPosition,
+  ]);
   /** 비즈니스 제안 버튼도 버튼 색상을 그대로 쓴다. 저장할 때도 같은 값을 넣는다. */
   const withButtonColors = (base: Record<string, any>) => ({
     ...base,
     businessProposalBg: accentColor,
     businessProposalText: buttonTextColor,
   });
-  const previewSocials = withButtonColors(socials);
+  const previewSocials = useMemo(() => withButtonColors(socials), [socials, accentColor, buttonTextColor]);
 
   const handleSaveDesign = async () => {
     setIsSaving(true);
@@ -1353,7 +1357,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   // Folder management functions - reserved for future folder UI
   void _handleAddFolder; void _handleEditFolder; void _handleSaveFolder; void _handleDeleteFolder; void _handleToggleBlockInFolder;
 
-  const managedCategories = (() => {
+  const managedCategories = useMemo(() => {
     const catSet = new Set<string>();
     for (const b of blocks) {
       const c = b.category;
@@ -1363,7 +1367,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       catSet.add(c);
     }
     return Array.from(catSet);
-  })();
+  }, [blocks, linkGridCategories]);
 
   /** 카테고리 버튼 색 미리보기에 세워 둘 칸 이름. 내 페이지에 카테고리가 하나라도 있으면
       공개 페이지와 똑같은 순서로 그 이름을 그대로 보여주고, 아직 없으면 예시 이름으로
@@ -1492,26 +1496,21 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     showSuccessFeedback(`'${catName}' 카테고리가 삭제되었습니다!`);
   };
 
-  const displayedBlocks = selectedFolderId
+  const displayedBlocks = useMemo(() => selectedFolderId
     ? blocks.filter(b => b.category === selectedFolderId)
-    : blocks;
+    : blocks, [blocks, selectedFolderId]);
 
-  const orderedCategoryGroups = (() => {
+  const orderedCategoryGroups = useMemo(() => {
     if (selectedFolderId) return [];
-    const seen = new Set<string>();
-    const order: string[] = [];
+    const groups = new Map<string, Block[]>();
     for (const b of blocks) {
       const cat = b.category || '';
-      if (!seen.has(cat)) {
-        seen.add(cat);
-        order.push(cat);
-      }
+      const group = groups.get(cat);
+      if (group) group.push(b);
+      else groups.set(cat, [b]);
     }
-    return order.map(cat => ({
-      category: cat,
-      blocks: blocks.filter(b => (b.category || '') === cat),
-    }));
-  })();
+    return Array.from(groups, ([category, groupBlocks]) => ({ category, blocks: groupBlocks }));
+  }, [blocks, selectedFolderId]);
 
   const handleMoveCategoryGroup = (category: string, direction: 'up' | 'down') => {
     const catOrder: string[] = [];
@@ -1682,11 +1681,135 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   const handleDeleteProduct = (pId: string) => setConfirmDelete({ type: 'product', id: pId });
 
+  const contentList = useMemo(() => (
+  <div className="space-y-3 md:space-y-4">
+    {!selectedFolderId ? (
+      orderedCategoryGroups.map((group, groupIndex) => (
+        <div key={group.category || '__uncategorized'} className="rounded-2xl border border-[#E2E8F0] overflow-hidden bg-slate-50/50">
+          <div className="flex items-center justify-between px-4 md:px-6 py-3 bg-white border-b border-[#E2E8F0]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs md:text-sm font-black text-[#1E1E2E] uppercase tracking-wider">{group.category || (language === 'en' ? 'Uncategorized' : '미분류')}</span>
+              <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}{language === 'en' ? ' items' : '개'}</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-slate-100 rounded-xl px-1.5 py-1 border border-slate-200">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">{language === 'en' ? 'CATEGORY' : '카테고리 순서'}</span>
+              <button
+                onClick={() => handleMoveCategoryGroup(group.category, 'up')}
+                disabled={groupIndex === 0}
+                className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+                title={language === 'en' ? 'Move Category Up' : '카테고리 위로 이동'}
+              >
+                <ChevronUp size={16} strokeWidth={2.5} />
+              </button>
+              <button
+                onClick={() => handleMoveCategoryGroup(group.category, 'down')}
+                disabled={groupIndex === orderedCategoryGroups.length - 1}
+                className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+                title="카테고리 아래로 이동"
+              >
+                <ChevronDown size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2 p-2 md:p-3">
+            {group.blocks.map((block, blockIndex) => (
+              <div
+                key={block.id}
+                className={`bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
+                draggable
+                onDragStart={e => handleDragStart(e, block.id)}
+                onDragOver={e => handleDragOver(e, block.id)}
+                onDrop={e => handleDrop(e, block.id)}
+                onDragEnd={handleDragEnd}
+              >
+                {renderOrderHandle(block.id, blockIndex, group.blocks.length)}
+                <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
+                  <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                    {block.displayType === 'text' ? (
+                      <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
+                        <span className="text-2xl font-black">T</span>
+                      </div>
+                    ) : (
+                      <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
+                        {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
+                      </span>
+                    </div>
+                    {block.displayType === 'text' ? (
+                      <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5 truncate">
+                        {block.textContent ? block.textContent.replace(/<[^>]*>/g, '').substring(0, 50) || '텍스트' : '텍스트를 입력하세요'}
+                      </h3>
+                    ) : (
+                      <>
+                        <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
+                        <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
+                      </>
+                    )}
+                  </div>
+                  <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-blue-600 transition-all" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))
+    ) : (
+      displayedBlocks.map((block, blockIndex) => (
+      <div
+        key={block.id}
+        className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
+        draggable
+        onDragStart={e => handleDragStart(e, block.id)}
+        onDragOver={e => handleDragOver(e, block.id)}
+        onDrop={e => handleDrop(e, block.id)}
+        onDragEnd={handleDragEnd}
+      >
+        {renderOrderHandle(block.id, blockIndex, displayedBlocks.length)}
+        <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
+        <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+          {block.displayType === 'text' ? (
+            <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
+              <span className="text-2xl font-black">T</span>
+            </div>
+          ) : (
+            <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="inline-block bg-[#F1F5F9] text-[#64748B] text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">{block.category}</span>
+            <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
+              {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
+            </span>
+          </div>
+          {block.displayType === 'text' ? (
+            <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5 truncate">
+              {block.textContent ? block.textContent.replace(/<[^>]*>/g, '').substring(0, 50) || '텍스트' : '텍스트를 입력하세요'}
+            </h3>
+          ) : (
+            <>
+              <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
+              <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
+            </>
+          )}
+        </div>
+        <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-blue-600 transition-all" />
+        </div>
+      </div>
+      ))
+    )}
+  </div>
+  ), [blocks, selectedFolderId, draggedBlockId, language, userName, orderedCategoryGroups, displayedBlocks]);
+
   const SaveButton = ({ onClick, disabled, label }: { onClick: () => void, disabled: boolean, label: string }) => (
     <button
       onClick={onClick}
       disabled={disabled || isSaving || isUploading}
-      className={`px-10 py-5 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 shadow-2xl ${
+      className={`shrink-0 whitespace-nowrap px-10 py-5 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 shadow-2xl ${
         isSaved
           ? 'bg-emerald-500 text-white scale-105'
           : 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95 disabled:opacity-50'
@@ -1781,127 +1904,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
               </div>
 
-              <div className="space-y-3 md:space-y-4">
-                {!selectedFolderId ? (
-                  orderedCategoryGroups.map((group, groupIndex) => (
-                    <div key={group.category || '__uncategorized'} className="rounded-2xl border border-[#E2E8F0] overflow-hidden bg-slate-50/50">
-                      <div className="flex items-center justify-between px-4 md:px-6 py-3 bg-white border-b border-[#E2E8F0]">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs md:text-sm font-black text-[#1E1E2E] uppercase tracking-wider">{group.category || (language === 'en' ? 'Uncategorized' : '미분류')}</span>
-                          <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}{language === 'en' ? ' items' : '개'}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 bg-slate-100 rounded-xl px-1.5 py-1 border border-slate-200">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">{language === 'en' ? 'CATEGORY' : '카테고리 순서'}</span>
-                          <button
-                            onClick={() => handleMoveCategoryGroup(group.category, 'up')}
-                            disabled={groupIndex === 0}
-                            className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
-                            title={language === 'en' ? 'Move Category Up' : '카테고리 위로 이동'}
-                          >
-                            <ChevronUp size={16} strokeWidth={2.5} />
-                          </button>
-                          <button
-                            onClick={() => handleMoveCategoryGroup(group.category, 'down')}
-                            disabled={groupIndex === orderedCategoryGroups.length - 1}
-                            className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
-                            title="카테고리 아래로 이동"
-                          >
-                            <ChevronDown size={16} strokeWidth={2.5} />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-2 p-2 md:p-3">
-                        {group.blocks.map((block, blockIndex) => (
-                          <div
-                            key={block.id}
-                            className={`bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
-                            draggable
-                            onDragStart={e => handleDragStart(e, block.id)}
-                            onDragOver={e => handleDragOver(e, block.id)}
-                            onDrop={e => handleDrop(e, block.id)}
-                            onDragEnd={handleDragEnd}
-                          >
-                            {renderOrderHandle(block.id, blockIndex, group.blocks.length)}
-                            <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
-                              <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                                {block.displayType === 'text' ? (
-                                  <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
-                                    <span className="text-2xl font-black">T</span>
-                                  </div>
-                                ) : (
-                                  <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                  <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
-                                    {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
-                                  </span>
-                                </div>
-                                {block.displayType === 'text' ? (
-                                  <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5 truncate">
-                                    {block.textContent ? block.textContent.replace(/<[^>]*>/g, '').substring(0, 50) || '텍스트' : '텍스트를 입력하세요'}
-                                  </h3>
-                                ) : (
-                                  <>
-                                    <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
-                                    <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
-                                  </>
-                                )}
-                              </div>
-                              <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-blue-600 transition-all" />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  displayedBlocks.map((block, blockIndex) => (
-                  <div
-                    key={block.id}
-                    className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
-                    draggable
-                    onDragStart={e => handleDragStart(e, block.id)}
-                    onDragOver={e => handleDragOver(e, block.id)}
-                    onDrop={e => handleDrop(e, block.id)}
-                    onDragEnd={handleDragEnd}
-                  >
-                    {renderOrderHandle(block.id, blockIndex, displayedBlocks.length)}
-                    <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
-                    <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                      {block.displayType === 'text' ? (
-                        <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
-                          <span className="text-2xl font-black">T</span>
-                        </div>
-                      ) : (
-                        <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="inline-block bg-[#F1F5F9] text-[#64748B] text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">{block.category}</span>
-                        <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
-                          {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
-                        </span>
-                      </div>
-                      {block.displayType === 'text' ? (
-                        <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5 truncate">
-                          {block.textContent ? block.textContent.replace(/<[^>]*>/g, '').substring(0, 50) || '텍스트' : '텍스트를 입력하세요'}
-                        </h3>
-                      ) : (
-                        <>
-                          <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
-                          <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
-                        </>
-                      )}
-                    </div>
-                    <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-blue-600 transition-all" />
-                    </div>
-                  </div>
-                  ))
-                )}
-              </div>
+              {contentList}
 
             </>
           ) : (

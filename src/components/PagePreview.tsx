@@ -102,4 +102,4 @@ const PagePreview: React.FC<PagePreviewProps> = ({
   );
 };
 
-export default PagePreview;
+export default React.memo(PagePreview);

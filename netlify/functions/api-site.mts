@@ -278,33 +278,13 @@ export default async (req: Request, context: Context) => {
         }, { status: 409 });
       }
 
-      if (existing.length > 0 && hasConnectedSiteContent(existingData)) {
-        try {
-          await db.sql`
-            INSERT INTO site_data_snapshots (username, data, snapshot_reason)
-            VALUES (${username}, ${JSON.stringify(existingData)}::jsonb, ${'pre-update'})
-          `;
-
-          await db.sql`
-            DELETE FROM site_data_snapshots
-            WHERE id IN (
-              SELECT id FROM site_data_snapshots
-              WHERE username = ${username}
-              ORDER BY created_at DESC
-              OFFSET ${MAX_SNAPSHOTS_PER_USER}
-            )
-          `;
-        } catch (snapshotErr) {
-          console.warn("[api-site] Snapshot creation failed (non-blocking):", snapshotErr);
-        }
-      }
-
       const newCoverImage =
         body?.design?.portfolioHeaderImage ||
         body?.blocks?.[0]?.coverMedia ||
         body?.profile?.avatar_url || null;
 
       const bodyJson = JSON.stringify(body);
+      let snapshotData: Record<string, any> | null = null;
 
       if (existing.length > 0) {
         let currentData = existingData;
@@ -337,6 +317,7 @@ export default async (req: Request, context: Context) => {
 
           if (updated.length > 0) {
             saved = true;
+            snapshotData = currentData;
             break;
           }
 
@@ -363,21 +344,47 @@ export default async (req: Request, context: Context) => {
         `;
       }
 
-      try {
-        const mergedResult = await db.sql`
-          SELECT data FROM site_data WHERE username = ${username}
-        `;
-        if (mergedResult.length > 0 && mergedResult[0].data) {
-          const { getStore } = await import("@netlify/blobs");
-          const blobStore = getStore({ name: "site-data", consistency: "strong" });
-          await blobStore.setJSON(username, mergedResult[0].data);
-        }
-      } catch (syncErr) {
-        console.warn("[api-site] Blob sync failed:", syncErr);
-      }
-
-      const { purgeCache } = await import("@netlify/functions");
-      await purgeCache({ tags: [`site-${encodeURIComponent(username)}`] }).catch(() => {});
+      await Promise.all([
+        (async () => {
+          if (!snapshotData || !hasConnectedSiteContent(snapshotData)) return;
+          try {
+            await db.sql`
+              WITH inserted AS (
+                INSERT INTO site_data_snapshots (username, data, snapshot_reason)
+                VALUES (${username}, ${JSON.stringify(snapshotData)}::jsonb, ${'pre-update'})
+                RETURNING id
+              )
+              DELETE FROM site_data_snapshots
+              WHERE id IN (
+                SELECT id FROM site_data_snapshots
+                WHERE username = ${username}
+                ORDER BY created_at DESC, id DESC
+                OFFSET ${MAX_SNAPSHOTS_PER_USER - 1}
+              ) AND EXISTS (SELECT 1 FROM inserted)
+            `;
+          } catch (snapshotErr) {
+            console.warn("[api-site] Snapshot creation failed (non-blocking):", snapshotErr);
+          }
+        })(),
+        (async () => {
+          try {
+            const mergedResult = await db.sql`
+              SELECT data FROM site_data WHERE username = ${username}
+            `;
+            if (mergedResult.length > 0 && mergedResult[0].data) {
+              const { getStore } = await import("@netlify/blobs");
+              const blobStore = getStore({ name: "site-data", consistency: "strong" });
+              await blobStore.setJSON(username, mergedResult[0].data);
+            }
+          } catch (syncErr) {
+            console.warn("[api-site] Blob sync failed:", syncErr);
+          }
+        })(),
+        (async () => {
+          const { purgeCache } = await import("@netlify/functions");
+          await purgeCache({ tags: [`site-${encodeURIComponent(username)}`] }).catch(() => {});
+        })(),
+      ]);
 
       return Response.json({ success: true });
     }
