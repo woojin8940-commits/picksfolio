@@ -2,12 +2,14 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { jsonError, norm } from "./_shared/affiliate.mts";
+import { recheckOrders } from "./_shared/affiliate-worker.mts";
 
 /**
  * 판매 성과.
  *
  *   GET /api/affiliate-stats?scope=brand&campaignId=&from=&to=   브랜드: 캠페인 · 상품 · 인플루언서별
  *   GET /api/affiliate-stats?scope=creator&from=&to=             인플루언서: 상품별
+ *   &refresh=1  새로고침 버튼 — 집계 전에 내 미검증 주문(무통장 입금 대기 등)을 카페24 에서 바로 다시 확인한다.
  *
  * 수수료는 보는 사람 기준이다 — 브랜드는 자기가 낼 수수료(brand_fee), 인플루언서는 자기
  * 몫(influencer_fee). 상태 구분:
@@ -44,6 +46,13 @@ export default async (req: Request) => {
   }
 
   const brand = scope === "brand";
+  if (url.searchParams.get("refresh") === "1") {
+    try {
+      await recheckOrders(db, { brand, me, campaignId });
+    } catch (e) {
+      console.error("[affiliate-stats] recheck failed", e instanceof Error ? e.message : "");
+    }
+  }
   const [products, clicks, orders, waitingRows] = await Promise.all([
     db.sql`
       SELECT cp.id, cp.name, cp.image_url, c.id AS campaign_id, c.title
@@ -61,7 +70,7 @@ export default async (req: Request) => {
       GROUP BY 1, 2, 3
     ` as unknown as Promise<any[]>,
     db.sql`
-      SELECT o.id, o.campaign_id, o.influencer_username, o.verification, o.status, o.commission_base, o.gross_base,
+      SELECT o.id, o.campaign_id, o.influencer_username, o.verification, o.status, o.status_reason, o.commission_base, o.gross_base,
              o.brand_fee, o.influencer_fee, o.commission_rate, o.platform_rate, l.campaign_product_id,
              COALESCE((SELECT SUM(CASE WHEN ${brand} THEN e.brand_fee ELSE e.influencer_fee END)
                        FROM affiliate_settlement_entries e JOIN affiliate_settlement_lines sl ON sl.id = e.line_id
@@ -113,6 +122,8 @@ export default async (req: Request) => {
         continue;
       }
       if (o.status === "excluded") {
+        // 취소 · 반품만 "취소"로 센다. 귀속 안 됨(7일 안 클릭 없음) · 캠페인 상품 없음은 애초에 성과가 아니다.
+        if (o.status_reason !== "cancelled_or_returned") continue;
         r.cancelled += 1;
         const rate = brand ? Number(o.commission_rate) : Number(o.commission_rate) - Number(o.platform_rate);
         r.excludedFee += Math.floor((Number(o.gross_base) * Math.round(rate * 100)) / 10000);

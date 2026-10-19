@@ -229,8 +229,9 @@ export type OrderEvaluation = {
   }[];
 };
 
+/** 취소 · 반품된 품목. 카페24 가 거부(C11 취소접수거부 · R11 반품접수거부)한 신청은 정상 품목으로 본다. */
 const isRefundStatus = (statusCode: string, orderStatus: string) =>
-  /^C[123]$/.test(statusCode) || statusCode === "C3" || /^[CR]\d/.test(orderStatus);
+  /^C[123]$/.test(statusCode) || (/^[CR]\d/.test(orderStatus) && !/^[CR]11$/.test(orderStatus));
 
 /**
  * 카페24 주문을 우리 규칙으로 판정한다.
@@ -308,7 +309,8 @@ export function evaluateOrder(
     })),
   };
 
-  if (net <= 0 || live.length === 0 || order.canceled && net <= 0) {
+  // 주문 전체가 취소되면(canceled=T) 품목 상태와 관계없이 제외한다 — 입금 전 취소는 품목에 환불 코드가 남지 않을 수 있다.
+  if (order.canceled || net <= 0 || live.length === 0) {
     return { ...evaluation, status: "excluded", reason: "cancelled_or_returned" };
   }
 
@@ -352,7 +354,7 @@ export async function syncOrder(
 
   const markAttempt = async (reason: string) => {
     // 무통장 입금 대기는 실패가 아니다 — 입금되거나(확인) 입금 기한이 지나 카페24 가 취소하면
-    // (제외) 저절로 끝난다. 10분마다 재확인하므로 시도 횟수에 넣으면 하루 만에 포기하게 된다.
+    // (제외) 저절로 끝난다. 새로고침할 때마다 재확인하므로 시도 횟수에 넣으면 하루 만에 포기하게 된다.
     const attempts = Number(row.verify_attempts || 0) + (reason === "awaiting_payment" ? 0 : 1);
     const giveUp = row.verification === "unverified" && attempts >= MAX_VERIFY_ATTEMPTS;
     await db.sql`

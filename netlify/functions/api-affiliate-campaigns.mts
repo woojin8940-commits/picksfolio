@@ -14,12 +14,13 @@ import {
   withTransaction,
 } from "./_shared/affiliate.mts";
 import { termsGate } from "./_shared/affiliate-terms.mts";
+import { recheckOrders } from "./_shared/affiliate-worker.mts";
 
 /**
  * 판매 연동형 캠페인.
  *
  *   GET   /api/affiliate-campaigns?scope=browse   인플루언서 둘러보기(공개 · 승인된 진행 중 캠페인)
- *   GET   /api/affiliate-campaigns?scope=brand    브랜드: 내 캠페인 + 간단 성과
+ *   GET   /api/affiliate-campaigns?scope=brand    브랜드: 내 캠페인 + 간단 성과(&refresh=1 이면 열린 주문을 카페24 에서 먼저 다시 확인)
  *   GET   /api/affiliate-campaigns?scope=admin    운영자: 전체(status 필터)
  *   GET   /api/affiliate-campaigns/:id?scope=...
  *   POST  /api/affiliate-campaigns                브랜드: 등록(관리자 승인 대기로 들어간다)
@@ -180,6 +181,11 @@ export default async (req: Request) => {
     if (scope === "brand") {
       const caller = await requireSignedInUser(req);
       if (!caller.ok) return caller.response;
+      if (url.searchParams.get("refresh") === "1") {
+        await recheckOrders(db, { brand: true, me: caller.username, campaignId: id }).catch((e) =>
+          console.error("[affiliate-campaigns] recheck failed", e instanceof Error ? e.message : ""),
+        );
+      }
       const rows = (await db.sql`
         SELECT * FROM affiliate_campaigns
         WHERE deleted_at IS NULL AND business_username = ${caller.username} AND (${id} = '' OR id = ${id})
