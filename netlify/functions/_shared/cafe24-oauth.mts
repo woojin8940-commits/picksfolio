@@ -40,8 +40,10 @@ export const SHOP_SETTINGS_PATH = "/business-admin?tab=shop-settings";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const LAUNCH_TTL_MS = 10 * 60 * 1000;
-/** 앱 실행 요청의 timestamp 허용 범위. 문서 심사 기준(2시간)보다 좁게 둔다. */
-const LAUNCH_MAX_SKEW_SEC = 5 * 60;
+/** 앱 실행 요청의 timestamp 유효 시간(카페24 심사 기준 2시간). 이만큼 지났으면 거부한다. */
+const LAUNCH_MAX_AGE_SEC = 2 * 60 * 60;
+/** 카페24 서버와의 시계 차이로 미래 시각이 찍힐 수 있어 이만큼은 허용한다. 넘으면 거부. */
+const LAUNCH_MAX_FUTURE_SEC = 60;
 
 const STATE_COOKIE = "pf_cafe24_state";
 
@@ -154,7 +156,7 @@ const decodeForm = (v: string) => decodeComponent(v.replace(/\+/g, "%20"));
  *      auth_config 포함 10개)를 파라미터명 알파벳순으로 정렬해 URL 인코딩된 query string 으로 만든다.
  *   2) 클라이언트 시크릿을 키로 HMAC-SHA256 → Base64.
  *   3) 전달된 hmac(URL 디코딩한 값)과 비교한다. 상수 시간 비교.
- *   + timestamp 가 지금과 5분 넘게 차이 나면 거부(재전송 공격 방지).
+ *   + timestamp 가 2시간(7200초) 이상 지났거나 지금보다 60초 넘게 미래면 거부(재전송 공격 방지).
  *
  * 받은 query 를 다시 조립하지 않고 **받은 그대로의 인코딩**으로 정렬해 쓰는 것이 기본이다
  * (문서 샘플 코드도 원문에서 '&hmac=…' 만 잘라 낸다). 중간 프록시가 인코딩 표기를
@@ -205,8 +207,9 @@ export function verifyAppLaunch(
   }
   if (!matched) return { ok: false, reason: "bad_hmac" };
 
-  const skew = Math.abs(Math.floor(nowMs / 1000) - Number(timestamp));
-  if (skew > LAUNCH_MAX_SKEW_SEC) return { ok: false, reason: "stale_timestamp" };
+  const age = Math.floor(nowMs / 1000) - Number(timestamp);
+  if (age < -LAUNCH_MAX_FUTURE_SEC) return { ok: false, reason: "future_timestamp" };
+  if (age >= LAUNCH_MAX_AGE_SEC) return { ok: false, reason: "stale_timestamp" };
 
   return { ok: true, mallId, shopNo: get("shop_no") || "1", userType: get("user_type") };
 }
