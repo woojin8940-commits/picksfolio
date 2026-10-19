@@ -6,8 +6,8 @@ import { signLaunch, verifyAppLaunch } from "./_shared/cafe24-oauth.mts";
  *
  * 카페24 는 `?auth_config(부운영자 · 공급사만)&is_multi_shop&lang&mall_id&nation&shop_no
  * &timestamp&user_id&user_name&user_type&hmac` 을 붙여 부른다. 문서('앱 실행 권한') 방식대로
- * hmac(클라이언트 시크릿 HMAC-SHA256, Base64)과 timestamp(5분 이내)를 확인한다 —
- * 규칙은 _shared/cafe24-oauth.mts 의 verifyAppLaunch.
+ * hmac(클라이언트 시크릿 HMAC-SHA256, Base64)과 timestamp(2시간 이내, 미래는 60초까지)를 확인한다 —
+ * 둘 중 하나라도 실패하면 403. 규칙은 _shared/cafe24-oauth.mts 의 verifyAppLaunch.
  *
  * 통과하면 검증된 몰 아이디를 서명 값(launch, 10분)에 담아 쇼핑몰 연동 화면으로 보낸다.
  * 픽스폴리오 로그인 정보는 브라우저에만 있어 서버가 알 수 없다. 그래서 작은 페이지가
@@ -34,6 +34,7 @@ main{background:#fff;border:1px solid #e2e8f0;border-radius:24px;padding:32px;ma
 
 const REASON_TEXT: Record<string, string> = {
   stale_timestamp: "실행 요청이 만료되었습니다. 카페24 관리자에서 앱을 다시 실행해 주세요.",
+  future_timestamp: "실행 요청 시각이 올바르지 않습니다. 카페24 관리자에서 앱을 다시 실행해 주세요.",
   config: "연동 설정이 준비되지 않았습니다. 픽스폴리오 고객센터로 문의해 주세요.",
 };
 
@@ -48,7 +49,7 @@ export default async (req: Request) => {
       "픽스폴리오 · 카페24",
       `<h1>요청을 확인하지 못했습니다</h1><p>${REASON_TEXT[result.reason] || "카페24 관리자 &gt; 앱 메뉴에서 픽스폴리오를 다시 실행해 주세요."}</p>`,
       "",
-      result.reason === "config" ? 503 : 400,
+      result.reason === "config" ? 503 : 403,
     );
   }
 
