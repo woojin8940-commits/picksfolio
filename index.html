@@ -12,24 +12,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#2563EB">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
-    <title>PICKSFOLIO | 크리에이터를 위한 올인원 서비스</title>
+    <title>픽스폴리오 - 인플루언서·브랜드 협업 플랫폼 | PICKSFOLIO</title>
     <!--
-      검색 결과에 그대로 실리는 소개글. 문구는 메인 홈페이지(Hero · 실시간 트렌드
-      보드 · 캠페인 소개)에서 실제로 하는 말을 그대로 옮긴 것이다 — 여기와 홈이
-      다른 말을 하면 검색으로 들어온 사람이 첫 화면에서 다른 서비스를 만난다.
+      검색 결과와 링크 미리보기에 그대로 실리는 소개글. 자바스크립트를 돌리지 않는
+      크롤러(네이버 Yeti, 카카오톡 미리보기 등)도 읽어야 하므로 반드시 이 정적
+      HTML 에 둔다 — 스크립트로 바꿔 넣지 않는다.
+      서비스명은 "픽스폴리오" 또는 "PICKSFOLIO" 로만 쓴다("PICKS" 단독 표기 금지).
       개인페이지(/아이디)에는 크리에이터 본인의 소개글이 들어가야 하므로,
-      netlify/edge-functions/og-image.ts 가 크롤러에게만 이 줄을 바꿔 준다.
+      netlify/edge-functions/og-image.ts 가 크롤러에게만 이 줄들을 바꿔 준다.
     -->
-    <meta name="description" content="오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요. 인기검색어를 분야별로 매일 정리해 보여주는 크리에이터 올인원 서비스 PICKS. 브랜드 광고 제안부터 진행·정산까지 담당자가 함께 관리합니다." />
-    <meta property="og:title" content="PICKS | 크리에이터를 위한 올인원 서비스" />
-    <meta property="og:description" content="오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요. 인기검색어를 분야별로 매일 정리해 보여주는 크리에이터 올인원 서비스 PICKS. 브랜드 광고 제안부터 진행·정산까지 담당자가 함께 관리합니다." />
+    <meta name="description" content="픽스폴리오는 인플루언서와 브랜드를 연결해요. 자동 DM, 브랜드 매칭, 개인 페이지, 판매 연동까지 한 곳에서." />
+    <meta property="og:site_name" content="픽스폴리오" />
+    <meta property="og:title" content="픽스폴리오 - 인플루언서·브랜드 협업 플랫폼" />
+    <meta property="og:description" content="픽스폴리오는 인플루언서와 브랜드를 연결해요. 자동 DM, 브랜드 매칭, 개인 페이지, 판매 연동까지 한 곳에서." />
     <meta property="og:image" content="https://picks-folio.com/og-image.png?v=2" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://picks-folio.com/" />
+    <meta property="og:locale" content="ko_KR" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PICKS | 크리에이터를 위한 올인원 서비스" />
-    <meta name="twitter:description" content="오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요. 인기검색어를 분야별로 매일 정리해 보여주는 크리에이터 올인원 서비스 PICKS. 브랜드 광고 제안부터 진행·정산까지 담당자가 함께 관리합니다." />
+    <meta name="twitter:title" content="픽스폴리오 - 인플루언서·브랜드 협업 플랫폼" />
+    <meta name="twitter:description" content="픽스폴리오는 인플루언서와 브랜드를 연결해요. 자동 DM, 브랜드 매칭, 개인 페이지, 판매 연동까지 한 곳에서." />
     <meta name="twitter:image" content="https://picks-folio.com/og-image.png?v=2" />
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"픽스폴리오","alternateName":["PICKSFOLIO","Picksfolio","picks-folio"],"url":"https://picks-folio.com/","logo":"https://picks-folio.com/og-image.png?v=2"}</script>
     <!--
       폰트는 가변(variable) 판의 dynamic-subset 을 쓴다.
       static 판은 굵기마다 한글 전체가 담긴 약 780KB woff2 를 따로 받는다. 홈과
@@ -62,7 +68,15 @@ fbq('track', 'PageView');
 <noscript><img height="1" width="1" style="display:none"
 src="https://www.facebook.com/tr?id=3504523199721217&ev=PageView&noscript=1"
 /></noscript>
-    <div id="root"></div>
+    <!--
+      #root 안의 h1 은 자바스크립트 없이도 메인 HTML 에 서비스명("픽스폴리오")이
+      보이게 하는 정적 제목이다. 리액트가 뜨면 createRoot 가 #root 안을 비우고 홈
+      화면으로 갈아 끼운다. 메인 홈(/)이 아닌 주소에서는 바로 아래 스크립트가
+      그리기 전에 지운다(개인페이지에 홈 제목이 번쩍이지 않게).
+      netlify/edge-functions/og-image.ts 가 이 마크업을 그대로 찾아 바꾸므로,
+      고치면 그쪽 STATIC_ROOT 도 함께 맞춘다.
+    -->
+    <div id="root"><h1 id="static-home-title" style="position:fixed;inset:0;margin:0;padding:1rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:#F4F5FA;font-size:1.5rem;font-weight:900;letter-spacing:-0.05em;color:#0B0F1A">픽스폴리오 <span style="display:block;margin-top:0.5rem;font-size:0.875rem;font-weight:700;letter-spacing:0;color:#4A5273">인플루언서·브랜드 협업 플랫폼 PICKSFOLIO</span></h1></div>
     <!--
       로그인 콜백으로 들어온 방문에만, 리액트가 뜨기 전 자리를 지키는 로딩 화면.
 
@@ -90,9 +104,12 @@ src="https://www.facebook.com/tr?id=3504523199721217&ev=PageView&noscript=1"
             loc.pathname === '/auth-callback' ||
             /[?&](code|kakao_login)=/.test(loc.search) ||
             /access_token=/.test(loc.hash);
-          if (!isAuthCallback) return;
           var root = document.getElementById('root');
           if (!root) return;
+          if (!isAuthCallback) {
+            if (loc.pathname !== '/') root.innerHTML = '';
+            return;
+          }
           // body 색도 함께 종이색으로 바꾼다. 이 화면은 fixed 라 overscroll
           // 되돌림 구간과 데스크톱 확대가 남기는 바깥 여백을 덮지 못한다.
           // AuthLoadingScreen 이 자리를 이어받은 뒤 이 인라인 색을 치운다.
