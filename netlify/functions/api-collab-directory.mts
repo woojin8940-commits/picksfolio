@@ -416,6 +416,13 @@ export default async (req: Request) => {
         // 콘텐츠 유형별 단가
         const post_price = (b.post_price || "").toString().trim();
         const short_price = (b.short_price || "").toString().trim();
+        // 단가는 담당자가 브랜드 예산에 맞는 사람을 추리는 값이라 둘 다 받는다.
+        if (!/\d/.test(post_price) || !/\d/.test(short_price)) {
+          return Response.json(
+            { error: "게시물 단가와 숏폼 단가를 모두 입력해 주세요." },
+            { status: 400 },
+          );
+        }
 
         // 인스타그램 지표는 공개 HTML 크롤링 값이 아니라 Meta 연동 데이터만 검증값으로
         // 사용한다. 연동을 마쳤으면 그 숫자를 대표값으로 굳히고, 연동 전에는 수기값을
@@ -707,6 +714,17 @@ export default async (req: Request) => {
         const tiktok_followers = count("tiktok_followers", row.tiktok_followers);
         const post_price = text("post_price", row.post_price);
         const short_price = text("short_price", row.short_price);
+        // 단가를 비워서 보낸 수정은 막는다. 단가를 보내지 않은 요청(다른 칸만 고치는
+        // 화면)은 예전 등록서를 그대로 두도록 통과시킨다.
+        if (
+          (typeof b.post_price !== "undefined" && !/\d/.test(post_price)) ||
+          (typeof b.short_price !== "undefined" && !/\d/.test(short_price))
+        ) {
+          return Response.json(
+            { error: "게시물 단가와 숏폼 단가를 모두 입력해 주세요." },
+            { status: 400 },
+          );
+        }
 
         // 틱톡 주소가 바뀐 경우에만 공개 페이지를 다시 본다. 단가만 고치러 온 요청이
         // 외부 사이트 응답을 기다릴 이유가 없다. 연동을 마친 계정이면 그 값이 쓰이지
