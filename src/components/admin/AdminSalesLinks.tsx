@@ -13,6 +13,9 @@ import { instagramPostUrl } from '../../utils/instagramPostUrl';
  *
  * 단가는 피드 / 릴스 두 가지다. 각각 원가(인플루언서에게 주는 금액)와 마진으로 나눠 적고,
  * 브랜드에게는 둘을 더한 제안 단가만 보인다.
+ *
+ * 매칭 등록자의 단가 칸은 손대기 전까지 등록서의 지금 단가를 따라간다. 운영자가 그 칸을
+ * 저장하면 저장한 금액으로 고정되고, 등록서 단가가 바뀌어도 브랜드에게는 정한 금액이 보인다.
  */
 
 interface Reel { id?: string; permalink: string; thumbnailUrl: string; views?: number }
@@ -42,7 +45,15 @@ interface Item {
   synced_at: string | null;
   /** 매칭 등록자 — 최근 릴스·조회수를 연동된 채널 지표에서 자동으로 가져옴 */
   reels_live?: boolean;
+  /** 운영자가 저장해 고정한 단가 칸 */
+  price_locked?: boolean;
+  reels_price_locked?: boolean;
+  /** 매칭 등록자 — 손대지 않은 단가 칸이 등록서 단가를 따르는 중 */
+  price_live?: boolean;
   reels_price_live?: boolean;
+  /** 지금 등록서에 적힌 원가 */
+  registered_price?: number;
+  registered_reels_price?: number;
 }
 
 interface SalesLink {
@@ -361,7 +372,7 @@ const LinkEditor: React.FC<{
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {link.items.map((it, i) => (
               <ItemCard
-                key={`${it.id}-${it.synced_at}-${it.price}-${it.reels_price}-${it.followers}`}
+                key={`${it.id}-${it.synced_at}-${it.base_price}-${it.price}-${it.reels_base_price}-${it.reels_price}-${it.price_locked}-${it.reels_price_locked}-${it.followers}`}
                 item={it}
                 first={i === 0}
                 last={i === link.items.length - 1}
@@ -441,6 +452,11 @@ const ItemCard: React.FC<{
     setReelsMargin(marginOf(reelsBase, pct));
   };
 
+  // 매칭 등록자의 단가 칸을 고쳐 저장하면 그 금액으로 고정한다. 고정하지 않으면 다음에 열 때
+  // 등록서 단가로 다시 바뀌어, 운영자가 정한 금액과 브랜드가 보는 금액이 어긋난다.
+  const feedLocked = !!item.price_locked || num(base) !== item.base_price || price !== item.price;
+  const reelsLocked = !!item.reels_price_locked || num(reelsBase) !== item.reels_base_price || reelsPrice !== item.reels_price;
+
   const save = async () => {
     setBusy('save');
     try {
@@ -452,10 +468,27 @@ const ItemCard: React.FC<{
           .filter(r => r.permalink),
         base_price: num(base), price,
         reels_base_price: num(reelsBase), reels_price: reelsPrice,
+        ...(item.source === 'registered' ? { price_locked: feedLocked, reels_price_locked: reelsLocked } : {}),
         price_note: note, memo,
       });
       await reload();
       notify({ tone: 'ok', text: `@${item.instagram_handle} 정보를 저장했습니다.` });
+    } catch (e) {
+      notify({ tone: 'warn', text: (e as Error).message });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  /** 고정을 풀고 등록서 단가를 다시 따른다. 마진은 지운다(원가 = 제안가). */
+  const followRegistered = async (kind: 'feed' | 'reels') => {
+    setBusy('save');
+    try {
+      await call(kind === 'feed'
+        ? { action: 'update_item', id: item.id, price_locked: false, base_price: 0, price: 0 }
+        : { action: 'update_item', id: item.id, reels_price_locked: false, reels_base_price: 0, reels_price: 0 });
+      await reload();
+      notify({ tone: 'ok', text: `@${item.instagram_handle} 의 ${kind === 'feed' ? '피드' : '릴스'} 단가가 등록서 단가를 따릅니다.` });
     } catch (e) {
       notify({ tone: 'warn', text: (e as Error).message });
     } finally {
@@ -552,7 +585,7 @@ const ItemCard: React.FC<{
                   onChange={e => setReels(prev => prev.map((r, j) => (j === i ? e.target.value : r)))}
                   placeholder="릴스 링크"
                   readOnly={item.reels_live}
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium read-only:bg-slate-50 read-only:text-slate-500"
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-700 placeholder:text-slate-400 read-only:bg-slate-50 read-only:text-slate-500"
                 />
                 <input
                   value={formatNumberWithCommas(reelViews[i])}
@@ -560,7 +593,7 @@ const ItemCard: React.FC<{
                   placeholder="조회수"
                   readOnly={item.reels_live}
                   inputMode="numeric"
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium read-only:bg-slate-50 read-only:text-slate-500"
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-700 placeholder:text-slate-400 read-only:bg-slate-50 read-only:text-slate-500"
                 />
               </div>
             );
@@ -570,17 +603,23 @@ const ItemCard: React.FC<{
 
       <div className="rounded-xl bg-slate-50 p-3 space-y-2">
         <div className="grid grid-cols-3 gap-2">
-          <Field label="피드 원가 (운영자만)"><input value={formatNumberWithCommas(base)} onChange={e => setBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
+          <Field label={item.price_live ? '피드 원가 (등록서 게시물 단가 연동)' : '피드 원가 (운영자만)'}><input value={formatNumberWithCommas(base)} onChange={e => setBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
           <Field label="피드 마진"><input value={formatNumberWithCommas(margin)} onChange={e => setMargin(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
           <Field label="피드 단가 (브랜드 노출)">
             <div className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-black">{price > 0 ? formatKRW(price) : '협의'}</div>
           </Field>
-          <Field label={item.reels_price_live ? '릴스 원가 (등록서 숏폼 단가 연동)' : '릴스 원가 (운영자만)'}><input value={formatNumberWithCommas(reelsBase)} onChange={e => setReelsBase(digits(e.target.value))} readOnly={item.reels_price_live} inputMode="numeric" className={`${inputCls} read-only:bg-slate-100 read-only:text-slate-500`} /></Field>
+          <Field label={item.reels_price_live ? '릴스 원가 (등록서 숏폼 단가 연동)' : '릴스 원가 (운영자만)'}><input value={formatNumberWithCommas(reelsBase)} onChange={e => setReelsBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
           <Field label="릴스 마진"><input value={formatNumberWithCommas(reelsMargin)} onChange={e => setReelsMargin(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
           <Field label="릴스 단가 (브랜드 노출)">
             <div className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-black">{reelsPrice > 0 ? formatKRW(reelsPrice) : '협의'}</div>
           </Field>
         </div>
+        {item.source === 'registered' && (
+          <div className="space-y-1">
+            <RegisteredPriceNote label="피드" locked={!!item.price_locked} live={!!item.price_live} registered={item.registered_price || 0} base={item.base_price} disabled={!!busy} onFollow={() => followRegistered('feed')} onApply={() => setBase(String(item.registered_price || ''))} />
+            <RegisteredPriceNote label="릴스" locked={!!item.reels_price_locked} live={!!item.reels_price_live} registered={item.registered_reels_price || 0} base={item.reels_base_price} disabled={!!busy} onFollow={() => followRegistered('reels')} onApply={() => setReelsBase(String(item.registered_reels_price || ''))} />
+          </div>
+        )}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] font-bold text-slate-400">원가 기준 마진</span>
           {[20, 30, 50, 100].map(p => (
@@ -699,6 +738,42 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
     {children}
   </label>
 );
+
+/** 매칭 등록자 단가 칸 하나가 등록서를 따르는지, 운영자 금액으로 고정됐는지 알려 준다. */
+const RegisteredPriceNote: React.FC<{
+  label: string;
+  locked: boolean;
+  live: boolean;
+  registered: number;
+  base: number;
+  disabled: boolean;
+  onFollow: () => void;
+  onApply: () => void;
+}> = ({ label, locked, live, registered, base, disabled, onFollow, onApply }) => {
+  const btn = 'px-1.5 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-black text-slate-600 disabled:opacity-40 hover:border-slate-400';
+  if (live) {
+    return (
+      <p className="text-[10px] font-bold text-blue-600">
+        {label}: 등록서 단가 {formatKRW(registered)} 연동 중 · 고쳐 저장하면 그 금액으로 고정됩니다
+      </p>
+    );
+  }
+  if (locked) {
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold text-slate-500">
+        <span>{label}: 운영자가 정한 금액으로 고정</span>
+        {registered > 0 && registered !== base && (
+          <>
+            <span className="text-amber-600">· 지금 등록서 단가 {formatKRW(registered)}</span>
+            <button type="button" onClick={onApply} disabled={disabled} className={btn}>원가에 넣기</button>
+          </>
+        )}
+        {registered > 0 && <button type="button" onClick={onFollow} disabled={disabled} className={btn}>등록서 단가 따르기</button>}
+      </div>
+    );
+  }
+  return <p className="text-[10px] font-bold text-slate-400">{label}: 등록서에 적힌 단가가 없습니다</p>;
+};
 
 const IconBtn: React.FC<{ label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }> = ({ label, disabled, onClick, children }) => (
   <button
