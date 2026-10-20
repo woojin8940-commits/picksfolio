@@ -3,6 +3,7 @@ import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul, form
 import { apiService, authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
+import { AFFILIATE_ENABLED } from '../../utils/featureFlags';
 import {
   REWARD_MODES, rewardModeOf, normalizeRewardMode, COMMISSION_RANGE,
   TIERS, tierFeeLabel, stageMarksFor,
@@ -298,10 +299,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const mode = rewardModeOf(form.reward_mode);
   const isBarter = form.reward_mode === 'barter';
   const isGroupBuy = form.reward_mode === 'groupbuy';
-  // 고를 수 있는 진행 방식. 커머스형은 '판매 캠페인' 메뉴로 옮겨 갔다 — 예전 커머스형
-  // 캠페인을 고치는 중일 때만 남겨 둔다(지우면 그 캠페인의 방식이 아무것도 아닌 것처럼 보인다).
+  // 고를 수 있는 진행 방식. 판매 캠페인(어필리에이트)이 켜져 있는 동안에는 커머스형을 그쪽에
+  // 맡기고, 예전 커머스형 캠페인을 고칠 때만 남겨 둔다. 카페24 심사 보류로 판매 캠페인을
+  // 꺼 둔 지금은 커머스형(공동구매)을 다시 고를 수 있다(utils/featureFlags).
   const pickableModes = REWARD_MODES.filter(
-    m => m.value !== 'groupbuy' || normalizeRewardMode(editing?.reward_mode) === 'groupbuy',
+    m => !AFFILIATE_ENABLED || m.value !== 'groupbuy' || normalizeRewardMode(editing?.reward_mode) === 'groupbuy',
   );
   // 모집기간을 브랜드가 정하는 방식인지. 지원을 받는 방식에만 모집 시작·마감이 있다.
   const hasRecruitPeriod = mode.openApply;
@@ -1035,10 +1037,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
               <div>
                 <label className={LABEL}>진행 방식 *</label>
                 {/* 방식을 한 줄에 나란히 둔다 — 나란히 보이지 않으면 무엇을 고르는지
-                    비교가 안 되고, 두 줄로 접히면 마지막 방식이 덤처럼 보인다.
-                    커머스형(판매 수수료)은 이제 '판매 캠페인' 메뉴가 맡는다(쇼핑몰 연동 ·
-                    추적 링크 · 월별 정산). 여기서는 고를 수 없고, 예전에 커머스형으로
-                    만든 캠페인을 고칠 때만 그 칸을 그대로 보여 준다. */}
+                    비교가 안 되고, 두 줄로 접히면 마지막 방식이 덤처럼 보인다. */}
                 <div className={`grid grid-cols-1 ${pickableModes.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2`}>
                   {pickableModes.map(m => {
                     const active = form.reward_mode === m.value;
@@ -1060,16 +1059,20 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                         </p>
                         {/* 지원을 받는 방식인지 아닌지가 이후 단계를 바꾼다. 고르기 전에 알려 준다. */}
                         <p className="text-[9px] font-black text-slate-400 mt-1.5 leading-snug">
-                          {m.openApply ? '캠페인 협업 목록에 노출 · 인플루언서가 직접 지원' : '목록에 노출하지 않고 담당자가 후보를 리스트업'}
+                          {m.openApply && m.managerListup
+                            ? '목록에 노출해 지원을 받고 · 담당자도 후보를 리스트업'
+                            : m.openApply ? '캠페인 협업 목록에 노출 · 인플루언서가 직접 지원' : '목록에 노출하지 않고 담당자가 후보를 리스트업'}
                         </p>
                       </button>
                     );
                   })}
                 </div>
-                <p className="text-[10px] text-slate-400 font-bold mt-2 leading-relaxed break-keep">
-                  판매 수수료형 캠페인은 '판매 캠페인' 메뉴에서 등록합니다. 쇼핑몰을 연동하면 판매가
-                  자동으로 집계됩니다.
-                </p>
+                {AFFILIATE_ENABLED && (
+                  <p className="text-[10px] text-slate-400 font-bold mt-2 leading-relaxed break-keep">
+                    판매 수수료형 캠페인은 '판매 캠페인' 메뉴에서 등록합니다. 쇼핑몰을 연동하면 판매가
+                    자동으로 집계됩니다.
+                  </p>
+                )}
               </div>
 
               {/* 진행 방식이 정하는 단계. 협업 화면에 실제로 생기는 단계와 짝을 맞춰 둔다.

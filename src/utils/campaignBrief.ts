@@ -142,7 +142,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     value: 'groupbuy',
     label: '커머스형',
     tagline: '판매 수수료',
-    lines: ['제품을 함께 팔고 판매 수수료를 지급합니다.', '지원한 인플루언서 중에서 골라 진행합니다.'],
+    lines: ['제품을 함께 팔고 판매 수수료를 지급합니다.', '지원도 받고, 담당자가 후보도 리스트업합니다.'],
     secondUseNote: '판매 기간과 수수료 지급은 담당자가 정리합니다',
     openApply: true,
     managerListup: true,

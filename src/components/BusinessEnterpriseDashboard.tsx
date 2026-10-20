@@ -30,6 +30,7 @@ const BusinessAdStatus = lazyWithRetry(() => import('./BusinessAdStatus'));
 // 브랜드용 인사이트(우리 계정을 태그한 인플루언서 콘텐츠). 인플루언서용 인사이트와는
 // 다른 화면이며, 이 대시보드에서만 열린다.
 const BusinessTaggedContent = lazyWithRetry(() => import('./BusinessTaggedContent'));
+import { AFFILIATE_ENABLED } from '../utils/featureFlags';
 // 판매 연동형(어필리에이트) 캠페인과 그 바닥인 쇼핑몰 연동. 자사몰(카페24) 상품을
 // 인플루언서가 판매하고 수수료를 받는다 — 광고비를 주는 캠페인 협업과는 따로 굴러간다.
 const BrandAffiliateCampaigns = lazyWithRetry(() => import('./affiliate/BrandAffiliateCampaigns'));
@@ -41,7 +42,8 @@ interface BusinessEnterpriseDashboardProps {
 }
 
 type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status' | 'affiliate';
-const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', 'affiliate'];
+// 판매 캠페인은 카페24 심사 보류로 꺼 두었다(utils/featureFlags) — 꺼져 있으면 예전에 보던 탭으로도 돌아가지 않는다.
+const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', ...(AFFILIATE_ENABLED ? ['affiliate' as const] : [])];
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
@@ -97,9 +99,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       insights: 'tagged-insights',
       history: 'campaign-history',
       ads: 'ad-status',
-      affiliate: 'affiliate',
-      shop: 'affiliate',
-      'shop-settings': 'affiliate',
+      // 판매 캠페인이 꺼져 있으면 예전 링크 · 카페24 콜백은 캠페인 협업으로 받는다.
+      affiliate: AFFILIATE_ENABLED ? 'affiliate' : 'campaign-collab',
+      shop: AFFILIATE_ENABLED ? 'affiliate' : 'campaign-collab',
+      'shop-settings': AFFILIATE_ENABLED ? 'affiliate' : 'campaign-collab',
     };
     if (tab === 'shop' || tab === 'shop-settings') setAffiliateTab('shop');
     if (tab && tabs[tab]) setCurrentSubView(tabs[tab]);
@@ -445,7 +448,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       );
       break;
     case 'affiliate':
-      subComponent = (
+      subComponent = !AFFILIATE_ENABLED ? null : (
         <LazyRoute>
           <BrandAffiliateCampaigns
             key={affiliateTab}
@@ -652,7 +655,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <div className="my-3 border-t border-white/10" />
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           {/* 판매 수수료형은 광고비 캠페인과 다른 메뉴다. 캠페인 협업 바로 아래에 둔다. */}
-          <NavItem icon="🛍️" label="판매 캠페인" active={currentSubView === 'affiliate'} onClick={() => setCurrentSubView('affiliate')} />
+          {AFFILIATE_ENABLED && (
+            <NavItem icon="🛍️" label="판매 캠페인" active={currentSubView === 'affiliate'} onClick={() => setCurrentSubView('affiliate')} />
+          )}
           <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           {/* 광고 현황은 이력에서 고른 콘텐츠의 다음 단계라, 이력 바로 아래에 둔다. */}
           <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
@@ -683,7 +688,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📩" label="DM자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <MobileNavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
-          <MobileNavItem icon="🛍️" label="판매캠페인" active={currentSubView === 'affiliate'} onClick={() => setCurrentSubView('affiliate')} />
+          {AFFILIATE_ENABLED && (
+            <MobileNavItem icon="🛍️" label="판매캠페인" active={currentSubView === 'affiliate'} onClick={() => setCurrentSubView('affiliate')} />
+          )}
           <MobileNavItem icon="📊" label="캠페인이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           <MobileNavItem icon="📣" label="광고현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
@@ -710,7 +717,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => { setCurrentSubView('tagged-insights'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} badge={collabUnread} />
-              <NavItem icon="🛍️" label="판매 캠페인" active={currentSubView === 'affiliate'} onClick={() => { setCurrentSubView('affiliate'); setIsMobileMenuOpen(false); }} />
+              {AFFILIATE_ENABLED && (
+                <NavItem icon="🛍️" label="판매 캠페인" active={currentSubView === 'affiliate'} onClick={() => { setCurrentSubView('affiliate'); setIsMobileMenuOpen(false); }} />
+              )}
               <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => { setCurrentSubView('campaign-history'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => { setCurrentSubView('ad-status'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
