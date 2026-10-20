@@ -143,7 +143,7 @@ interface CampaignCollabManagementProps {
 const CAMPAIGN_TYPES = [
   { value: '', label: '전체' },
   { value: 'ad_collab', label: '광고 협업' },
-  // 커머스(공동구매)는 뺐다. 판매 수수료형은 '판매 캠페인' 메뉴가 따로 보여 준다.
+  { value: 'group_buy', label: '커머스' },
   { value: 'other', label: '기타' },
 ];
 

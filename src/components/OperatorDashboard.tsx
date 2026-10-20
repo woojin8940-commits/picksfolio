@@ -22,6 +22,7 @@ import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminAffiliateConsole from './admin/AdminAffiliateConsole';
 import AdminPlatformSettings from './admin/AdminPlatformSettings';
 import AdminSalesLinks from './admin/AdminSalesLinks';
+import { AFFILIATE_ENABLED } from '../utils/featureFlags';
 import { isTestProposal } from '../utils/testData';
 
 /**
@@ -289,7 +290,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'campaigns', label: '1. 캠페인 승인', badge: pendingCampaigns },
         { key: 'listup', label: '2. 인플루언서 배정 · 진행' },
         { key: 'collabs', label: '3. 캠페인 관리' },
-        { key: 'affiliate', label: '판매 연동 캠페인' },
+        // 판매 연동 캠페인 · 그 수수료를 정하는 플랫폼 설정은 카페24 심사 보류로 꺼 두었다(utils/featureFlags).
+        ...(AFFILIATE_ENABLED ? [{ key: 'affiliate' as OperatorTab, label: '판매 연동 캠페인' }] : []),
       ],
     },
     {
@@ -308,7 +310,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'managers', label: '담당자 계정' },
         { key: 'dmqueue', label: 'DM 발송' },
         { key: 'settlement', label: '정산·매출' },
-        { key: 'platform-settings', label: '플랫폼 설정' },
+        ...(AFFILIATE_ENABLED ? [{ key: 'platform-settings' as OperatorTab, label: '플랫폼 설정' }] : []),
       ],
     },
   ];

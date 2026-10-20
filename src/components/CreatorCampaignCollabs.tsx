@@ -8,6 +8,7 @@ import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
 import CampaignAiAssistant from './collab/CampaignAiAssistant';
 import CreatorAffiliateSales from './affiliate/CreatorAffiliateSales';
+import { AFFILIATE_ENABLED } from '../utils/featureFlags';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
@@ -522,13 +523,15 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
         </div>
         {/* 판매 연동형 캠페인은 연동한 계정과 상관없이 링크로 판매한다. 연동을 끊어
             둔 동안에도 판매 링크 · 수수료는 볼 수 있어야 한다. */}
-        <button
-          type="button"
-          onClick={() => setListTab('affiliate')}
-          className="mt-4 text-xs font-black text-blue-600 hover:text-blue-700"
-        >
-          {isEn ? 'Open affiliate sales →' : '어필리에이트 판매 링크 · 수수료 보기 →'}
-        </button>
+        {AFFILIATE_ENABLED && (
+          <button
+            type="button"
+            onClick={() => setListTab('affiliate')}
+            className="mt-4 text-xs font-black text-blue-600 hover:text-blue-700"
+          >
+            {isEn ? 'Open affiliate sales →' : '어필리에이트 판매 링크 · 수수료 보기 →'}
+          </button>
+        )}
         {toastEl}
       </main>
     );
@@ -843,8 +846,9 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
           {([
             { key: 'active' as ListTab, label: isEn ? 'In progress' : '진행중', count: tabCounts.active },
             { key: 'closed' as ListTab, label: isEn ? 'Closed' : '마감됨', count: tabCounts.closed },
-            { key: 'affiliate' as ListTab, label: isEn ? 'Affiliate' : '어필리에이트', count: null as number | null },
-          ]).map(t => (
+            // 카페24 심사 보류로 판매 연동형을 꺼 둔 동안에는 탭을 감춘다(utils/featureFlags).
+            ...(AFFILIATE_ENABLED ? [{ key: 'affiliate' as ListTab, label: isEn ? 'Affiliate' : '어필리에이트', count: null as number | null }] : []),
+          ] as { key: ListTab; label: string; count: number | null }[]).map(t => (
             <button
               key={t.key}
               type="button"

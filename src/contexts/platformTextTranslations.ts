@@ -2718,6 +2718,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "캠페인 진행 현황을 불러오는 중...": "Loading campaign progress status...",
   "캠페인 협업": "Campaigns",
   "캠페인 협업 목록에 노출 · 인플루언서가 직접 지원": "Exposure to campaign collaboration list · Direct support from influencers",
+  "목록에 노출해 지원을 받고 · 담당자도 후보를 리스트업": "Listed to receive applications · Manager also lists up candidates",
+  "지원도 받고, 담당자가 후보도 리스트업합니다.": "Influencers can apply, and a manager also lists up candidates.",
   "캠페인 협업 목록에 올라가고, 인플루언서가 직접 지원합니다. 광고비 없이 제품만 제공하므로 구성안·콘텐츠 검수 단계가 없고, 가이드를 전달한 뒤 업로드를 확인하는 흐름으로 진행됩니다.": "It is listed on the campaign collaboration list, and the influencer directly applies. Since we only provide products without advertising costs, there is no composition plan or content inspection stage, and the process proceeds by delivering a guide and then confirming the upload.",
   "캠페인 협업 목록에 올라가고, 판매를 함께할 인플루언서가 직접 지원합니다. 광고비 대신 판매 수수료로 정산하며, 콘텐츠 검수와 수수료 정산 단계가 있습니다.": "You will be listed on the campaign collaboration list, and the influencer who will be working with you on sales will apply directly. It is settled with a sales commission instead of an advertising fee, and there are content inspection and commission settlement steps.",
   "캠페인 협업에서 캠페인을 등록하면 진행 이력이 이 화면에 쌓입니다.": "When you register a campaign in Campaign Collaboration, the progress history is accumulated on this screen.",
