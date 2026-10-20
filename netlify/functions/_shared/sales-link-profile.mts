@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { connect } from "node:http2";
 import { fetchAllowed } from "./allowed-fetch.mts";
 import { safeKeyPrefix } from "./upload-media.mts";
 
@@ -92,6 +93,42 @@ async function mirrorImage(source: string, key: string): Promise<string> {
   }
 }
 
+/**
+ * HTTP/2 로 GET 한다. 인스타는 공개 프로필 주소에 HTTP/1.1 로 오는 요청을 모두 429 로
+ * 막는다. Node 의 fetch 는 HTTP/1.1 만 쓰므로, 같은 요청이라도 이 길로 보내야 답을 준다.
+ */
+function getHttp2(url: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const client = connect(u.origin);
+    const timer = setTimeout(() => {
+      client.destroy();
+      reject(new Error("timeout"));
+    }, timeoutMs);
+    const fail = (e: Error) => {
+      clearTimeout(timer);
+      client.destroy();
+      reject(e);
+    };
+    client.on("error", fail);
+    const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+    const stream = client.request({ ":method": "GET", ":path": u.pathname + u.search, ...lower });
+    let status = 0;
+    const chunks: Buffer[] = [];
+    stream.on("response", (h) => {
+      status = Number(h[":status"] || 0);
+    });
+    stream.on("data", (d: Buffer) => chunks.push(d));
+    stream.on("error", fail);
+    stream.on("end", () => {
+      clearTimeout(timer);
+      client.close();
+      resolve({ status, body: Buffer.concat(chunks).toString("utf8") });
+    });
+    stream.end();
+  });
+}
+
 /** 공개 프로필을 읽는다. 실패하면 { error } 로 이유를 돌려준다. */
 export async function fetchPublicProfile(
   handle: string,
@@ -119,13 +156,18 @@ export async function fetchPublicProfile(
   let lastStatus = 0;
   for (const attempt of attempts) {
     try {
-      const res = await fetch(attempt.url, { headers: attempt.headers, signal: AbortSignal.timeout(7000) });
+      const res = await getHttp2(attempt.url, attempt.headers, 7000);
       if (res.status === 404) return { error: "존재하지 않는 계정입니다." };
-      if (!res.ok) {
+      if (res.status < 200 || res.status >= 300) {
         lastStatus = res.status;
         continue;
       }
-      const data = (await res.json().catch(() => null)) as any;
+      let data: any = null;
+      try {
+        data = JSON.parse(res.body);
+      } catch {
+        // 형식이 바뀐 응답 — user 없음으로 처리
+      }
       user = data?.data?.user;
       // 200 인데 user 가 없으면 비공개·없는 계정이다. 다른 주소도 같은 답을 준다.
       lastStatus = 200;
