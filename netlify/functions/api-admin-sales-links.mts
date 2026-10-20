@@ -9,7 +9,7 @@ import {
   handleFromInput,
   type SalesReel,
 } from "./_shared/sales-link-profile.mts";
-import { priceFromText, withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
+import { normUsername, ratesFromApplication, withLiveRegistered } from "./_shared/sales-link-live.mts";
 
 /**
  * 브랜드 영업용 링크 — 운영자 관리 API.
@@ -59,7 +59,7 @@ function shapeItem(row: any) {
 /** 브랜드 매칭 등록자 한 명의 지금 프로필. 연동 지표가 없으면 공개 프로필로 채운다. */
 async function snapshotRegistered(db: any, applicationId: string, opts: { skipPublic?: boolean } = {}) {
   const rows = await db.sql`
-    SELECT a.id, a.name, a.instagram_url, a.category, a.ad_price, a.post_price, a.short_price, a.follower_count,
+    SELECT a.id, a.applicant_username, a.name, a.instagram_url, a.category, a.ad_price, a.post_price, a.short_price, a.follower_count,
       c.connected, c.instagram_handle, c.followers, c.following, c.recent_reels, c.profile_image
     FROM collab_directory_applications a
     LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
@@ -79,7 +79,9 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
       thumbnailUrl: String(r?.thumbnailUrl || ""),
       views: clampInt(Number(r?.views || 0)),
     }));
+  const rates = ratesFromApplication(row);
   let snap = {
+    applicantUsername: normUsername(row.applicant_username),
     handle,
     displayName: String(row.name || ""),
     category: String(row.category || ""),
@@ -87,11 +89,8 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
     following: clampInt(Number(row.following || 0)),
     profileImageUrl: String(row.profile_image || ""),
     reels,
-    // 게시물 단가 = 피드, 숏폼 단가 = 릴스. 둘 다 비어 있으면 예전 단일 단가 문구를 피드로 읽는다.
-    basePrice: row.post_price
-      ? priceFromText(row.post_price)
-      : row.short_price ? 0 : priceFromText(row.ad_price),
-    reelsBasePrice: priceFromText(row.short_price),
+    basePrice: rates.feed,
+    reelsBasePrice: rates.reels,
     error: "",
   };
 
@@ -151,7 +150,7 @@ function keepManualViews(fresh: SalesReel[], prior: any[]): SalesReel[] {
 async function listLinks(db: any) {
   const links = await db.sql`SELECT * FROM sales_links ORDER BY created_at DESC`;
   const rows = await db.sql`SELECT * FROM sales_link_influencers ORDER BY sort_order ASC, created_at ASC`;
-  const items = await withLiveRegisteredReels(db, rows);
+  const items = await withLiveRegistered(db, rows);
   const byLink = new Map<string, any[]>();
   for (const it of items) {
     const list = byLink.get(it.link_id) || [];
@@ -271,11 +270,11 @@ export default async (req: Request) => {
             }
             await db.sql`
               INSERT INTO sales_link_influencers (
-                id, link_id, sort_order, source, application_id, instagram_handle, profile_url, display_name,
+                id, link_id, sort_order, source, application_id, applicant_username, instagram_handle, profile_url, display_name,
                 profile_image_url, category, followers, following, recent_reels, base_price, price,
                 reels_base_price, reels_price, fetch_error, synced_at
               ) VALUES (
-                ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'registered', ${appId}, ${snap.handle},
+                ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'registered', ${appId}, ${snap.applicantUsername}, ${snap.handle},
                 ${snap.handle ? `https://www.instagram.com/${snap.handle}/` : ""}, ${snap.displayName}, ${snap.profileImageUrl},
                 ${snap.category}, ${snap.followers}, ${snap.following}, ${JSON.stringify(snap.reels)}::jsonb,
                 ${snap.basePrice}, ${snap.basePrice},
@@ -312,6 +311,8 @@ export default async (req: Request) => {
             price = ${b.price !== undefined ? int(b.price) : cur.price},
             reels_base_price = ${b.reels_base_price !== undefined ? int(b.reels_base_price) : cur.reels_base_price},
             reels_price = ${b.reels_price !== undefined ? int(b.reels_price) : cur.reels_price},
+            price_locked = ${b.price_locked !== undefined ? b.price_locked === true : cur.price_locked},
+            reels_price_locked = ${b.reels_price_locked !== undefined ? b.reels_price_locked === true : cur.reels_price_locked},
             price_note = ${b.price_note !== undefined ? text(b.price_note, 200) : cur.price_note},
             memo = ${b.memo !== undefined ? text(b.memo, 2000) : cur.memo},
             updated_at = NOW()

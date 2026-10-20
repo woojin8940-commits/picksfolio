@@ -1,6 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
-import { withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
+import { withLiveRegistered } from "./_shared/sales-link-live.mts";
 
 /**
  * 브랜드 영업용 링크 — 공개 조회.
@@ -30,10 +30,12 @@ export default async (req: Request, context: Context) => {
     const db = getDatabase();
     const [link] = await db.sql`SELECT id, title, brand_name, intro, is_active, updated_at FROM sales_links WHERE token = ${token}`;
     if (!link || !link.is_active) return Response.json({ error: "링크를 찾을 수 없습니다." }, { status: 404 });
-    // 매칭 등록자는 채널 지표의 최근 릴스·조회수로 바꿔 낸다(저장된 사본은 담던 날 기준).
-    const rows = await withLiveRegisteredReels(db, await db.sql`
-      SELECT id, source, application_id, instagram_handle, profile_url, display_name, profile_image_url, category,
-        followers, following, recent_reels, price, reels_price, price_note
+    // 매칭 등록자는 채널 지표의 최근 릴스·조회수와 등록서 단가로 바꿔 낸다(저장된 사본은 담던 날 기준).
+    // 원가·고정 여부는 운영자 화면과 같은 금액을 계산하는 데만 쓰고 응답에는 넣지 않는다.
+    const rows = await withLiveRegistered(db, await db.sql`
+      SELECT id, source, application_id, applicant_username, instagram_handle, profile_url, display_name,
+        profile_image_url, category, followers, following, recent_reels, base_price, price, price_locked,
+        reels_base_price, reels_price, reels_price_locked, price_note
       FROM sales_link_influencers
       WHERE link_id = ${link.id}
       ORDER BY sort_order ASC, created_at ASC
