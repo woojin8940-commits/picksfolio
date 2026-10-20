@@ -42,6 +42,7 @@ interface Item {
   synced_at: string | null;
   /** 매칭 등록자 — 최근 릴스·조회수를 연동된 채널 지표에서 자동으로 가져옴 */
   reels_live?: boolean;
+  reels_price_live?: boolean;
 }
 
 interface SalesLink {
@@ -574,7 +575,7 @@ const ItemCard: React.FC<{
           <Field label="피드 단가 (브랜드 노출)">
             <div className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-black">{price > 0 ? formatKRW(price) : '협의'}</div>
           </Field>
-          <Field label="릴스 원가 (운영자만)"><input value={formatNumberWithCommas(reelsBase)} onChange={e => setReelsBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
+          <Field label={item.reels_price_live ? '릴스 원가 (등록서 숏폼 단가 연동)' : '릴스 원가 (운영자만)'}><input value={formatNumberWithCommas(reelsBase)} onChange={e => setReelsBase(digits(e.target.value))} readOnly={item.reels_price_live} inputMode="numeric" className={`${inputCls} read-only:bg-slate-100 read-only:text-slate-500`} /></Field>
           <Field label="릴스 마진"><input value={formatNumberWithCommas(reelsMargin)} onChange={e => setReelsMargin(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
           <Field label="릴스 단가 (브랜드 노출)">
             <div className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-black">{reelsPrice > 0 ? formatKRW(reelsPrice) : '협의'}</div>

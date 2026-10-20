@@ -9,7 +9,7 @@ import {
   handleFromInput,
   type SalesReel,
 } from "./_shared/sales-link-profile.mts";
-import { withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
+import { priceFromText, withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
 
 /**
  * 브랜드 영업용 링크 — 운영자 관리 API.
@@ -27,17 +27,6 @@ const genToken = () => randomBytes(9).toString("base64url");
 const INT_MAX = 2_147_483_647;
 const clampInt = (n: number) => Math.min(INT_MAX, Math.max(0, Math.round(Number.isFinite(n) ? n : 0)));
 const int = (raw: unknown) => clampInt(Number(String(raw ?? "").replace(/[^\d.]/g, "")) || 0);
-
-/**
- * 등록서의 단가 문구("게시물 30만원 / 숏폼 50만원", "300,000원")에서 첫 금액을 원 단위로 읽는다.
- * 숫자만 남기면 두 금액이 이어 붙어("300000500000") 정수 칸을 넘기고, 만원 단위도 틀린다.
- */
-function priceFromText(raw: unknown): number {
-  const m = String(raw ?? "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)\s*(만|천)?/);
-  if (!m) return 0;
-  const unit = m[2] === "만" ? 10000 : m[2] === "천" ? 1000 : 1;
-  return clampInt(Number(m[1]) * unit);
-}
 const text = (raw: unknown, max = 500) => String(raw ?? "").trim().slice(0, max);
 
 function parseJsonArray(raw: unknown): any[] {
