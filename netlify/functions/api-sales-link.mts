@@ -6,7 +6,7 @@ import { withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
  * 브랜드 영업용 링크 — 공개 조회.
  *
  * 로그인 없이 열리는 주소라, 브랜드에게 보여 줄 값만 골라 내려 준다. 인플루언서에게
- * 주는 금액(base_price)·운영자 메모·연락처는 응답에 넣지 않는다.
+ * 주는 금액(base_price·reels_base_price)·운영자 메모·연락처는 응답에 넣지 않는다.
  */
 function parseJsonArray(raw: unknown): any[] {
   if (Array.isArray(raw)) return raw;
@@ -33,7 +33,7 @@ export default async (req: Request, context: Context) => {
     // 매칭 등록자는 채널 지표의 최근 릴스·조회수로 바꿔 낸다(저장된 사본은 담던 날 기준).
     const rows = await withLiveRegisteredReels(db, await db.sql`
       SELECT id, source, application_id, instagram_handle, profile_url, display_name, profile_image_url, category,
-        followers, following, recent_reels, price, price_note
+        followers, following, recent_reels, price, reels_price, price_note
       FROM sales_link_influencers
       WHERE link_id = ${link.id}
       ORDER BY sort_order ASC, created_at ASC
@@ -51,6 +51,7 @@ export default async (req: Request, context: Context) => {
           followers: Number(r.followers || 0),
           following: Number(r.following || 0),
           price: Number(r.price || 0),
+          reels_price: Number(r.reels_price || 0),
           price_note: r.price_note,
           recent_reels: parseJsonArray(r.recent_reels)
             .slice(0, 3)
