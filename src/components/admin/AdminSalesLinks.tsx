@@ -15,7 +15,7 @@ import { instagramPostUrl } from '../../utils/instagramPostUrl';
  * 제안 단가만 보인다.
  */
 
-interface Reel { id?: string; permalink: string; thumbnailUrl: string }
+interface Reel { id?: string; permalink: string; thumbnailUrl: string; views?: number }
 
 interface Item {
   id: string;
@@ -397,6 +397,7 @@ const ItemCard: React.FC<{
   const [followers, setFollowers] = useState(String(item.followers || ''));
   const [following, setFollowing] = useState(String(item.following || ''));
   const [reels, setReels] = useState<string[]>(() => [0, 1, 2].map(i => item.recent_reels[i]?.permalink || ''));
+  const [reelViews, setReelViews] = useState<string[]>(() => [0, 1, 2].map(i => String(item.recent_reels[i]?.views || '')));
   const [base, setBase] = useState(String(item.base_price || ''));
   const [margin, setMargin] = useState(String(Math.max(0, item.price - item.base_price) || ''));
   const [note, setNote] = useState(item.price_note);
@@ -408,8 +409,9 @@ const ItemCard: React.FC<{
     name !== item.display_name || category !== item.category || num(followers) !== item.followers ||
     num(following) !== item.following || note !== item.price_note || memo !== item.memo ||
     num(base) !== item.base_price || price !== item.price ||
-    reels.join('|') !== [0, 1, 2].map(i => item.recent_reels[i]?.permalink || '').join('|')
-  ), [name, category, followers, following, note, memo, base, price, reels, item]);
+    reels.join('|') !== [0, 1, 2].map(i => item.recent_reels[i]?.permalink || '').join('|') ||
+    reelViews.map(num).join('|') !== [0, 1, 2].map(i => Number(item.recent_reels[i]?.views || 0)).join('|')
+  ), [name, category, followers, following, note, memo, base, price, reels, reelViews, item]);
 
   const applyPercent = (pct: number) => setMargin(String(Math.round((num(base) * pct) / 100 / 1000) * 1000));
 
@@ -419,7 +421,10 @@ const ItemCard: React.FC<{
       await call({
         action: 'update_item', id: item.id,
         display_name: name, category, followers: num(followers), following: num(following),
-        recent_reels: reels.filter(r => r.trim()), base_price: num(base), price, price_note: note, memo,
+        recent_reels: reels
+          .map((permalink, i) => ({ permalink: permalink.trim(), views: num(reelViews[i]) }))
+          .filter(r => r.permalink),
+        base_price: num(base), price, price_note: note, memo,
       });
       await reload();
       notify({ tone: 'ok', text: `@${item.instagram_handle} 정보를 저장했습니다.` });
@@ -492,7 +497,7 @@ const ItemCard: React.FC<{
       </div>
 
       <div>
-        <p className="text-[10px] font-black text-slate-400 mb-1.5">최근 릴스 3편</p>
+        <p className="text-[10px] font-black text-slate-400 mb-1.5">최근 릴스 3편 · 조회수 (비우면 브랜드 화면에 안 보임)</p>
         <div className="grid grid-cols-3 gap-2">
           {[0, 1, 2].map(i => {
             const saved = item.recent_reels.find(r => r.permalink === reels[i]);
@@ -514,6 +519,13 @@ const ItemCard: React.FC<{
                   value={reels[i]}
                   onChange={e => setReels(prev => prev.map((r, j) => (j === i ? e.target.value : r)))}
                   placeholder="릴스 링크"
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium"
+                />
+                <input
+                  value={formatNumberWithCommas(reelViews[i])}
+                  onChange={e => setReelViews(prev => prev.map((v, j) => (j === i ? digits(e.target.value) : v)))}
+                  placeholder="조회수"
+                  inputMode="numeric"
                   className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium"
                 />
               </div>
