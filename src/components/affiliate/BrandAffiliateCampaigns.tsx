@@ -7,6 +7,8 @@ import {
   Plus,
   RefreshCw,
   ShoppingBag,
+  Store,
+  Unplug,
 } from 'lucide-react';
 import {
   affiliateService,
@@ -28,6 +30,7 @@ import {
   type Participation,
   type ParticipationStatus,
   type SettlementBatch,
+  type ShopConnectionStatus,
   type StatRow,
 } from '../../services/affiliateService';
 import { todayInSeoul } from '../../utils/formatters';
@@ -849,6 +852,91 @@ const CampaignDetail: React.FC<{
 
 // ───────────────────────────── 메뉴 본체 ─────────────────────────────
 
+/**
+ * 연동된 카페24 몰 줄. 판매 캠페인 화면에서도 연동 상태를 보고 바로 해제할 수 있게 한다.
+ * 해제는 '쇼핑몰 연동' 메뉴와 같은 동작이다 — 스크립트 제거 → 카페24 토큰 폐기 → 연결 해제.
+ */
+const ShopConnectionBar: React.FC<{ onOpenShopSettings?: () => void }> = ({ onOpenShopSettings }) => {
+  const [connections, setConnections] = useState<ShopConnectionStatus[]>([]);
+  const [busy, setBusy] = useState('');
+  const [banner, setBanner] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    const res = await affiliateService.getShopConnections();
+    if (res.error) return;
+    const list = Array.isArray(res.connections) ? res.connections : [];
+    setConnections(list.filter(c => c.shopType === 'cafe24' && c.mallId && (c.state === 'connected' || c.state === 'reconnect')));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const disconnect = async (mallId: string) => {
+    if (!confirm('카페24 연동을 해제할까요?\n추적 스크립트를 제거하고 연동 권한을 폐기합니다. 진행 중인 판매 캠페인의 주문이 더 이상 집계되지 않습니다.')) return;
+    setBusy(mallId);
+    const res = await affiliateService.disconnectShop(mallId);
+    setBusy('');
+    if (res.error || !res.disconnected) {
+      setBanner({ tone: 'error', text: res.error || '연동을 해제하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+      return;
+    }
+    setBanner({
+      tone: res.scriptRemoved ? 'success' : 'error',
+      text: res.scriptRemoved
+        ? '카페24 연동을 해제했습니다.'
+        : '연동은 해제했지만 추적 스크립트를 지우지 못했습니다. 카페24 관리자 > 앱 > 스크립트 관리에서 직접 삭제해 주세요.',
+    });
+    load();
+  };
+
+  if (connections.length === 0 && !banner) return null;
+
+  return (
+    <div className="mb-4 space-y-2">
+      {banner && (
+        <p className={`rounded-2xl px-4 py-3 text-[12px] font-bold ${
+          banner.tone === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'
+        }`}>
+          {banner.text}
+        </p>
+      )}
+      {connections.map(c => (
+        <div key={c.mallId} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3 flex items-center gap-3 flex-wrap">
+          <Store className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          <div className="flex-1 min-w-[160px]">
+            <p className="text-[12px] font-black text-slate-800 truncate">
+              카페24{c.shopName ? ` · ${c.shopName}` : ''}
+              <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                c.state === 'connected' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+              }`}>
+                {c.state === 'connected' ? '연결됨' : '재연동 필요'}
+              </span>
+            </p>
+            <p className="text-[11px] text-slate-400 font-bold truncate">{c.shopDomain || c.mallId}</p>
+          </div>
+          {onOpenShopSettings && (
+            <button
+              type="button"
+              onClick={onOpenShopSettings}
+              className="px-3 py-2 rounded-xl text-slate-500 text-[11px] font-black hover:bg-slate-50"
+            >
+              연동 설정
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => disconnect(c.mallId)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-rose-100 text-rose-500 text-[11px] font-black hover:bg-rose-50 disabled:opacity-50"
+          >
+            {busy === c.mallId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unplug className="w-3.5 h-3.5" />}
+            연동 해제
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ companyName, onOpenShopSettings }) => {
   const [topTab, setTopTab] = useState<'campaigns' | 'settlement' | 'terms'>('campaigns');
   const [terms, setTerms] = useState<TermsSummary | null>(null);
@@ -951,6 +1039,10 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
             약관 확인하고 동의하기
           </button>
         </div>
+      )}
+
+      {topTab === 'campaigns' && !wizard && !detail && (
+        <ShopConnectionBar onOpenShopSettings={onOpenShopSettings} />
       )}
 
       {wizard ? (
