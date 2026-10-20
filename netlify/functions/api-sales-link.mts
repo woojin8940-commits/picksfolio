@@ -52,7 +52,11 @@ export default async (req: Request, context: Context) => {
           price_note: r.price_note,
           recent_reels: parseJsonArray(r.recent_reels)
             .slice(0, 3)
-            .map((x: any) => ({ permalink: String(x?.permalink || ""), thumbnailUrl: String(x?.thumbnailUrl || "") })),
+            .map((x: any) => ({
+              permalink: String(x?.permalink || ""),
+              thumbnailUrl: String(x?.thumbnailUrl || ""),
+              views: Number(x?.views || 0),
+            })),
         })),
       },
       { headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } },

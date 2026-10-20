@@ -18,6 +18,8 @@ export interface SalesReel {
   id: string;
   permalink: string;
   thumbnailUrl: string;
+  /** 조회수. 0 = 모름(공개 프로필이 안 주거나 운영자가 아직 안 넣음). */
+  views: number;
 }
 
 export interface PublicProfile {
@@ -171,6 +173,7 @@ export async function fetchPublicProfile(
         id: String(n.shortcode),
         permalink: `https://www.instagram.com/reel/${n.shortcode}/`,
         thumbnailUrl: thumbs[i] || "",
+        views: Math.min(2_147_483_647, Number(n.video_view_count || n.video_play_count || n.play_count || 0)),
       })),
     },
   };

@@ -85,6 +85,7 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
       id: String(r?.id || ""),
       permalink: String(r?.permalink || ""),
       thumbnailUrl: String(r?.thumbnailUrl || ""),
+      views: clampInt(Number(r?.views || 0)),
     }));
   let snap = {
     handle,
@@ -122,7 +123,10 @@ async function nextSortOrder(db: any, linkId: string) {
   return Number(r?.[0]?.n || 1);
 }
 
-/** 손으로 고친 릴스 목록. 새로 들어온 주소만 표지를 받아 온다. */
+/**
+ * 손으로 고친 릴스 목록. 새로 들어온 주소만 표지를 받아 온다.
+ * 항목은 주소 문자열이나 { permalink, views }. views 를 안 보내면 기존 조회수를 지킨다.
+ */
 async function normalizeReels(raw: unknown, prior: any[], handle: string): Promise<SalesReel[]> {
   const priorByLink = new Map(prior.map((r: any) => [cleanReelUrl(r?.permalink), r]));
   const list = (Array.isArray(raw) ? raw : []).slice(0, 3);
@@ -131,13 +135,21 @@ async function normalizeReels(raw: unknown, prior: any[], handle: string): Promi
     const permalink = cleanReelUrl(typeof entry === "string" ? entry : entry?.permalink);
     if (!permalink) continue;
     const old = priorByLink.get(permalink);
+    const sentViews = typeof entry === "object" && entry?.views !== undefined && entry?.views !== "";
+    const views = sentViews ? int(entry.views) : clampInt(Number(old?.views || 0));
     if (old?.thumbnailUrl) {
-      out.push({ id: String(old.id || permalink), permalink, thumbnailUrl: String(old.thumbnailUrl) });
+      out.push({ id: String(old.id || permalink), permalink, thumbnailUrl: String(old.thumbnailUrl), views });
       continue;
     }
-    out.push({ id: permalink, permalink, thumbnailUrl: await fetchReelThumbnail(permalink, handle) });
+    out.push({ id: permalink, permalink, thumbnailUrl: await fetchReelThumbnail(permalink, handle), views });
   }
   return out;
+}
+
+/** 새로 불러온 릴스에 조회수가 없으면, 같은 릴스에 손으로 넣어 둔 조회수를 이어 쓴다. */
+function keepManualViews(fresh: SalesReel[], prior: any[]): SalesReel[] {
+  const priorViews = new Map(prior.map((r: any) => [cleanReelUrl(r?.permalink), clampInt(Number(r?.views || 0))]));
+  return fresh.map((r) => (r.views ? r : { ...r, views: priorViews.get(cleanReelUrl(r.permalink)) || 0 }));
 }
 
 async function listLinks(db: any) {
@@ -341,7 +353,9 @@ export default async (req: Request) => {
             profile_image_url = ${image || cur.profile_image_url},
             followers = ${followers || cur.followers},
             following = ${following || cur.following},
-            recent_reels = ${JSON.stringify(reels.length ? reels : parseJsonArray(cur.recent_reels))}::jsonb,
+            recent_reels = ${JSON.stringify(
+              reels.length ? keepManualViews(reels, parseJsonArray(cur.recent_reels)) : parseJsonArray(cur.recent_reels),
+            )}::jsonb,
             fetch_error = '',
             synced_at = NOW(),
             updated_at = NOW()
