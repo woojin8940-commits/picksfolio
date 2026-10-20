@@ -1,5 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
+import { withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
 
 /**
  * 브랜드 영업용 링크 — 공개 조회.
@@ -29,13 +30,14 @@ export default async (req: Request, context: Context) => {
     const db = getDatabase();
     const [link] = await db.sql`SELECT id, title, brand_name, intro, is_active, updated_at FROM sales_links WHERE token = ${token}`;
     if (!link || !link.is_active) return Response.json({ error: "링크를 찾을 수 없습니다." }, { status: 404 });
-    const rows = await db.sql`
-      SELECT id, instagram_handle, profile_url, display_name, profile_image_url, category,
+    // 매칭 등록자는 채널 지표의 최근 릴스·조회수로 바꿔 낸다(저장된 사본은 담던 날 기준).
+    const rows = await withLiveRegisteredReels(db, await db.sql`
+      SELECT id, source, application_id, instagram_handle, profile_url, display_name, profile_image_url, category,
         followers, following, recent_reels, price, price_note
       FROM sales_link_influencers
       WHERE link_id = ${link.id}
       ORDER BY sort_order ASC, created_at ASC
-    `;
+    `);
     return Response.json(
       {
         link: { title: link.title, brand_name: link.brand_name, intro: link.intro, updated_at: link.updated_at },
