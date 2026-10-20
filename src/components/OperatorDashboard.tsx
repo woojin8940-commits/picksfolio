@@ -21,6 +21,7 @@ import AdminDmQueue from './admin/AdminDmQueue';
 import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminAffiliateConsole from './admin/AdminAffiliateConsole';
 import AdminPlatformSettings from './admin/AdminPlatformSettings';
+import AdminSalesLinks from './admin/AdminSalesLinks';
 import { isTestProposal } from '../utils/testData';
 
 /**
@@ -48,6 +49,7 @@ type OperatorTab =
   | 'influencerdb'
   | 'directory'
   | 'applicants'
+  | 'saleslinks'
   | 'users'
   | 'managers'
   | 'dmqueue'
@@ -296,6 +298,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'influencerdb', label: '인플루언서 DB' },
         { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
         { key: 'applicants', label: '인플루언서 지원자' },
+        { key: 'saleslinks', label: '브랜드 영업 링크' },
       ],
     },
     {
@@ -788,6 +791,21 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />
+        )}
+
+        {/* 브랜드 영업 링크 */}
+        {activeTab === 'saleslinks' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="브랜드 영업 링크 · 인플루언서 제안 명단"
+                  body="브랜드에게 보낼 인플루언서 명단을 링크로 만듭니다. 브랜드 매칭 등록자를 골라 넣거나, 등록하지 않은 계정도 인스타 프로필 링크만 넣으면 팔로워·팔로잉·최근 릴스 3편을 불러옵니다. 원가에 마진을 붙인 제안 단가만 브랜드에게 보이고, 원가와 메모는 운영자만 봅니다."
+                />
+                <AdminSalesLinks token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 영업 링크가 표시됩니다." />
         )}
 
         {/* 인플루언서 지원자 (광고 모집 설문) */}

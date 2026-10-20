@@ -31,7 +31,9 @@ export default async (req: Request, context: Context) => {
     RESERVED_PATHS.has(path) ||
     path.includes('.') ||
     url.pathname.startsWith('/api/') ||
-    url.pathname.startsWith('/.netlify/')
+    url.pathname.startsWith('/.netlify/') ||
+    // 브랜드 영업용 링크(/pick/<토큰>)는 사용자 페이지가 아니다.
+    url.pathname.startsWith('/pick/')
   ) {
     return
   }
