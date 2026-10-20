@@ -33,7 +33,6 @@ const BusinessTaggedContent = lazyWithRetry(() => import('./BusinessTaggedConten
 // 판매 연동형(어필리에이트) 캠페인과 그 바닥인 쇼핑몰 연동. 자사몰(카페24) 상품을
 // 인플루언서가 판매하고 수수료를 받는다 — 광고비를 주는 캠페인 협업과는 따로 굴러간다.
 const BrandAffiliateCampaigns = lazyWithRetry(() => import('./affiliate/BrandAffiliateCampaigns'));
-const BrandShopConnection = lazyWithRetry(() => import('./affiliate/BrandShopConnection'));
 
 interface BusinessEnterpriseDashboardProps {
   businessUsername: string;
@@ -41,8 +40,8 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status' | 'affiliate' | 'shop-settings';
-const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', 'affiliate', 'shop-settings'];
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status' | 'affiliate';
+const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', 'affiliate'];
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
@@ -55,6 +54,15 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     rememberTab('business', 'picksBizSubView', currentSubView);
   }, [currentSubView]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  /**
+   * 판매 캠페인 메뉴를 열 때 띄울 탭. 쇼핑몰 연동은 별도 메뉴 없이 판매 캠페인의 '연동' 탭에서
+   * 관리한다 — 카페24 콜백 · 앱 실행(?tab=shop-settings)도 그 탭으로 받는다.
+   */
+  const [affiliateTab, setAffiliateTab] = useState<'campaigns' | 'shop'>('campaigns');
+  // 콜백으로 연동 탭을 연 뒤 다른 메뉴로 나갔다 오면 평소처럼 캠페인 탭부터 보여 준다.
+  useEffect(() => {
+    if (currentSubView !== 'affiliate') setAffiliateTab('campaigns');
+  }, [currentSubView]);
   /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabCampaignId, setCollabCampaignId] = useState<string | null>(null);
   /**
@@ -90,9 +98,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       history: 'campaign-history',
       ads: 'ad-status',
       affiliate: 'affiliate',
-      shop: 'shop-settings',
-      'shop-settings': 'shop-settings',
+      shop: 'affiliate',
+      'shop-settings': 'affiliate',
     };
+    if (tab === 'shop' || tab === 'shop-settings') setAffiliateTab('shop');
     if (tab && tabs[tab]) setCurrentSubView(tabs[tab]);
     if (tab === 'campaigns' && campaignId) setCollabCampaignId(campaignId);
   }, []);
@@ -439,15 +448,13 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       subComponent = (
         <LazyRoute>
           <BrandAffiliateCampaigns
+            key={affiliateTab}
             businessUsername={businessUsername}
             companyName={companyName}
-            onOpenShopSettings={() => setCurrentSubView('shop-settings')}
+            initialTab={affiliateTab}
           />
         </LazyRoute>
       );
-      break;
-    case 'shop-settings':
-      subComponent = <LazyRoute><BrandShopConnection /></LazyRoute>;
       break;
     default:
       subComponent = null;
@@ -655,8 +662,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-          {/* 쇼핑몰 연동은 한 번 해 두면 다시 찾을 일이 적은 설정이라 아래 묶음에 둔다. */}
-          <NavItem icon="🏪" label="쇼핑몰 연동" active={currentSubView === 'shop-settings'} onClick={() => setCurrentSubView('shop-settings')} />
           {!isNativeApp() && (
             <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
           )}
@@ -684,7 +689,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="📅" label="협업현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
-          <MobileNavItem icon="🏪" label="쇼핑몰연동" active={currentSubView === 'shop-settings'} onClick={() => setCurrentSubView('shop-settings')} />
           {!isNativeApp() && (
             <MobileNavItem icon="💎" label="멤버십" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
           )}
@@ -714,7 +718,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-              <NavItem icon="🏪" label="쇼핑몰 연동" active={currentSubView === 'shop-settings'} onClick={() => { setCurrentSubView('shop-settings'); setIsMobileMenuOpen(false); }} />
               {!isNativeApp() && (
                 <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { setCurrentSubView('membership'); setIsMobileMenuOpen(false); }} />
               )}

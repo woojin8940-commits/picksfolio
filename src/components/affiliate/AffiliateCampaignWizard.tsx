@@ -43,7 +43,7 @@ interface AffiliateCampaignWizardProps {
   editing?: AffiliateCampaign | null;
   onClose: () => void;
   onSaved: (campaign: AffiliateCampaign) => void;
-  /** 연결된 몰이 없을 때 '쇼핑몰 연동' 메뉴로 보낸다. */
+  /** 연결된 몰이 없을 때 판매 캠페인의 '연동' 탭으로 보낸다. */
   onOpenShopSettings?: () => void;
 }
 
@@ -324,7 +324,7 @@ const AffiliateCampaignWizard: React.FC<AffiliateCampaignWizardProps> = ({
                   onClick={onOpenShopSettings}
                   className="mt-4 px-5 py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700"
                 >
-                  쇼핑몰 연동 메뉴로 가기
+                  쇼핑몰 연동하러 가기
                 </button>
               )}
             </div>
@@ -364,7 +364,7 @@ const AffiliateCampaignWizard: React.FC<AffiliateCampaignWizardProps> = ({
               {/* 스크립트가 없으면 판매가 집계되지 않는다. 등록은 막지 않지만 미리 알린다. */}
               {selectedShop?.script.mode === 'none' && (
                 <p className="mt-2 text-[11px] text-amber-600 font-bold leading-relaxed">
-                  이 몰에는 추적 스크립트가 아직 없습니다. 공개 전에 '쇼핑몰 연동' 메뉴에서 설치해 주세요.
+                  이 몰에는 추적 스크립트가 아직 없습니다. 공개 전에 '연동' 탭에서 설치해 주세요.
                 </p>
               )}
             </div>
