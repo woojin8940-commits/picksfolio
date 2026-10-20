@@ -9,6 +9,7 @@ import {
   handleFromInput,
   type SalesReel,
 } from "./_shared/sales-link-profile.mts";
+import { withLiveRegisteredReels } from "./_shared/sales-link-live.mts";
 
 /**
  * 브랜드 영업용 링크 — 운영자 관리 API.
@@ -154,7 +155,8 @@ function keepManualViews(fresh: SalesReel[], prior: any[]): SalesReel[] {
 
 async function listLinks(db: any) {
   const links = await db.sql`SELECT * FROM sales_links ORDER BY created_at DESC`;
-  const items = await db.sql`SELECT * FROM sales_link_influencers ORDER BY sort_order ASC, created_at ASC`;
+  const rows = await db.sql`SELECT * FROM sales_link_influencers ORDER BY sort_order ASC, created_at ASC`;
+  const items = await withLiveRegisteredReels(db, rows);
   const byLink = new Map<string, any[]>();
   for (const it of items) {
     const list = byLink.get(it.link_id) || [];

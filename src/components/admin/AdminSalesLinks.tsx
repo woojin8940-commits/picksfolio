@@ -36,6 +36,8 @@ interface Item {
   memo: string;
   fetch_error: string;
   synced_at: string | null;
+  /** 매칭 등록자 — 최근 릴스·조회수를 연동된 채널 지표에서 자동으로 가져옴 */
+  reels_live?: boolean;
 }
 
 interface SalesLink {
@@ -497,7 +499,11 @@ const ItemCard: React.FC<{
       </div>
 
       <div>
-        <p className="text-[10px] font-black text-slate-400 mb-1.5">최근 릴스 3편 · 조회수 (비우면 브랜드 화면에 안 보임)</p>
+        <p className="text-[10px] font-black text-slate-400 mb-1.5">
+          {item.reels_live
+            ? '최근 릴스 3편 · 조회수 (매칭 등록자 — 연동된 채널의 최근 릴스·조회수가 자동으로 표시됨)'
+            : '최근 릴스 3편 · 조회수 (비우면 브랜드 화면에 안 보임)'}
+        </p>
         <div className="grid grid-cols-3 gap-2">
           {[0, 1, 2].map(i => {
             const saved = item.recent_reels.find(r => r.permalink === reels[i]);
@@ -519,14 +525,16 @@ const ItemCard: React.FC<{
                   value={reels[i]}
                   onChange={e => setReels(prev => prev.map((r, j) => (j === i ? e.target.value : r)))}
                   placeholder="릴스 링크"
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium"
+                  readOnly={item.reels_live}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium read-only:bg-slate-50 read-only:text-slate-500"
                 />
                 <input
                   value={formatNumberWithCommas(reelViews[i])}
                   onChange={e => setReelViews(prev => prev.map((v, j) => (j === i ? digits(e.target.value) : v)))}
                   placeholder="조회수"
+                  readOnly={item.reels_live}
                   inputMode="numeric"
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium"
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-medium read-only:bg-slate-50 read-only:text-slate-500"
                 />
               </div>
             );
