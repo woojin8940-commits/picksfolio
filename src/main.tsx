@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import SalesLinkPage from './components/SalesLinkPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { completeKakaoSdkLogin, isKakaoSdkCallback } from './utils/kakaoLogin';
@@ -36,8 +37,21 @@ const RootFallback = (
 );
 
 const root = ReactDOM.createRoot(rootElement);
+
+// 브랜드 영업용 링크(/pick/<토큰>)는 로그인·앱 화면과 무관한 공개 페이지라 App 을
+// 거치지 않고 바로 그린다.
+const salesLinkToken = window.location.pathname.match(/^\/pick\/([A-Za-z0-9_-]{6,64})\/?$/)?.[1];
+
 const renderApp = () =>
-  root.render(
+  salesLinkToken
+    ? root.render(
+      <React.StrictMode>
+        <ErrorBoundary fallback={RootFallback}>
+          <SalesLinkPage token={salesLinkToken} />
+        </ErrorBoundary>
+      </React.StrictMode>
+    )
+    : root.render(
     <React.StrictMode>
       <ErrorBoundary fallback={RootFallback}>
         <LanguageProvider>
