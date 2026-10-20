@@ -38,6 +38,7 @@ import { lazyWithRetry, LazyRoute } from '../../utils/lazyRoute';
 
 const AffiliateCampaignWizard = lazyWithRetry(() => import('./AffiliateCampaignWizard'));
 const BrandAffiliateTerms = lazyWithRetry(() => import('./BrandAffiliateTerms'));
+const BrandShopConnection = lazyWithRetry(() => import('./BrandShopConnection'));
 
 /**
  * 판매 캠페인(어필리에이트) — 브랜드 메뉴.
@@ -57,9 +58,11 @@ const BrandAffiliateTerms = lazyWithRetry(() => import('./BrandAffiliateTerms'))
 interface BrandAffiliateCampaignsProps {
   businessUsername: string;
   companyName: string;
-  /** '쇼핑몰 연동' 메뉴로 보낸다(연결된 몰이 없을 때). */
-  onOpenShopSettings?: () => void;
+  /** 처음 열 탭. 카페24 연동 콜백(?tab=shop-settings)은 '연동' 탭으로 바로 연다. */
+  initialTab?: AffiliateTopTab;
 }
+
+export type AffiliateTopTab = 'campaigns' | 'settlement' | 'terms' | 'shop';
 
 const STATUS_CHIP: Record<AffiliateCampaignStatus, { label: string; cls: string }> = {
   pending_approval: { label: '승인 대기', cls: 'bg-amber-50 text-amber-600' },
@@ -854,7 +857,7 @@ const CampaignDetail: React.FC<{
 
 /**
  * 연동된 카페24 몰 줄. 판매 캠페인 화면에서도 연동 상태를 보고 바로 해제할 수 있게 한다.
- * 해제는 '쇼핑몰 연동' 메뉴와 같은 동작이다 — 스크립트 제거 → 카페24 토큰 폐기 → 연결 해제.
+ * 해제는 '연동' 탭과 같은 동작이다 — 스크립트 제거 → 카페24 토큰 폐기 → 연결 해제.
  */
 const ShopConnectionBar: React.FC<{ onOpenShopSettings?: () => void }> = ({ onOpenShopSettings }) => {
   const [connections, setConnections] = useState<ShopConnectionStatus[]>([]);
@@ -937,8 +940,8 @@ const ShopConnectionBar: React.FC<{ onOpenShopSettings?: () => void }> = ({ onOp
   );
 };
 
-const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ companyName, onOpenShopSettings }) => {
-  const [topTab, setTopTab] = useState<'campaigns' | 'settlement' | 'terms'>('campaigns');
+const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ companyName, initialTab = 'campaigns' }) => {
+  const [topTab, setTopTab] = useState<AffiliateTopTab>(initialTab);
   const [terms, setTerms] = useState<TermsSummary | null>(null);
   /** 새 캠페인을 누르다 약관 화면으로 왔는지(체결 후 "등록 계속하기"를 보여 준다). */
   const [termsGated, setTermsGated] = useState(false);
@@ -976,6 +979,14 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
 
   const detail = detailId ? campaigns.find(c => c.id === detailId) || null : null;
 
+  /** 쇼핑몰 연동은 별도 메뉴 없이 이 메뉴의 '연동' 탭에서 관리한다. */
+  const onOpenShopSettings = () => {
+    setWizard(null);
+    setDetailId(null);
+    setTermsGated(false);
+    setTopTab('shop');
+  };
+
   const upsert = (c: AffiliateCampaign) => {
     // 응답에는 counts 가 없을 수 있다 — 목록에 있던 값을 지키고, 정확한 값은 다시 읽어 맞춘다.
     setCampaigns(prev => {
@@ -1009,7 +1020,7 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
 
       {!wizard && !detail && (
         <div className="flex gap-1 mb-4">
-          {([['campaigns', '캠페인'], ['settlement', '월별 정산'], ['terms', '약관']] as const).map(([k, label]) => (
+          {([['campaigns', '캠페인'], ['settlement', '월별 정산'], ['terms', '약관'], ['shop', '연동']] as const).map(([k, label]) => (
             <button
               key={k}
               type="button"
@@ -1060,6 +1071,10 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
             onOpenShopSettings={onOpenShopSettings}
           />
         </LazyRoute>
+      ) : topTab === 'shop' ? (
+        <LazyRoute>
+          <BrandShopConnection embedded />
+        </LazyRoute>
       ) : topTab === 'settlement' ? (
         <SettlementPanel />
       ) : topTab === 'terms' ? (
@@ -1106,15 +1121,13 @@ const BrandAffiliateCampaigns: React.FC<BrandAffiliateCampaignsProps> = ({ compa
             >
               새 판매 캠페인 만들기
             </button>
-            {onOpenShopSettings && (
-              <button
-                type="button"
-                onClick={onOpenShopSettings}
-                className="px-5 py-3 rounded-xl border border-slate-200 text-slate-600 text-[13px] font-black hover:bg-slate-50"
-              >
-                쇼핑몰 연동
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={onOpenShopSettings}
+              className="px-5 py-3 rounded-xl border border-slate-200 text-slate-600 text-[13px] font-black hover:bg-slate-50"
+            >
+              쇼핑몰 연동
+            </button>
           </div>
         </div>
       ) : (

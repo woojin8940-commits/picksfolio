@@ -426,7 +426,8 @@ const ConnectionCard: React.FC<{
   );
 };
 
-const BrandShopConnection: React.FC = () => {
+/** embedded: 판매 캠페인 메뉴의 '연동' 탭 안에 들어갈 때. 바깥 여백과 큰 제목을 뺀다. */
+const BrandShopConnection: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [connections, setConnections] = useState<ShopConnectionStatus[]>([]);
   const [connectUrl, setConnectUrl] = useState('');
   const [notice, setNotice] = useState('');
@@ -546,6 +547,7 @@ const BrandShopConnection: React.FC = () => {
     setConnections(prev => prev.map(c => (c.mallId === mallId && c.shopType === res.connection!.shopType ? res.connection! : c)));
   };
 
+  const Wrapper = embedded ? 'div' : 'main';
   const cafe24 = connections.filter(c => c.shopType === 'cafe24');
   // 카페24 연결이 하나도 없으면 '미연결' 카드 한 장을 세운다. 서버가 빈 목록을 줘도
   // 연동 버튼이 있어야 시작할 수 있다.
@@ -556,13 +558,19 @@ const BrandShopConnection: React.FC = () => {
   }];
 
   return (
-    <main className="p-4 md:p-14 w-full max-w-3xl animate-in fade-in duration-500">
-      <header className="mb-5 md:mb-8">
-        <h2 className="text-lg md:text-3xl font-black text-slate-900">쇼핑몰 연동</h2>
-        <p className="text-[12px] md:text-sm text-slate-500 font-bold mt-1 leading-relaxed">
+    <Wrapper className={embedded ? 'w-full max-w-3xl' : 'p-4 md:p-14 w-full max-w-3xl animate-in fade-in duration-500'}>
+      {embedded ? (
+        <p className="mb-4 text-[12px] text-slate-500 font-bold leading-relaxed">
           자사몰을 연동하고 추적 스크립트를 설치하면, 판매 캠페인의 인플루언서 판매가 자동으로 집계됩니다.
         </p>
-      </header>
+      ) : (
+        <header className="mb-5 md:mb-8">
+          <h2 className="text-lg md:text-3xl font-black text-slate-900">쇼핑몰 연동</h2>
+          <p className="text-[12px] md:text-sm text-slate-500 font-bold mt-1 leading-relaxed">
+            자사몰을 연동하고 추적 스크립트를 설치하면, 판매 캠페인의 인플루언서 판매가 자동으로 집계됩니다.
+          </p>
+        </header>
+      )}
 
       {banner && (
         <div
@@ -659,7 +667,7 @@ const BrandShopConnection: React.FC = () => {
           </div>
         </div>
       )}
-    </main>
+    </Wrapper>
   );
 };
 
