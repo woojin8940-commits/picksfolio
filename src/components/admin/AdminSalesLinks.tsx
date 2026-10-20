@@ -11,8 +11,8 @@ import { instagramPostUrl } from '../../utils/instagramPostUrl';
  * 있다. 프로필 링크를 넣으면 팔로워·팔로잉·최근 릴스 3편을 불러오고, 못 불러온
  * 값은 여기서 손으로 채운다.
  *
- * 단가는 원가(인플루언서에게 주는 금액)와 마진으로 나눠 적고, 브랜드에게는 둘을 더한
- * 제안 단가만 보인다.
+ * 단가는 피드 / 릴스 두 가지다. 각각 원가(인플루언서에게 주는 금액)와 마진으로 나눠 적고,
+ * 브랜드에게는 둘을 더한 제안 단가만 보인다.
  */
 
 interface Reel { id?: string; permalink: string; thumbnailUrl: string; views?: number }
@@ -31,7 +31,11 @@ interface Item {
   following: number;
   recent_reels: Reel[];
   base_price: number;
+  /** 피드 단가 (base_price = 원가, price = 브랜드 노출) */
   price: number;
+  /** 릴스 단가 */
+  reels_base_price: number;
+  reels_price: number;
   price_note: string;
   memo: string;
   fetch_error: string;
@@ -187,6 +191,8 @@ const LinkEditor: React.FC<{
   const [profileUrl, setProfileUrl] = useState('');
   const [newBase, setNewBase] = useState('');
   const [newMargin, setNewMargin] = useState('');
+  const [newReelsBase, setNewReelsBase] = useState('');
+  const [newReelsMargin, setNewReelsMargin] = useState('');
   const [newCategory, setNewCategory] = useState('');
   const [newNote, setNewNote] = useState('');
   const [adding, setAdding] = useState(false);
@@ -225,16 +231,19 @@ const LinkEditor: React.FC<{
     setAddNotice(null);
     try {
       const base = num(newBase);
+      const reelsBase = num(newReelsBase);
       const data = await call({
         action: 'add_external',
         link_id: link.id,
         profile_url: profileUrl,
         base_price: base,
         price: base + num(newMargin),
+        reels_base_price: reelsBase,
+        reels_price: reelsBase + num(newReelsMargin),
         category: newCategory,
         price_note: newNote,
       });
-      setProfileUrl(''); setNewBase(''); setNewMargin(''); setNewCategory(''); setNewNote('');
+      setProfileUrl(''); setNewBase(''); setNewMargin(''); setNewReelsBase(''); setNewReelsMargin(''); setNewCategory(''); setNewNote('');
       await reload();
       setAddNotice(data.warning
         ? { tone: 'warn', text: `@${data.item.instagram_handle} 를 추가했지만 정보를 불러오지 못했습니다: ${data.warning} 아래 카드에서 직접 입력해 주세요.` }
@@ -247,8 +256,10 @@ const LinkEditor: React.FC<{
   };
 
   const url = publicUrl(link.token);
-  const totalBase = link.items.reduce((s, i) => s + i.base_price, 0);
-  const totalPrice = link.items.reduce((s, i) => s + i.price, 0);
+  const totalFeed = link.items.reduce((s, i) => s + i.price, 0);
+  const totalFeedBase = link.items.reduce((s, i) => s + i.base_price, 0);
+  const totalReels = link.items.reduce((s, i) => s + i.reels_price, 0);
+  const totalReelsBase = link.items.reduce((s, i) => s + i.reels_base_price, 0);
 
   return (
     <div className="space-y-4">
@@ -310,17 +321,19 @@ const LinkEditor: React.FC<{
             onChange={e => setProfileUrl(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') addExternal(); }}
             placeholder="인스타 프로필 링크 또는 @아이디"
-            className={`${inputCls} md:col-span-4`}
+            className={`${inputCls} md:col-span-6`}
           />
-          <input value={formatNumberWithCommas(newBase)} onChange={e => setNewBase(digits(e.target.value))} placeholder="원가(원)" inputMode="numeric" className={`${inputCls} md:col-span-2`} />
-          <input value={formatNumberWithCommas(newMargin)} onChange={e => setNewMargin(digits(e.target.value))} placeholder="마진(원)" inputMode="numeric" className={`${inputCls} md:col-span-2`} />
-          <input value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="분야 (예: 뷰티, 육아)" className={`${inputCls} md:col-span-2`} />
+          <input value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="분야 (예: 뷰티, 육아)" className={`${inputCls} md:col-span-4`} />
           <button onClick={addExternal} disabled={adding || !profileUrl.trim()} className="md:col-span-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black disabled:opacity-40 hover:bg-blue-600">
             {adding ? '불러오는 중...' : '추가'}
           </button>
-          <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="단가 설명 (예: 릴스 1건 + 스토리 1회)" className={`${inputCls} md:col-span-8`} />
+          <input value={formatNumberWithCommas(newBase)} onChange={e => setNewBase(digits(e.target.value))} placeholder="피드 원가(원)" inputMode="numeric" className={`${inputCls} md:col-span-3`} />
+          <input value={formatNumberWithCommas(newMargin)} onChange={e => setNewMargin(digits(e.target.value))} placeholder="피드 마진(원)" inputMode="numeric" className={`${inputCls} md:col-span-3`} />
+          <input value={formatNumberWithCommas(newReelsBase)} onChange={e => setNewReelsBase(digits(e.target.value))} placeholder="릴스 원가(원)" inputMode="numeric" className={`${inputCls} md:col-span-3`} />
+          <input value={formatNumberWithCommas(newReelsMargin)} onChange={e => setNewReelsMargin(digits(e.target.value))} placeholder="릴스 마진(원)" inputMode="numeric" className={`${inputCls} md:col-span-3`} />
+          <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="단가 설명 (예: 스토리 1회 포함)" className={`${inputCls} md:col-span-8`} />
           <p className="md:col-span-4 self-center text-[11px] font-bold text-slate-400">
-            제안 단가 = {formatKRW(num(newBase) + num(newMargin))}
+            제안 단가 · 피드 {formatKRW(num(newBase) + num(newMargin))} · 릴스 {formatKRW(num(newReelsBase) + num(newReelsMargin))}
           </p>
         </div>
         {addNotice && (
@@ -337,7 +350,9 @@ const LinkEditor: React.FC<{
       <section className="space-y-3">
         <div className="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
           <span>명단 {link.items.length}명</span>
-          <span>원가 합계 {formatKRW(totalBase)} · 제안가 합계 {formatKRW(totalPrice)} · 마진 {formatKRW(totalPrice - totalBase)}</span>
+          <span>
+            피드 제안가 합계 {formatKRW(totalFeed)} (마진 {formatKRW(totalFeed - totalFeedBase)}) · 릴스 제안가 합계 {formatKRW(totalReels)} (마진 {formatKRW(totalReels - totalReelsBase)})
+          </span>
         </div>
         {link.items.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-sm text-slate-400 font-bold">아직 담긴 인플루언서가 없습니다.</div>
@@ -345,7 +360,7 @@ const LinkEditor: React.FC<{
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {link.items.map((it, i) => (
               <ItemCard
-                key={`${it.id}-${it.synced_at}-${it.price}-${it.followers}`}
+                key={`${it.id}-${it.synced_at}-${it.price}-${it.reels_price}-${it.followers}`}
                 item={it}
                 first={i === 0}
                 last={i === link.items.length - 1}
@@ -402,20 +417,28 @@ const ItemCard: React.FC<{
   const [reelViews, setReelViews] = useState<string[]>(() => [0, 1, 2].map(i => String(item.recent_reels[i]?.views || '')));
   const [base, setBase] = useState(String(item.base_price || ''));
   const [margin, setMargin] = useState(String(Math.max(0, item.price - item.base_price) || ''));
+  const [reelsBase, setReelsBase] = useState(String(item.reels_base_price || ''));
+  const [reelsMargin, setReelsMargin] = useState(String(Math.max(0, item.reels_price - item.reels_base_price) || ''));
   const [note, setNote] = useState(item.price_note);
   const [memo, setMemo] = useState(item.memo);
   const [busy, setBusy] = useState<'' | 'save' | 'refresh'>('');
 
   const price = num(base) + num(margin);
+  const reelsPrice = num(reelsBase) + num(reelsMargin);
   const dirty = useMemo(() => (
     name !== item.display_name || category !== item.category || num(followers) !== item.followers ||
     num(following) !== item.following || note !== item.price_note || memo !== item.memo ||
     num(base) !== item.base_price || price !== item.price ||
+    num(reelsBase) !== item.reels_base_price || reelsPrice !== item.reels_price ||
     reels.join('|') !== [0, 1, 2].map(i => item.recent_reels[i]?.permalink || '').join('|') ||
     reelViews.map(num).join('|') !== [0, 1, 2].map(i => Number(item.recent_reels[i]?.views || 0)).join('|')
-  ), [name, category, followers, following, note, memo, base, price, reels, reelViews, item]);
+  ), [name, category, followers, following, note, memo, base, price, reelsBase, reelsPrice, reels, reelViews, item]);
 
-  const applyPercent = (pct: number) => setMargin(String(Math.round((num(base) * pct) / 100 / 1000) * 1000));
+  const marginOf = (b: string, pct: number) => String(Math.round((num(b) * pct) / 100 / 1000) * 1000);
+  const applyPercent = (pct: number) => {
+    setMargin(marginOf(base, pct));
+    setReelsMargin(marginOf(reelsBase, pct));
+  };
 
   const save = async () => {
     setBusy('save');
@@ -426,7 +449,9 @@ const ItemCard: React.FC<{
         recent_reels: reels
           .map((permalink, i) => ({ permalink: permalink.trim(), views: num(reelViews[i]) }))
           .filter(r => r.permalink),
-        base_price: num(base), price, price_note: note, memo,
+        base_price: num(base), price,
+        reels_base_price: num(reelsBase), reels_price: reelsPrice,
+        price_note: note, memo,
       });
       await reload();
       notify({ tone: 'ok', text: `@${item.instagram_handle} 정보를 저장했습니다.` });
@@ -544,21 +569,26 @@ const ItemCard: React.FC<{
 
       <div className="rounded-xl bg-slate-50 p-3 space-y-2">
         <div className="grid grid-cols-3 gap-2">
-          <Field label="원가 (운영자만)"><input value={formatNumberWithCommas(base)} onChange={e => setBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
-          <Field label="마진"><input value={formatNumberWithCommas(margin)} onChange={e => setMargin(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
-          <Field label="제안 단가 (브랜드 노출)">
+          <Field label="피드 원가 (운영자만)"><input value={formatNumberWithCommas(base)} onChange={e => setBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
+          <Field label="피드 마진"><input value={formatNumberWithCommas(margin)} onChange={e => setMargin(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
+          <Field label="피드 단가 (브랜드 노출)">
             <div className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-black">{price > 0 ? formatKRW(price) : '협의'}</div>
+          </Field>
+          <Field label="릴스 원가 (운영자만)"><input value={formatNumberWithCommas(reelsBase)} onChange={e => setReelsBase(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
+          <Field label="릴스 마진"><input value={formatNumberWithCommas(reelsMargin)} onChange={e => setReelsMargin(digits(e.target.value))} inputMode="numeric" className={inputCls} /></Field>
+          <Field label="릴스 단가 (브랜드 노출)">
+            <div className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-black">{reelsPrice > 0 ? formatKRW(reelsPrice) : '협의'}</div>
           </Field>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] font-bold text-slate-400">원가 기준 마진</span>
           {[20, 30, 50, 100].map(p => (
-            <button key={p} onClick={() => applyPercent(p)} disabled={!num(base)} className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-black text-slate-600 disabled:opacity-40 hover:border-slate-400">
+            <button key={p} onClick={() => applyPercent(p)} disabled={!num(base) && !num(reelsBase)} className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-black text-slate-600 disabled:opacity-40 hover:border-slate-400">
               +{p}%
             </button>
           ))}
         </div>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="단가 설명 (브랜드 노출, 예: 릴스 1건 + 스토리 1회)" className={inputCls} />
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="단가 설명 (브랜드 노출, 예: 스토리 1회 포함)" className={inputCls} />
         <textarea value={memo} onChange={e => setMemo(e.target.value)} rows={1} placeholder="운영자 메모 (브랜드에게 보이지 않음)" className={`${inputCls} resize-y`} />
       </div>
 

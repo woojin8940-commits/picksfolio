@@ -60,6 +60,8 @@ function shapeItem(row: any) {
     following: Number(row.following || 0),
     base_price: Number(row.base_price || 0),
     price: Number(row.price || 0),
+    reels_base_price: Number(row.reels_base_price || 0),
+    reels_price: Number(row.reels_price || 0),
     sort_order: Number(row.sort_order || 0),
     recent_reels: parseJsonArray(row.recent_reels).slice(0, 3),
   };
@@ -68,7 +70,7 @@ function shapeItem(row: any) {
 /** 브랜드 매칭 등록자 한 명의 지금 프로필. 연동 지표가 없으면 공개 프로필로 채운다. */
 async function snapshotRegistered(db: any, applicationId: string, opts: { skipPublic?: boolean } = {}) {
   const rows = await db.sql`
-    SELECT a.id, a.name, a.instagram_url, a.category, a.ad_price, a.follower_count,
+    SELECT a.id, a.name, a.instagram_url, a.category, a.ad_price, a.post_price, a.short_price, a.follower_count,
       c.connected, c.instagram_handle, c.followers, c.following, c.recent_reels, c.profile_image
     FROM collab_directory_applications a
     LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
@@ -96,7 +98,11 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
     following: clampInt(Number(row.following || 0)),
     profileImageUrl: String(row.profile_image || ""),
     reels,
-    basePrice: priceFromText(row.ad_price),
+    // 게시물 단가 = 피드, 숏폼 단가 = 릴스. 둘 다 비어 있으면 예전 단일 단가 문구를 피드로 읽는다.
+    basePrice: row.post_price
+      ? priceFromText(row.post_price)
+      : row.short_price ? 0 : priceFromText(row.ad_price),
+    reelsBasePrice: priceFromText(row.short_price),
     error: "",
   };
 
@@ -234,15 +240,18 @@ export default async (req: Request) => {
         const p = "profile" in pub ? pub.profile : null;
         const realHandle = p?.handle || handle;
         const basePrice = int(b.base_price);
+        const reelsBase = int(b.reels_base_price);
         const [row] = await db.sql`
           INSERT INTO sales_link_influencers (
             id, link_id, sort_order, source, instagram_handle, profile_url, display_name, profile_image_url,
-            category, followers, following, recent_reels, base_price, price, price_note, fetch_error, synced_at
+            category, followers, following, recent_reels, base_price, price, reels_base_price, reels_price, price_note, fetch_error, synced_at
           ) VALUES (
             ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'external', ${realHandle},
             ${`https://www.instagram.com/${realHandle}/`}, ${p?.fullName || ""}, ${p?.profileImageUrl || ""},
             ${text(b.category, 120)}, ${p?.followers || 0}, ${p?.following || 0}, ${JSON.stringify(p?.reels || [])}::jsonb,
-            ${basePrice}, ${b.price !== undefined && b.price !== "" ? int(b.price) : basePrice}, ${text(b.price_note, 200)},
+            ${basePrice}, ${b.price !== undefined && b.price !== "" ? int(b.price) : basePrice},
+            ${reelsBase}, ${b.reels_price !== undefined && b.reels_price !== "" ? int(b.reels_price) : reelsBase},
+            ${text(b.price_note, 200)},
             ${"error" in pub ? pub.error : ""}, ${p ? new Date().toISOString() : null}
           )
           RETURNING *
@@ -274,12 +283,14 @@ export default async (req: Request) => {
             await db.sql`
               INSERT INTO sales_link_influencers (
                 id, link_id, sort_order, source, application_id, instagram_handle, profile_url, display_name,
-                profile_image_url, category, followers, following, recent_reels, base_price, price, fetch_error, synced_at
+                profile_image_url, category, followers, following, recent_reels, base_price, price,
+                reels_base_price, reels_price, fetch_error, synced_at
               ) VALUES (
                 ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'registered', ${appId}, ${snap.handle},
                 ${snap.handle ? `https://www.instagram.com/${snap.handle}/` : ""}, ${snap.displayName}, ${snap.profileImageUrl},
                 ${snap.category}, ${snap.followers}, ${snap.following}, ${JSON.stringify(snap.reels)}::jsonb,
-                ${snap.basePrice}, ${snap.basePrice}, ${snap.error}, ${new Date().toISOString()}
+                ${snap.basePrice}, ${snap.basePrice},
+                ${snap.reelsBasePrice}, ${snap.reelsBasePrice}, ${snap.error}, ${new Date().toISOString()}
               )
             `;
             haveApp.add(appId);
@@ -310,6 +321,8 @@ export default async (req: Request) => {
             recent_reels = ${JSON.stringify(reels)}::jsonb,
             base_price = ${b.base_price !== undefined ? int(b.base_price) : cur.base_price},
             price = ${b.price !== undefined ? int(b.price) : cur.price},
+            reels_base_price = ${b.reels_base_price !== undefined ? int(b.reels_base_price) : cur.reels_base_price},
+            reels_price = ${b.reels_price !== undefined ? int(b.reels_price) : cur.reels_price},
             price_note = ${b.price_note !== undefined ? text(b.price_note, 200) : cur.price_note},
             memo = ${b.memo !== undefined ? text(b.memo, 2000) : cur.memo},
             updated_at = NOW()
