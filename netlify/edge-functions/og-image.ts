@@ -7,6 +7,13 @@ import type { Config, Context } from '@netlify/edge-functions'
  * 비즈니스 · 담당자 · 결제 복귀 주소가 빠져 있어서, 크롤러가 그 주소를 읽으면
  * "business-login 이라는 크리에이터" 의 미리보기 카드를 만들려 들었다.
  */
+/**
+ * index.html 의 #root 안에 들어 있는 정적 제목 마크업(<h1 id="static-home-title">).
+ * 자바스크립트 없이도 메인 HTML 에 서비스명이 보이게 넣어 둔 것이라, 크롤러용으로
+ * #root 를 갈아 끼울 때는 이 자리를 통째로 찾아 바꾼다. index.html 과 짝이다.
+ */
+const STATIC_ROOT = /<div id="root"><h1 id="static-home-title"[\s\S]*?<\/h1><\/div>/
+
 const RESERVED_PATHS = new Set([
   'signup', 'login', 'admin', 'operator', 'operator-login',
   'terms', 'privacy', 'setup-link', 'api', '.netlify',
@@ -137,6 +144,9 @@ export default async (req: Request, context: Context) => {
         /<title>[^<]*<\/title>/,
         `<title>${escapeHtml(ogTitle)}</title>`,
       )
+      // 홈의 정적 제목과 회사 소개(JSON-LD)는 개인페이지의 것이 아니다.
+      .replace(STATIC_ROOT, '<div id="root"></div>')
+      .replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\s*/, '')
 
     // Return with no-cache headers so crawlers always get fresh OG tags
     const headers = new Headers(response.headers)
@@ -156,7 +166,7 @@ export default async (req: Request, context: Context) => {
 /**
  * 검색 크롤러에게 보내는 메인 홈.
  *
- * 홈은 리액트가 그리는 화면이라 index.html 의 #root 가 비어 있다. 네이버 검색 로봇
+ * 홈은 리액트가 그리는 화면이라 index.html 의 #root 에는 정적 제목 한 줄뿐이다. 네이버 검색 로봇
  * (Yeti)은 자바스크립트를 거의 실행하지 않으므로 홈에서 읽을 글이 하나도 없었고,
  * 같은 도메인에서 글이 가득한 정적 페이지인 이용약관(/terms)이 "픽스폴리오" 검색의
  * 대표 결과로 잡혔다. 그래서 홈 화면(Hero · 실시간 트렌드 보드 · 캠페인 소개)이
@@ -173,22 +183,15 @@ async function renderHomeForCrawler(context: Context, url: URL): Promise<Respons
     const html = await response.text()
     const origin = url.origin
 
+    // Organization 은 index.html 에 정적으로 들어 있으므로 여기서는 WebSite 만 더한다.
     const jsonLd = JSON.stringify([
       {
         '@context': 'https://schema.org',
         '@type': 'WebSite',
-        name: 'PICKSFOLIO',
-        alternateName: ['픽스폴리오', 'Picksfolio', 'PICKS'],
+        name: '픽스폴리오',
+        alternateName: ['PICKSFOLIO', 'Picksfolio', 'picks-folio'],
         url: `${origin}/`,
         inLanguage: 'ko-KR',
-      },
-      {
-        '@context': 'https://schema.org',
-        '@type': 'Organization',
-        name: 'PICKSFOLIO',
-        alternateName: '픽스폴리오',
-        url: `${origin}/`,
-        logo: `${origin}/og-image.png?v=2`,
       },
     ]).replace(/</g, '\\u003c')
 
@@ -198,7 +201,8 @@ async function renderHomeForCrawler(context: Context, url: URL): Promise<Respons
 
     const body = `<main>
       <header>
-        <h1>PICKSFOLIO(픽스폴리오) | 크리에이터를 위한 올인원 서비스</h1>
+        <h1>픽스폴리오 - 인플루언서·브랜드 협업 플랫폼 | PICKSFOLIO</h1>
+        <p>픽스폴리오는 인플루언서와 브랜드를 연결해요. 자동 DM, 브랜드 매칭, 개인 페이지, 판매 연동까지 한 곳에서.</p>
         <p>오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요.</p>
         <p>인기검색어를 분야별로 매일 정리해 보여줍니다. 나만의 프로필링크에 담아 소개해보세요.</p>
         <p>주소만 정하면 내 페이지가 바로 열립니다. <a href="${origin}/signup">바로 만들기</a></p>
@@ -235,13 +239,13 @@ async function renderHomeForCrawler(context: Context, url: URL): Promise<Respons
 
     const headers = new Headers(response.headers)
     headers.delete('content-length')
-    if (!html.includes('<div id="root"></div>')) {
+    if (!STATIC_ROOT.test(html)) {
       return new Response(html, { status: response.status, headers })
     }
 
     const updatedHtml = html
       .replace('</head>', `    ${headTags}</head>`)
-      .replace('<div id="root"></div>', `<div id="root">${body}</div>`)
+      .replace(STATIC_ROOT, () => `<div id="root">${body}</div>`)
 
     return new Response(updatedHtml, { status: response.status, headers })
   } catch {
