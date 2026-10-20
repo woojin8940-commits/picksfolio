@@ -22,7 +22,21 @@ const genId = (prefix: string) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 const genToken = () => randomBytes(9).toString("base64url");
 
-const int = (raw: unknown) => Math.max(0, Math.round(Number(String(raw ?? "").replace(/[^\d.]/g, "")) || 0));
+/** Postgres INTEGER 상한. 넘기면 INSERT 가 통째로 실패한다. */
+const INT_MAX = 2_147_483_647;
+const clampInt = (n: number) => Math.min(INT_MAX, Math.max(0, Math.round(Number.isFinite(n) ? n : 0)));
+const int = (raw: unknown) => clampInt(Number(String(raw ?? "").replace(/[^\d.]/g, "")) || 0);
+
+/**
+ * 등록서의 단가 문구("게시물 30만원 / 숏폼 50만원", "300,000원")에서 첫 금액을 원 단위로 읽는다.
+ * 숫자만 남기면 두 금액이 이어 붙어("300000500000") 정수 칸을 넘기고, 만원 단위도 틀린다.
+ */
+function priceFromText(raw: unknown): number {
+  const m = String(raw ?? "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)\s*(만|천)?/);
+  if (!m) return 0;
+  const unit = m[2] === "만" ? 10000 : m[2] === "천" ? 1000 : 1;
+  return clampInt(Number(m[1]) * unit);
+}
 const text = (raw: unknown, max = 500) => String(raw ?? "").trim().slice(0, max);
 
 function parseJsonArray(raw: unknown): any[] {
@@ -51,7 +65,7 @@ function shapeItem(row: any) {
 }
 
 /** 브랜드 매칭 등록자 한 명의 지금 프로필. 연동 지표가 없으면 공개 프로필로 채운다. */
-async function snapshotRegistered(db: any, applicationId: string) {
+async function snapshotRegistered(db: any, applicationId: string, opts: { skipPublic?: boolean } = {}) {
   const rows = await db.sql`
     SELECT a.id, a.name, a.instagram_url, a.category, a.ad_price, a.follower_count,
       c.connected, c.instagram_handle, c.followers, c.following, c.recent_reels, c.profile_image
@@ -76,16 +90,16 @@ async function snapshotRegistered(db: any, applicationId: string) {
     handle,
     displayName: String(row.name || ""),
     category: String(row.category || ""),
-    followers: Number(row.followers || row.follower_count || 0),
-    following: Number(row.following || 0),
+    followers: clampInt(Number(row.followers || row.follower_count || 0)),
+    following: clampInt(Number(row.following || 0)),
     profileImageUrl: String(row.profile_image || ""),
     reels,
-    basePrice: int(row.ad_price),
+    basePrice: priceFromText(row.ad_price),
     error: "",
   };
 
   // 연동 지표가 비어 있으면 공개 프로필에서 채운다.
-  if (handle && (!snap.reels.length || !snap.following || !snap.followers)) {
+  if (handle && !opts.skipPublic && (!snap.reels.length || !snap.following || !snap.followers)) {
     const pub = await fetchPublicProfile(handle);
     if ("profile" in pub) {
       snap = {
@@ -230,30 +244,40 @@ export default async (req: Request) => {
         const haveHandle = new Set(existing.map((r: any) => r.h).filter(Boolean));
         let added = 0;
         const skipped: string[] = [];
+        const failed: string[] = [];
+        // 인스타가 한 번 막으면 같은 묶음의 나머지도 막힌다. 그 뒤로는 묻지 않고 연동 지표만 담는다.
+        let throttled = false;
         for (const appId of ids) {
           if (haveApp.has(appId)) continue;
-          const snap = await snapshotRegistered(db, appId);
-          if (!snap) continue;
-          if (snap.handle && haveHandle.has(snap.handle.toLowerCase())) {
-            skipped.push(snap.handle);
-            continue;
+          try {
+            const snap = await snapshotRegistered(db, appId, { skipPublic: throttled });
+            if (!snap) continue;
+            if (snap.error.includes("HTTP 429")) throttled = true;
+            if (snap.handle && haveHandle.has(snap.handle.toLowerCase())) {
+              skipped.push(snap.handle);
+              continue;
+            }
+            await db.sql`
+              INSERT INTO sales_link_influencers (
+                id, link_id, sort_order, source, application_id, instagram_handle, profile_url, display_name,
+                profile_image_url, category, followers, following, recent_reels, base_price, price, fetch_error, synced_at
+              ) VALUES (
+                ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'registered', ${appId}, ${snap.handle},
+                ${snap.handle ? `https://www.instagram.com/${snap.handle}/` : ""}, ${snap.displayName}, ${snap.profileImageUrl},
+                ${snap.category}, ${snap.followers}, ${snap.following}, ${JSON.stringify(snap.reels)}::jsonb,
+                ${snap.basePrice}, ${snap.basePrice}, ${snap.error}, ${new Date().toISOString()}
+              )
+            `;
+            haveApp.add(appId);
+            if (snap.handle) haveHandle.add(snap.handle.toLowerCase());
+            added += 1;
+          } catch (err: any) {
+            // 한 명이 실패해도 나머지는 담는다.
+            console.error("[sales-links] add_registered 실패:", appId, err?.message);
+            failed.push(appId);
           }
-          await db.sql`
-            INSERT INTO sales_link_influencers (
-              id, link_id, sort_order, source, application_id, instagram_handle, profile_url, display_name,
-              profile_image_url, category, followers, following, recent_reels, base_price, price, fetch_error, synced_at
-            ) VALUES (
-              ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'registered', ${appId}, ${snap.handle},
-              ${snap.handle ? `https://www.instagram.com/${snap.handle}/` : ""}, ${snap.displayName}, ${snap.profileImageUrl},
-              ${snap.category}, ${snap.followers}, ${snap.following}, ${JSON.stringify(snap.reels)}::jsonb,
-              ${snap.basePrice}, ${snap.basePrice}, ${snap.error}, ${new Date().toISOString()}
-            )
-          `;
-          haveApp.add(appId);
-          if (snap.handle) haveHandle.add(snap.handle.toLowerCase());
-          added += 1;
         }
-        return Response.json({ added, skipped });
+        return Response.json({ added, skipped, failed: failed.length });
       }
 
       case "update_item": {
@@ -353,6 +377,7 @@ export default async (req: Request) => {
         return Response.json({ error: "알 수 없는 요청입니다." }, { status: 400 });
     }
   } catch (err: any) {
+    console.error("[sales-links]", b?.action, err?.message);
     return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
   }
 };

@@ -94,20 +94,48 @@ async function mirrorImage(source: string, key: string): Promise<string> {
 export async function fetchPublicProfile(
   handle: string,
 ): Promise<{ profile: PublicProfile } | { error: string }> {
-  const url = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
-  let user: any;
-  try {
-    const res = await fetch(url, {
+  // 같은 공개 정보를 두 주소가 준다. 인스타는 요청 주소별로 따로 막기(429) 때문에,
+  // 한쪽이 막히면 다른 쪽을 물어본다.
+  const q = `users/web_profile_info/?username=${encodeURIComponent(handle)}`;
+  const attempts: Array<{ url: string; headers: Record<string, string> }> = [
+    {
+      url: `https://i.instagram.com/api/v1/${q}`,
       headers: { "User-Agent": UA, "x-ig-app-id": IG_WEB_APP_ID, Accept: "application/json" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 404) return { error: "존재하지 않는 계정입니다." };
-    if (!res.ok) return { error: `인스타그램이 응답하지 않았습니다(HTTP ${res.status}). 숫자를 직접 입력해 주세요.` };
-    const data = (await res.json().catch(() => null)) as any;
-    user = data?.data?.user;
-  } catch {
-    return { error: "인스타그램에서 정보를 불러오지 못했습니다. 숫자를 직접 입력해 주세요." };
+    },
+    {
+      url: `https://www.instagram.com/api/v1/${q}`,
+      headers: {
+        "User-Agent": UA,
+        "x-ig-app-id": IG_WEB_APP_ID,
+        "X-Requested-With": "XMLHttpRequest",
+        Referer: `https://www.instagram.com/${encodeURIComponent(handle)}/`,
+        Accept: "application/json",
+      },
+    },
+  ];
+  let user: any;
+  let lastStatus = 0;
+  for (const attempt of attempts) {
+    try {
+      const res = await fetch(attempt.url, { headers: attempt.headers, signal: AbortSignal.timeout(7000) });
+      if (res.status === 404) return { error: "존재하지 않는 계정입니다." };
+      if (!res.ok) {
+        lastStatus = res.status;
+        continue;
+      }
+      const data = (await res.json().catch(() => null)) as any;
+      user = data?.data?.user;
+      // 200 인데 user 가 없으면 비공개·없는 계정이다. 다른 주소도 같은 답을 준다.
+      lastStatus = 200;
+      break;
+    } catch {
+      // 시간 초과·연결 실패 — 다음 주소로
+    }
   }
+  if (lastStatus && lastStatus !== 200) {
+    return { error: `인스타그램이 응답하지 않았습니다(HTTP ${lastStatus}). 잠시 뒤 '인스타에서 새로고침'을 누르거나 숫자를 직접 입력해 주세요.` };
+  }
+  if (!lastStatus) return { error: "인스타그램에서 정보를 불러오지 못했습니다. 숫자를 직접 입력해 주세요." };
   if (!user) return { error: "존재하지 않거나 비공개 계정입니다." };
 
   const realHandle = String(user.username || handle);
@@ -136,8 +164,8 @@ export async function fetchPublicProfile(
     profile: {
       handle: realHandle,
       fullName: String(user.full_name || ""),
-      followers: Number(user.edge_followed_by?.count || 0),
-      following: Number(user.edge_follow?.count || 0),
+      followers: Math.min(2_147_483_647, Number(user.edge_followed_by?.count || 0)),
+      following: Math.min(2_147_483_647, Number(user.edge_follow?.count || 0)),
       profileImageUrl,
       reels: reelNodes.map((n, i) => ({
         id: String(n.shortcode),

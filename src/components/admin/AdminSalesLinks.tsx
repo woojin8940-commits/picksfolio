@@ -189,6 +189,8 @@ const LinkEditor: React.FC<{
   const [newNote, setNewNote] = useState('');
   const [adding, setAdding] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 추가 결과는 추가 칸 바로 아래에 띄운다. 페이지 맨 위 알림은 스크롤을 내린 상태에서 보이지 않는다.
+  const [addNotice, setAddNotice] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
 
   const dirty = title !== link.title || brand !== link.brand_name || intro !== link.intro || active !== link.is_active;
 
@@ -218,6 +220,7 @@ const LinkEditor: React.FC<{
   const addExternal = async () => {
     if (!profileUrl.trim()) return;
     setAdding(true);
+    setAddNotice(null);
     try {
       const base = num(newBase);
       const data = await call({
@@ -231,11 +234,11 @@ const LinkEditor: React.FC<{
       });
       setProfileUrl(''); setNewBase(''); setNewMargin(''); setNewCategory(''); setNewNote('');
       await reload();
-      notify(data.warning
+      setAddNotice(data.warning
         ? { tone: 'warn', text: `@${data.item.instagram_handle} 를 추가했지만 정보를 불러오지 못했습니다: ${data.warning} 아래 카드에서 직접 입력해 주세요.` }
         : { tone: 'ok', text: `@${data.item.instagram_handle} 를 추가했습니다.` });
     } catch (e) {
-      notify({ tone: 'warn', text: (e as Error).message });
+      setAddNotice({ tone: 'warn', text: (e as Error).message });
     } finally {
       setAdding(false);
     }
@@ -295,7 +298,7 @@ const LinkEditor: React.FC<{
       <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <p className="text-sm font-black text-slate-900">인플루언서 추가</p>
-          <button onClick={() => setPickerOpen(true)} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200">
+          <button onClick={() => { setAddNotice(null); setPickerOpen(true); }} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200">
             브랜드 매칭 등록자에서 가져오기
           </button>
         </div>
@@ -318,6 +321,11 @@ const LinkEditor: React.FC<{
             제안 단가 = {formatKRW(num(newBase) + num(newMargin))}
           </p>
         </div>
+        {addNotice && (
+          <p className={`rounded-lg px-3 py-2 text-xs font-bold ${addNotice.tone === 'ok' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+            {addNotice.text}
+          </p>
+        )}
         <p className="text-[11px] font-medium text-slate-400">
           프로필 링크를 넣으면 팔로워·팔로잉·최근 릴스 3편을 불러옵니다. 인스타그램이 응답하지 않으면 카드에서 직접 입력할 수 있습니다.
         </p>
@@ -354,16 +362,20 @@ const LinkEditor: React.FC<{
           existingIds={new Set(link.items.map(i => i.application_id).filter(Boolean))}
           onClose={() => setPickerOpen(false)}
           onPick={async ids => {
+            // 실패 문구는 창 안에 띄운다. 창 뒤(페이지 맨 위)에 띄우면 어두운 배경에 가려
+            // 버튼을 눌러도 아무 일도 없는 것처럼 보인다.
             try {
               const data = await call({ action: 'add_registered', link_id: link.id, application_ids: ids });
               setPickerOpen(false);
               await reload();
-              notify({
-                tone: data.skipped?.length ? 'warn' : 'ok',
-                text: `${data.added}명을 추가했습니다.${data.skipped?.length ? ` 이미 있는 계정 ${data.skipped.map((h: string) => '@' + h).join(', ')} 은(는) 건너뛰었습니다.` : ''}`,
-              });
+              const notes = [
+                data.skipped?.length ? `이미 있는 계정 ${data.skipped.map((h: string) => '@' + h).join(', ')} 은(는) 건너뛰었습니다.` : '',
+                data.failed ? `${data.failed}명은 추가하지 못했습니다. 다시 시도해 주세요.` : '',
+              ].filter(Boolean).join(' ');
+              setAddNotice({ tone: notes ? 'warn' : 'ok', text: `${data.added}명을 추가했습니다.${notes ? ` ${notes}` : ''}` });
+              return '';
             } catch (e) {
-              notify({ tone: 'warn', text: (e as Error).message });
+              return (e as Error).message;
             }
           }}
         />
@@ -552,12 +564,14 @@ const RegisteredPicker: React.FC<{
   headers: () => Record<string, string>;
   existingIds: Set<string>;
   onClose: () => void;
-  onPick: (ids: string[]) => Promise<void>;
+  /** 실패하면 이유 문구를, 성공하면 빈 문자열을 돌려준다. */
+  onPick: (ids: string[]) => Promise<string>;
 }> = ({ headers, existingIds, onClose, onPick }) => {
   const [list, setList] = useState<DirEntry[] | null>(null);
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetch('/api/collab-directory?role=influencer&sort=followers', { credentials: 'same-origin', headers: headers() })
@@ -607,13 +621,14 @@ const RegisteredPicker: React.FC<{
             );
           })}
         </div>
+        {error && <p className="mx-4 mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600">{error}</p>}
         <div className="p-4 border-t border-slate-100 flex justify-between items-center">
           <span className="text-xs font-bold text-slate-500">{picked.size}명 선택</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black">취소</button>
             <button
               disabled={!picked.size || busy}
-              onClick={async () => { setBusy(true); await onPick([...picked]); setBusy(false); }}
+              onClick={async () => { setBusy(true); setError(''); setError(await onPick([...picked])); setBusy(false); }}
               className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black disabled:opacity-40"
             >
               {busy ? '불러오는 중...' : '추가'}
