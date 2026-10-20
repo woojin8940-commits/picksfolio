@@ -516,6 +516,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "광고": "Advertisement",
   "광고 / 협찬": "Ad / Sponsor",
   "광고 단가": "Advertising price",
+  "게시물 단가와 숏폼 단가를 모두 입력해 주세요.": "Please enter both your post rate and short-form rate.",
   "광고 목적": "Advertising purpose",
   "광고 목적 *": "Advertising purpose *",
   "광고 비중이 높음": "High proportion of advertising",

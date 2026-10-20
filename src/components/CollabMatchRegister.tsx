@@ -807,6 +807,12 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setSubmitting(false);
         return;
       }
+      // 단가는 담당자가 브랜드 예산에 맞는 사람을 추리는 값이라 둘 다 받는다.
+      if (variant === 'influencer' && (!digitsOnly(infForm.post_price) || !digitsOnly(infForm.short_price))) {
+        setNotice({ type: 'err', text: '게시물 단가와 숏폼 단가를 모두 입력해 주세요.' });
+        setSubmitting(false);
+        return;
+      }
       // 분야가 비어 있으면 캠페인 후보로 추려지지 않는다. 등록만 되고 아무 연락도
       // 오지 않는 상태를 만들지 않으려면 여기서 막는 편이 낫다.
       if (variant === 'influencer' && selectedCategories.length === 0) {
@@ -1189,10 +1195,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                   </div>
 
                   <div className="pt-1">
-                    <p className="text-xs font-black text-slate-500 mb-2">광고 단가</p>
+                    <p className="text-xs font-black text-slate-500 mb-2">광고 단가<span className="text-rose-500 ml-0.5">*</span></p>
                     <div className="grid grid-cols-2 gap-3">
-                      <MoneyField label="게시물 단가" value={infForm.post_price} onChange={v => setInfForm(f => ({ ...f, post_price: v }))} placeholder="300,000" />
-                      <MoneyField label="숏폼 단가" value={infForm.short_price} onChange={v => setInfForm(f => ({ ...f, short_price: v }))} placeholder="500,000" />
+                      <MoneyField label="게시물 단가" required value={infForm.post_price} onChange={v => setInfForm(f => ({ ...f, post_price: v }))} placeholder="300,000" />
+                      <MoneyField label="숏폼 단가" required value={infForm.short_price} onChange={v => setInfForm(f => ({ ...f, short_price: v }))} placeholder="500,000" />
                     </div>
                   </div>
 
@@ -1536,10 +1542,12 @@ const Field: React.FC<{
 
 /** 원 단위 금액 칸. 적는 대로 쉼표가 붙고, 단위(원)는 칸 안에 붙박이로 둔다. */
 const MoneyField: React.FC<{
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
-}> = ({ label, value, onChange, placeholder }) => (
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; required?: boolean;
+}> = ({ label, value, onChange, placeholder, required }) => (
   <div>
-    <label className="block text-xs font-bold text-slate-500 mb-1.5">{label}</label>
+    <label className="block text-xs font-bold text-slate-500 mb-1.5">
+      {label}{required && <span className="text-rose-500 ml-0.5">*</span>}
+    </label>
     <div className="flex items-center gap-2 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-colors">
       <input
         value={value}
