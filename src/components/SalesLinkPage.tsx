@@ -97,6 +97,13 @@ const SalesLinkPage: React.FC<{ token: string }> = ({ token }) => {
 
   return (
     <div className="min-h-screen bg-[#f6f5f2] text-slate-900">
+      <div className="bg-amber-300 text-slate-950">
+        <div className="max-w-[1440px] mx-auto px-5 sm:px-8 py-2.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs sm:text-sm">
+          <span className="font-black">인플루언서 미리보기</span>
+          <span className="text-slate-950/40">/</span>
+          <span className="font-bold">가입하면 더 많은 인플루언서를 만날 수 있어요.</span>
+        </div>
+      </div>
       <header className="bg-slate-950 text-white">
         <div className="max-w-[1440px] mx-auto px-5 sm:px-8 pt-10 pb-12">
           <p className="text-[11px] font-black tracking-[0.35em] text-white/50">PICKSFOLIO · INFLUENCER PROPOSAL</p>
@@ -109,7 +116,7 @@ const SalesLinkPage: React.FC<{ token: string }> = ({ token }) => {
           )}
           <div className="mt-8 flex gap-8">
             <div>
-              <p className="text-[10px] font-black tracking-widest text-white/40">추천 인플루언서</p>
+              <p className="text-[10px] font-black tracking-widest text-white/40">인플루언서 미리보기</p>
               <p className="mt-1 text-2xl font-black">{items.length}명</p>
             </div>
             <div>
