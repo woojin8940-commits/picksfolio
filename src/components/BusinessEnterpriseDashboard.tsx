@@ -27,9 +27,9 @@ const BusinessCampaignHistory = lazyWithRetry(() => import('./BusinessCampaignHi
 // 광고 현황 — 이력에서 고른 콘텐츠를 광고로 돌린 결과를 보는 화면. 목록·상태·지표는
 // 메타 Marketing API 에서 읽는다.
 const BusinessAdStatus = lazyWithRetry(() => import('./BusinessAdStatus'));
-// 브랜드용 인사이트(우리 계정을 태그한 인플루언서 콘텐츠). 인플루언서용 인사이트와는
-// 다른 화면이며, 이 대시보드에서만 열린다.
-const BusinessTaggedContent = lazyWithRetry(() => import('./BusinessTaggedContent'));
+// 인사이트 — 브랜드 계정 자체의 성과(팔로워 · 릴스). 인플루언서용 인사이트와 같은
+// 화면을 브랜드 모드로 연다. 태그된 인플루언서 콘텐츠는 캠페인 이력 · 광고 현황에서 본다.
+const CreatorInsights = lazyWithRetry(() => import('./CreatorInsights'));
 import { AFFILIATE_ENABLED } from '../utils/featureFlags';
 // 판매 연동형(어필리에이트) 캠페인과 그 바닥인 쇼핑몰 연동. 자사몰(카페24) 상품을
 // 인플루언서가 판매하고 수수료를 받는다 — 광고비를 주는 캠페인 협업과는 따로 굴러간다.
@@ -153,7 +153,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     later(600, () => {
       import('./BusinessInbox').catch(() => {});
       import('./DmAutomation').catch(() => {});
-      import('./BusinessTaggedContent').catch(() => {});
+      import('./CreatorInsights').catch(() => {});
       import('./BusinessEntCalendar').catch(() => {});
     });
     later(1100, () => {
@@ -168,7 +168,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       import('./BusinessCampaignHistory').catch(() => {});
       import('./BusinessAdStatus').catch(() => {});
       apiService.getCollabs('brand').catch(() => undefined);
-      apiService.getBusinessTaggedMedia(cleanUsername).catch(() => undefined);
+      apiService.getCreatorInsights(cleanUsername).catch(() => undefined);
     });
     later(2500, () => {
       apiService.getBusinessProposals(cleanUsername)
@@ -425,7 +425,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     case 'tagged-insights':
       subComponent = (
         <LazyRoute>
-          <BusinessTaggedContent businessUsername={businessUsername} />
+          <CreatorInsights userName={businessUsername} brand />
         </LazyRoute>
       );
       break;
