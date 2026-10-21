@@ -6,7 +6,7 @@ import { instagramPostUrl } from '../utils/instagramPostUrl';
  * 브랜드 영업용 링크 공개 화면(/pick/<토큰>).
  *
  * 운영자가 브랜드에게 보내는 인플루언서 제안 명단이다. 로그인 없이 열리고, 계정마다
- * 팔로워·팔로잉·최근 릴스 3편(조회수 포함)과 운영자가 정한 피드 / 릴스 단가만 보인다. 미등록 계정의
+ * 팔로워·팔로잉·최근 릴스 3편(조회수 포함)과 운영자가 정한 피드 / 릴스 단가(블러 처리)만 보인다. 미등록 계정의
  * 릴스 조회수는 운영자가 직접 넣는다. 평균 조회수·동향은 싣지 않는다.
  */
 
@@ -255,15 +255,18 @@ const PriceBox: React.FC<{ it: Influencer }> = ({ it }) => (
             <PriceCell label="피드" value={it.price} />
             <PriceCell label="릴스" value={it.reels_price} />
           </div>
-          {it.price_note && <p className="mt-2 text-xs font-bold text-white/60 truncate" title={it.price_note}>{it.price_note}</p>}
+          {it.price_note && <p className="mt-2 text-xs font-bold text-white/60 truncate blur-sm select-none" aria-hidden="true">{it.price_note}</p>}
         </div>
+        <p className="mt-2.5 text-xs font-bold text-slate-500 leading-relaxed">
+          정확한 견적은 픽스폴리오 가입 후 캠페인을 등록하면 안내해 드려요
+        </p>
       </div>
 );
 
 const PriceCell: React.FC<{ label: string; value: number }> = ({ label, value }) => (
   <div className="min-w-0">
     <p className="text-[11px] font-black text-white/50">{label}</p>
-    <p className="text-xl font-black whitespace-nowrap">{value > 0 ? formatKRW(value) : '협의'}</p>
+    <p className="text-xl font-black whitespace-nowrap blur-md select-none" aria-hidden="true">{value > 0 ? formatKRW(value) : '협의'}</p>
   </div>
 );
 
