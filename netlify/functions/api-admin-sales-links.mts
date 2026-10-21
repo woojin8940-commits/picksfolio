@@ -380,9 +380,14 @@ export default async (req: Request) => {
         const to = b.direction === "up" ? at - 1 : at + 1;
         if (at < 0 || to < 0 || to >= ids.length) return Response.json({ success: true });
         [ids[at], ids[to]] = [ids[to], ids[at]];
-        for (let i = 0; i < ids.length; i++) {
-          await db.sql`UPDATE sales_link_influencers SET sort_order = ${i + 1} WHERE id = ${ids[i]}`;
-        }
+        // 한 번에 다시 매긴다. 예전에는 줄마다 UPDATE 를 따로 보내서, 명단이 길면 응답이
+        // 몇 초씩 걸려 버튼을 눌러도 아무 반응이 없는 것처럼 보였다.
+        await db.sql`
+          UPDATE sales_link_influencers s
+          SET sort_order = v.ord, updated_at = NOW()
+          FROM unnest(${ids}::text[]) WITH ORDINALITY AS v(id, ord)
+          WHERE s.id = v.id
+        `;
         return Response.json({ success: true });
       }
 
