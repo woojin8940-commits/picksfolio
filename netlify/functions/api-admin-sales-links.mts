@@ -106,6 +106,8 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
         profileImageUrl: snap.profileImageUrl || pub.profile.profileImageUrl,
         reels: snap.reels.length ? snap.reels : pub.profile.reels,
       };
+      // 팔로워 수만 못 받은 계정 — 연동 지표나 등록서에도 없으면 직접 넣으라고 알린다.
+      if (pub.profile.notice && !snap.followers) snap.error = pub.profile.notice;
     } else if (!snap.reels.length) {
       snap.error = pub.error;
     }
@@ -240,11 +242,15 @@ export default async (req: Request) => {
             ${basePrice}, ${b.price !== undefined && b.price !== "" ? int(b.price) : basePrice},
             ${reelsBase}, ${b.reels_price !== undefined && b.reels_price !== "" ? int(b.reels_price) : reelsBase},
             ${text(b.price_note, 200)},
-            ${"error" in pub ? pub.error : ""}, ${p ? new Date().toISOString() : null}
+            ${"error" in pub ? pub.error : p?.notice || ""}, ${p ? new Date().toISOString() : null}
           )
           RETURNING *
         `;
-        return Response.json({ item: shapeItem(row), warning: "error" in pub ? pub.error : "" });
+        return Response.json({
+          item: shapeItem(row),
+          warning: "error" in pub ? pub.error : "",
+          notice: p?.notice || "",
+        });
       }
 
       case "add_registered": {
@@ -315,6 +321,7 @@ export default async (req: Request) => {
             reels_price_locked = ${b.reels_price_locked !== undefined ? b.reels_price_locked === true : cur.reels_price_locked},
             price_note = ${b.price_note !== undefined ? text(b.price_note, 200) : cur.price_note},
             memo = ${b.memo !== undefined ? text(b.memo, 2000) : cur.memo},
+            fetch_error = ${b.followers !== undefined && int(b.followers) > 0 ? "" : cur.fetch_error},
             updated_at = NOW()
           WHERE id = ${b.id}
           RETURNING *
@@ -329,6 +336,7 @@ export default async (req: Request) => {
 
         let followers = 0, following = 0, reels: SalesReel[] = [], image = "", name = "", handle = cur.instagram_handle;
         let error = "";
+        let notice = "";
         if (cur.source === "registered" && cur.application_id) {
           const snap = await snapshotRegistered(db, cur.application_id);
           if (snap) {
@@ -339,16 +347,20 @@ export default async (req: Request) => {
         } else if (handle) {
           const pub = await fetchPublicProfile(handle);
           if ("profile" in pub) {
-            ({ followers, following, reels, profileImageUrl: image, fullName: name } = pub.profile);
+            ({ followers, following, reels, profileImageUrl: image, fullName: name, notice } = pub.profile);
             handle = pub.profile.handle;
           } else {
             error = pub.error;
           }
         }
-        if (error && !followers) {
+        // 등록자 쪽은 팔로워 수만 빠진 안내가 error 로 온다. 받은 사진·릴스는 저장한다.
+        if (error && !followers && !reels.length) {
           await db.sql`UPDATE sales_link_influencers SET fetch_error = ${error}, updated_at = NOW() WHERE id = ${b.id}`;
           return Response.json({ error }, { status: 502 });
         }
+        if (error) notice = error;
+        // 손으로 넣은 팔로워 수가 있으면 안내는 남기지 않는다.
+        if (notice && cur.followers) notice = "";
         // 새로 받은 값이 비어 있는 칸은 기존 값(손으로 넣은 값 포함)을 지킨다.
         const [row] = await db.sql`
           UPDATE sales_link_influencers SET
@@ -361,13 +373,13 @@ export default async (req: Request) => {
             recent_reels = ${JSON.stringify(
               reels.length ? keepManualViews(reels, parseJsonArray(cur.recent_reels)) : parseJsonArray(cur.recent_reels),
             )}::jsonb,
-            fetch_error = '',
+            fetch_error = ${notice},
             synced_at = NOW(),
             updated_at = NOW()
           WHERE id = ${b.id}
           RETURNING *
         `;
-        return Response.json({ item: shapeItem(row) });
+        return Response.json({ item: shapeItem(row), notice });
       }
 
       case "move_item": {
