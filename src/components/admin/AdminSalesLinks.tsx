@@ -125,13 +125,20 @@ const AdminSalesLinks: React.FC<{ token: string }> = ({ token }) => {
   const selected = links.find(l => l.id === selectedId) || null;
 
   /** 화면의 명단 순서를 먼저 바꾼다. 서버 응답을 기다리면 누른 뒤 한참 그대로라 안 눌린 것처럼 보인다. */
-  const moveLocal = useCallback((linkId: string, itemId: string, direction: 'up' | 'down') => {
+  const moveLocal = useCallback((linkId: string, itemId: string, direction: 'up' | 'down' | 'top') => {
     setLinks(prev => prev.map(l => {
       if (l.id !== linkId) return l;
       const items = [...l.items];
       const at = items.findIndex(i => i.id === itemId);
+      if (at < 0) return l;
+      if (direction === 'top') {
+        if (at === 0) return l;
+        const [moved] = items.splice(at, 1);
+        items.unshift(moved);
+        return { ...l, items };
+      }
       const to = direction === 'up' ? at - 1 : at + 1;
-      if (at < 0 || to < 0 || to >= items.length) return l;
+      if (to < 0 || to >= items.length) return l;
       [items[at], items[to]] = [items[to], items[at]];
       return { ...l, items };
     }));
@@ -207,7 +214,7 @@ const LinkEditor: React.FC<{
   headers: () => Record<string, string>;
   reload: () => Promise<void>;
   notify: (n: { tone: 'ok' | 'warn'; text: string } | null) => void;
-  moveLocal: (linkId: string, itemId: string, direction: 'up' | 'down') => void;
+  moveLocal: (linkId: string, itemId: string, direction: 'up' | 'down' | 'top') => void;
 }> = ({ link, call, headers, reload, notify, moveLocal }) => {
   const [title, setTitle] = useState(link.title);
   const [brand, setBrand] = useState(link.brand_name);
@@ -436,7 +443,7 @@ const ItemCard: React.FC<{
   call: (b: Record<string, unknown>) => Promise<any>;
   reload: () => Promise<void>;
   notify: (n: { tone: 'ok' | 'warn'; text: string } | null) => void;
-  onMove: (direction: 'up' | 'down') => void;
+  onMove: (direction: 'up' | 'down' | 'top') => void;
 }> = ({ item, first, last, call, reload, notify, onMove }) => {
   const [name, setName] = useState(item.display_name);
   const [category, setCategory] = useState(item.category);
@@ -526,7 +533,7 @@ const ItemCard: React.FC<{
     }
   };
 
-  const move = async (direction: 'up' | 'down') => {
+  const move = async (direction: 'up' | 'down' | 'top') => {
     onMove(direction);
     try { await call({ action: 'move_item', id: item.id, direction }); }
     catch (e) {
@@ -562,6 +569,7 @@ const ItemCard: React.FC<{
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <IconBtn label="맨 위로" disabled={first} onClick={() => move('top')}>⤒</IconBtn>
           <IconBtn label="위로" disabled={first} onClick={() => move('up')}>↑</IconBtn>
           <IconBtn label="아래로" disabled={last} onClick={() => move('down')}>↓</IconBtn>
           <IconBtn label="삭제" onClick={remove}>✕</IconBtn>
