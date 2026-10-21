@@ -124,6 +124,19 @@ const AdminSalesLinks: React.FC<{ token: string }> = ({ token }) => {
 
   const selected = links.find(l => l.id === selectedId) || null;
 
+  /** 화면의 명단 순서를 먼저 바꾼다. 서버 응답을 기다리면 누른 뒤 한참 그대로라 안 눌린 것처럼 보인다. */
+  const moveLocal = useCallback((linkId: string, itemId: string, direction: 'up' | 'down') => {
+    setLinks(prev => prev.map(l => {
+      if (l.id !== linkId) return l;
+      const items = [...l.items];
+      const at = items.findIndex(i => i.id === itemId);
+      const to = direction === 'up' ? at - 1 : at + 1;
+      if (at < 0 || to < 0 || to >= items.length) return l;
+      [items[at], items[to]] = [items[to], items[at]];
+      return { ...l, items };
+    }));
+  }, []);
+
   const createLink = async () => {
     try {
       const data = await call({ action: 'create_link', title: '인플루언서 제안' });
@@ -181,6 +194,7 @@ const AdminSalesLinks: React.FC<{ token: string }> = ({ token }) => {
           headers={headers}
           reload={load}
           notify={setNotice}
+          moveLocal={moveLocal}
         />
       )}
     </div>
@@ -193,7 +207,8 @@ const LinkEditor: React.FC<{
   headers: () => Record<string, string>;
   reload: () => Promise<void>;
   notify: (n: { tone: 'ok' | 'warn'; text: string } | null) => void;
-}> = ({ link, call, headers, reload, notify }) => {
+  moveLocal: (linkId: string, itemId: string, direction: 'up' | 'down') => void;
+}> = ({ link, call, headers, reload, notify, moveLocal }) => {
   const [title, setTitle] = useState(link.title);
   const [brand, setBrand] = useState(link.brand_name);
   const [intro, setIntro] = useState(link.intro);
@@ -379,6 +394,7 @@ const LinkEditor: React.FC<{
                 call={call}
                 reload={reload}
                 notify={notify}
+                onMove={direction => moveLocal(link.id, it.id, direction)}
               />
             ))}
           </div>
@@ -420,7 +436,8 @@ const ItemCard: React.FC<{
   call: (b: Record<string, unknown>) => Promise<any>;
   reload: () => Promise<void>;
   notify: (n: { tone: 'ok' | 'warn'; text: string } | null) => void;
-}> = ({ item, first, last, call, reload, notify }) => {
+  onMove: (direction: 'up' | 'down') => void;
+}> = ({ item, first, last, call, reload, notify, onMove }) => {
   const [name, setName] = useState(item.display_name);
   const [category, setCategory] = useState(item.category);
   const [followers, setFollowers] = useState(String(item.followers || ''));
@@ -510,8 +527,13 @@ const ItemCard: React.FC<{
   };
 
   const move = async (direction: 'up' | 'down') => {
-    try { await call({ action: 'move_item', id: item.id, direction }); await reload(); }
-    catch (e) { notify({ tone: 'warn', text: (e as Error).message }); }
+    onMove(direction);
+    try { await call({ action: 'move_item', id: item.id, direction }); }
+    catch (e) {
+      // 서버에 못 남겼으면 화면도 서버 순서로 되돌린다.
+      await reload();
+      notify({ tone: 'warn', text: `순서를 바꾸지 못했습니다: ${(e as Error).message}` });
+    }
   };
 
   const remove = async () => {
