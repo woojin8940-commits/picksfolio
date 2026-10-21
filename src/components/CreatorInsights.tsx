@@ -58,6 +58,13 @@ import { instagramPostUrl } from '../utils/instagramPostUrl';
  * 본 사람이 "다시 보겠다"고 누른 것이라 다음 편을 만들 때 참고할 값에 더 가깝다.
  * 다만 저장수는 인사이트 권한이 통했을 때만 내려온다 — 못 받은 계정에서는 조회수를
  * 기준으로 내려앉고, 화면은 그 사실을 숨기지 않는다.
+ *
+ * 브랜드 계정도 이 화면을 그대로 쓴다(`brand`). 태그된 인플루언서 콘텐츠는 캠페인
+ * 이력·광고 현황에서 보고, 인사이트 메뉴는 인플루언서처럼 내 계정 성과만 본다.
+ * 브랜드에게서 달라지는 것은 둘이다 — 벤치마킹 탭이 없고(비교 대상이 등록
+ * 인플루언서라 브랜드 계정과 견줄 평균이 아니다), 연동을 마치면 브랜드 대시보드의
+ * 이 탭으로 돌아온다. 연동 자체는 디엠 자동화와 같은 하나라, 여기서 연동해도 자동
+ * 디엠까지 함께 연동된다.
  */
 
 type SortKey = 'saved' | 'views' | 'recent';
@@ -299,7 +306,11 @@ const sortReels = (reels: InsightReel[], key: SortKey): InsightReel[] => {
   return copy.sort((a, b) => (b.saved ?? 0) - (a.saved ?? 0));
 };
 
-const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
+const CreatorInsights: React.FC<{
+  userName: string;
+  /** 브랜드 워크스페이스에서 열린 화면인가. 파일 위 주석 참고. */
+  brand?: boolean;
+}> = ({ userName, brand = false }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
   const initialCache = useMemo(() => readCreatorInsightsCache(userName), [userName]);
@@ -633,8 +644,11 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
     // 예전에는 캠페인 전용 연동('collab')으로 시작해서, 여기서 연동한 사람이 자동
     // 디엠에서 다시 "계정을 먼저 연동해주세요"를 만났다 — 같은 계정에 같은 동의
     // 화면을 여러 번 지나고, 만료도 각각 세니 재연동도 그만큼 반복됐다.
-    // 돌아올 곳만 이 화면으로 표시해 둔다.
-    const returnTo = `${window.location.pathname}?ig_insights=1`;
+    // 돌아올 곳만 이 화면으로 표시해 둔다. 브랜드 대시보드는 하위 화면을 주소가
+    // 아니라 상태로 여닫으므로, 탭 이름을 함께 실어야 인사이트로 돌아온다.
+    const returnTo = brand
+      ? '/business-admin?tab=insights&ig_insights=1'
+      : `${window.location.pathname}?ig_insights=1`;
     const res = await apiService.instagramConnectUrl(userName, returnTo);
     if (!res.url) {
       setConnecting(false);
@@ -725,10 +739,14 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
               : (isEn ? 'Connect your Instagram account' : '인스타그램 계정을 연동해 주세요')}
           </h3>
           <p className="text-xs md:text-sm text-slate-500 font-medium leading-relaxed mb-6">
-            {data.error ||
-              (isEn
-                ? 'Once connected, your follower count and reel performance appear here.'
-                : '연동하면 팔로워 수와 릴스별 조회수·도달·저장수를 이 화면에서 볼 수 있어요.')}
+            {brand && !data.needsReauth
+              ? (isEn
+                  ? 'Connect your brand account and its follower count and reel performance appear here. DM Automation is connected at the same time.'
+                  : '브랜드 계정을 연동하면 팔로워 수와 릴스별 조회수·도달·저장수를 이 화면에서 볼 수 있어요. DM 자동화도 함께 연동됩니다.')
+              : data.error ||
+                (isEn
+                  ? 'Once connected, your follower count and reel performance appear here.'
+                  : '연동하면 팔로워 수와 릴스별 조회수·도달·저장수를 이 화면에서 볼 수 있어요.')}
           </p>
           <button
             type="button"
@@ -739,8 +757,8 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
             {connecting
               ? (isEn ? 'Opening…' : '연동 창을 여는 중')
               : data.needsReauth
-                ? (isEn ? 'Reconnect' : '다시 연동하기')
-                : (isEn ? 'Connect Instagram' : '인스타그램 연동하기')}
+                  ? (isEn ? 'Reconnect' : '다시 연동하기')
+                  : (isEn ? 'Connect Instagram' : '인스타그램 연동하기')}
           </button>
           {notice && <p className="text-[11px] font-bold text-rose-600 mt-3">{notice}</p>}
         </div>
@@ -819,9 +837,11 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
           <SortChip active={tab === 'followers'} onClick={() => setTab('followers')}>
             {isEn ? 'Followers' : '팔로워 분석'}
           </SortChip>
-          <SortChip active={tab === 'benchmark'} onClick={() => setTab('benchmark')}>
-            {isEn ? 'Benchmark' : '벤치마킹'}
-          </SortChip>
+          {!brand && (
+            <SortChip active={tab === 'benchmark'} onClick={() => setTab('benchmark')}>
+              {isEn ? 'Benchmark' : '벤치마킹'}
+            </SortChip>
+          )}
           <SortChip active={tab === 'strategy'} onClick={() => setTab('strategy')}>
             {isEn ? 'Upload strategy' : '업로드 전략'}
           </SortChip>
@@ -937,6 +957,7 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
             reels={reels}
             coaching={coaching}
             insightsAvailable={Boolean(data?.insightsAvailable)}
+            brand={brand}
             isEn={isEn}
           />
         )}
@@ -2476,8 +2497,9 @@ const StrategyPanel: React.FC<{
   reels: InsightReel[];
   coaching: ReelCoaching;
   insightsAvailable: boolean;
+  brand?: boolean;
   isEn: boolean;
-}> = ({ reels, coaching, insightsAvailable, isEn }) => {
+}> = ({ reels, coaching, insightsAvailable, brand = false, isEn }) => {
   /** 요일별 업로드 편수와 평균 조회수. 한 주는 항상 일곱 칸이다(빈 요일도 자리를 지킨다). */
   const weekdayRows = useMemo(() => {
     const buckets: { views: (number | null)[] }[] = WEEKDAYS_KO.map(() => ({ views: [] }));
@@ -2770,7 +2792,7 @@ const StrategyPanel: React.FC<{
                   <p className="text-[11px] md:text-xs font-bold text-slate-600 mt-3 leading-relaxed">
                     {isEn
                       ? `Your account leans ${dominant.en.toLowerCase()} — ${dominant.count} of ${typeMix.counted} typed reels.`
-                      : `내 계정은 ${dominant.ko}에 가깝습니다 — 분류된 ${typeMix.counted}편 중 ${dominant.count}편. 브랜드에게 제안할 때 이 강점을 그대로 말하면 됩니다.`}
+                      : `내 계정은 ${dominant.ko}에 가깝습니다 — 분류된 ${typeMix.counted}편 중 ${dominant.count}편.${brand ? '' : ' 브랜드에게 제안할 때 이 강점을 그대로 말하면 됩니다.'}`}
                   </p>
                 )}
 
