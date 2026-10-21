@@ -49,6 +49,8 @@ export const SAMPLE_SIZE = 12;
 export const SHOW_SIZE = 6;
 /** 화면에 보여줄 최근 피드 개수. 3×3 한 화면에 들어가는 만큼만. */
 export const FEED_SIZE = 9;
+/** 릴스를 채우려고 첫 페이지 뒤로 더 넘겨 볼 미디어 페이지 수(사진이 많은 계정 대비). */
+const REEL_EXTRA_PAGES = 3;
 
 export interface MetaLink {
   accessToken?: string;
@@ -264,25 +266,6 @@ const viewsFromMedia = (media: any): number | null => {
 };
 
 /**
- * 릴스 하나의 조회수를 인사이트 엔드포인트로 받아 온다.
- * 실패는 조용히 0 으로 둔다 — 한 편이 막혔다고 나머지 릴스까지 버릴 이유가 없다.
- */
-async function fetchReelViews(graphHost: string, token: string, mediaId: string): Promise<number> {
-  if (!mediaId) return 0;
-  try {
-    const res = await fetch(
-      `https://${graphHost}/${encodeURIComponent(mediaId)}/insights?metric=views` +
-        `&access_token=${encodeURIComponent(token)}`,
-    );
-    if (!res.ok) return 0;
-    const data = (await res.json().catch(() => ({}))) as any;
-    return insightValue(data) ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
-/**
  * 어느 (버전, 지표 이름) 조합이 통했는지 기억해 둔다.
  *
  * 사다리를 게시물마다 처음부터 다시 타면, 태그된 콘텐츠 서른 편을 채우는 데 필요한
@@ -307,7 +290,7 @@ const isMetricRejected = (payload: any): boolean => {
 /**
  * 미디어 한 편의 조회수를 지금 조회한다. 못 받으면 null.
  *
- * `fetchReelViews` 와 달리 실패를 0 으로 접지 않는다. 브랜드 화면의 태그된 콘텐츠
+ * 실패를 0 으로 접지 않는다. 브랜드 화면의 태그된 콘텐츠
  * 목록처럼 "조회수 0" 과 "조회수를 못 받음" 을 구분해 적어야 하는 쪽이 쓴다 —
  * 0 으로 접으면 그 게시물이 아무도 안 본 것으로 읽힌다.
  *
@@ -783,24 +766,54 @@ export async function fetchInstagramMetrics(
   }
 
   const items: any[] = Array.isArray(result.data?.data) ? result.data.data : [];
+  const isReelItem = (m: any) =>
+    String(m?.media_product_type || "").toUpperCase() === "REELS" ||
+    String(m?.media_type || "").toUpperCase() === "VIDEO";
   // 릴스만 본다. 사진 게시물은 조회수가 없고, 섞으면 평균이 무슨 숫자인지 알 수 없어진다.
-  const reels = items
-    .filter(
-      (m) =>
-        String(m?.media_product_type || "").toUpperCase() === "REELS" ||
-        String(m?.media_type || "").toUpperCase() === "VIDEO",
-    )
-    .slice(0, SAMPLE_SIZE);
-
-  // 릴스별 조회수. 목록 요청에 인사이트가 실려 왔으면 그대로 쓰고, 하나도 못 받았으면
-  // 릴스별 인사이트를 병렬로 부른다. 일부라도 실려 왔다면(권한은 있는데 특정 영상만
-  // 빠진 경우) 다시 부르지 않는다 — 그 영상은 실제로 집계 전일 수 있다.
-  let reelViews = reels.map((m) => viewsFromMedia(m) ?? 0);
-  if (reels.length > 0 && reelViews.every((v) => v <= 0)) {
-    reelViews = await Promise.all(
-      reels.map((m) => fetchReelViews(graphHost, token, String(m?.id || ""))),
-    );
+  //
+  // 예전에는 첫 페이지(최근 게시물 24개)만 보고 그 안의 릴스만 셌다. 사진·캐러셀을
+  // 많이 올리는 계정은 그 안에 릴스가 두세 편뿐이거나 아예 없어서, 릴스가 분명히
+  // 있는데도 "릴스 없음"이나 두세 편짜리 평균이 됐다. 릴스가 SAMPLE_SIZE 편 모일
+  // 때까지 다음 페이지를 따라간다. 뒤쪽 페이지가 실패하면 모은 만큼으로 만든다.
+  const reels: any[] = items.filter(isReelItem);
+  let nextPage: string | null = items.length > 0 ? result.data?.paging?.next || null : null;
+  for (let i = 0; i < REEL_EXTRA_PAGES && reels.length < SAMPLE_SIZE && nextPage; i++) {
+    try {
+      const res = await fetch(nextPage);
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (!res.ok) break;
+      const more: any[] = Array.isArray(data?.data) ? data.data : [];
+      reels.push(...more.filter(isReelItem));
+      nextPage = more.length > 0 ? data?.paging?.next || null : null;
+    } catch {
+      break;
+    }
   }
+  reels.splice(SAMPLE_SIZE);
+
+  /**
+   * 릴스별 조회수.
+   *
+   * 목록 요청에 실려 온 값을 먼저 쓰고, 값이 아예 안 실려 온 릴스(null)만 따로
+   * 물어본다. 예전에는 한 편이라도 실려 오면 나머지를 다시 묻지 않고 0 으로 두었고,
+   * 따로 물을 때도 버전 없는 주소에 `views` 한 가지만 물어서, 앱 기본 버전이
+   * 오래됐으면 전부 0 이 됐다. 그 0 은 평균에서 빠지므로 남은 몇 편만으로 평균이
+   * 만들어져 실제와 다른 조회수가 저장됐다. 따로 물을 때는 버전·지표 이름을 차례로
+   * 물러나는 fetchMediaViews 를 쓴다.
+   *
+   * 0 으로 실려 온 값은 다시 묻지 않는다 — 그 영상은 실제로 집계 전일 수 있다. 다만
+   * 전부 0 이면 목록 요청 쪽 지표가 잘못 온 것이므로 모두 다시 묻는다.
+   */
+  const expanded = reels.map((m) => viewsFromMedia(m));
+  const allZero = expanded.every((v) => v === null || v <= 0);
+  const reelViews: number[] = await Promise.all(
+    reels.map(async (m, i) => {
+      const got = expanded[i];
+      if (got !== null && (got > 0 || !allZero)) return got;
+      const id = String(m?.id || "");
+      return id ? ((await fetchMediaViews(link, id)) ?? 0) : 0;
+    }),
+  );
   // 조회수를 한 편이라도 받았는지. 화면이 "연동됐지만 조회수는 비공개"를 말할 근거다.
   const viewsAvailable = reelViews.some((v) => v > 0);
 

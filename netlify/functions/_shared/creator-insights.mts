@@ -3,6 +3,7 @@ import { clipText } from "./clip-text.mts";
 import {
   intOf,
   isTokenInvalidError,
+  INSTAGRAM_GRAPH_VERSION,
   resolveSharedLink,
   markLinkNeedsReauth,
   REAUTH_MESSAGE,
@@ -152,7 +153,13 @@ const insightsMap = (payload: any): Record<string, number> => {
   for (const row of rows) {
     const name = String(row?.name || "");
     if (!name) continue;
-    const value = Array.isArray(row?.values) ? row.values[0]?.value : row?.value;
+    // 2025년 지표 개편 이후 미디어 지표는 API 버전에 따라 `total_value: { value }` 로도
+    // 온다. 예전에는 `values` 모양만 읽어서, 값이 내려왔는데도 조회수가 0 으로 보였다.
+    const value = Array.isArray(row?.values)
+      ? row.values[0]?.value
+      : typeof row?.total_value?.value !== "undefined"
+        ? row.total_value.value
+        : row?.value;
     if (typeof value !== "undefined" && value !== null) out[name] = intOf(value);
   }
   return out;
@@ -165,26 +172,32 @@ async function fetchOneInsight(
   mediaId: string,
 ): Promise<Record<string, number>> {
   if (!mediaId) return {};
-  const ask = async (metrics: string) => {
+  const ask = async (base: string, metrics: string) => {
     const res = await fetch(
-      `https://${graphHost}/${encodeURIComponent(mediaId)}/insights?metric=${metrics}` +
+      `${base}/${encodeURIComponent(mediaId)}/insights?metric=${metrics}` +
         `&access_token=${encodeURIComponent(token)}`,
     );
     if (!res.ok) return null;
     return insightsMap((await res.json().catch(() => ({}))) as any);
   };
-  try {
-    // 도달·저장수·공유까지 한 번에. 지표 하나가 막히면 그 요청은 통째로 거절되므로
-    // 한 칸씩 줄여 내려간다 — 마지막에는 조회수만이라도 받아 둔다.
-    return (
-      (await ask("views,reach,saved,shares")) ||
-      (await ask("views,reach,saved")) ||
-      (await ask("views")) ||
-      {}
-    );
-  } catch {
-    return {};
+  // 버전을 박은 주소를 먼저 묻는다. 버전 없는 주소는 앱 기본 버전으로 해석되고, 그
+  // 버전이 오래됐으면 `views` 가 "없는 지표"라 요청이 통째로 거절돼 조회수가 비었다.
+  // 박아 둔 버전이 만료되는 날을 대비해 버전 없는 주소도 뒤에 한 번 둔다.
+  const bases = [`https://${graphHost}/${INSTAGRAM_GRAPH_VERSION}`, `https://${graphHost}`];
+  for (const base of bases) {
+    try {
+      // 도달·저장수·공유까지 한 번에. 지표 하나가 막히면 그 요청은 통째로 거절되므로
+      // 한 칸씩 줄여 내려간다 — 마지막에는 조회수만이라도 받아 둔다.
+      const got =
+        (await ask(base, "views,reach,saved,shares")) ||
+        (await ask(base, "views,reach,saved")) ||
+        (await ask(base, "views"));
+      if (got) return got;
+    } catch {
+      // 다음 주소로 넘어간다.
+    }
   }
+  return {};
 }
 
 /** 릴스인지. 세로 영상은 media_product_type 이 REELS 로 오고, 예전 영상은 VIDEO 다. */
@@ -218,12 +231,12 @@ export const resolveInsightsLink = resolveSharedLink;
 /**
  * 계정별 캐시 키. 사용자명은 소문자 영문·숫자·밑줄·점만 남긴다.
  *
- * 판 번호(`v2`)는 굳혀 둔 값의 모양이 바뀔 때 올린다. 예전 판에는 공유 수가 없어서,
- * 키를 그대로 두면 이미 캐시가 있는 계정은 TTL 이 끝날 때까지 공유 수가 빈 그래프를
- * 계속 본다.
+ * 판 번호(`v3`)는 굳혀 둔 값의 모양이나 계산이 바뀔 때 올린다. v2 에는 공유 수가
+ * 없었고, v3 은 조회수를 잘못 읽던 값(0 으로 접힌 조회수)을 버리려고 올렸다. 키를
+ * 그대로 두면 이미 캐시가 있는 계정은 TTL 이 끝날 때까지 예전 숫자를 계속 본다.
  */
 const cacheKey = (username: string) =>
-  `reels_v2_${String(username || "").toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+  `reels_v3_${String(username || "").toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
 
 /** 굳혀 둔 값을 읽는다. TTL 이 지났으면 null. */
 async function readCache(
@@ -388,27 +401,50 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
     if (raw.length >= REELS_LIMIT) break;
     const next = items.length > 0 ? (page.data?.paging?.next as string) || null : null;
     if (!next || i === MAX_PAGES - 1) break;
-    const attempt = await askPage(fields, next);
-    // 도중에 실패하면 모은 만큼으로 만든다. 뒤쪽 페이지는 더 오래된 릴스다.
+    let attempt = await askPage(fields, next);
+    // 뒤쪽 페이지에는 인사이트를 못 주는 오래된 게시물(비즈니스 계정 전환 전 영상 등)이
+    // 섞여 있을 수 있고, 그 한 편 때문에 페이지 전체가 거절된다. 예전에는 거기서 멈춰
+    // 오래된 릴스가 통째로 빠졌다. 같은 자리를 더 가벼운 필드 조합으로 다시 묻는다 —
+    // 빠진 지표는 아래에서 릴스별로 채운다.
+    for (let rung = FIELD_LADDER.indexOf(fields) + 1; !attempt.ok && rung < FIELD_LADDER.length; rung++) {
+      if (isTokenInvalidError(attempt.data)) break;
+      const lighter = FIELD_LADDER[rung];
+      try {
+        const retryUrl = new URL(next);
+        retryUrl.searchParams.set("fields", lighter);
+        attempt = await askPage(lighter, retryUrl.toString());
+        if (attempt.ok) fields = lighter;
+      } catch {
+        break;
+      }
+    }
+    // 그래도 실패하면 모은 만큼으로 만든다. 뒤쪽 페이지는 더 오래된 릴스다.
     if (!attempt.ok) break;
     page = attempt;
   }
 
   const reelsRaw = raw.slice(0, REELS_LIMIT);
 
-  // 목록 요청에 인사이트가 실려 왔으면 그대로 쓴다. 하나도 안 왔으면 릴스별로 부른다.
-  let metrics: Record<string, number>[] = reelsRaw.map((m) => insightsMap(m?.insights));
-  const gotAnything = metrics.some((row) => Object.keys(row).length > 0);
-  if (reelsRaw.length > 0 && !gotAnything) {
-    metrics = [];
-    for (let i = 0; i < reelsRaw.length; i += INSIGHT_CHUNK) {
-      const slice = reelsRaw.slice(i, i + INSIGHT_CHUNK);
-      metrics.push(
-        ...(await Promise.all(
-          slice.map((m) => fetchOneInsight(graphHost, token, String(m?.id || ""))),
-        )),
-      );
-    }
+  /**
+   * 목록 요청에 인사이트가 실려 왔으면 그대로 쓰고, 조회수가 안 실려 온 릴스만
+   * 릴스별로 부른다.
+   *
+   * 예전에는 한 편이라도 실려 오면 나머지를 다시 묻지 않았다. 페이지마다 필드 조합이
+   * 다를 수 있고(위의 재시도), 일부 영상만 인사이트가 빠져 오기도 해서, 그 릴스들은
+   * 조회수가 0 으로 남았다.
+   */
+  const metrics: Record<string, number>[] = reelsRaw.map((m) => insightsMap(m?.insights));
+  const missing = reelsRaw
+    .map((_, i) => i)
+    .filter((i) => typeof metrics[i].views === "undefined");
+  for (let i = 0; i < missing.length; i += INSIGHT_CHUNK) {
+    const slice = missing.slice(i, i + INSIGHT_CHUNK);
+    const rows = await Promise.all(
+      slice.map((idx) => fetchOneInsight(graphHost, token, String(reelsRaw[idx]?.id || ""))),
+    );
+    slice.forEach((idx, k) => {
+      metrics[idx] = { ...metrics[idx], ...rows[k] };
+    });
   }
 
   const reels: InsightReel[] = reelsRaw.map((m, i) => {
