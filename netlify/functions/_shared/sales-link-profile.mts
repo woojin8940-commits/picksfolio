@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { randomBytes } from "node:crypto";
 import { connect } from "node:http2";
 import { fetchAllowed } from "./allowed-fetch.mts";
 import { safeKeyPrefix } from "./upload-media.mts";
@@ -94,10 +95,15 @@ async function mirrorImage(source: string, key: string): Promise<string> {
 }
 
 /**
- * HTTP/2 로 GET 한다. 인스타는 공개 프로필 주소에 HTTP/1.1 로 오는 요청을 모두 429 로
+ * HTTP/2 로 요청한다. 인스타는 공개 프로필 주소에 HTTP/1.1 로 오는 요청을 모두 429 로
  * 막는다. Node 의 fetch 는 HTTP/1.1 만 쓰므로, 같은 요청이라도 이 길로 보내야 답을 준다.
  */
-function getHttp2(url: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
+function getHttp2(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  post?: string,
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const client = connect(u.origin);
@@ -112,7 +118,7 @@ function getHttp2(url: string, headers: Record<string, string>, timeoutMs: numbe
     };
     client.on("error", fail);
     const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
-    const stream = client.request({ ":method": "GET", ":path": u.pathname + u.search, ...lower });
+    const stream = client.request({ ":method": post === undefined ? "GET" : "POST", ":path": u.pathname + u.search, ...lower });
     let status = 0;
     const chunks: Buffer[] = [];
     stream.on("response", (h) => {
@@ -125,8 +131,61 @@ function getHttp2(url: string, headers: Record<string, string>, timeoutMs: numbe
       client.close();
       resolve({ status, body: Buffer.concat(chunks).toString("utf8") });
     });
-    stream.end();
+    stream.end(post);
   });
+}
+
+interface ReelCandidate {
+  shortcode: string;
+  takenAt: number;
+  imageUrl: string;
+  views: number;
+}
+
+/**
+ * 프로필의 '릴스' 탭 목록. 프로필 정보는 최근 게시물 12개만 주므로, 그 안이 모두
+ * 사진·슬라이드면 릴스가 하나도 안 잡힌다. 릴스 탭은 릴스만 최근 순으로 주고 조회수도
+ * 함께 준다. 로그인 없이도 열리지만 CSRF 쿠키·헤더 짝은 있어야 해서 임의 값을 만들어
+ * 보낸다. 실패하면 빈 목록 — 호출부가 프로필 게시물로 대신한다.
+ */
+async function fetchClips(userId: string, handle: string): Promise<ReelCandidate[]> {
+  if (!/^\d+$/.test(userId)) return [];
+  const csrf = randomBytes(16).toString("hex");
+  try {
+    const res = await getHttp2(
+      "https://www.instagram.com/api/v1/clips/user/",
+      {
+        "User-Agent": UA,
+        "x-ig-app-id": IG_WEB_APP_ID,
+        "x-csrftoken": csrf,
+        Cookie: `csrftoken=${csrf}`,
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://www.instagram.com",
+        Referer: `https://www.instagram.com/${encodeURIComponent(handle)}/reels/`,
+        Accept: "application/json",
+      },
+      7000,
+      `target_user_id=${userId}&page_size=12&include_feed_video=true`,
+    );
+    if (res.status !== 200) {
+      console.warn(`[sales-link] 릴스 탭 응답 HTTP ${res.status} (@${handle})`);
+      return [];
+    }
+    const items: any[] = JSON.parse(res.body)?.items || [];
+    return items
+      .map((it) => it?.media)
+      .filter((m) => m && m.code)
+      .map((m) => ({
+        shortcode: String(m.code),
+        takenAt: Number(m.taken_at || 0),
+        imageUrl: String(m.image_versions2?.candidates?.[0]?.url || ""),
+        views: Number(m.play_count || m.ig_play_count || m.view_count || 0),
+      }));
+  } catch (e) {
+    console.warn(`[sales-link] 릴스 탭 실패 (@${handle}):`, (e as Error)?.message);
+    return [];
+  }
 }
 
 /** 공개 프로필을 읽는다. 실패하면 { error } 로 이유를 돌려준다. */
@@ -188,20 +247,27 @@ export async function fetchPublicProfile(
     ...(user.edge_felix_video_timeline?.edges || []),
     ...(user.edge_owner_to_timeline_media?.edges || []),
   ];
-  // 최근 릴스 3편. 고정 게시물이 맨 앞에 오므로 올린 시각으로 다시 줄 세운다.
-  const seen = new Set<string>();
-  const reelNodes = edges
+  const fromProfile: ReelCandidate[] = edges
     .map((e) => e?.node)
     .filter((n) => n && n.shortcode && (n.product_type === "clips" || n.is_video))
+    .map((n) => ({
+      shortcode: String(n.shortcode),
+      takenAt: Number(n.taken_at_timestamp || 0),
+      imageUrl: String(n.thumbnail_src || n.display_url || ""),
+      views: Number(n.video_view_count || n.video_play_count || n.play_count || 0),
+    }));
+  // 릴스 탭을 먼저 쓴다(조회수가 있다). 못 받으면 프로필 게시물 속 영상으로 채운다.
+  const fromClips = user.has_clips === false ? [] : await fetchClips(String(user.id || ""), realHandle);
+  // 최근 릴스 3편. 고정 게시물이 맨 앞에 오므로 올린 시각으로 다시 줄 세운다.
+  const seen = new Set<string>();
+  const reelNodes = [...fromClips, ...fromProfile]
     .filter((n) => (seen.has(n.shortcode) ? false : (seen.add(n.shortcode), true)))
-    .sort((a, b) => Number(b.taken_at_timestamp || 0) - Number(a.taken_at_timestamp || 0))
+    .sort((a, b) => b.takenAt - a.takenAt)
     .slice(0, 3);
 
   const [profileImageUrl, ...thumbs] = await Promise.all([
     mirrorImage(String(user.profile_pic_url_hd || user.profile_pic_url || ""), `${keyBase}/profile-${Date.now().toString(36)}`),
-    ...reelNodes.map((n) =>
-      mirrorImage(String(n.thumbnail_src || n.display_url || ""), `${keyBase}/${safeKeyPrefix(n.shortcode)}`),
-    ),
+    ...reelNodes.map((n) => mirrorImage(n.imageUrl, `${keyBase}/${safeKeyPrefix(n.shortcode)}`)),
   ]);
 
   return {
@@ -215,7 +281,7 @@ export async function fetchPublicProfile(
         id: String(n.shortcode),
         permalink: `https://www.instagram.com/reel/${n.shortcode}/`,
         thumbnailUrl: thumbs[i] || "",
-        views: Math.min(2_147_483_647, Number(n.video_view_count || n.video_play_count || n.play_count || 0)),
+        views: Math.min(2_147_483_647, n.views),
       })),
     },
   };
