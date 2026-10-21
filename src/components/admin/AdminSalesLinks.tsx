@@ -281,7 +281,9 @@ const LinkEditor: React.FC<{
       await reload();
       setAddNotice(data.warning
         ? { tone: 'warn', text: `@${data.item.instagram_handle} 를 추가했지만 정보를 불러오지 못했습니다: ${data.warning} 아래 카드에서 직접 입력해 주세요.` }
-        : { tone: 'ok', text: `@${data.item.instagram_handle} 를 추가했습니다.` });
+        : data.notice
+          ? { tone: 'warn', text: `@${data.item.instagram_handle} 를 추가했습니다. ${data.notice}` }
+          : { tone: 'ok', text: `@${data.item.instagram_handle} 를 추가했습니다.` });
     } catch (e) {
       setAddNotice({ tone: 'warn', text: (e as Error).message });
     } finally {
@@ -523,9 +525,11 @@ const ItemCard: React.FC<{
   const refresh = async () => {
     setBusy('refresh');
     try {
-      await call({ action: 'refresh_item', id: item.id });
+      const data = await call({ action: 'refresh_item', id: item.id });
       await reload();
-      notify({ tone: 'ok', text: `@${item.instagram_handle} 의 팔로워·릴스를 새로 불러왔습니다.` });
+      notify(data?.notice
+        ? { tone: 'warn', text: `@${item.instagram_handle}: ${data.notice}` }
+        : { tone: 'ok', text: `@${item.instagram_handle} 의 팔로워·릴스를 새로 불러왔습니다.` });
     } catch (e) {
       notify({ tone: 'warn', text: (e as Error).message });
     } finally {

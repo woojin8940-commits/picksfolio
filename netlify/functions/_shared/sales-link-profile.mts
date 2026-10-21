@@ -31,6 +31,8 @@ export interface PublicProfile {
   following: number;
   profileImageUrl: string;
   reels: SalesReel[];
+  /** 일부만 받아 온 경우의 안내. 빈 값 = 모두 받음. */
+  notice: string;
 }
 
 const UA =
@@ -188,6 +190,49 @@ async function fetchClips(userId: string, handle: string): Promise<ReelCandidate
   }
 }
 
+/**
+ * 게시물 목록(프로필 '게시물' 탭)에서 계정 정보를 꺼낸다. 프로필 정보가 막힌 계정의
+ * 대안이다. 팔로워 수는 없고, 프로필 정보와 같은 모양으로 맞춰 돌려준다.
+ * "missing" = 없는 계정, null = 못 받음.
+ */
+async function fetchFeedUser(handle: string): Promise<any | "missing" | null> {
+  try {
+    const res = await getHttp2(
+      `https://www.instagram.com/api/v1/feed/user/${encodeURIComponent(handle)}/username/?count=12`,
+      { "User-Agent": UA, "x-ig-app-id": IG_WEB_APP_ID, Accept: "application/json" },
+      7000,
+    );
+    if (res.status === 404) return "missing";
+    if (res.status !== 200) {
+      console.warn(`[sales-link] 게시물 목록 응답 HTTP ${res.status} (@${handle})`);
+      return null;
+    }
+    const data = JSON.parse(res.body);
+    const items: any[] = data?.items || [];
+    const u = data?.user || items[0]?.user;
+    if (!u?.username) return null;
+    return {
+      id: String(u.pk || u.id || ""),
+      username: String(u.username),
+      full_name: String(u.full_name || ""),
+      is_private: u.is_private === true,
+      profile_pic_url_hd: String(items[0]?.user?.hd_profile_pic_url_info?.url || ""),
+      profile_pic_url: String(u.profile_pic_url || ""),
+      feedReels: items
+        .filter((m) => m?.code && (m.product_type === "clips" || m.media_type === 2))
+        .map((m) => ({
+          shortcode: String(m.code),
+          takenAt: Number(m.taken_at || 0),
+          imageUrl: String(m.image_versions2?.candidates?.[0]?.url || ""),
+          views: Number(m.play_count || m.ig_play_count || m.view_count || 0),
+        })),
+    };
+  } catch (e) {
+    console.warn(`[sales-link] 게시물 목록 실패 (@${handle}):`, (e as Error)?.message);
+    return null;
+  }
+}
+
 /** 공개 프로필을 읽는다. 실패하면 { error } 로 이유를 돌려준다. */
 export async function fetchPublicProfile(
   handle: string,
@@ -213,12 +258,19 @@ export async function fetchPublicProfile(
   ];
   let user: any;
   let lastStatus = 0;
+  let schemaBroken = false;
   for (const attempt of attempts) {
     try {
       const res = await getHttp2(attempt.url, attempt.headers, 7000);
       if (res.status === 404) return { error: "존재하지 않는 계정입니다." };
       if (res.status < 200 || res.status >= 300) {
         lastStatus = res.status;
+        // 인스타 쪽 고장: 일부 비즈니스 계정은 프로필 정보를 어느 주소로 물어도
+        // 400 "…ig_business_category_subvertical has been deleted…" 를 준다.
+        if (res.status === 400 && /cannot use this schema/i.test(res.body)) {
+          schemaBroken = true;
+          break;
+        }
         continue;
       }
       let data: any = null;
@@ -235,11 +287,27 @@ export async function fetchPublicProfile(
       // 시간 초과·연결 실패 — 다음 주소로
     }
   }
+
+  // 프로필 정보를 못 받았으면 게시물 목록으로 대신한다. 이름·사진·아이디(→ 릴스 탭)는
+  // 나오지만 팔로워·팔로잉 수는 없다 — 그 둘은 운영자가 직접 넣는다.
+  let notice = "";
+  if (lastStatus !== 200) {
+    const feed = await fetchFeedUser(handle);
+    if (feed === "missing") return { error: "존재하지 않는 계정입니다." };
+    if (feed) {
+      user = feed;
+      lastStatus = 200;
+      notice = "인스타그램이 이 계정의 팔로워·팔로잉 수를 주지 않아 사진·릴스만 불러왔습니다. 팔로워·팔로잉은 직접 입력해 주세요.";
+    } else if (schemaBroken) {
+      return { error: "인스타그램이 이 계정의 프로필 정보를 주지 않습니다. 숫자와 릴스 링크를 직접 입력해 주세요." };
+    }
+  }
   if (lastStatus && lastStatus !== 200) {
     return { error: `인스타그램이 응답하지 않았습니다(HTTP ${lastStatus}). 잠시 뒤 '인스타에서 새로고침'을 누르거나 숫자를 직접 입력해 주세요.` };
   }
   if (!lastStatus) return { error: "인스타그램에서 정보를 불러오지 못했습니다. 숫자를 직접 입력해 주세요." };
   if (!user) return { error: "존재하지 않거나 비공개 계정입니다." };
+  if (notice && user.is_private) return { error: "비공개 계정입니다. 숫자를 직접 입력해 주세요." };
 
   const realHandle = String(user.username || handle);
   const keyBase = safeKeyPrefix(realHandle);
@@ -256,6 +324,7 @@ export async function fetchPublicProfile(
       imageUrl: String(n.thumbnail_src || n.display_url || ""),
       views: Number(n.video_view_count || n.video_play_count || n.play_count || 0),
     }));
+  fromProfile.push(...(user.feedReels || []));
   // 릴스 탭을 먼저 쓴다(조회수가 있다). 못 받으면 프로필 게시물 속 영상으로 채운다.
   const fromClips = user.has_clips === false ? [] : await fetchClips(String(user.id || ""), realHandle);
   // 최근 릴스 3편. 고정 게시물이 맨 앞에 오므로 올린 시각으로 다시 줄 세운다.
@@ -283,6 +352,7 @@ export async function fetchPublicProfile(
         thumbnailUrl: thumbs[i] || "",
         views: Math.min(2_147_483_647, n.views),
       })),
+      notice,
     },
   };
 }
