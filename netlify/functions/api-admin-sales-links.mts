@@ -377,9 +377,17 @@ export default async (req: Request) => {
         const list = await db.sql`SELECT id FROM sales_link_influencers WHERE link_id = ${cur.link_id} ORDER BY sort_order ASC, created_at ASC`;
         const ids = list.map((r: any) => r.id);
         const at = ids.indexOf(cur.id);
-        const to = b.direction === "up" ? at - 1 : at + 1;
-        if (at < 0 || to < 0 || to >= ids.length) return Response.json({ success: true });
-        [ids[at], ids[to]] = [ids[to], ids[at]];
+        if (at < 0) return Response.json({ success: true });
+        if (b.direction === "top") {
+          // 맨 위로: 해당 항목을 빼서 맨 앞에 넣는다.
+          if (at === 0) return Response.json({ success: true });
+          ids.splice(at, 1);
+          ids.unshift(cur.id);
+        } else {
+          const to = b.direction === "up" ? at - 1 : at + 1;
+          if (to < 0 || to >= ids.length) return Response.json({ success: true });
+          [ids[at], ids[to]] = [ids[to], ids[at]];
+        }
         // 한 번에 다시 매긴다. 예전에는 줄마다 UPDATE 를 따로 보내서, 명단이 길면 응답이
         // 몇 초씩 걸려 버튼을 눌러도 아무 반응이 없는 것처럼 보였다.
         await db.sql`
