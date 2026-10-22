@@ -86,7 +86,7 @@ export default async (req: Request, context: Context) => {
       usableImage(data.blocks?.[0]?.coverMedia) ||
       usableImage(data.profile?.avatar_url)
 
-    const ogImage = directImage || `${url.origin}/og-image.png`
+    const ogImage = directImage || `${url.origin}/og-image.png?v=3`
 
     const profileName = data.profile?.name || username
     const ogTitle = data.design?.title || `${profileName} | PICKSFOLIO`
