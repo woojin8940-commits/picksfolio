@@ -951,7 +951,12 @@ export async function acceptListup(input: {
   actorRole: "influencer" | "manager";
   actorUsername: string;
 }): Promise<AcceptResult> {
-  const { db, listup, campaign } = input;
+  const { db, listup } = input;
+  const campaigns = await db.sql`SELECT * FROM campaigns WHERE id = ${input.campaign.id}`;
+  const campaign = campaigns[0];
+  if (!campaign || campaign.deleted_at || !['active', 'inactive'].includes(campaign.status)) {
+    throw new Error('삭제되었거나 승인되지 않은 캠페인에서는 수락할 수 없습니다.');
+  }
   const creatorUsername = norm(listup.influencer_username);
   const businessUsername = norm(campaign.business_username);
   const managerUsername = norm(campaign.manager_username) || norm(listup.offer_sent_by);
@@ -1033,7 +1038,7 @@ export async function acceptListup(input: {
   await applyOfferToCollab(db, collab.id, campaign.type, campaign.package_tier, campaign.reward_mode, offer);
 
   // 4) 양쪽 목록에 노출
-  await mirrorCollabProposal({
+  db.afterCommit(() => mirrorCollabProposal({
     collabId: collab.id,
     campaignId: listup.campaign_id,
     campaignType: campaign.type,
@@ -1046,7 +1051,7 @@ export async function acceptListup(input: {
     startDate: offer.startDate || campaign.start_date || "",
     endDate: campaign.end_date || "",
     fee: offer.fee,
-  });
+  }));
 
   await logCollabEvent(db, {
     id: `ce_listup_accepted_${collab.id}_${listup.id}`,
@@ -1059,11 +1064,11 @@ export async function acceptListup(input: {
   });
 
   // 5) 담당자가 중단했던 자동 디엠을 다시 연다(유가시딩 제안 수락일 때만).
-  await reopenDmAccessOnPaidListupAccept({
+  db.afterCommit(() => reopenDmAccessOnPaidListupAccept({
     username: creatorUsername,
     rewardMode: campaign.reward_mode,
     campaignTitle: String(campaign.title || ""),
-  });
+  }));
 
   return {
     collabId: collab.id,

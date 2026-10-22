@@ -10,7 +10,7 @@ import { parseAmount } from "./_shared/collab-records.mts";
 import { createCollabForApplication, logCollabEvent, norm } from "./_shared/collab-workflow.mts";
 import { buildSnapshots, loadManagerContacts, mirrorCollabProposal, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
-import { todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { todayInSeoul, withCampaignLock } from "./_shared/campaign-recruit.mts";
 
 /**
  * 캠페인 지원자 — 조회와 선정.
@@ -159,6 +159,9 @@ export default async (req: Request) => {
         return Response.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });
       }
 
+      const target = await db.sql`SELECT campaign_id FROM campaign_applications WHERE id = ${id}`;
+      if (!target.length) return Response.json({ error: "지원서를 찾을 수 없습니다." }, { status: 404 });
+      return await withCampaignLock(db, String(target[0].campaign_id), async (db) => {
       const appRows = await db.sql`
         SELECT ca.*, c.title as campaign_title, c.business_username, c.brand_name,
                c.type as campaign_type, c.reward_type, c.reward_amount,
@@ -166,7 +169,7 @@ export default async (req: Request) => {
                c.product_name, c.product_url, c.upload_channel, c.content_format,
                c.video_concept, c.guideline_url, c.guideline_note,
                c.second_use_fee, c.second_use_note, c.upload_from, c.upload_to,
-               c.reward_mode, c.package_tier
+               c.reward_mode, c.package_tier, c.status AS campaign_status, c.deleted_at AS campaign_deleted_at
         FROM campaign_applications ca
         JOIN campaigns c ON c.id = ca.campaign_id
         WHERE ca.id = ${id}
@@ -256,6 +259,9 @@ export default async (req: Request) => {
       }
 
       const currentStatus = String(appRow.status || "pending");
+      if (status === 'accepted' && (appRow.campaign_deleted_at || !['active', 'inactive'].includes(appRow.campaign_status))) {
+        return Response.json({ error: "삭제되었거나 승인되지 않은 캠페인에서는 수락할 수 없습니다." }, { status: 409 });
+      }
       const statusChanged = currentStatus !== status;
       if (statusChanged && currentStatus !== "pending") {
         return Response.json({ error: "이미 처리된 지원서는 상태를 변경할 수 없습니다." }, { status: 409 });
@@ -336,7 +342,7 @@ export default async (req: Request) => {
       // 2) 인플루언서의 제안 목록과 브랜드 수신함에 이 협업을 노출한다.
       //    (진행은 협업 화면에서 하지만, 목록에는 진행 중 협업으로 보여야 한다.)
       //    리스트업 수락도 같은 반영이 필요해서 공용 함수로 빼 두었다.
-      await mirrorCollabProposal({
+      db.afterCommit(() => mirrorCollabProposal({
         collabId: collab.id,
         campaignId: appRow.campaign_id,
         campaignType: appRow.campaign_type,
@@ -349,7 +355,7 @@ export default async (req: Request) => {
         startDate: appRow.start_date || "",
         endDate: appRow.end_date || "",
         fee,
-      });
+      }));
 
       // 3) 정산은 여기서 만들지 않는다.
       //    예전에는 수락 시점 +30일로 예약했는데, 업로드가 그보다 늦어지면 아직
@@ -372,6 +378,7 @@ export default async (req: Request) => {
         created: collab.created,
         // 담당자 배정 전이라면 화면이 "담당자가 곧 연락드립니다"로 안내할 수 있게 알려준다.
         managerUsername,
+      });
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "상태 변경 실패" }, { status: 500 });

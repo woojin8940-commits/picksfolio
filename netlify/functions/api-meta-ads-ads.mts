@@ -22,6 +22,7 @@ import {
   saveAdRecord,
   scheduleTimes,
   toMinorUnits,
+  withAdRecordLock,
 } from "./_shared/meta-ads-graph.mts";
 
 /**
@@ -53,6 +54,7 @@ const publicRecord = (r: MetaAdRecord) => r;
 
 /** 메타 오류를 기록에 남기고 화면에 그대로 돌려준다. */
 async function stepFailed(username: string, record: MetaAdRecord, res: GraphResult, fallback: string) {
+  if (!res.uncertain) record.pendingStep = undefined;
   record.error = res.error || fallback;
   record.errorCode = res.errorCode;
   record.updatedAt = new Date().toISOString();
@@ -74,6 +76,7 @@ async function postWithFallback(
 ): Promise<GraphResult> {
   const first = await graphPost(path, token, params, proof);
   if (first.ok) return first;
+  if (first.uncertain) return first;
   const text = `${first.error || ""} ${JSON.stringify(first.data?.error || {})}`;
   const extra = Object.fromEntries(Object.entries(fallbacks).filter(([k]) => text.includes(k)));
   if (Object.keys(extra).length === 0) return first;
@@ -329,6 +332,7 @@ async function runCreative(
     let first: GraphResult | null = null;
     for (let i = 0; i < attempts.length; i++) {
       const res = await graphPost(`${r.adAccountId}/adcreatives`, token, attempts[i], proof);
+      if (res.uncertain) return res;
       if (res.ok) {
         const usedCta = (attempts[i].call_to_action as { type?: string } | undefined)?.type;
         if (fallbackCta && usedCta === "LEARN_MORE") {
@@ -401,7 +405,7 @@ async function runCreative(
     { name: `${r.name} · 소재`, object_story_spec: storySpec(true), url_tags: r.urlTags || undefined },
     proof,
   );
-  if (first.ok || !r.instagramUserId) return first;
+  if (first.ok || first.uncertain || !r.instagramUserId) return first;
   // 인스타그램 계정을 이 광고 계정에서 쓸 수 없으면 페이지 이름으로만 만든다. 인스타그램
   // 게재 위치에는 페이지와 연결된 계정 이름으로 나간다(메타 기본 동작).
   const retry = await graphPost(
@@ -433,13 +437,18 @@ async function runAd(token: string, proof: string, r: MetaAdRecord): Promise<Gra
     proof,
   );
   if (tracked.ok) return tracked;
+  if (tracked.uncertain) return tracked;
   const plain = await graphPost(`${r.adAccountId}/ads`, token, base, proof);
   if (plain.ok) r.warnings.push(`픽셀 추적을 붙이지 못해 추적 없이 만들었습니다. (${tracked.error})`);
-  return plain.ok ? plain : tracked;
+  return plain;
 }
 
 /** 다음 단계 하나를 실행하고 기록을 저장한다. */
 async function advance(username: string, token: string, proof: string, r: MetaAdRecord, businessId: string) {
+  if (r.pendingStep) return Response.json({ record: r, error: '이전 생성 요청의 결과를 확인해야 합니다. Meta 광고 관리자에서 생성 여부를 먼저 확인해 주세요.', code: 'AD_RESULT_UNKNOWN' }, { status: 409 });
+  r.pendingStep = r.step;
+  r.updatedAt = new Date().toISOString();
+  await saveAdRecord(username, r);
   r.error = undefined;
   r.errorCode = undefined;
   const now = () => new Date().toISOString();
@@ -447,27 +456,36 @@ async function advance(username: string, token: string, proof: string, r: MetaAd
   if (r.step === "campaign") {
     const res = await runCampaign(token, proof, r);
     if (!res.ok) return stepFailed(username, r, res, "캠페인을 만들지 못했습니다.");
+    if (!res.data?.id) return stepFailed(username, r, { ...res, uncertain: true }, "생성 결과를 확인할 수 없습니다. Meta 광고 관리자에서 확인해 주세요.");
     r.campaignId = String(res.data?.id || "");
     r.step = "adset";
   } else if (r.step === "adset") {
     const res = await runAdSet(token, proof, r);
     if (!res.ok) return stepFailed(username, r, res, "광고 세트를 만들지 못했습니다.");
+    if (!res.data?.id) return stepFailed(username, r, { ...res, uncertain: true }, "생성 결과를 확인할 수 없습니다. Meta 광고 관리자에서 확인해 주세요.");
     r.adSetId = String(res.data?.id || "");
     r.step = "creative";
   } else if (r.step === "creative") {
     const res = await runCreative(token, proof, r, businessId);
-    if (res instanceof Response) return res;
+    if (res instanceof Response) {
+      r.pendingStep = undefined;
+      await saveAdRecord(username, r);
+      return res;
+    }
     if (!res.ok) return stepFailed(username, r, res, "광고 소재를 만들지 못했습니다.");
+    if (!res.data?.id) return stepFailed(username, r, { ...res, uncertain: true }, "생성 결과를 확인할 수 없습니다. Meta 광고 관리자에서 확인해 주세요.");
     r.creativeId = String(res.data?.id || "");
     r.step = "ad";
   } else if (r.step === "ad") {
     const res = await runAd(token, proof, r);
     if (!res.ok) return stepFailed(username, r, res, "광고를 만들지 못했습니다.");
+    if (!res.data?.id) return stepFailed(username, r, { ...res, uncertain: true }, "생성 결과를 확인할 수 없습니다. Meta 광고 관리자에서 확인해 주세요.");
     r.adId = String(res.data?.id || "");
     r.step = "done";
   }
 
   r.updatedAt = now();
+  r.pendingStep = undefined;
   await saveAdRecord(username, r);
   return Response.json({ record: publicRecord(r) });
 }
@@ -574,6 +592,7 @@ async function liveStatus(token: string, proof: string, records: MetaAdRecord[],
 
   const deleted = new Set<string>();
   for (const r of records) {
+    if (r.pendingStep) continue;
     if (r.adId) {
       const row = live[r.adId];
       if (ads.missing.includes(r.adId) || isGoneRow(row)) {
@@ -644,6 +663,11 @@ async function buildRecord(
   token: string,
   proof: string,
 ): Promise<MetaAdRecord | Response> {
+  const currency = await graphGet(account.id, token, { fields: 'currency' }, proof);
+  if (!currency.ok) return graphErrorResponse(currency, '광고 계정 통화를 확인하지 못했습니다.');
+  if (String(currency.data?.currency || '').toUpperCase() !== 'KRW') {
+    return Response.json({ error: '원화(KRW) 광고 계정만 집행할 수 있습니다.' }, { status: 400 });
+  }
   const source = draft.source === "partnership" ? "partnership" : "own";
   // 부스팅은 '참여' 목표까지 고를 수 있다. 예전 부스팅 기록은 목표가 비어 있어 전환이 된다.
   const objectives =
@@ -718,7 +742,7 @@ async function buildRecord(
     updatedAt: now,
     source,
     adAccountId: account.id,
-    currency: account.currency || "KRW",
+    currency: 'KRW',
     step: "campaign",
     warnings: [],
     initialStatus: draft.initialStatus === "PAUSED" ? "PAUSED" : "ACTIVE",
@@ -818,6 +842,7 @@ export default async (req: Request, context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
+  try {
   const stored = await readMetaAdsToken(username);
   if (!stored.ok) return tokenErrorResponse(stored.reason);
   const { token, proof } = stored;
@@ -831,7 +856,7 @@ export default async (req: Request, context: Context) => {
     const range = DATE_PRESETS.includes(params.get("range") || "") ? String(params.get("range")) : "maximum";
     const records = (await readAdRecords(username)).filter((r) => !account || r.adAccountId === account);
     const { ads, errors, deleted } = await liveStatus(token, proof, records, range);
-    await removeAdRecords(username, deleted);
+    await removeAdRecords(username, deleted, false, Object.fromEntries(records.map(r => [r.id, Number(r.revision)])));
     return Response.json({ ads, errors, range, fetchedAt: new Date().toISOString(), source: "meta_graph_api" });
   }
 
@@ -839,6 +864,13 @@ export default async (req: Request, context: Context) => {
 
   const body = (await req.json().catch(() => ({}))) as any;
   const action = String(body?.action || "");
+  const requestId = String(body?.requestId || '');
+  if ((action === 'create' || action === 'resume') && !/^[A-Za-z0-9_-]{16,100}$/.test(requestId)) {
+    return Response.json({ error: '생성 요청을 새로 시작해 주세요.' }, { status: 400 });
+  }
+  const recordId = action === 'create' ? `mad_${requestId}` : String(body?.id || '');
+  if (!recordId) return Response.json({ error: '광고 ID가 필요합니다.' }, { status: 400 });
+  const result = await withAdRecordLock(username, recordId, async () => {
 
   if (action === "continue" || action === "status" || action === "resume" || action === "delete") {
     const record = (await readAdRecords(username)).find((r) => r.id === String(body?.id || ""));
@@ -847,6 +879,9 @@ export default async (req: Request, context: Context) => {
 
     if (action === "continue") {
       if (record.step === "done") return Response.json({ record });
+      if (!account || String(account.currency || '').toUpperCase() !== 'KRW' || record.currency !== 'KRW') {
+        return Response.json({ error: '원화(KRW) 광고 계정을 다시 확인해 주세요.' }, { status: 400 });
+      }
       return advance(username, token, proof, record, account?.businessId || "");
     }
 
@@ -857,11 +892,13 @@ export default async (req: Request, context: Context) => {
         const res = await deleteCampaign(token, proof, record.campaignId);
         if (res) return res;
       }
-      await removeAdRecords(username, [record.id]);
+      await removeAdRecords(username, [record.id], true, { [record.id]: Number(record.revision) });
       return Response.json({ ok: true });
     }
 
     if (action === "resume") {
+      if (record.resumeRequestId === requestId) return Response.json({ record });
+      if (record.pendingStep) return Response.json({ record, error: '이전 생성 요청 결과를 Meta 광고 관리자에서 먼저 확인해 주세요.', code: 'AD_RESULT_UNKNOWN' }, { status: 409 });
       if (record.step === "done") return Response.json({ error: "이미 다 만들어진 광고입니다." }, { status: 400 });
       if (!account) return Response.json({ error: "이 광고의 광고 계정이 연동되어 있지 않습니다." }, { status: 400 });
       if (record.source === "partnership") {
@@ -893,17 +930,25 @@ export default async (req: Request, context: Context) => {
       // 빠짐없이 들어가도록 지우고 캠페인부터 다시 만든다 — 남겨 두면 광고 계정에 빈
       // 캠페인이 쌓인다.
       if (record.campaignId) {
+        record.pendingStep = 'resume';
+        await saveAdRecord(username, record);
         const res = await deleteCampaign(token, proof, record.campaignId);
         if (res) return res;
       }
       built.id = record.id;
       built.createdAt = record.createdAt;
+      built.revision = record.revision;
+      built.resumeRequestId = requestId;
+      await saveAdRecord(username, built);
       return advance(username, token, proof, built, account.businessId || "");
     }
 
     const status = String(body?.status || "");
     if (status !== "ACTIVE" && status !== "PAUSED") {
       return Response.json({ error: "status는 ACTIVE 또는 PAUSED여야 합니다." }, { status: 400 });
+    }
+    if (status === 'ACTIVE' && (record.currency !== 'KRW' || String(account?.currency || '').toUpperCase() !== 'KRW')) {
+      return Response.json({ error: '원화(KRW) 광고 계정만 집행할 수 있습니다.' }, { status: 400 });
     }
     // 다시 켤 때는 셋 다 켠다 — 일시중지로 만든 광고는 캠페인·세트·광고가 모두 꺼져 있다.
     // 켤 때는 광고부터 위로, 끌 때는 캠페인부터 아래로 바꾼다. 중간에 실패해도 켜는 쪽은
@@ -914,7 +959,7 @@ export default async (req: Request, context: Context) => {
       if (res.ok) continue;
       // 광고 관리자에서 이미 지운 광고면 기록도 지우고 화면이 목록에서 빼게 한다.
       if (isMissingObject(res)) {
-        await removeAdRecords(username, [record.id]);
+        await removeAdRecords(username, [record.id], false, { [record.id]: Number(record.revision) });
         return Response.json({ error: "Meta 광고 관리자에서 삭제된 광고라 목록에서 뺐습니다.", removed: true }, { status: 410 });
       }
       return graphErrorResponse(res, "광고 상태를 바꾸지 못했습니다.");
@@ -925,6 +970,8 @@ export default async (req: Request, context: Context) => {
   if (action !== "create") return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });
 
   const draft = (body?.draft || {}) as Draft;
+  const previous = (await readAdRecords(username)).find(r => r.id === recordId);
+  if (previous) return Response.json({ record: previous });
   const account = accounts.find((a) => a.id === draft.adAccountId);
   if (!account) return Response.json({ error: "연동된 광고 계정을 골라 주세요." }, { status: 400 });
   if (draft.source === "partnership") {
@@ -934,7 +981,15 @@ export default async (req: Request, context: Context) => {
 
   const record = await buildRecord(draft, account, token, proof);
   if (record instanceof Response) return record;
+  record.id = recordId;
+  await saveAdRecord(username, record);
   return advance(username, token, proof, record, account.businessId || "");
+  });
+  return result || Response.json({ error: '이 광고를 처리 중입니다. 잠시 후 광고 현황에서 확인해 주세요.', code: 'AD_BUSY' }, { status: 409 });
+  } catch (error) {
+    console.error('[meta-ads] operation failed:', (error as Error)?.message);
+    return Response.json({ error: '광고 기록을 안전하게 처리하지 못했습니다. 광고 현황에서 확인 후 다시 시도해 주세요.' }, { status: 503 });
+  }
 };
 
 export const config: Config = {

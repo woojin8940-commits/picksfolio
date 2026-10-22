@@ -241,7 +241,7 @@ export const selectAdAccount = (username: string, accountId: string): MetaAdConn
 const NO_ACCOUNTS: MetaAdAccount[] = [];
 
 export const listAdAccounts = (diagnosis: MetaAdDiagnosis | null | undefined): MetaAdAccount[] =>
-  diagnosis?.connected && diagnosis.accounts?.length ? diagnosis.accounts : NO_ACCOUNTS;
+  diagnosis?.connected && diagnosis.accounts?.length ? diagnosis.accounts.filter(a => a.currency?.toUpperCase() === 'KRW') : NO_ACCOUNTS;
 
 export const findAdAccount = (
   accounts: MetaAdAccount[],

@@ -227,6 +227,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   const [campaigns, setCampaigns] = useState<Campaign[]>(cachedCampaigns);
   const [loading, setLoading] = useState(cachedCampaigns.length === 0);
+  const [campaignError, setCampaignError] = useState('');
+  const [applicantError, setApplicantError] = useState('');
+  const campaignRequest = React.useRef(0);
+  const applicantRequest = React.useRef(0);
   const [showForm, setShowForm] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
@@ -312,6 +316,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   useVisiblePolling(signal => refreshUnread(signal), 120000, !!businessUsername, businessUsername, 2000);
 
   const fetchCampaigns = useCallback(async () => {
+    const request = ++campaignRequest.current;
+    setCampaignError('');
     try {
       // 로그인 정보를 실어 보낸다. 담당자 연락처는 계정 주인으로 확인된 요청에만
       // 내려오고, 수정 화면이 이미 적어 둔 담당자를 되읽으려면 그 값이 필요하다.
@@ -320,13 +326,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       });
       const data = await res.json();
       if (!res.ok || !Array.isArray(data.campaigns)) throw new Error('Campaign request failed');
+      if (request !== campaignRequest.current) return;
       const fresh = data.campaigns || [];
       setCampaigns(fresh);
       try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
     } catch {
+      if (request !== campaignRequest.current) return;
+      setCampaignError('캠페인을 불러오지 못했습니다. 다시 시도해 주세요.');
       console.error('Failed to fetch campaigns');
     } finally {
-      setLoading(false);
+      if (request === campaignRequest.current) setLoading(false);
     }
   }, [businessUsername, cacheKey]);
 
@@ -366,8 +375,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   }, []);
 
   useEffect(() => {
+    setCampaigns(cachedCampaigns);
+    setLoading(cachedCampaigns.length === 0);
+    setSelectedCampaign(null);
     fetchCampaigns();
     fetchActualSpend();
+    return () => { ++campaignRequest.current; ++applicantRequest.current; };
   }, [fetchCampaigns, fetchActualSpend]);
 
   /**
@@ -430,6 +443,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   }, [campaigns]);
 
   const fetchApplicants = async (campaignId: string) => {
+    const request = ++applicantRequest.current;
+    setApplicantError('');
     const cached = readApplicantCache(businessUsername, campaignId);
     if (cached) {
       setApplicants(cached.applicants || []);
@@ -443,7 +458,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       // 지원자 연락처가 담긴 목록이라 서버가 캠페인 소유자(또는 담당자)인지 확인한다.
       const data = await apiService.getCampaignApplicants(campaignId);
       if (data.error) throw new Error(data.error);
-      if (selectedIdRef.current !== campaignId) return;
+      if (selectedIdRef.current !== campaignId || request !== applicantRequest.current) return;
       const nextApplicants = Array.isArray(data.applicants) ? data.applicants : [];
       const nextSelectionBy = data.selectionBy === 'brand' ? 'brand' : 'manager';
       setApplicants(nextApplicants);
@@ -456,9 +471,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         savedAt: Date.now(),
       });
     } catch {
+      if (selectedIdRef.current !== campaignId || request !== applicantRequest.current) return;
+      setApplicantError('지원자를 불러오지 못했습니다. 다시 시도해 주세요.');
       console.error('Failed to fetch applicants');
     } finally {
-      if (selectedIdRef.current === campaignId) setApplicantsLoading(false);
+      if (selectedIdRef.current === campaignId && request === applicantRequest.current) setApplicantsLoading(false);
     }
   };
 
@@ -532,6 +549,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
   const handleToggleStatus = async (campaign: Campaign) => {
+    if (campaign.status !== 'active' && isPastDeadline(campaign.end_date)) {
+      handleEdit(campaign);
+      notify(rewardModeOf(campaign.reward_mode).openApply
+        ? '새 모집 종료일을 설정하고 저장해 주세요.'
+        : '희망 업로드 시작일을 미래 날짜로 설정하고 저장해 주세요.');
+      return;
+    }
     const newStatus = campaign.status === 'active' ? 'inactive' : 'active';
     try {
       const res = await fetch('/api/campaigns', {
@@ -879,7 +903,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const spentPending = spentRows.filter(c => Number(c.fee || 0) <= 0).length;
     const showSpent = mode.pickInfluencer && isClosedCampaign(selectedCampaign) && spentRows.length > 0;
     const stageMarks = stageMarksFor(mode.value);
-    const uploadedCount = collabSummary.filter(c => c.uploadUrl).length;
+    const activeCollabs = collabSummary.filter(c => c.status === 'in_progress' || c.status === 'completed');
+    const uploadedCount = activeCollabs.filter(c => c.uploadUrl).length;
     const provideLabel = PRODUCT_PROVIDE.find(p => p.value === selectedCampaign.product_provide)?.label || '';
     // 광고 목적은 담당자 리스트업에 쓰는 조건이라 광고비 지급형에만 있다.
     const objectiveLabel = mode.pickInfluencer
@@ -891,9 +916,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const phasePill =
       selectedCampaign.status !== 'active'
         ? null
-        : collabSummary.length === 0
+        : activeCollabs.length === 0
           ? { label: '섭외중', cls: 'bg-blue-50 text-blue-600' }
-          : uploadedCount >= collabSummary.length
+          : uploadedCount >= activeCollabs.length
             ? { label: '업로드 완료', cls: 'bg-emerald-50 text-emerald-600' }
             : { label: '진행중', cls: 'bg-blue-50 text-blue-600' };
 
@@ -1215,7 +1240,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
             <p className="text-sm font-black text-slate-600">모집 기간이 종료되었습니다</p>
             <p className="text-xs text-slate-400 font-medium mt-1">
-              크리에이터 캠페인 목록에 더 이상 노출되지 않습니다. 계속 모집하려면 수정에서 희망 업로드 시작일을 늦춰 주세요.
+              크리에이터 캠페인 목록에 더 이상 노출되지 않습니다. 계속 모집하려면 수정에서 {mode.openApply ? '모집 종료일' : '희망 업로드 시작일'}을 늦춰 주세요.
             </p>
           </div>
         )}
@@ -1385,6 +1410,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     <div className="text-center py-12">
                       <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
                       <p className="text-sm text-slate-400 font-bold">불러오는 중...</p>
+                    </div>
+                  ) : applicantError ? (
+                    <div role="alert" className="py-8 text-center text-sm text-red-600">
+                      <p>{applicantError}</p>
+                      <button type="button" onClick={() => void fetchApplicants(selectedCampaign.id)} className="mt-3 font-bold">다시 시도</button>
                     </div>
                   ) : applyRows.length === 0 ? (
                     <div className="text-center py-12">
@@ -1630,7 +1660,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             campaignId={selectedCampaign.id}
             budgetKrw={budget}
             uploadedCount={uploadedCount}
-            totalCollabs={collabSummary.length}
+            totalCollabs={activeCollabs.length}
           /></Suspense>
         )}
 
@@ -1667,7 +1697,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-slate-400">{mode.label}</p>
                 <p className="text-sm font-black text-slate-900 truncate">
-                  진행 {collabSummary.length}명
+                  진행 {activeCollabs.length}명
                   {selectedCampaign.max_applicants > 0 && ` / 예정 ${selectedCampaign.max_applicants}명`}
                   {isBarter
                     ? barterHeadcount > 0 && ` · 협찬 ${barterHeadcount}명`
@@ -1835,6 +1865,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-sm text-slate-400 font-bold">캠페인 불러오는 중...</p>
         </div>
+      ) : campaignError ? (
+        <div role="alert" className="py-12 text-center text-sm text-red-600">
+          <p>{campaignError}</p>
+          <button type="button" onClick={() => void fetchCampaigns()} className="mt-3 font-bold">다시 시도</button>
+        </div>
       ) : filteredCampaigns.length === 0 ? (
         <div className="text-center py-20">
           <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-4">
@@ -1934,9 +1969,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     <button onClick={() => handleEdit(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-white rounded-lg transition-colors shadow-sm" title="수정">
                       <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </button>
-                    <button onClick={() => handleDelete(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-red-50 rounded-lg transition-colors shadow-sm" title="삭제">
+                    {closed && <button onClick={() => handleDelete(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-red-50 rounded-lg transition-colors shadow-sm" title="삭제">
                       <svg className="w-3.5 h-3.5 text-slate-500 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>
+                    </button>}
                   </div>
                 </div>
 

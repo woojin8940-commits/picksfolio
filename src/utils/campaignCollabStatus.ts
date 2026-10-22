@@ -317,8 +317,6 @@ export function openCampaignCollab(detail: { campaignId?: string; collabId?: str
  * 남기는 쪽은 협업이다. 제안으로 접힌 줄은 금액과 기간만 알지만, 협업 줄은 지금 단계와
  * 진행률까지 알고 진행사항으로 들어가는 길이 있다.
  *
- * 취소된 협업은 짝을 지우지 않는다 — 협업 줄이 목록에서 빠지는 쪽이라, 여기서 제안까지
- * 지우면 선정 기록이 통째로 사라진다.
  */
 export function campaignProposalId(c: { campaignId: string; creatorUsername: string }): string {
   return `campaign_${c.campaignId}_${String(c.creatorUsername || '').toLowerCase()}`;
@@ -329,7 +327,7 @@ export function dropProposalsCoveredByCollabs<T extends { id: string }>(
   collabs: CampaignCollabStatus[],
 ): T[] {
   const covered = new Set(
-    collabs.filter(c => c.state !== 'cancelled').map(campaignProposalId),
+    collabs.map(campaignProposalId),
   );
   if (covered.size === 0) return proposals;
   return proposals.filter(p => !covered.has(String(p.id)));

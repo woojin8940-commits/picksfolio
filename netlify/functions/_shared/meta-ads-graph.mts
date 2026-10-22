@@ -1,4 +1,7 @@
 import { getStore } from "@netlify/blobs";
+import { getDatabase } from "@picks/netlify-database";
+import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appSecretProof, GRAPH_VERSION, metaAdsAppSecret } from "./meta-ads.mts";
 
 /**
@@ -17,9 +20,15 @@ export interface GraphResult<T = any> {
   error?: string;
   errorCode?: number;
   errorSubcode?: number;
+  uncertain?: boolean;
 }
 
 const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const adLeaseContext = new AsyncLocalStorage<() => Promise<boolean>>();
+async function requireActiveAdLease(): Promise<void> {
+  const ownsLease = adLeaseContext.getStore();
+  if (ownsLease && !await ownsLease()) throw new Error('광고 처리 점유가 만료되었습니다. 광고 현황에서 다시 확인해 주세요.');
+}
 
 /** 객체·배열 파라미터는 메타가 받는 모양(JSON 문자열)으로 바꾼다. */
 const toParam = (value: unknown): string =>
@@ -74,13 +83,19 @@ export async function graphPost<T = any>(
   params: Record<string, unknown> = {},
   proof?: string,
 ): Promise<GraphResult<T>> {
+  try {
+    await requireActiveAdLease();
+  } catch (error) {
+    return { ...failed(error), status: 409 };
+  }
   const body = new URLSearchParams({ access_token: token });
   body.set("appsecret_proof", proof || appSecretProof(token, metaAdsAppSecret()));
   for (const [k, v] of Object.entries(params)) if (v !== undefined) body.set(k, toParam(v));
   try {
-    return await readResult(await fetch(`${GRAPH}/${path}`, { method: "POST", body }));
+    const result = await readResult(await fetch(`${GRAPH}/${path}`, { method: "POST", body }));
+    return { ...result, uncertain: !result.ok && (result.status >= 500 || result.status < 400) };
   } catch (e) {
-    return failed(e);
+    return { ...failed(e), uncertain: true };
   }
 }
 
@@ -131,6 +146,9 @@ export type MetaAdStep = "campaign" | "adset" | "creative" | "ad" | "done";
 
 export interface MetaAdRecord {
   id: string;
+  revision?: number;
+  pendingStep?: string;
+  resumeRequestId?: string;
   createdAt: string;
   updatedAt: string;
   source: "partnership" | "own";
@@ -217,31 +235,124 @@ const RECORD_STORE = "meta-ads";
 const recordsKey = (username: string) => `ads_list_${username.replace(/^biz\//, "").toLowerCase()}`;
 const store = () => getStore({ name: RECORD_STORE, consistency: "strong" });
 
-/** 한 계정이 쌓는 기록은 많지 않다. 그래도 끝없이 자라지 않게 최근 것만 남긴다. */
-const MAX_RECORDS = 200;
+const ownerName = (username: string) => username.replace(/^biz\//, '').trim().toLowerCase();
+let schemaReady: Promise<void> | undefined;
+let database: ReturnType<typeof getDatabase> | undefined;
+
+async function recordsDatabase() {
+  const db = database ||= getDatabase();
+  if (!schemaReady) schemaReady = (async () => {
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('picks:meta-ad-schema', 0))");
+      await client.query('CREATE TABLE IF NOT EXISTS meta_ad_owners (username text PRIMARY KEY, migrated boolean NOT NULL DEFAULT false)');
+      await client.query('CREATE TABLE IF NOT EXISTS meta_ad_records (username text NOT NULL, id text NOT NULL, data jsonb NOT NULL, revision bigint NOT NULL DEFAULT 1, PRIMARY KEY (username, id))');
+      await client.query('CREATE TABLE IF NOT EXISTS meta_ad_locks (username text NOT NULL, id text NOT NULL, token text NOT NULL, expires_at timestamptz NOT NULL, PRIMARY KEY (username, id))');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally { client.release(); }
+  })().catch(error => { schemaReady = undefined; throw error; });
+  await schemaReady;
+  return db;
+}
+
+async function importLegacyRecords(username: string): Promise<void> {
+  const db = await recordsDatabase();
+  const owner = ownerName(username);
+  const known = await db.sql`SELECT migrated FROM meta_ad_owners WHERE username = ${owner}`;
+  if (known[0]?.migrated) return;
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL lock_timeout = '10s'");
+    await client.query('INSERT INTO meta_ad_owners (username) VALUES ($1) ON CONFLICT DO NOTHING', [owner]);
+    const current = (await client.query('SELECT migrated FROM meta_ad_owners WHERE username = $1 FOR UPDATE', [owner])).rows[0];
+    if (!current.migrated) {
+      const legacy = await store().get(recordsKey(owner), { type: 'json' });
+      if (legacy !== null && (!Array.isArray(legacy) || legacy.some(r => !r || typeof r.id !== 'string' || !r.id))) {
+        throw new Error('기존 광고 기록 형식을 확인하지 못했습니다.');
+      }
+      await client.query(`INSERT INTO meta_ad_records (username, id, data)
+        SELECT $1, item->>'id', item FROM jsonb_array_elements($2::jsonb) item
+        ON CONFLICT DO NOTHING`, [owner, JSON.stringify(legacy || [])]);
+      await client.query('UPDATE meta_ad_owners SET migrated = true WHERE username = $1', [owner]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}
 
 export async function readAdRecords(username: string): Promise<MetaAdRecord[]> {
-  try {
-    const found = (await store().get(recordsKey(username), { type: "json" })) as MetaAdRecord[] | null;
-    return Array.isArray(found) ? found : [];
-  } catch (e) {
-    console.warn("[meta-ads] records read failed:", (e as Error)?.message);
-    return [];
-  }
+  await importLegacyRecords(username);
+  const db = await recordsDatabase();
+  const rows = await db.sql`SELECT data, revision FROM meta_ad_records WHERE username = ${ownerName(username)} ORDER BY data->>'createdAt' DESC, id`;
+  return rows.map(row => ({ ...row.data, revision: Number(row.revision) } as MetaAdRecord));
 }
 
 export async function saveAdRecord(username: string, record: MetaAdRecord): Promise<void> {
-  const list = await readAdRecords(username);
-  const next = [record, ...list.filter((r) => r.id !== record.id)]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, MAX_RECORDS);
-  await store().setJSON(recordsKey(username), next);
+  await requireActiveAdLease();
+  await importLegacyRecords(username);
+  const db = await recordsDatabase();
+  const rows = await db.sql`
+    INSERT INTO meta_ad_records (username, id, data)
+    VALUES (${ownerName(username)}, ${record.id}, ${JSON.stringify(record)}::jsonb)
+    ON CONFLICT (username, id) DO UPDATE SET data = EXCLUDED.data, revision = meta_ad_records.revision + 1
+    WHERE meta_ad_records.revision = ${record.revision || 0}
+    RETURNING revision
+  `;
+  if (!rows.length) throw new Error('광고 기록이 변경되었습니다. 광고 현황을 다시 불러와 주세요.');
+  record.revision = Number(rows[0].revision);
+}
+
+export async function withAdRecordLock<T>(username: string, id: string, work: () => Promise<T>): Promise<T | null> {
+  await importLegacyRecords(username);
+  const db = await recordsDatabase();
+  const owner = ownerName(username);
+  const token = randomUUID();
+  const claimed = await db.sql`
+    INSERT INTO meta_ad_locks (username, id, token, expires_at)
+    VALUES (${owner}, ${id}, ${token}, clock_timestamp() + INTERVAL '3 minutes')
+    ON CONFLICT (username, id) DO UPDATE SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at
+    WHERE meta_ad_locks.expires_at <= clock_timestamp()
+    RETURNING token
+  `;
+  if (!claimed.length) return null;
+  let renewing: Promise<unknown> | undefined;
+  const heartbeat = setInterval(() => {
+    if (renewing) return;
+    renewing = Promise.resolve(db.sql`
+      UPDATE meta_ad_locks SET expires_at = clock_timestamp() + INTERVAL '3 minutes'
+      WHERE username = ${owner} AND id = ${id} AND token = ${token}
+    `).catch(error => { console.error('[meta-ads] lock renewal failed:', (error as Error)?.message); }).finally(() => { renewing = undefined; });
+  }, 30_000);
+  heartbeat.unref?.();
+  try {
+    return await adLeaseContext.run(async () => {
+      const owned = await db.sql`
+        UPDATE meta_ad_locks SET expires_at = clock_timestamp() + INTERVAL '3 minutes'
+        WHERE username = ${owner} AND id = ${id} AND token = ${token} AND expires_at > clock_timestamp()
+        RETURNING token
+      `;
+      return owned.length > 0;
+    }, work);
+  } finally {
+    clearInterval(heartbeat);
+    await renewing;
+    await db.sql`DELETE FROM meta_ad_locks WHERE username = ${owner} AND id = ${id} AND token = ${token}`;
+  }
 }
 
 /** 광고 기록이 있는 계정들(아이디). 주기 작업이 계정마다 광고 상태를 확인할 때 쓴다. */
 export async function listAdRecordOwners(): Promise<string[]> {
   const { blobs } = await store().list({ prefix: "ads_list_" });
-  return blobs.map((b) => b.key.slice("ads_list_".length)).filter(Boolean);
+  const db = await recordsDatabase();
+  const rows = await db.sql`SELECT username FROM meta_ad_owners`;
+  return [...new Set([...blobs.map(b => b.key.slice('ads_list_'.length)), ...rows.map(row => String(row.username))])].filter(Boolean);
 }
 
 /**
@@ -264,13 +375,17 @@ export async function writeRejectionNotices(username: string, notices: Record<st
 }
 
 /** 기록을 목록에서 뺀다(삭제했거나 메타에서 지워진 광고). */
-export async function removeAdRecords(username: string, ids: string[]): Promise<void> {
+export async function removeAdRecords(username: string, ids: string[], allowPending = false, expectedRevisions?: Record<string, number>): Promise<void> {
   if (ids.length === 0) return;
-  const drop = new Set(ids);
-  const list = await readAdRecords(username);
-  const next = list.filter((r) => !drop.has(r.id));
-  if (next.length === list.length) return;
-  await store().setJSON(recordsKey(username), next);
+  await requireActiveAdLease();
+  await importLegacyRecords(username);
+  const db = await recordsDatabase();
+  await db.sql`
+    DELETE FROM meta_ad_records
+    WHERE username = ${ownerName(username)} AND id = ANY(${ids})
+      AND (${allowPending} OR NOT data ? 'pendingStep')
+      AND (${expectedRevisions === undefined} OR revision = (${JSON.stringify(expectedRevisions || {})}::jsonb ->> id)::bigint)
+  `;
 }
 
 /**

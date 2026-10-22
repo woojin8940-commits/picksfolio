@@ -38,6 +38,7 @@ interface Campaign {
   application_count: number;
   admin_rejected_reason?: string;
   admin_approved_at?: string;
+  review_revision?: string;
   manager_username?: string;
   manager_assigned_at?: string;
   created_at: string;
@@ -130,21 +131,22 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
   const handleApprove = async (id: string) => {
     if (!confirm('이 캠페인을 승인하시겠습니까? 승인하면 담당자가 배정되고 모집이 시작됩니다.')) return;
     setProcessing(id);
-    const result = await apiService.adminCampaignAction(token, id, 'approve');
-    if (result.success) fetchCampaigns();
-    else alert(result.error || '승인 실패');
+    const result = await apiService.adminCampaignAction(token, id, 'approve', undefined, undefined, campaigns.find(c => c.id === id)?.review_revision);
+    if (!result.success) alert(result.error || '승인 실패');
+    await fetchCampaigns();
     setProcessing(null);
   };
 
   const handleReject = async (id: string) => {
     setProcessing(id);
-    const result = await apiService.adminCampaignAction(token, id, 'reject', rejectReason);
+    const result = await apiService.adminCampaignAction(token, id, 'reject', rejectReason, undefined, campaigns.find(c => c.id === id)?.review_revision);
     if (result.success) {
       setRejectingId(null);
       setRejectReason('');
       fetchCampaigns();
     } else {
       alert(result.error || '거절 실패');
+      await fetchCampaigns();
     }
     setProcessing(null);
   };

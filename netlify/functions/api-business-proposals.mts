@@ -43,7 +43,7 @@ export default async (req: Request, context: Context) => {
       dbInstance = getDatabase();
     } catch {}
 
-    const [cachedData, sqlProposals, campaignRows, deletedIds, hiddenIds] = await Promise.all([
+    const [cachedData, sqlProposals, campaignRows, deletedIds, hiddenIds, cancelledRows] = await Promise.all([
       store.get(key, { type: "json" }).catch(() => null),
       dbInstance ? (async () => {
         try {
@@ -68,7 +68,13 @@ export default async (req: Request, context: Context) => {
       })() : Promise.resolve([]),
       loadDeletedProposalIds(),
       loadHiddenInboxIds(username),
+      dbInstance ? dbInstance.sql`
+        SELECT campaign_id, creator_username FROM campaign_collabs
+        WHERE LOWER(REGEXP_REPLACE(business_username, '^biz/', '')) = ${username}
+          AND (status = 'cancelled' OR cancelled_at IS NOT NULL)
+      ` : Promise.resolve([]),
     ]);
+    for (const row of cancelledRows as any[]) hiddenIds.add(`campaign_${row.campaign_id}_${String(row.creator_username || '').toLowerCase()}`);
 
     // 지운 줄(묘비)과 업체가 목록에서 내린 줄은 올리지 않는다. SQL·Blobs·캠페인
     // 파생 행 어느 쪽에서 되살아나도 같은 자리에서 걸러진다.

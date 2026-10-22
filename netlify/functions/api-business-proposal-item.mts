@@ -42,7 +42,7 @@ export default async (req: Request, context: Context) => {
 
   const scope = new URL(req.url).searchParams.get("scope");
 
-  if (scope === "hide") {
+  if (scope === "hide" || itemId.startsWith('campaign_')) {
     try {
       await hideInboxItem(username, itemId);
     } catch (err) {

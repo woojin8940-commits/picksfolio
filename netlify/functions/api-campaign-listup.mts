@@ -7,6 +7,7 @@ import {
 } from "./_shared/user-auth.mts";
 import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { newId, norm } from "./_shared/collab-workflow.mts";
+import { withCampaignLock } from "./_shared/campaign-recruit.mts";
 import { isManagerListupMode } from "./_shared/reward-mode.mts";
 import { influencerAccountsOf } from "./_shared/influencer-accounts.mts";
 import { refreshStaleChannelImages, resyncStaleChannels } from "./_shared/instagram-metrics.mts";
@@ -612,6 +613,9 @@ export default async (req: Request, context: Context) => {
         return Response.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });
       }
 
+      const targetRows = await db.sql`SELECT campaign_id FROM campaign_listups WHERE id = ${id}`;
+      if (!targetRows[0]) return Response.json({ error: "후보를 찾을 수 없습니다." }, { status: 404 });
+      return await withCampaignLock(db, String(targetRows[0].campaign_id), async (db) => {
       const listupRows = await db.sql`SELECT * FROM campaign_listups WHERE id = ${id}`;
       const listup = (listupRows as any[])?.[0];
       if (!listup) {
@@ -625,6 +629,11 @@ export default async (req: Request, context: Context) => {
       // 제안을 그대로 수락할 수 있어, 없는 캠페인으로 협업이 만들어졌다.
       if (campaign.deleted_at && !["withdraw_offer", "remove", "note", "favorite"].includes(String(action || ""))) {
         return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
+      }
+      if (['start_collab', 'respond'].includes(action) &&
+          (action === 'start_collab' || body.accept === true || body.decision === 'accept' || listup.outreach_status === 'accepted') &&
+          !['active', 'inactive'].includes(String(campaign.status))) {
+        return Response.json({ error: "승인되지 않은 캠페인에서는 수락할 수 없습니다." }, { status: 409 });
       }
 
       const manager = await requireManager(req);
@@ -1108,6 +1117,7 @@ export default async (req: Request, context: Context) => {
       }
 
       return Response.json({ error: "알 수 없는 동작입니다." }, { status: 400 });
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "처리에 실패했습니다." }, { status: 500 });
     }

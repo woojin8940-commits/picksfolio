@@ -1,6 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
-import { isRecruitClosed, todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { isRecruitClosed, todayInSeoul, withCampaignLock } from "./_shared/campaign-recruit.mts";
 import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
@@ -354,12 +354,14 @@ export default async (req: Request) => {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
 
+      return await withCampaignLock(db, String(id), async (db) => {
       const existing = await db.sql`SELECT * FROM campaigns WHERE id = ${id}`;
       if (existing.length === 0) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
 
       const c = existing[0] as Record<string, any>;
+      if (c.deleted_at) return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
 
       // 캠페인 ID 만 알면 남의 캠페인을 고칠 수 있었다. 등록한 브랜드(또는 관리자)만
       // 수정할 수 있도록 확인한다.
@@ -390,8 +392,55 @@ export default async (req: Request) => {
       }
 
       let newStatus = updates.status ?? c.status;
-      if (c.status === 'pending_approval' || c.status === 'admin_rejected') {
-        newStatus = c.status;
+      if (updates.status !== undefined && (typeof updates.status !== 'string' || !['active', 'inactive'].includes(updates.status))) {
+        return Response.json({ error: "잘못된 모집 상태입니다." }, { status: 400 });
+      }
+      if (!['active', 'inactive', 'pending_approval', 'admin_rejected'].includes(String(c.status))) {
+        return Response.json({ error: "캠페인 상태를 확인할 수 없습니다. 관리자에게 문의해 주세요." }, { status: 409 });
+      }
+      const workflowChanged =
+        rewardMode(updates.reward_mode === undefined ? c.reward_mode : updates.reward_mode) !== rewardMode(c.reward_mode) ||
+        (updates.type != null && String(updates.type) !== String(c.type || '')) ||
+        (updates.reward_type != null && String(updates.reward_type) !== String(c.reward_type || ''));
+      if (workflowChanged) {
+        const ongoing = await db.sql`
+          SELECT 1 FROM campaign_collabs WHERE campaign_id = ${id} AND status <> 'cancelled'
+          UNION ALL
+          SELECT 1 FROM campaign_applications WHERE campaign_id = ${id} AND status = 'accepted'
+          LIMIT 1
+        `;
+        if (ongoing.length) return Response.json({ error: "선정되거나 진행 중인 협업이 있어 보상·진행 방식을 변경할 수 없습니다." }, { status: 409 });
+      }
+      const numericFields = new Set(['budget_krw', 'second_use_fee', 'seeding_count', 'groupbuy_commission_rate', 'min_views']);
+      const csvFields = new Set(['influencer_ages', 'follower_tiers', 'influencer_styles', 'exclude_keywords']);
+      const materialFields = ['title', 'type', 'description', 'brand_name', 'thumbnail_url', 'category', 'reward_type', 'reward_amount', 'requirements', 'max_applicants', 'product_name', 'product_url', 'upload_channel', 'content_format', 'video_concept', 'second_use_fee', 'second_use_note', 'package_tier', 'reward_mode', 'product_provide', 'ad_objective', 'budget_krw', 'seeding_count', 'groupbuy_commission_rate', 'fast_track', 'influencer_gender', 'influencer_ages', 'sns_category', 'follower_tiers', 'min_views', 'influencer_styles', 'exclude_keywords', 'target_audience', 'tier_counts', 'upload_from', 'upload_to'];
+      for (const key of materialFields) {
+        const value = updates[key];
+        if (value === undefined || value === null) continue;
+        const valid = key === 'fast_track' ? typeof value === 'boolean'
+          : key === 'max_applicants' ? ['string', 'number'].includes(typeof value) && Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647
+          : numericFields.has(key) || key === 'reward_amount' ? ['string', 'number'].includes(typeof value)
+          : csvFields.has(key) ? typeof value === 'string' || (Array.isArray(value) && value.every(item => ['string', 'number'].includes(typeof item)))
+          : typeof value === 'string';
+        if (!valid) return Response.json({ error: "캠페인 입력 형식을 확인해 주세요." }, { status: 400 });
+      }
+      const materialChanged = materialFields.some(key => {
+        if (updates[key] === undefined) return false;
+        if (key === 'product_url') return productUrl !== String(c.product_url || '');
+        if (key === 'reward_mode') return rewardMode(updates[key]) !== rewardMode(c[key]);
+        if (numericFields.has(key)) return briefFee(updates[key]) !== briefFee(c[key]);
+        if (key === 'max_applicants') return Number(updates[key] ?? c[key] ?? 0) !== Number(c[key] || 0);
+        if (key === 'fast_track') return Boolean(updates[key]) !== Boolean(c[key]);
+        if (csvFields.has(key)) return csv(updates[key]) !== csv(c[key]);
+        if (key === 'tier_counts') return String(updates[key] || '') !== String(c[key] || '');
+        if (updates[key] === null) return false;
+        return String(updates[key]) !== String(c[key] ?? '');
+      });
+      const requiresApproval = (materialChanged || workflowChanged) && ['active', 'inactive', 'admin_rejected'].includes(String(c.status));
+      if (requiresApproval) newStatus = 'pending_approval';
+      else if (c.status === 'pending_approval' || c.status === 'admin_rejected') newStatus = c.status;
+      if (newStatus === 'active' && updates.status === 'active' && isRecruitClosed({ end_date: updates.end_date ?? c.end_date })) {
+        return Response.json({ error: "모집 종료일이 지났습니다. 새 모집 종료일을 먼저 설정해 주세요." }, { status: 409 });
       }
 
       await db.sql`
@@ -441,11 +490,13 @@ export default async (req: Request) => {
             contact_phone = ${nextPhone},
             contact_email = ${contactEmail(updates.contact_email) || contactEmail(c.contact_email)},
             status = ${newStatus},
+            admin_approved_at = CASE WHEN ${requiresApproval} THEN NULL ELSE admin_approved_at END,
             updated_at = NOW()
         WHERE id = ${id}
       `;
 
-      return Response.json({ success: true });
+      return Response.json({ success: true, status: newStatus, requiresApproval });
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "캠페인 수정 실패" }, { status: 500 });
     }
@@ -458,7 +509,8 @@ export default async (req: Request) => {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
 
-      const existing = await db.sql`SELECT id, business_username FROM campaigns WHERE id = ${id}`;
+      return await withCampaignLock(db, String(id), async (db) => {
+      const existing = await db.sql`SELECT id, business_username, status, end_date, deleted_at FROM campaigns WHERE id = ${id}`;
       if (existing.length === 0) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
@@ -467,6 +519,12 @@ export default async (req: Request) => {
       // 빼면 누구나 남의 캠페인을 지울 수 있었다. 이제 토큰으로 확인한다.
       const auth = await requireAccountOwner(req, String((existing[0] as any).business_username || ""));
       if (!auth.ok) return auth.response;
+
+      const campaign = existing[0] as any;
+      if (!campaign.deleted_at && campaign.status !== 'inactive' && campaign.status !== 'admin_rejected' &&
+          !(campaign.status === 'active' && isRecruitClosed(campaign))) {
+        return Response.json({ error: "모집을 마감한 뒤 삭제해 주세요." }, { status: 409 });
+      }
 
       /**
        * 삭제는 "목록에서 내린다"까지다. 행은 지우지 않는다.
@@ -483,6 +541,7 @@ export default async (req: Request) => {
       await db.sql`UPDATE campaigns SET deleted_at = NOW(), updated_at = NOW() WHERE id = ${id}`;
 
       return Response.json({ success: true });
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "캠페인 삭제 실패" }, { status: 500 });
     }

@@ -227,7 +227,7 @@ export default async (req: Request, context: Context) => {
           views += metric.views;
           likes += metric.likes;
           comments += metric.comments;
-          measuredSpend += intOf(collab.fee);
+          if (metric.views > 0) measuredSpend += intOf(collab.fee);
         }
 
         return {

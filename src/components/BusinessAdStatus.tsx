@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Search, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
@@ -632,6 +632,8 @@ const metaAdsErrorText = (code: string): string => {
       return '연동 결과를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
     case 'missing_code':
       return 'Meta에서 연동 정보를 받지 못했습니다. 다시 연동해 주세요.';
+    case 'krw_account_required':
+      return '접근 가능한 원화(KRW) 광고 계정이 필요합니다. Meta 광고 계정 통화를 확인해 주세요.';
     default:
       return '연동을 마치지 못했습니다. 다시 연동해 주세요.';
   }
@@ -735,28 +737,44 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
    * "집행이 안 됐다"로 읽힌다.
    */
   const accountId = account?.id || '';
+  const adsRequest = useRef(0);
+  const adsScope = `${cleanUsername}:${connected}:${accountId}:${range}`;
+  const currentAdsScope = useRef(adsScope);
+  currentAdsScope.current = adsScope;
   const loadAds = useCallback(async () => {
+    if (currentAdsScope.current !== adsScope) return;
+    const request = ++adsRequest.current;
     if (!connected || !accountId) {
       setMetaAds([]);
+      setFetchedAt('');
+      setAdsError('');
+      setAdsNeedReconnect(false);
+      setAdsLoading(false);
       return;
     }
     setAdsLoading(true);
     const res = await fetchMetaAds(cleanUsername, accountId, range);
+    if (request !== adsRequest.current || currentAdsScope.current !== adsScope) return;
     if (res.ok) {
       setMetaAds(res.ads);
       setFetchedAt(res.fetchedAt);
       setAdsError(res.errors?.length ? res.errors.join(' / ') : '');
       setAdsNeedReconnect(false);
     } else {
+      setMetaAds([]);
+      setFetchedAt('');
       setAdsError(res.error);
       setAdsNeedReconnect(needsReconnect(res));
     }
     setAdsLoading(false);
-  }, [cleanUsername, connected, accountId, range]);
+  }, [cleanUsername, connected, accountId, range, adsScope]);
 
   useEffect(() => {
+    setMetaAds([]);
+    setFetchedAt('');
     void loadAds();
-    return subscribeMetaAds(() => void loadAds());
+    const unsubscribe = subscribeMetaAds(() => void loadAds());
+    return () => { ++adsRequest.current; unsubscribe(); };
   }, [loadAds]);
 
   // 광고 관리자에서 지운 광고가 여기서도 빠지도록, 창으로 돌아오면(그리고 1분마다) 다시 읽는다.

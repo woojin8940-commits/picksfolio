@@ -679,9 +679,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (!editing) {
         try { localStorage.removeItem(draftKey); } catch { /* 지우지 못해도 등록은 끝났다. */ }
       }
+      const saved = await res.json().catch(() => ({}));
       onNotify(
         editing
-          ? '캠페인이 수정되었습니다.'
+          ? saved.requiresApproval ? '주요 내용이 변경되어 관리자 재승인 대기로 저장했습니다.' : '캠페인이 수정되었습니다.'
           : picksInfluencer
             ? '캠페인이 등록되었습니다. 담당자가 조건에 맞는 인플루언서를 찾아 리스트업해 드립니다.'
             : '캠페인이 등록되었습니다. 승인 후 캠페인 협업 목록에 올라가고, 지원자가 모이면 그 중에서 고르실 수 있습니다.',

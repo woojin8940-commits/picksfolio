@@ -81,3 +81,31 @@ export function isQuotaReached(campaign: CampaignRecruitFields): boolean {
 export function isRecruitClosed(campaign: CampaignRecruitFields, today: string = todayInSeoul()): boolean {
   return isPastDeadline(campaign.end_date, today);
 }
+
+export async function withCampaignLock<T>(db: any, id: string, work: (db: any) => Promise<T>): Promise<T> {
+  const client = await db.pool.connect();
+  const effects: Array<() => Promise<unknown>> = [];
+  let result: T;
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL lock_timeout = '10s'");
+    await client.query("SELECT id FROM campaigns WHERE id = $1 FOR UPDATE", [id]);
+    const locked = { sql: async (parts: TemplateStringsArray, ...values: unknown[]) => {
+      const text = parts.reduce((sql, part, i) => sql + (i ? `$${i}` : "") + part, "");
+      return (await client.query(text, values)).rows;
+    }, afterCommit: (effect: () => Promise<unknown>) => { effects.push(effect); } };
+    result = await work(locked);
+    if (result instanceof Response && !result.ok) {
+      await client.query('ROLLBACK');
+      return result;
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  for (const effect of effects) await effect().catch(error => { console.error('[campaign] 후속 반영 실패:', error); });
+  return result;
+}
