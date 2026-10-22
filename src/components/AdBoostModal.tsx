@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
   Check,
@@ -183,6 +183,16 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   const [freqImpressions, setFreqImpressions] = useState(2);
   const [freqDays, setFreqDays] = useState(7);
   const [submitting, setSubmitting] = useState(false);
+  const runController = useRef<AbortController | null>(null);
+  const inFlight = useRef(false);
+  const creationId = useRef('');
+  useEffect(() => {
+    const controller = new AbortController();
+    runController.current = controller;
+    creationId.current = crypto.randomUUID();
+    inFlight.current = false;
+    return () => { controller.abort(); inFlight.current = false; };
+  }, [open, businessUsername]);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
   const [startPaused, setStartPaused] = useState(resumeProp?.initialStatus === 'PAUSED');
@@ -419,10 +429,16 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     [objective, page, creatorHandle, objectiveLabel, goal, conversionEvent, delivery, toWebsite, finalUrl, cta, displayLink],
   );
 
-  const runSteps = async (from: MetaAdRecord) => {
+  const runSteps = async (from: MetaAdRecord, started = false) => {
+    if (inFlight.current && !started) return;
+    const signal = runController.current?.signal;
+    if (signal?.aborted) return;
+    inFlight.current = true;
     setRunError('');
     setSubmitting(true);
-    const result = await runRemainingSteps(businessUsername, from, (next) => setRecord(next));
+    const result = await runRemainingSteps(businessUsername, from, (next) => setRecord(next), signal);
+    if (signal?.aborted) return;
+    inFlight.current = false;
     setRecord(result.record);
     setSubmitting(false);
     notifyMetaAdsChanged();
@@ -443,6 +459,9 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   ].filter(Boolean);
 
   const submit = async () => {
+    if (inFlight.current) return;
+    const signal = runController.current?.signal;
+    if (signal?.aborted) return;
     if (problems.length || !selectedAccount || !page) {
       setError(problems[0] || '설정을 확인해 주세요.');
       return;
@@ -451,13 +470,14 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     setRunError('');
     setSubmitting(true);
     setPhase('running');
+    inFlight.current = true;
 
     const created = resume
       ? await resumeMetaAd(businessUsername, resume.id, {
           pageId: page.id,
           initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
           ...settings(),
-        })
+        }, creationId.current, signal)
       : await createMetaAd(businessUsername, {
           source: 'partnership',
           adAccountId: selectedAccount.id,
@@ -470,8 +490,10 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
           partnershipCode,
           thumbnailUrl: /^https:\/\//.test(thumbnailUrl) ? thumbnailUrl : '',
           ...settings(),
-        });
+        }, creationId.current, signal);
+    if (signal?.aborted) return;
     if (!created.ok) {
+      inFlight.current = false;
       if (created.record) {
         setRecord(created.record);
         notifyMetaAdsChanged();
@@ -481,7 +503,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
       return;
     }
     setRecord(created.record);
-    await runSteps(created.record);
+    await runSteps(created.record, true);
   };
 
   const retry = () => {
@@ -693,7 +715,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
               {runError && !submitting && (
                 <button
                   type="button"
-                  onClick={() => { setPhase('form'); setRunError(''); if (record) setFixing(true); }}
+                  onClick={() => { creationId.current = crypto.randomUUID(); setPhase('form'); setRunError(''); if (record) setFixing(true); }}
                   className="w-full py-3 rounded-xl border border-slate-200 text-slate-600 text-[12px] font-black hover:bg-slate-50 transition-colors"
                 >
                   설정 고치기

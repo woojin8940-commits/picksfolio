@@ -185,7 +185,8 @@ export default async (req: Request, _context: Context) => {
       currency: String(row?.currency || ""),
       accountStatus: Number(row?.account_status) || undefined,
       businessId: row?.business?.id ? String(row.business.id) : undefined,
-    }));
+    })).filter((account: MetaAdsAccount) => account.currency?.toUpperCase() === 'KRW');
+    if (adAccounts.probe.ok && !accounts.length) return fail('krw_account_required');
     if (adAccounts.probe.ok) adAccounts.probe.count = accounts.length;
 
     // 5) 비즈니스. 광고 계정이 어느 비즈니스에 매달렸는지 확인하는 용도다.

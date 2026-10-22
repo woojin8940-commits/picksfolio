@@ -2288,6 +2288,7 @@ export const apiService = {
     action: 'approve' | 'reject' | 'assign_manager',
     reason?: string,
     managerUsername?: string,
+    reviewRevision?: string,
   ): Promise<{ success: boolean; error?: string; managerUsername?: string }> {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -2296,7 +2297,7 @@ export const apiService = {
         method: 'PATCH',
         credentials: 'same-origin',
         headers,
-        body: JSON.stringify({ id, action, reason, managerUsername }),
+        body: JSON.stringify({ id, action, reason, managerUsername, reviewRevision }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {

@@ -107,6 +107,16 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   const [conversionEvent, setConversionEvent] = useState(resumeProp?.conversionEvent || 'PURCHASE');
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const runController = useRef<AbortController | null>(null);
+  const inFlight = useRef(false);
+  const creationId = useRef('');
+  useEffect(() => {
+    const controller = new AbortController();
+    runController.current = controller;
+    creationId.current = crypto.randomUUID();
+    inFlight.current = false;
+    return () => { controller.abort(); inFlight.current = false; };
+  }, [open, username]);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
   /** PAUSED 로 만들면 광고가 만들어져도 노출·과금이 시작되지 않는다(검증용). */
@@ -234,14 +244,20 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   };
 
   /** 기록이 만들어진 뒤 남은 단계를 진행한다. 다시 시도도 여기로 온다. */
-  const runSteps = async (from: MetaAdRecord) => {
+  const runSteps = async (from: MetaAdRecord, started = false) => {
+    if (inFlight.current && !started) return;
+    const signal = runController.current?.signal;
+    if (signal?.aborted) return;
+    inFlight.current = true;
     setRunError('');
     setSubmitting(true);
     setPhase('running');
     const result = await runRemainingSteps(username, from, (next, note) => {
       setRecord(next);
       setRunNote(note || '');
-    });
+    }, signal);
+    if (signal?.aborted) return;
+    inFlight.current = false;
     setRecord(result.record);
     setRunNote('');
     setSubmitting(false);
@@ -256,6 +272,9 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   };
 
   const submit = async () => {
+    if (inFlight.current) return;
+    const signal = runController.current?.signal;
+    if (signal?.aborted) return;
     if (!account) {
       setError('광고를 만들 Meta 광고 계정을 먼저 골라 주세요.');
       return;
@@ -286,6 +305,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
     setRunError('');
     setSubmitting(true);
     setPhase('running');
+    inFlight.current = true;
 
     // 이어서 만들 때 파일을 바꾸지 않았으면 이미 광고 계정에 올라간 소재를 그대로 쓴다.
     let media: { imageHash: string; videoId?: string } | null = null;
@@ -293,12 +313,15 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       if (file) media = await uploadCreative(account, file);
       else setUpload({ state: 'done', label: 'Meta 광고 계정에 소재 올리기', detail: '이전에 올린 소재 사용' });
     } catch (e) {
+      if (signal?.aborted) return;
+      inFlight.current = false;
       setUpload({ state: 'error', label: 'Meta 광고 계정에 소재 올리기', detail: (e as Error)?.message });
       setRunError((e as Error)?.message || '소재를 올리지 못했습니다.');
       setSubmitting(false);
       return;
     }
 
+    if (signal?.aborted) return;
     const settings = {
       pageId: page.id,
       initialStatus: (startPaused ? 'PAUSED' : 'ACTIVE') as 'PAUSED' | 'ACTIVE',
@@ -315,9 +338,11 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       ...delivery.payload(),
     };
     const created = resume
-      ? await resumeMetaAd(username, resume.id, settings)
-      : await createMetaAd(username, { source: 'own', adAccountId: account.id, ...settings });
+      ? await resumeMetaAd(username, resume.id, settings, creationId.current, signal)
+      : await createMetaAd(username, { source: 'own', adAccountId: account.id, ...settings }, creationId.current, signal);
+    if (signal?.aborted) return;
     if (!created.ok) {
+      inFlight.current = false;
       if (created.record) {
         setRecord(created.record);
         notifyMetaAdsChanged();
@@ -328,7 +353,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       return;
     }
     setRecord(created.record);
-    await runSteps(created.record);
+    await runSteps(created.record, true);
   };
 
   /** 실패한 단계부터 다시. 기록이 아직 없으면(업로드·캠페인 전) 처음부터 다시 누른다. */
@@ -426,7 +451,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
               {runError && !submitting && (
                 <button
                   type="button"
-                  onClick={() => { setPhase('form'); setRunError(''); if (record) setFixing(true); }}
+                  onClick={() => { creationId.current = crypto.randomUUID(); setPhase('form'); setRunError(''); if (record) setFixing(true); }}
                   className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 text-[12px] font-black hover:bg-slate-50 transition-colors"
                 >
                   설정 고치기

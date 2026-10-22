@@ -2978,10 +2978,15 @@ export default async (req: Request, context: Context) => {
           }
         }
         await db.sql`
+          WITH cancelled AS (
           UPDATE campaign_collabs
           SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = ${reason},
               cancelled_by = ${caller.username}, updated_at = NOW()
           WHERE id = ${collabId}
+          RETURNING application_id
+          )
+          UPDATE campaign_applications SET status = 'rejected', updated_at = NOW()
+          WHERE id IN (SELECT application_id FROM cancelled)
         `;
         await logCollabEvent(db, {
           id: `ce_collab_cancelled_${collabId}`,

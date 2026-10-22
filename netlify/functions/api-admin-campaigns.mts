@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { requireAdmin } from "./_shared/admin-auth.mts";
+import { withCampaignLock } from "./_shared/campaign-recruit.mts";
 
 export default async (req: Request, context: Context) => {
   const admin = await requireAdmin(req);
@@ -26,7 +27,7 @@ export default async (req: Request, context: Context) => {
       let result;
       if (status) {
         result = await db.sql`
-          SELECT c.*,
+          SELECT c.*, md5(to_jsonb(c)::text) AS review_revision,
                  (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count,
                  lc.listed_count, lc.picked_count, lc.sent_count, lc.accepted_count, lc.declined_count,
                  mg.priced_count, mg.brand_amount, mg.influencer_cost, mg.margin_amount,
@@ -67,7 +68,7 @@ export default async (req: Request, context: Context) => {
         `;
       } else {
         result = await db.sql`
-          SELECT c.*,
+          SELECT c.*, md5(to_jsonb(c)::text) AS review_revision,
                  (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count,
                  lc.listed_count, lc.picked_count, lc.sent_count, lc.accepted_count, lc.declined_count,
                  mg.priced_count, mg.brand_amount, mg.influencer_cost, mg.margin_amount,
@@ -141,12 +142,18 @@ export default async (req: Request, context: Context) => {
         );
       }
 
-      const existing = await db.sql`SELECT * FROM campaigns WHERE id = ${id}`;
+      return await withCampaignLock(db, String(id), async (db) => {
+      const existing = await db.sql`SELECT c.*, md5(to_jsonb(c)::text) AS review_revision FROM campaigns c WHERE id = ${id}`;
       if (existing.length === 0) {
         return Response.json(
           { error: "캠페인을 찾을 수 없습니다." },
           { status: 404 }
         );
+      }
+      if (existing[0].deleted_at) return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
+      if (action !== 'assign_manager' &&
+          (existing[0].status !== 'pending_approval' || typeof body.reviewRevision !== 'string' || body.reviewRevision !== existing[0].review_revision)) {
+        return Response.json({ error: "검토 후 캠페인 내용이나 상태가 변경되었습니다. 목록을 새로고침하고 다시 검토해 주세요." }, { status: 409 });
       }
 
       // 담당자 식별자는 이메일 앞부분을 쓴다(운영 콘솔은 Netlify Identity 로그인).
@@ -207,6 +214,7 @@ export default async (req: Request, context: Context) => {
       }
 
       return Response.json({ success: true });
+      });
     } catch (err: any) {
       return Response.json(
         { error: err?.message || "처리 실패" },

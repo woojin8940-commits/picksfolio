@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { isAssignedManager } from "./_shared/manager-auth.mts";
 import { requireAdmin } from "./_shared/admin-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
   FRESH_HOURS,
   collectCampaignMetrics,
@@ -35,6 +36,15 @@ import {
 
 const norm = (raw: unknown) =>
   String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
+
+async function reserveRefresh(campaignId: string, scope: string): Promise<boolean> {
+  let allowed = false;
+  await mutateBlobJSON<{ at: number }>('campaign-metrics-refresh', `${campaignId}:${scope || 'all'}`, current => {
+    allowed = !current || Date.now() - Number(current.at || 0) >= 600_000;
+    return allowed ? { at: Date.now() } : null;
+  });
+  return allowed;
+}
 
 type Role = "brand" | "manager" | "influencer";
 
@@ -162,6 +172,9 @@ export default async (req: Request) => {
       if (action !== "refresh") {
         return Response.json({ error: "알 수 없는 요청입니다." }, { status: 400 });
       }
+      if (!await reserveRefresh(id, scope)) {
+        return Response.json({ error: "최근에 새로고침했습니다. 최대 10분 후 다시 시도해 주세요." }, { status: 429, headers: { 'Retry-After': '600' } });
+      }
       const result = await collectCampaignMetrics(db, id, {
         force: true,
         creatorUsername: scope,
@@ -187,7 +200,7 @@ export default async (req: Request) => {
       Date.now() - new Date(first.totals.collectedAt).getTime() > FRESH_HOURS * 3600_000;
     const pending = first.totals.uploadedCount > first.posts.length;
 
-    if (stale || pending) {
+    if ((stale || pending) && await reserveRefresh(id, scope)) {
       try {
         await collectCampaignMetrics(db, id, { creatorUsername: scope });
         first = await loadCampaignMetrics(db, id, { creatorUsername: scope });

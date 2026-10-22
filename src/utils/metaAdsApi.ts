@@ -439,16 +439,18 @@ export type MetaAdDraft = {
 
 type StepResult = MetaApiResult<{ record: MetaAdRecord; pending?: boolean }> & { record?: MetaAdRecord };
 
-export const createMetaAd = (username: string, draft: MetaAdDraft) =>
+export const createMetaAd = (username: string, draft: MetaAdDraft, requestId: string, signal?: AbortSignal) =>
   call<{ record: MetaAdRecord }>(username, adsPath(username), {
     method: 'POST',
-    body: JSON.stringify({ action: 'create', draft }),
+    body: JSON.stringify({ action: 'create', draft, requestId }),
+    signal,
   }) as Promise<StepResult>;
 
-export const continueMetaAd = (username: string, id: string) =>
+export const continueMetaAd = (username: string, id: string, signal?: AbortSignal) =>
   call<{ record: MetaAdRecord; pending?: boolean }>(username, adsPath(username), {
     method: 'POST',
     body: JSON.stringify({ action: 'continue', id }),
+    signal,
   }) as Promise<StepResult>;
 
 /**
@@ -456,10 +458,11 @@ export const continueMetaAd = (username: string, id: string) =>
  * 다시 만들어 첫 단계 결과를 돌려준다 — 남은 단계는 runRemainingSteps 로 잇는다.
  * 직접 올린 소재는 파일을 바꾸지 않았으면 imageHash 를 비워 보낸다(기록의 소재를 쓴다).
  */
-export const resumeMetaAd = (username: string, id: string, draft: Partial<MetaAdDraft>) =>
+export const resumeMetaAd = (username: string, id: string, draft: Partial<MetaAdDraft>, requestId: string, signal?: AbortSignal) =>
   call<{ record: MetaAdRecord }>(username, adsPath(username), {
     method: 'POST',
-    body: JSON.stringify({ action: 'resume', id, draft }),
+    body: JSON.stringify({ action: 'resume', id, draft, requestId }),
+    signal,
   }) as Promise<StepResult>;
 
 /** 광고 기록을 지운다. removeFromMeta 면 메타 캠페인(아래 세트·광고 포함)도 지운다. */
@@ -502,11 +505,14 @@ export async function runRemainingSteps(
   username: string,
   record: MetaAdRecord,
   onStep: (record: MetaAdRecord, note?: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ record: MetaAdRecord; error?: string }> {
   let current = record;
   let waits = 0;
   while (current.step !== 'done') {
-    const res = await continueMetaAd(username, current.id);
+    if (signal?.aborted) return { record: current, error: '요청을 중단했습니다. 광고 현황에서 진행 상태를 확인해 주세요.' };
+    const res = await continueMetaAd(username, current.id, signal);
+    if (signal?.aborted) return { record: res.record || current, error: '요청을 중단했습니다. 광고 현황에서 진행 상태를 확인해 주세요.' };
     if (!res.ok) return { record: res.record || current, error: res.error };
     if (res.pending) {
       if (++waits > 40) return { record: current, error: 'Meta의 영상 처리가 길어지고 있습니다. 광고 현황에서 이어서 만들어 주세요.' };

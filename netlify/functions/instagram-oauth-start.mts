@@ -119,7 +119,13 @@ export default async (req: Request, _context: Context) => {
     // 남아 있는 인스타그램 세션으로 조용히 통과시키면, 등록하는 사람은 어떤 계정이
     // 붙었는지 확인할 기회 없이 남의(혹은 예전) 계정으로 등록서를 내게 된다.
     (forceReauth ? `&force_reauth=true` : ``) +
-    `&state=${encodeURIComponent(issued.state)}`;
+    `&state=${encodeURIComponent(issued.state)}` +
+    // `#weblink` 는 인스타그램 apple-app-site-association 이 모든 경로에서 앱 열기를
+    // 제외하는 조각이다. 슬래시 규칙은 첫 주소에만 걸리지만, 조각은 리다이렉트를 따라
+    // 이어지므로 로그인·동의 사이의 중간 주소도 앱으로 넘어가지 않고 웹에 남는다.
+    // 서버로는 전송되지 않고, 마지막 복귀 주소는 인스타그램이 자기 조각(#_)을 붙여
+    // 덮으므로 픽스폴리오 주소에도 남지 않는다.
+    `#weblink`;
 
   // 이 브라우저에만 결속 쿠키를 심는다(oauth-state 의 브라우저 결속).
   return Response.json({ url: authorizeUrl }, { headers: { "Set-Cookie": issued.cookie } });

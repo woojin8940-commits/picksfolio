@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { BusinessProposal } from '../types';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, todayInSeoul } from '../utils/formatters';
+import { daysUntilDeadline } from '../utils/campaignRecruit';
 import { apiService } from '../services/apiService';
 import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import {
@@ -182,17 +183,12 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfWeek = new Date(year, month, 1).getDay();
-  // 로컬 날짜 기준. `toISOString()` 은 UTC라서 한국 시간 오전 9시 이전에는
-  // 어제 날짜가 나오고, 그동안 "오늘"과 완료 판정이 하루씩 어긋났다.
-  const today = ymd(new Date());
+  const today = todayInSeoul();
 
-  // Keep the calendar status in sync with the dates: an accepted proposal whose
-  // end date has already passed (or which is already settled/completed) is shown
-  // as 완료됨 instead of lingering as 진행중. Dates are compared as YYYY-MM-DD.
   const isCollabDone = (p: CollabRow): boolean => {
     if (p.status === 'completed') return true;
-    const end = (p.end_date || '').split('T')[0];
-    return !!end && end < today;
+    const linked = p._collabId ? collabs.find(c => c.id === p._collabId) : undefined;
+    return !!linked && linked.state !== 'cancelled' && !!linked.uploadConfirmedAt;
   };
 
   const getDateStr = (day: number) => {
@@ -363,14 +359,15 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   // Upcoming deadlines
   const upcomingDeadlines = useMemo(() => {
     return rows
-      .filter(p => !isCollabDone(p) && p.end_date && new Date(p.end_date) >= new Date())
+      .filter(p => !isCollabDone(p) && p.end_date && dayOnly(p.end_date) >= today)
       .map(p => ({ id: p.id, title: p.title, influencer: p.influencer_username, endDate: p.end_date, fee: p.fee }))
       .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
       .slice(0, 6);
-  }, [rows]);
+  }, [rows, collabs, today]);
 
   const getDaysLeft = (endDate: string) => {
-    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const diff = daysUntilDeadline(endDate);
+    if (diff === null) return '-';
     if (diff < 0) return '마감됨';
     if (diff === 0) return 'D-Day';
     return `D-${diff}`;

@@ -36,6 +36,21 @@ const EXTERNAL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 /** KakaoTalk universal links must be resolved by the OS, not rendered in WebView. */
 const KAKAO_TALK_UNIVERSAL_LINK = /^https:\/\/talk-apps\.kakao\.com\/scheme\//i;
 
+/**
+ * Instagram app hand-offs (`instagram://…`, or an Android `intent://` aimed at an
+ * Instagram package/scheme). Instagram's web login and consent pages fire these
+ * to push people into the app, but account connection must finish on the web:
+ * the app cannot complete the OAuth consent and dead-ends with an error, and
+ * the redirect back to PicksFolio never happens. These are swallowed so the
+ * user stays on the web login page in the WebView.
+ */
+function isInstagramAppLink(url: string): boolean {
+  if (/^instagram(-stories)?:/i.test(url)) return true;
+  if (!/^intent:/i.test(url)) return false;
+  const { appUrl, packageName } = parseAndroidIntent(url);
+  return /^com\.instagram\./i.test(packageName || '') || /^instagram(-stories)?:/i.test(appUrl || '');
+}
+
 /** http(s) hosts that should always open in the system browser, not in-app. */
 function isInternalUrl(url: string): boolean {
   // Everything on the web app, the auth providers it redirects through, and the
@@ -274,6 +289,13 @@ export default function WebAppScreen() {
         return false;
       }
       if (isInternalUrl(url)) return true;
+      // Instagram connection must stay on the web flow. A web fallback (if the
+      // intent carries one) is loaded here; otherwise the page simply stays put.
+      if (isInstagramAppLink(url)) {
+        const { fallbackUrl } = parseAndroidIntent(url);
+        if (fallbackUrl && isInternalUrl(fallbackUrl)) navigateTo(fallbackUrl);
+        return false;
+      }
       // `intent://` needs unwrapping first — handing it to the OS as-is does
       // nothing, which is how the KakaoTalk/PG app buttons used to dead-end.
       if (/^intent:/i.test(url)) {
@@ -289,7 +311,7 @@ export default function WebAppScreen() {
       }
       return true;
     },
-    [openAndroidIntent],
+    [openAndroidIntent, navigateTo],
   );
 
   const reload = useCallback(() => {
