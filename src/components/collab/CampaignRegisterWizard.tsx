@@ -307,6 +307,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   );
   // 모집기간을 브랜드가 정하는 방식인지. 지원을 받는 방식에만 모집 시작·마감이 있다.
   const hasRecruitPeriod = mode.openApply;
+  // 희망 업로드 일정을 묻는지. 커머스형(공동구매)은 모집기간만 정하면 되고, 게시 시점은
+  // 판매 일정에 맞춰 담당자와 인플루언서가 정한다.
+  const hasUploadSchedule = !isGroupBuy;
   // 규모별 배분을 브랜드가 직접 정하는 방식인지. 단계 구성과 필수 항목이 여기서 갈린다.
   const picksInfluencer = mode.pickInfluencer;
   const budgetKrw = Number(digitsOnly(form.budget_krw) || 0);
@@ -471,7 +474,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       ...(hasRecruitPeriod
         ? [{ label: '모집기간', done: !!form.recruit_from && !!form.recruit_to, required: true }]
         : []),
-      { label: '희망 업로드 일정', done: !!form.upload_from, required: true },
+      ...(hasUploadSchedule
+        ? [{ label: '희망 업로드 일정', done: !!form.upload_from, required: true }]
+        : []),
       { label: conceptLabel, done: !!form.video_concept.trim(), required: true },
     ],
     influencer: [
@@ -485,7 +490,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제외 조건', done: form.exclude_keywords.length > 0, required: false },
     ],
   }), [
-    form, mode, picksInfluencer, isGroupBuy, hasRecruitPeriod, conceptLabel,
+    form, mode, picksInfluencer, isGroupBuy, hasRecruitPeriod, hasUploadSchedule, conceptLabel,
     applyHeadcount, commissionRate,
     badCommission, budgetKrw, cheapestFee, headcount, overBudget,
   ]);
@@ -523,9 +528,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         if (!form.recruit_from || !form.recruit_to) return '모집기간을 선택해 주세요.';
         if (form.recruit_from > form.recruit_to) return '모집기간의 시작일이 마감일보다 늦습니다.';
       }
-      if (!form.upload_from) return '희망 업로드 시작일을 선택해 주세요.';
-      if (form.upload_from && form.upload_to && form.upload_from > form.upload_to) {
-        return '희망 업로드 일정의 시작일이 마감일보다 늦습니다.';
+      if (hasUploadSchedule) {
+        if (!form.upload_from) return '희망 업로드 시작일을 선택해 주세요.';
+        if (form.upload_to && form.upload_from > form.upload_to) {
+          return '희망 업로드 일정의 시작일이 마감일보다 늦습니다.';
+        }
       }
       if (mode.hasContentFormat && !form.content_format) return '콘텐츠 형식을 골라 주세요.';
       if (!form.video_concept.trim()) return `원하는 ${conceptLabel}을 적어 주세요.`;
@@ -610,8 +617,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         product_url: form.product_url,
         upload_channel: form.upload_channel,
         video_concept: form.video_concept,
-        upload_from: form.upload_from,
-        upload_to: form.upload_to,
+        // 업로드 일정을 묻지 않는 방식은 방식을 바꾸기 전에 골라 둔 날짜가 남아 있어도 보내지 않는다.
+        upload_from: hasUploadSchedule ? form.upload_from : '',
+        upload_to: hasUploadSchedule ? form.upload_to : '',
 
         reward_mode: form.reward_mode,
         // 지원을 받아 고르는 방식에는 희망 인플루언서 조건이 없다. 폼에 남아 있는 값이
@@ -1252,16 +1260,18 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               )}
 
-              <div>
-                <label className={LABEL}>희망 업로드 일정 *</label>
-                <DateRangeCalendar
-                  from={form.upload_from}
-                  to={form.upload_to}
-                  onChange={(nextFrom, nextTo) =>
-                    setForm(p => ({ ...p, upload_from: nextFrom, upload_to: nextTo }))
-                  }
-                />
-              </div>
+              {hasUploadSchedule && (
+                <div>
+                  <label className={LABEL}>희망 업로드 일정 *</label>
+                  <DateRangeCalendar
+                    from={form.upload_from}
+                    to={form.upload_to}
+                    onChange={(nextFrom, nextTo) =>
+                      setForm(p => ({ ...p, upload_from: nextFrom, upload_to: nextTo }))
+                    }
+                  />
+                </div>
+              )}
 
               <div>
                 <label className={LABEL}>{conceptLabel} *</label>
@@ -1599,7 +1609,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   <span>{form.recruit_from}{form.recruit_to ? ` ~ ${form.recruit_to}` : ''}</span>
                 </div>
               )}
-              {form.upload_from && (
+              {hasUploadSchedule && form.upload_from && (
                 <div className="flex items-center justify-between">
                   <span className="text-white/50">업로드</span>
                   <span>{form.upload_from}{form.upload_to ? ` ~ ${form.upload_to}` : ''}</span>

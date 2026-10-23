@@ -2282,6 +2282,54 @@ export const apiService = {
     }
   },
 
+  /** 커머스 캠페인 목록과 캠페인별 선정 수(운영 콘솔). */
+  async getAdminCommerceCampaigns(token: string): Promise<{ campaigns: any[]; newSelectedTotal: number; error?: string }> {
+    try {
+      const res = await fetch('/api/admin/commerce-selections', {
+        credentials: 'same-origin',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { campaigns: [], newSelectedTotal: 0, error: json?.error || '커머스 캠페인을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get commerce campaigns:', e);
+      return { campaigns: [], newSelectedTotal: 0, error: '네트워크 오류' };
+    }
+  },
+
+  /** 커머스 캠페인 한 건의 지원자 · 선정자(연락처 포함, 운영 콘솔). */
+  async getAdminCommerceApplicants(token: string, campaignId: string): Promise<{ applicants: any[]; error?: string }> {
+    try {
+      const res = await fetch(`/api/admin/commerce-selections?campaign_id=${encodeURIComponent(campaignId)}`, {
+        credentials: 'same-origin',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { applicants: [], error: json?.error || '지원자를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get commerce applicants:', e);
+      return { applicants: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 커머스 캠페인의 새 선정 알림을 확인 처리한다(운영 콘솔). */
+  async markAdminCommerceSeen(token: string, campaignId: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/admin/commerce-selections', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ campaignId }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to mark commerce selections seen:', e);
+      return false;
+    }
+  },
+
   async adminCampaignAction(
     token: string,
     id: string,

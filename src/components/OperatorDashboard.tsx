@@ -22,6 +22,7 @@ import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminAffiliateConsole from './admin/AdminAffiliateConsole';
 import AdminPlatformSettings from './admin/AdminPlatformSettings';
 import AdminSalesLinks from './admin/AdminSalesLinks';
+import AdminCommerceCampaigns from './admin/AdminCommerceCampaigns';
 import { AFFILIATE_ENABLED } from '../utils/featureFlags';
 import { isTestProposal } from '../utils/testData';
 
@@ -46,6 +47,7 @@ type OperatorTab =
   | 'campaigns'
   | 'listup'
   | 'collabs'
+  | 'commerce'
   | 'affiliate'
   | 'influencerdb'
   | 'directory'
@@ -121,6 +123,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   // with `credentials: 'same-origin'`. Sub-panels and apiService calls work
   // off that cookie, so we only need a flag to know auth is ready.
   const [adminToken, setAdminToken] = useState<string>('');
+  // 커머스 캠페인에서 브랜드가 새로 선정한 지원자 수. 탭 배지로 알린다.
+  const [newCommerceSelections, setNewCommerceSelections] = useState(0);
 
   const getToken = useCallback(async () => {
     const user = await getUser();
@@ -204,6 +208,35 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // 커머스 캠페인 선정 알림. 어느 탭에 있든 배지가 보여야 하므로 화면을 열 때 한 번 세고,
+  // 그 뒤로는 하루 한 번 점심(한국 시간 12시)에 다시 센다. 브랜드 선정은 하루에 몇 건이라
+  // 자주 물어볼 이유가 없다. 탭을 열면 그 화면이 직접 세어 배지를 맞춘다.
+  useEffect(() => {
+    if (!adminToken) return;
+    let alive = true;
+    let timer = 0;
+    const load = async () => {
+      const res = await apiService.getAdminCommerceCampaigns(adminToken);
+      if (alive && !res.error) setNewCommerceSelections(res.newSelectedTotal || 0);
+    };
+    // 한국은 UTC+9 이고 서머타임이 없다 — 한국 12시는 UTC 03시다.
+    const msUntilSeoulNoon = () => {
+      const now = new Date();
+      const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 3, 0, 0));
+      if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+      return next.getTime() - now.getTime();
+    };
+    const scheduleNoon = () => {
+      timer = window.setTimeout(() => {
+        void load();
+        scheduleNoon();
+      }, msUntilSeoulNoon());
+    };
+    void load();
+    scheduleNoon();
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [adminToken]);
 
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }
@@ -290,6 +323,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'campaigns', label: '1. 캠페인 승인', badge: pendingCampaigns },
         { key: 'listup', label: '2. 인플루언서 배정 · 진행' },
         { key: 'collabs', label: '3. 캠페인 관리' },
+        { key: 'commerce', label: '커머스 캠페인', badge: newCommerceSelections },
         // 판매 연동 캠페인 · 그 수수료를 정하는 플랫폼 설정은 카페24 심사 보류로 꺼 두었다(utils/featureFlags).
         ...(AFFILIATE_ENABLED ? [{ key: 'affiliate' as OperatorTab, label: '판매 연동 캠페인' }] : []),
       ],
@@ -437,7 +471,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         </div>
       </header>
 
-      <div className={`mx-auto px-4 md:px-8 py-6 ${activeTab === 'listup' ? 'max-w-[1560px]' : 'max-w-7xl'}`}>
+      <div className={`mx-auto px-4 md:px-8 py-6 ${activeTab === 'listup' || activeTab === 'commerce' ? 'max-w-[1560px]' : 'max-w-7xl'}`}>
         {/* Tab Navigation — 일하는 순서대로 묶어 둔다. */}
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           {navGroups.map((group, gi) => (
@@ -748,6 +782,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 관리가 표시됩니다." />
+        )}
+
+        {/* 커머스 캠페인 — 지원 없이 리스트업만 받는 캠페인을 인플루언서 캠페인 메뉴 모양으로 */}
+        {activeTab === 'commerce' && (
+          adminToken
+            ? <AdminCommerceCampaigns token={adminToken} onNewCountChange={setNewCommerceSelections} />
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 커머스 캠페인이 표시됩니다." />
         )}
 
         {/* 판매 연동 캠페인(어필리에이트) */}

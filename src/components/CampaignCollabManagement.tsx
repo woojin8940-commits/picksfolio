@@ -15,6 +15,9 @@ import {
 } from '../utils/campaignBrief';
 import Toast from './Toast';
 
+/** 커머스 캠페인에서 브랜드가 지원자를 선정했을 때 안내하는 문구. 선정 카드 · 확인 창 · 알림이 같은 문장을 쓴다. */
+const COMMERCE_SELECTED_NOTICE = '담당 픽스폴리오 매니저가 인플루언서와 조율하여 연결드릴 예정입니다';
+
 const BrandCollabProgress = lazyWithRetry(() => import('./BrandCollabProgress'));
 const CampaignRegisterWizard = lazyWithRetry(() => import('./collab/CampaignRegisterWizard'));
 const CampaignInsightPanel = lazyWithRetry(() => import('./collab/CampaignInsightPanel'));
@@ -685,9 +688,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     // 진행 방식은 지금 열어 둔 캠페인이 정한다. 상세 화면 안쪽의 mode 는 이 핸들러
     // 바깥이라 여기서 다시 읽는다.
     const isBarter = rewardModeOf(selectedCampaign?.reward_mode).value === 'barter';
+    const isGroupBuy = rewardModeOf(selectedCampaign?.reward_mode).value === 'groupbuy';
     const acceptNote = isBarter
       ? '수락하면 인플루언서에게 선정 안내가 갑니다. 이후 진행은 지원서에 적힌 연락처로 브랜드에서 직접 연락해 주세요.'
-      : '수락하면 인플루언서에게 선정 안내가 가고, 픽스폴리오 담당자가 배정되어 연락드립니다.';
+      : isGroupBuy
+        ? `수락하면 인플루언서에게 선정 안내가 갑니다. ${COMMERCE_SELECTED_NOTICE}`
+        : '수락하면 인플루언서에게 선정 안내가 가고, 픽스폴리오 담당자가 인플루언서에게 연락해 조건과 일정을 조율합니다. 인플루언서 연락처는 브랜드에 공개되지 않습니다.';
     if (!window.confirm(`@${app.applicant_username} 님을 수락하시겠습니까?\n\n${acceptNote}`)) {
       return;
     }
@@ -701,7 +707,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       notify(
         isBarter
           ? '수락했습니다. 지원서에 적힌 연락처로 인플루언서에게 연락해 주세요.'
-          : res.managerUsername
+          : isGroupBuy
+            ? `선정했습니다. ${COMMERCE_SELECTED_NOTICE}`
+            : res.managerUsername
             ? `수락했습니다. 담당자 (@${res.managerUsername})가 연락드립니다.`
             : '수락했습니다. 담당자가 배정되어 연락드립니다.',
       );
@@ -1484,10 +1492,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                              판단이라 카드 겉에 둔다 — 펼침 안에 숨기면 브랜드는 숫자만
                              보고 거르게 된다. */
                           note={app.manager_note}
-                          /* 지원 메시지와 연락처는 펼쳤을 때만 보여 준다. 고를 때
-                             필요한 것은 숫자와 릴스이고, 연락처는 고른 뒤에 쓰는
-                             값이다 — 겉에 두면 카드 하나가 화면을 다 차지해 후보를
-                             나란히 비교할 수 없다. */
+                          /* 지원 메시지와 링크는 펼쳤을 때만 보여 준다. 고를 때
+                             필요한 것은 숫자와 릴스다 — 겉에 두면 카드 하나가 화면을
+                             다 차지해 후보를 나란히 비교할 수 없다. 연락처는 선정 전에는
+                             서버가 아예 보내지 않고(커머스형은 선정 후에도), 대신 누가
+                             연락하는지를 적어 둔다. */
                           details={
                             <div className="space-y-2.5">
                               {app.message && (
@@ -1522,7 +1531,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                                   </div>
                                 )}
                                 {!app.contact && !app.instagram_url && !app.youtube_naver_url && !app.portfolio_url && (
-                                  <p className="text-[11px] text-slate-400 font-medium">등록된 연락처/링크가 없습니다</p>
+                                  <p className="text-[11px] text-slate-400 font-medium">등록된 링크가 없습니다</p>
+                                )}
+                                {!app.contact && (
+                                  <p className="text-[11px] text-slate-400 font-medium leading-relaxed break-keep pt-1 border-t border-slate-100">
+                                    {app.status === 'accepted'
+                                      ? '연락은 픽스폴리오 담당자가 진행합니다.'
+                                      : isBarter
+                                        ? '연락처는 수락한 뒤에 보입니다.'
+                                        : '연락처는 공개되지 않습니다. 선정하시면 픽스폴리오 담당자가 인플루언서에게 연락해 진행합니다.'}
+                                  </p>
                                 )}
                               </div>
                             </div>
@@ -1596,11 +1614,20 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                               </button>
                             )}
                             {app.status === 'accepted' && (
-                              <p className="text-xs text-emerald-600 font-bold">
-                                {isBarter
-                                  ? '수락 완료. 지원서에 적힌 연락처로 직접 연락해 진행해 주세요.'
-                                  : `수락 완료. 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 배정되어 연락드립니다.`}
-                              </p>
+                              isBarter ? (
+                                <p className="text-xs text-emerald-600 font-bold">
+                                  수락 완료. 지원서에 적힌 연락처로 직접 연락해 진행해 주세요.
+                                </p>
+                              ) : (
+                                <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+                                  <p className="text-xs text-emerald-700 font-black">선정 완료</p>
+                                  <p className="text-[11px] text-emerald-700 font-medium mt-0.5 leading-relaxed break-keep">
+                                    {isGroupBuy
+                                      ? COMMERCE_SELECTED_NOTICE
+                                      : `픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 인플루언서에게 연락해 조건과 일정을 조율합니다. 진행 상황은 담당자가 안내해 드립니다.`}
+                                  </p>
+                                </div>
+                              )
                             )}
                             {app.status === 'pending' && !brandSelects && app.brand_preference === 'shortlist' && (
                               <p className="text-xs text-blue-600 font-bold">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>

@@ -123,8 +123,16 @@ export default async (req: Request) => {
           const key = norm(r.applicant_username);
           const insights = snapshots.get(key) || null;
           const quote = quotes.get(key);
+          /**
+           * 브랜드에게는 지원서 연락처를 선정 전에 보내지 않는다. 고를 때 보는 것은 인스타
+           * 프로필과 링크면 충분하고, 번호가 먼저 나가면 고르지도 않은 사람에게 브랜드가
+           * 직접 연락하게 된다. 선정한 뒤에도 커머스형은 픽스폴리오 담당자가 연락해 조율하므로
+           * 계속 감춘다. 제품 협찬형만 수락한 사람에게 브랜드가 직접 연락하는 방식이라 연다.
+           */
+          const brandMaySeeContact = r.status === "accepted" && rewardMode === "barter";
           return {
             ...r,
+            contact: viewerRole === "brand" && !brandMaySeeContact ? "" : r.contact,
             // 브랜드에게는 인플루언서 등록 단가를 보내지 않는다(withoutRegisteredPrices 주석).
             insights: viewerRole === "brand" ? withoutRegisteredPrices(insights) : insights,
             contact_card: contacts.get(key) || null,
