@@ -2943,6 +2943,43 @@ export const apiService = {
     }
   },
 
+  // 메타 광고로 받은 브랜드 서비스 소개서 신청(/brand-deck). 운영자 전용.
+  async getBrandDeckRequests(token?: string): Promise<{ requests?: any[]; error?: string }> {
+    try {
+      const res = await fetch('/api/brand-deck-requests', {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { requests: [], error: json?.error || '신청자 목록을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get brand deck requests:', e);
+      return { requests: [], error: '네트워크 오류' };
+    }
+  },
+
+  async updateBrandDeckRequest(
+    id: number,
+    patch: { status?: string; memo?: string },
+    token?: string,
+  ): Promise<{ request?: any; error?: string }> {
+    try {
+      const res = await fetch('/api/brand-deck-requests', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ id, ...patch }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '신청서를 저장하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to update brand deck request:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getManagers(token?: string): Promise<{ managers?: any[]; error?: string }> {
     try {
       const res = await fetch('/api/managers', {

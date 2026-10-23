@@ -19,6 +19,7 @@ import AdminManagerAccounts from './admin/AdminManagerAccounts';
 import AdminLegacyUsernameTransfer from './admin/AdminLegacyUsernameTransfer';
 import AdminDmQueue from './admin/AdminDmQueue';
 import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
+import AdminBrandDeckRequests from './admin/AdminBrandDeckRequests';
 import AdminAffiliateConsole from './admin/AdminAffiliateConsole';
 import AdminPlatformSettings from './admin/AdminPlatformSettings';
 import AdminSalesLinks from './admin/AdminSalesLinks';
@@ -52,6 +53,7 @@ type OperatorTab =
   | 'influencerdb'
   | 'directory'
   | 'applicants'
+  | 'brandleads'
   | 'saleslinks'
   | 'users'
   | 'managers'
@@ -336,6 +338,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'applicants', label: '인플루언서 지원자' },
         { key: 'saleslinks', label: '브랜드 영업 링크' },
       ],
+    },
+    {
+      group: '브랜드',
+      tabs: [{ key: 'brandleads', label: '브랜드 신청자' }],
     },
     {
       group: '운영',
@@ -864,6 +870,21 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />
+        )}
+
+        {/* 브랜드 신청자 (메타 광고 서비스 소개서 신청) */}
+        {activeTab === 'brandleads' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="브랜드 신청자 · 서비스 소개서 신청"
+                  body="메타 광고로 연결되는 신청 페이지(/brand-deck)에 남겨진 회사명 · 담당자 · 연락처 · 직책 · 이메일입니다. 소개서를 보낸 뒤 상태를 '소개서 발송' 또는 '완료'로 바꾸고 상담 메모를 남겨 두면, 아직 대응하지 못한 브랜드만 추려 볼 수 있습니다."
+                />
+                <AdminBrandDeckRequests token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 신청자 목록이 표시됩니다." />
         )}
 
         {/* 회원 관리 */}
