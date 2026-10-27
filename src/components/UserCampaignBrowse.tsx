@@ -640,7 +640,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center shadow-[0_2px_6px_-2px_rgba(16,185,129,0.45)]">
                       <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-black uppercase">{isEn ? 'Campaign Period' : '캠페인 기간'}</span>
+                    <span className="text-[10px] text-slate-400 font-black uppercase">{isEn ? 'Recruitment Period' : '모집기간'}</span>
                   </div>
                   {selectedCampaign.start_date ? (
                     <div>

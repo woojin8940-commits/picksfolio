@@ -452,7 +452,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제품명', done: !!form.product_name.trim(), required: true },
       { label: '제품 대표 이미지', done: !!form.thumbnail_url, required: false },
       { label: '제품 카테고리', done: !!form.category, required: true },
-      { label: '제품 URL', done: !!form.product_url.trim(), required: false },
+      { label: '제품 URL', done: !!form.product_url.trim(), required: true },
       { label: '제품 소개', done: !!form.description.trim(), required: true },
       { label: '제품 제공 방식', done: !!form.product_provide, required: true },
       { label: '담당자 이름', done: !!form.contact_person.trim(), required: true },
@@ -501,6 +501,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (!form.brand_name.trim()) return '브랜드명을 입력해 주세요.';
       if (!form.product_name.trim()) return '제품명을 입력해 주세요.';
       if (!form.category) return '제품 카테고리를 선택해 주세요.';
+      // 제품 링크도 필수다. 인플루언서는 상세 페이지를 보고 지원을 정하고, 담당자는
+      // 운영 콘솔에서 이 링크로 상품을 확인한 뒤 조건을 조율한다.
+      if (!form.product_url.trim()) return '제품 URL(상품 링크)을 입력해 주세요.';
       if (!form.description.trim()) return '제품 소개를 입력해 주세요. 인플루언서가 가장 먼저 읽는 내용입니다.';
       if (!form.contact_person.trim()) return '캠페인 담당자 이름을 입력해 주세요.';
       if (!contactPhoneDigits) return '캠페인 담당자 연락처를 입력해 주세요.';
@@ -908,13 +911,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className={LABEL}>제품 URL <span className="font-bold text-slate-400">(선택)</span></label>
+                  <label className={LABEL}>제품 URL *</label>
                   <input
                     type="url"
                     value={form.product_url}
                     onChange={e => patch('product_url', e.target.value)}
                     className={INPUT}
-                    placeholder="없으면 비워 두세요"
+                    placeholder="상품 상세 페이지 링크 (예: https://...)"
                   />
                 </div>
               </div>

@@ -182,7 +182,7 @@ const AdminCommerceCampaigns: React.FC<Props> = ({ token, onNewCountChange }) =>
                   {c.manager_username ? ` · 담당 @${c.manager_username}` : ' · 담당자 없음'}
                 </p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
-                  <InfoTile label="희망 수수료" value={rate > 0 ? `${rate}%` : '협의'} accent />
+                  <InfoTile label="브랜드 입력 수수료" value={rate > 0 ? `${rate}%` : '미입력'} accent />
                   <InfoTile label="모집 인원" value={headcount > 0 ? `${headcount}명` : '제한 없음'} />
                   <InfoTile
                     label="모집기간"
@@ -195,16 +195,22 @@ const AdminCommerceCampaigns: React.FC<Props> = ({ token, onNewCountChange }) =>
                     {c.description}
                   </p>
                 )}
-                {c.product_url && (
-                  <a
-                    href={c.product_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block mt-2 text-[11px] font-black text-blue-600 hover:underline"
-                  >
-                    제품 페이지 보기 →
-                  </a>
-                )}
+                {/* 브랜드가 등록 때 적은 상품 링크. 담당자는 이 상품을 보고 수수료와 조건을 조율한다. */}
+                <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                  <p className="text-[10px] text-slate-400 font-black">상품 링크</p>
+                  {c.product_url ? (
+                    <a
+                      href={c.product_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block mt-0.5 text-sm font-black text-blue-600 hover:underline break-all"
+                    >
+                      {c.product_url} ↗
+                    </a>
+                  ) : (
+                    <p className="mt-0.5 text-sm font-bold text-slate-400">브랜드가 입력하지 않았습니다</p>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -450,7 +456,7 @@ const AdminCommerceCampaigns: React.FC<Props> = ({ token, onNewCountChange }) =>
                     {c.title}
                   </h3>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-black text-rose-500">{rate > 0 ? `수수료 ${rate}%` : '수수료 협의'}</span>
+                    <span className="text-xs font-black text-rose-500">{rate > 0 ? `수수료 ${rate}%` : '수수료 미입력'}</span>
                     <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap">
                       {headcount > 0 ? `${applied}/${headcount}명` : `${applied}명 지원`}{selectedCount > 0 ? ` · 선정 ${selectedCount}` : ''}
                     </span>
@@ -458,6 +464,17 @@ const AdminCommerceCampaigns: React.FC<Props> = ({ token, onNewCountChange }) =>
                   <p className="text-[10px] text-slate-400 font-medium mt-1 truncate">
                     {c.manager_username ? `담당 @${c.manager_username}` : '담당자 없음'}
                   </p>
+                  {c.product_url && (
+                    <a
+                      href={c.product_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="block text-[10px] font-black text-blue-600 hover:underline mt-0.5 truncate"
+                    >
+                      상품 링크 ↗
+                    </a>
+                  )}
                 </div>
               </div>
             );
