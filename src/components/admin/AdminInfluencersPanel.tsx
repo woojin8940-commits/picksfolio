@@ -72,6 +72,9 @@ const formatDate = (s?: string | null) => {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 };
 
+/** 유저네임이 없는 회원은 auth id 로 구분한다. 서버의 멤버십 변경은 auth_user_id 로 계정을 찾는다. */
+const rowKey = (r: { id: string; username: string }) => r.username || r.id;
+
 const formatTimeAgo = (s?: string | null) => {
   if (!s) return '-';
   const d = new Date(s);
@@ -107,8 +110,15 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   const load = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     const data = await apiService.getAdminInfluencers(token);
-    setRows(data.influencers || []);
-    setBusinesses(data.businesses || []);
+    // 카카오로 가입만 하고 링크(유저네임)를 아직 만들지 않은 회원은 username 이 비어 온다.
+    // 그대로 두면 r.username.slice() 같은 곳에서 화면 전체가 오류로 멈추므로 여기서 맞춘다.
+    setRows((data.influencers || []).map((r: any) => ({
+      ...r,
+      username: String(r?.username || ''),
+      views: Number(r?.views) || 0,
+      clicks: Number(r?.clicks) || 0,
+    })));
+    setBusinesses((data.businesses || []).map((b: any) => ({ ...b, username: String(b?.username || '') })));
     setGrants((data.operatorGrants || []) as OperatorGrantRow[]);
     setGrantsError(data.operatorGrantsError || null);
     if (!opts?.silent) setLoading(false);
@@ -169,6 +179,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   );
 
   const toggleFeatured = async (r: InfluencerRow) => {
+    if (!r.username) return;
     setBusy(r.username);
     const res = await apiService.updateAdminInfluencer(token, r.username, { featured: !r.featured });
     setBusy(null);
@@ -182,16 +193,16 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
     if (currentPlan === plan) return;
 
     const verb = plan === null ? '운영자 부여 해제' : `${TIER_LABEL[plan]} 부여`;
-    if (!window.confirm(`@${r.username} 계정에 ${verb}하시겠어요?`)) return;
+    if (!window.confirm(`@${r.username || r.email || r.id.slice(0, 8)} 계정에 ${verb}하시겠어요?`)) return;
 
-    setBusy(r.username);
-    const res = await apiService.updateAdminInfluencer(token, r.username, {
+    setBusy(rowKey(r));
+    const res = await apiService.updateAdminInfluencer(token, rowKey(r), {
       membership_plan: plan,
       auth_user_id: r.id,
     });
     setBusy(null);
     if (res.ok && res.membership) {
-      setRows(prev => prev.map(x => x.username === r.username
+      setRows(prev => prev.map(x => x.id === r.id
         ? {
             ...x,
             ...res.membership,
@@ -419,10 +430,10 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                     <div key={r.id} className="md:grid md:grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-slate-50/50 transition-all">
                       <div className="md:col-span-3 flex items-center gap-2 min-w-0">
                         <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
-                          <span className="text-xs font-black text-white">{r.username.slice(0, 2).toUpperCase()}</span>
+                          <span className="text-xs font-black text-white">{(r.username || '?').slice(0, 2).toUpperCase()}</span>
                         </div>
                         <div className="min-w-0">
-                          <p className="font-black text-slate-900 text-sm truncate">@{r.username}</p>
+                          <p className="font-black text-slate-900 text-sm truncate">{r.username ? `@${r.username}` : '유저네임 미설정'}</p>
                           <p className="text-[10px] font-bold text-slate-400 truncate">{r.full_name || '-'} · {r.email || '-'}</p>
                         </div>
                         {r.featured && (
@@ -477,7 +488,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                       <div className="md:col-span-3 mt-2 md:mt-0 flex justify-end gap-1.5 flex-wrap">
                         <button
                           onClick={() => toggleFeatured(r)}
-                          disabled={busy === r.username || r.has_profile === false}
+                          disabled={busy === rowKey(r) || r.has_profile === false || !r.username}
                           title={r.has_profile === false ? '프로필이 만들어진 뒤에 주목으로 올릴 수 있습니다. 멤버십 부여는 지금도 됩니다.' : undefined}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all ${
                             r.featured
@@ -489,7 +500,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'standard')}
-                          disabled={busy === r.username || r.operator_membership_plan === 'standard'}
+                          disabled={busy === rowKey(r) || r.operator_membership_plan === 'standard'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'standard'
                               ? 'bg-blue-500 text-white'
@@ -500,7 +511,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'standard_ai')}
-                          disabled={busy === r.username || r.operator_membership_plan === 'standard_ai'}
+                          disabled={busy === rowKey(r) || r.operator_membership_plan === 'standard_ai'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'standard_ai'
                               ? 'bg-violet-500 text-white'
@@ -511,7 +522,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'pro')}
-                          disabled={busy === r.username || r.operator_membership_plan === 'pro'}
+                          disabled={busy === rowKey(r) || r.operator_membership_plan === 'pro'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'pro'
                               ? 'bg-slate-900 text-white'
@@ -523,13 +534,13 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         {r.operator_membership_plan && (
                           <button
                             onClick={() => setMembership(r, null)}
-                            disabled={busy === r.username}
+                            disabled={busy === rowKey(r)}
                             className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-white text-slate-500 hover:bg-slate-50 border border-slate-200 disabled:opacity-50"
                           >
                             부여 해제
                           </button>
                         )}
-                        {busy === r.username && (
+                        {busy === rowKey(r) && (
                           <span className="px-2 py-1.5 text-[10px] font-bold text-slate-400">처리중...</span>
                         )}
                       </div>
