@@ -298,6 +298,11 @@ export default async (req: Request) => {
       if (productUrl === null) {
         return Response.json({ error: "제품 URL을 확인해 주세요." }, { status: 400 });
       }
+      // 새로 등록하는 캠페인은 상품 링크가 필수다. 담당자가 운영 콘솔에서 이 링크로
+      // 상품을 확인하고 조건을 조율한다.
+      if (!productUrl) {
+        return Response.json({ error: "제품 URL(상품 링크)을 입력해 주세요." }, { status: 400 });
+      }
 
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -372,6 +377,11 @@ export default async (req: Request) => {
         : optionalHttpUrl(updates.product_url);
       if (productUrl === null) {
         return Response.json({ error: "제품 URL을 확인해 주세요." }, { status: 400 });
+      }
+      // 이미 있는 링크를 지우는 수정은 받지 않는다. 링크 없이 등록된 예전 캠페인은
+      // 링크를 보내지 않는 수정(상태 변경 등)이 그대로 통과한다.
+      if (updates.product_url !== undefined && !productUrl) {
+        return Response.json({ error: "제품 URL(상품 링크)을 입력해 주세요." }, { status: 400 });
       }
 
       /**
