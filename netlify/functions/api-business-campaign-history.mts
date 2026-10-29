@@ -67,6 +67,12 @@ type PostMetric = {
   views: number;
   likes: number;
   comments: number;
+  /**
+   * 공유 수. 채널 동기화가 인사이트로 받아 둔 값이고, 못 받은 게시물(권한 없음 ·
+   * 공유 수를 받기 전에 동기화된 채널)은 null 이다. 0 으로 두면 아무도 공유하지 않은
+   * 게시물로 읽힌다.
+   */
+  shares: number | null;
   thumbnailUrl: string;
   permalink: string;
   timestamp: string;
@@ -86,6 +92,7 @@ const mediaIndexOf = (row: any): Record<string, PostMetric> => {
       views: intOf(item?.views),
       likes: intOf(item?.likes),
       comments: intOf(item?.comments),
+      shares: item?.shares === null || typeof item?.shares === "undefined" ? null : intOf(item.shares),
       thumbnailUrl: String(item?.thumbnailUrl || ""),
       permalink: String(item?.permalink || ""),
       timestamp: String(item?.timestamp || ""),
@@ -206,6 +213,9 @@ export default async (req: Request, context: Context) => {
       let views = 0;
       let likes = 0;
       let comments = 0;
+      let shares = 0;
+      // 공유 수를 실제로 받은 게시물 수. 화면이 "집계 전"과 "공유 0"을 가르는 근거다.
+      let sharesMatched = 0;
       let matched = 0;
       let uploaded = 0;
       let spend = 0;
@@ -227,6 +237,10 @@ export default async (req: Request, context: Context) => {
           views += metric.views;
           likes += metric.likes;
           comments += metric.comments;
+          if (metric.shares !== null) {
+            shares += metric.shares;
+            sharesMatched++;
+          }
           if (metric.views > 0) measuredSpend += intOf(collab.fee);
         }
 
@@ -277,6 +291,9 @@ export default async (req: Request, context: Context) => {
       totals.matched += matched;
       totals.views += views;
       totals.reactions += likes + comments;
+      totals.comments += comments;
+      totals.shares += shares;
+      totals.sharesMatched += sharesMatched;
       totals.spend += spend;
       totals.measuredSpend += measuredSpend;
 
@@ -300,6 +317,8 @@ export default async (req: Request, context: Context) => {
         views,
         likes,
         comments,
+        shares,
+        sharesMatched,
         spend,
         measuredSpend,
         cpv,
@@ -331,6 +350,9 @@ function emptyTotals() {
     matched: 0,
     views: 0,
     reactions: 0,
+    comments: 0,
+    shares: 0,
+    sharesMatched: 0,
     spend: 0,
     measuredSpend: 0,
     cpv: 0,

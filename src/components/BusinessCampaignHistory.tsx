@@ -40,6 +40,8 @@ type PostMetric = {
   views: number;
   likes: number;
   comments: number;
+  /** 공유 수. 인사이트로 받지 못한 게시물은 null(또는 예전 캐시라 없음). */
+  shares?: number | null;
   thumbnailUrl: string;
   permalink: string;
   timestamp: string;
@@ -94,6 +96,9 @@ type HistoryCampaign = {
   views: number;
   likes: number;
   comments: number;
+  /** 공유 수 합계 — 공유 수를 받은 게시물(sharesMatched)만 더한 값. */
+  shares?: number;
+  sharesMatched?: number;
   spend: number;
   /** CPV 의 분자 — 지표가 맞춰진 게시물의 지급액만. spend 는 확정 지급액 전부다. */
   measuredSpend: number;
@@ -108,14 +113,17 @@ type HistoryTotals = {
   matched: number;
   views: number;
   reactions: number;
+  comments: number;
+  shares: number;
+  sharesMatched: number;
   spend: number;
   measuredSpend: number;
   cpv: number;
 };
 
 const EMPTY_TOTALS: HistoryTotals = {
-  campaigns: 0, collabs: 0, uploaded: 0, matched: 0, views: 0, reactions: 0, spend: 0,
-  measuredSpend: 0, cpv: 0,
+  campaigns: 0, collabs: 0, uploaded: 0, matched: 0, views: 0, reactions: 0,
+  comments: 0, shares: 0, sharesMatched: 0, spend: 0, measuredSpend: 0, cpv: 0,
 };
 
 /** 지표를 못 붙인 이유를 브랜드가 할 일로 바꿔서 적는다. */
@@ -157,15 +165,19 @@ type StatusFilter = '' | 'open' | 'closed';
 
 /**
  * 이력을 가르는 기준은 카테고리가 아니라 성과다. 브랜드가 "지난번에 뭐가 잘 됐지"를
- * 물을 때 알고 싶은 건 그게 패션 캠페인이었는지가 아니라 조회수·반응·CPV 중 어느
- * 쪽으로 잘 됐는지다. 그래서 카테고리 구분을 빼고 그 세 축의 정렬만 남긴다.
+ * 물을 때 알고 싶은 건 그게 패션 캠페인이었는지가 아니라 조회수·댓글·공유·CPV 중
+ * 어느 쪽으로 잘 됐는지다. 그래서 카테고리 구분을 빼고 그 축의 정렬만 남긴다.
+ *
+ * 좋아요를 댓글과 묶어 보던 축은 댓글과 공유로 나눴다. 좋아요는 스쳐 가며 누르는
+ * 반응이라 콘텐츠가 대화를 만들었는지(댓글), 남에게 퍼졌는지(공유)를 가려 주지 못한다.
  */
-type SortKey = 'recent' | 'views' | 'reactions' | 'cpv';
+type SortKey = 'recent' | 'views' | 'comments' | 'shares' | 'cpv';
 
 const SORT_TABS: [SortKey, string][] = [
   ['recent', '최신순'],
   ['views', '조회수순'],
-  ['reactions', '좋아요·댓글순'],
+  ['comments', '댓글순'],
+  ['shares', '공유순'],
   ['cpv', 'CPV순'],
 ];
 
@@ -243,12 +255,18 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     // 집계 전(0)인 캠페인은 성과순 정렬에서 아래로 내린다. 0 을 '가장 저렴한 CPV' 로
     // 읽히게 두면 아직 숫자가 없는 캠페인이 제일 잘한 것처럼 맨 위에 올라온다.
     const score = (c: HistoryCampaign) =>
-      sort === 'views' ? c.views : sort === 'reactions' ? c.likes + c.comments : c.cpv;
+      sort === 'views'
+        ? c.views
+        : sort === 'comments'
+          ? c.comments
+          : sort === 'shares'
+            ? c.shares ?? 0
+            : c.cpv;
     return [...rows].sort((a, b) => {
       const av = score(a);
       const bv = score(b);
       if (av === 0 || bv === 0) return av === bv ? 0 : av === 0 ? 1 : -1;
-      // CPV 는 낮을수록 좋으니 오름차순, 조회수·반응은 높을수록 좋으니 내림차순.
+      // CPV 는 낮을수록 좋으니 오름차순, 조회수·댓글·공유는 높을수록 좋으니 내림차순.
       return sort === 'cpv' ? av - bv : bv - av;
     });
   }, [campaigns, status, sort]);
@@ -264,6 +282,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       base.matched += c.matched;
       base.views += c.views;
       base.reactions += c.likes + c.comments;
+      base.comments += c.comments;
+      base.shares += c.shares ?? 0;
+      base.sharesMatched += c.sharesMatched ?? 0;
       base.spend += c.spend;
       base.measuredSpend += c.measuredSpend ?? 0;
     }
@@ -277,13 +298,16 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
   const filtered = !!status;
   const coverage = shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.matched}건 집계` : '';
+  // 공유 수는 인사이트 값이라 조회수·댓글보다 덜 채워진다. 몇 건에서 받았는지를 따로 적는다.
+  const shareCoverage =
+    shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.sharesMatched}건 집계` : '';
 
   if (loading) {
     return (
       <div className="p-4 md:p-14 w-full">
         <div className="h-8 w-40 bg-slate-100 rounded-lg animate-pulse" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-8">
-          {[0, 1, 2, 3].map((i) => (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-8">
+          {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="h-24 bg-slate-100 rounded-2xl animate-pulse" />
           ))}
         </div>
@@ -312,7 +336,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Kpi
           label={filtered ? '캠페인 (필터)' : '진행한 캠페인'}
           value={formatNumberWithCommas(shown.campaigns)}
@@ -327,11 +351,18 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           hint={coverage || '업로드가 확인되면 여기에 쌓입니다'}
         />
         <Kpi
-          label="좋아요 · 댓글"
-          value={shown.reactions > 0 ? formatNumberWithCommas(shown.reactions) : '—'}
-          unit={shown.reactions > 0 ? '건' : undefined}
-          pending={shown.reactions === 0}
+          label="콘텐츠 댓글"
+          value={shown.matched > 0 ? formatNumberWithCommas(shown.comments) : '—'}
+          unit={shown.matched > 0 ? '개' : undefined}
+          pending={shown.matched === 0}
           hint={coverage}
+        />
+        <Kpi
+          label="공유"
+          value={shown.sharesMatched > 0 ? formatNumberWithCommas(shown.shares) : '—'}
+          unit={shown.sharesMatched > 0 ? '회' : undefined}
+          pending={shown.sharesMatched === 0}
+          hint={shareCoverage || '인플루언서 채널 인사이트에서 받아옵니다'}
         />
         <Kpi
           label="평균 CPV"
@@ -358,7 +389,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       <div className="mt-5 bg-blue-50 border border-blue-100 rounded-2xl p-4">
         <p className="text-[12px] font-black text-blue-800">게시물 지표는 인플루언서 채널 연동에서 받아옵니다</p>
         <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
-          업로드된 게시물 주소를 인플루언서의 메타 계정 최근 게시물과 맞춰 조회수·반응을 가져옵니다.
+          업로드된 게시물 주소를 인플루언서의 메타 계정 최근 게시물과 맞춰 조회수·댓글·공유를 가져옵니다.
+          공유 수는 인스타그램 인사이트 값이라, 인플루언서가 채널을 다시 동기화한 뒤부터 채워집니다.
           인플루언서가 직접 적은 숫자는 성과 근거로 쓰지 않기 때문에, 연동 전 게시물은 집계 전으로 남습니다.
           메타는 최근 게시물만 돌려주므로 오래된 캠페인의 게시물도 집계에서 빠질 수 있습니다.
         </p>
@@ -460,7 +492,10 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                           조회 {c.views > 0 ? formatNumberWithCommas(c.views) : '—'}
                         </span>
                         <span className="text-[11px] font-bold text-slate-500">
-                          반응 {c.likes + c.comments > 0 ? formatNumberWithCommas(c.likes + c.comments) : '—'}
+                          댓글 {c.matched > 0 ? formatNumberWithCommas(c.comments) : '—'}
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-500">
+                          공유 {(c.sharesMatched ?? 0) > 0 ? formatNumberWithCommas(c.shares ?? 0) : '—'}
                         </span>
                         <span className="text-[11px] font-bold text-slate-500">
                           CPV {c.cpv > 0 ? `${formatNumberWithCommas(c.cpv)}원` : '—'}
@@ -530,8 +565,10 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                       : '조회수 비공개'}
                                   </p>
                                   <p className="text-[10px] text-slate-500 font-bold">
-                                    좋아요 {formatNumberWithCommas(p.metrics.likes)} · 댓글{' '}
-                                    {formatNumberWithCommas(p.metrics.comments)}
+                                    댓글 {formatNumberWithCommas(p.metrics.comments)} · 공유{' '}
+                                    {typeof p.metrics.shares === 'number'
+                                      ? formatNumberWithCommas(p.metrics.shares)
+                                      : '—'}
                                     {p.metrics.views > 0 && p.fee > 0
                                       ? ` · CPV ${formatNumberWithCommas(Math.round(p.fee / p.metrics.views))}원`
                                       : ''}
