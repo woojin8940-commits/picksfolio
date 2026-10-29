@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { mutateBlobJSON } from "./blob-write.mts";
 import { clipText } from "./clip-text.mts";
 import { safeKeyPrefix } from "./upload-media.mts";
+import { mapConcurrent } from "./concurrency.mts";
 
 /**
  * 메타(인스타그램) 지표 수집 — 픽스폴리오가 보관하는 숫자의 단일 출처.
@@ -145,6 +146,8 @@ export interface RecentReel {
   views: number;
   likes: number;
   comments: number;
+  /** 공유 수(인사이트). 권한·게시물 종류 때문에 못 받으면 null — 0 과 섞지 않는다. */
+  shares: number | null;
   timestamp: string;
   source: string;
 }
@@ -158,6 +161,8 @@ export interface RecentFeedItem {
   caption: string;
   likes: number;
   comments: number;
+  /** 공유 수(인사이트). 못 받으면 null. */
+  shares: number | null;
   timestamp: string;
 }
 
@@ -365,6 +370,30 @@ export async function fetchMediaViews(link: MetaLink, mediaId: string): Promise<
 export const MEDIA_FIELDS_WITH_VIEWS = `${MEDIA_FIELDS},${VIEWS_EXPANSION}`;
 /** 미디어 항목에 실려 온 조회수. 없으면 null — 부르는 쪽이 따로 조회할지 정한다. */
 export const viewsOnMedia = viewsFromMedia;
+
+/**
+ * 미디어 한 편의 공유 수를 지금 조회한다. 못 받으면 null.
+ *
+ * 공유는 좋아요·댓글과 달리 미디어의 일반 필드가 아니라 인사이트 지표다. 목록 요청의
+ * 필드 확장(`insights.metric(views)`)에 끼워 넣지 않는 이유는, 게시물 종류나 권한
+ * 때문에 지표 하나가 거부되면 메타가 요청 전체를 실패시키기 때문이다 — 공유 수
+ * 하나 때문에 조회수까지 잃으면 안 된다. 그래서 게시물마다 따로 묻는다.
+ */
+export async function fetchMediaShares(link: MetaLink, mediaId: string): Promise<number | null> {
+  const token = String(link.accessToken || "");
+  if (!token || !mediaId) return null;
+  const host = graphHostFor(link.tokenSource);
+  try {
+    const res = await fetch(
+      `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(mediaId)}/insights?metric=shares` +
+        `&access_token=${encodeURIComponent(token)}`,
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    return res.ok ? insightValue(data) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** 사용자별 인스타그램 연동 정보. 스코프에 따라 보관 위치가 다르다(linkLocation 참고). */
 export async function loadMetaLink(
@@ -831,8 +860,30 @@ export async function fetchInstagramMetrics(
     caption: clipText(m?.caption, 200),
     likes: intOf(m?.like_count),
     comments: intOf(m?.comments_count),
+    shares: null,
     timestamp: String(m?.timestamp || ""),
   }));
+
+  /**
+   * 화면에 남길 게시물(릴스 SHOW_SIZE 편 + 피드 FEED_SIZE 칸)의 공유 수.
+   *
+   * 캠페인 이력에서 브랜드가 게시물별 댓글·공유를 따로 보려면 이 값이 채널 자료에
+   * 함께 굳어 있어야 한다. 릴스와 피드가 같은 게시물을 겹쳐 담으므로 아이디로 한 번씩만
+   * 묻는다. 못 받은 게시물은 null 로 남는다.
+   */
+  const shareIds = Array.from(
+    new Set(
+      [...reels.slice(0, SHOW_SIZE), ...items.slice(0, FEED_SIZE)]
+        .map((m) => String(m?.id || ""))
+        .filter(Boolean),
+    ),
+  );
+  const shareValues = await mapConcurrent(shareIds, 5, (id) => fetchMediaShares(link, id));
+  const sharesById = new Map(shareIds.map((id, i) => [id, shareValues[i] ?? null]));
+  const sharesOf = (m: any): number | null => sharesById.get(String(m?.id || "")) ?? null;
+  feed.forEach((item) => {
+    item.shares = sharesById.get(item.id) ?? null;
+  });
 
   // 팔로워·팔로잉은 프로필 필드로 별도 조회한다.
   let igUsername = String(link.igUsername || "");
@@ -885,6 +936,7 @@ export async function fetchInstagramMetrics(
         views: reelViews[i] || 0,
         likes: intOf(m?.like_count),
         comments: intOf(m?.comments_count),
+        shares: sharesOf(m),
         timestamp: String(m?.timestamp || ""),
         source: "meta_api",
       })),
