@@ -38,12 +38,14 @@ export const GRAPH_VERSION = "v25.0";
  *   business_management    광고 계정·비즈니스 자산 접근
  *   pages_show_list        관리하는 페이스북 페이지 목록 (광고 페이지 선택)
  *   pages_read_engagement  페이지 게시물 반응 (좋아요·댓글·공유)
+ *   instagram_basic · instagram_branded_content_ads_brand
+ *                          파트너십 광고(광고 코드 부스팅) — 2026-10-30 메타 앱 심사 승인
  *
  * 인스타그램 인사이트(instagram_manage_insights)는 여기 넣지 않는다. 그 권한은 이미
  * 인스타그램 연동에서 받고 있다.
  *
- * 파트너십 광고(광고 코드) 같은 추가 권한은 META_ADS_EXTRA_SCOPES(쉼표 구분)로 붙인다 —
- * 심사를 받지 않은 권한을 기본값에 넣으면 역할이 없는 사용자의 동의 화면이 깨진다.
+ * 그 밖의 추가 권한은 META_ADS_EXTRA_SCOPES(쉼표 구분)로 붙인다 — 심사를 받지 않은
+ * 권한을 기본값에 넣으면 역할이 없는 사용자의 동의 화면이 깨진다.
  */
 const BASE_SCOPES = [
   "ads_management",
@@ -54,26 +56,27 @@ const BASE_SCOPES = [
 ];
 
 /**
- * 파트너십 광고(광고 코드 부스팅)에 필요한 권한.
+ * 파트너십 광고(광고 코드 부스팅)에 필요한 권한. 심사가 승인되어 기본 권한에 함께 넣는다.
  *
  * 메타 문서상 instagram_branded_content_ads_brand 는 instagram_basic 없이 받으면 광고 코드
- * 조회가 403 으로 막힌다. 그래서 하나만 적어도 둘을 같이 요청한다.
+ * 조회가 403 으로 막힌다. 그래서 둘을 항상 같이 요청한다.
  */
 export const PARTNERSHIP_SCOPES = ["instagram_basic", "instagram_branded_content_ads_brand"];
+
+const DEFAULT_SCOPES = [...BASE_SCOPES, ...PARTNERSHIP_SCOPES];
 
 const extraScopes = (): string[] => {
   const list = String(process.env.META_ADS_EXTRA_SCOPES || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (list.includes("instagram_branded_content_ads_brand")) list.push(...PARTNERSHIP_SCOPES);
-  return [...new Set(list)].filter((s) => !BASE_SCOPES.includes(s));
+  return [...new Set(list)].filter((s) => !DEFAULT_SCOPES.includes(s));
 };
 
-export const META_ADS_SCOPES = BASE_SCOPES;
+export const META_ADS_SCOPES = DEFAULT_SCOPES;
 
 /** 실제로 동의 화면에 올리는 권한(기본 + 추가). */
-export const metaAdsScopes = (): string[] => [...BASE_SCOPES, ...extraScopes()];
+export const metaAdsScopes = (): string[] => [...DEFAULT_SCOPES, ...extraScopes()];
 
 /**
  * 페이스북 앱 ID(client_id).
