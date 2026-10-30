@@ -69,6 +69,18 @@ export const META_PERMISSIONS: MetaPermission[] = [
     status: 'approved',
     purpose: '페이지 게시물 반응·댓글·공유 수 조회',
   },
+  {
+    label: '인스타그램 기본 정보',
+    scope: 'instagram_basic',
+    status: 'approved',
+    purpose: '연결된 인스타그램 비즈니스 계정 확인',
+  },
+  {
+    label: '파트너십 광고',
+    scope: 'instagram_branded_content_ads_brand',
+    status: 'approved',
+    purpose: '인플루언서 파트너십 코드로 광고 집행',
+  },
 ];
 
 export type MetaAdAccount = {
