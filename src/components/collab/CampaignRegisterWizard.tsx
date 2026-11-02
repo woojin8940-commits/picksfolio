@@ -1261,7 +1261,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   <p className={`text-[11px] font-medium mt-1.5 ${badCommission && form.commission_rate ? 'text-rose-500 font-black' : 'text-slate-400'}`}>
                     판매 금액에서 인플루언서에게 지급할 비율입니다. {COMMISSION_RANGE.min}% ~ {COMMISSION_RANGE.max}% 사이로 적어 주세요.
                     <br />
-                    <span className="text-blue-600 font-black">입력하신 % 안에 픽스폴리오 수수료 3%가 포함됩니다.</span>
+                    <span className="text-blue-600 font-black">입력하신 % 안에 픽스폴리오 수수료 5%가 포함됩니다.</span>
                     <br />
                     이 비율은 담당자에게만 전달되고 캠페인 화면에는 노출되지 않습니다. 최종 수수료는 담당자가 인플루언서와 협의해 정합니다.
                   </p>
