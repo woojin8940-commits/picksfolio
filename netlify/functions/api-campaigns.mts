@@ -316,7 +316,8 @@ export default async (req: Request) => {
           product_name, product_url, upload_channel, content_format, video_concept,
           guideline_url, guideline_note, second_use_fee, second_use_note, upload_from, upload_to,
           package_tier, reward_mode, tier_counts,
-          product_provide, ad_objective, budget_krw, seeding_count, groupbuy_commission_rate, fast_track,
+          product_provide, ad_objective, budget_krw, seeding_count, groupbuy_commission_rate,
+          groupbuy_product_price, groupbuy_sale_price, fast_track,
           influencer_gender, influencer_ages, sns_category, follower_tiers, min_views,
           influencer_styles, exclude_keywords, target_audience,
           contact_person, contact_phone, contact_email
@@ -336,6 +337,7 @@ export default async (req: Request) => {
           ${body.product_provide || "provide"},
           ${body.ad_objective ?? "awareness"}, ${briefFee(body.budget_krw)},
           ${briefFee(body.seeding_count)}, ${briefFee(body.groupbuy_commission_rate)},
+          ${briefFee(body.groupbuy_product_price)}, ${briefFee(body.groupbuy_sale_price)},
           ${Boolean(body.fast_track)},
           ${body.influencer_gender || ""}, ${csv(body.influencer_ages)},
           ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
@@ -421,9 +423,9 @@ export default async (req: Request) => {
         `;
         if (ongoing.length) return Response.json({ error: "선정되거나 진행 중인 협업이 있어 보상·진행 방식을 변경할 수 없습니다." }, { status: 409 });
       }
-      const numericFields = new Set(['budget_krw', 'second_use_fee', 'seeding_count', 'groupbuy_commission_rate', 'min_views']);
+      const numericFields = new Set(['budget_krw', 'second_use_fee', 'seeding_count', 'groupbuy_commission_rate', 'groupbuy_product_price', 'groupbuy_sale_price', 'min_views']);
       const csvFields = new Set(['influencer_ages', 'follower_tiers', 'influencer_styles', 'exclude_keywords']);
-      const materialFields = ['title', 'type', 'description', 'brand_name', 'thumbnail_url', 'category', 'reward_type', 'reward_amount', 'requirements', 'max_applicants', 'product_name', 'product_url', 'upload_channel', 'content_format', 'video_concept', 'second_use_fee', 'second_use_note', 'package_tier', 'reward_mode', 'product_provide', 'ad_objective', 'budget_krw', 'seeding_count', 'groupbuy_commission_rate', 'fast_track', 'influencer_gender', 'influencer_ages', 'sns_category', 'follower_tiers', 'min_views', 'influencer_styles', 'exclude_keywords', 'target_audience', 'tier_counts', 'upload_from', 'upload_to'];
+      const materialFields = ['title', 'type', 'description', 'brand_name', 'thumbnail_url', 'category', 'reward_type', 'reward_amount', 'requirements', 'max_applicants', 'product_name', 'product_url', 'upload_channel', 'content_format', 'video_concept', 'second_use_fee', 'second_use_note', 'package_tier', 'reward_mode', 'product_provide', 'ad_objective', 'budget_krw', 'seeding_count', 'groupbuy_commission_rate', 'groupbuy_product_price', 'groupbuy_sale_price', 'fast_track', 'influencer_gender', 'influencer_ages', 'sns_category', 'follower_tiers', 'min_views', 'influencer_styles', 'exclude_keywords', 'target_audience', 'tier_counts', 'upload_from', 'upload_to'];
       for (const key of materialFields) {
         const value = updates[key];
         if (value === undefined || value === null) continue;
@@ -487,6 +489,8 @@ export default async (req: Request) => {
             budget_krw = ${updates.budget_krw === undefined ? Number(c.budget_krw || 0) : briefFee(updates.budget_krw)},
             seeding_count = ${updates.seeding_count === undefined ? Number(c.seeding_count || 0) : briefFee(updates.seeding_count)},
             groupbuy_commission_rate = ${updates.groupbuy_commission_rate === undefined ? Number(c.groupbuy_commission_rate || 0) : briefFee(updates.groupbuy_commission_rate)},
+            groupbuy_product_price = ${updates.groupbuy_product_price === undefined ? Number(c.groupbuy_product_price || 0) : briefFee(updates.groupbuy_product_price)},
+            groupbuy_sale_price = ${updates.groupbuy_sale_price === undefined ? Number(c.groupbuy_sale_price || 0) : briefFee(updates.groupbuy_sale_price)},
             fast_track = ${updates.fast_track === undefined ? Boolean(c.fast_track) : Boolean(updates.fast_track)},
             influencer_gender = ${updates.influencer_gender ?? c.influencer_gender ?? ""},
             influencer_ages = ${updates.influencer_ages === undefined ? (c.influencer_ages ?? "") : csv(updates.influencer_ages)},
