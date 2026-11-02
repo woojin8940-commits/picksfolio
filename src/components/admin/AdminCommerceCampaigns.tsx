@@ -183,6 +183,8 @@ const AdminCommerceCampaigns: React.FC<Props> = ({ token, onNewCountChange }) =>
                 </p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
                   <InfoTile label="브랜드 입력 수수료" value={rate > 0 ? `${rate}%` : '미입력'} accent />
+                  <InfoTile label="상품 가격" value={num(c.groupbuy_product_price) > 0 ? `${num(c.groupbuy_product_price).toLocaleString('ko-KR')}원` : '미입력'} />
+                  <InfoTile label="진행 가격" value={num(c.groupbuy_sale_price) > 0 ? `${num(c.groupbuy_sale_price).toLocaleString('ko-KR')}원` : '미입력'} />
                   <InfoTile label="모집 인원" value={headcount > 0 ? `${headcount}명` : '제한 없음'} />
                   <InfoTile
                     label="모집기간"

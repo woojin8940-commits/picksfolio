@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { formatKoreanWon } from '../utils/formatters';
+import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { apiService, authHeaders } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { rewardModeOf, contentFormatLabel } from '../utils/campaignBrief';
@@ -33,6 +33,9 @@ interface Campaign {
   recruit_closed?: boolean;
   reward_mode?: string;
   seeding_count?: number;
+  /** 커머스형 상품 정가와 인플루언서 진행 가격(할인가). 0 이면 입력되지 않은 것이다. */
+  groupbuy_product_price?: number;
+  groupbuy_sale_price?: number;
   /** 숏폼(릴스) 인지 피드 게시물인지. 내 어느 단가가 쓰이는지가 여기서 갈린다. */
   content_format?: string;
 }
@@ -791,6 +794,26 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <span className="text-sm text-blue-700 font-black">{isEn ? 'Negotiable with Manager' : '담당자와 협의'}</span>
                   </div>
                 )}
+                {mode.value === 'groupbuy' && Number(selectedCampaign.groupbuy_product_price) > 0 && (
+                  <div className="flex items-center px-5 py-3.5">
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Retail Price' : '상품 가격'}</span>
+                    <span className="text-sm text-slate-900 font-bold">{formatNumberWithCommas(Number(selectedCampaign.groupbuy_product_price))}{isEn ? ' KRW' : '원'}</span>
+                  </div>
+                )}
+                {mode.value === 'groupbuy' && Number(selectedCampaign.groupbuy_sale_price) > 0 && (() => {
+                  const list = Number(selectedCampaign.groupbuy_product_price) || 0;
+                  const sale = Number(selectedCampaign.groupbuy_sale_price) || 0;
+                  const off = list > sale ? Math.round((1 - sale / list) * 100) : 0;
+                  return (
+                    <div className="flex items-center px-5 py-3.5">
+                      <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Group-buy Price' : '진행 가격'}</span>
+                      <span className="text-sm text-blue-700 font-black">
+                        {formatNumberWithCommas(sale)}{isEn ? ' KRW' : '원'}
+                        {off > 0 && <span className="text-rose-500 ml-1.5">{off}%{isEn ? ' off' : ' 할인'}</span>}
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="flex items-center px-5 py-3.5">
                   <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{headcountLabel}</span>
                   <span className="text-sm text-slate-900 font-bold">

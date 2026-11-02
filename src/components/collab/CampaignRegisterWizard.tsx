@@ -81,6 +81,8 @@ export interface CampaignBriefDraft {
   budget_krw?: number;
   seeding_count?: number;
   groupbuy_commission_rate?: number | string;
+  groupbuy_product_price?: number | string;
+  groupbuy_sale_price?: number | string;
   influencer_gender?: string;
   influencer_ages?: string;
   sns_category?: string;
@@ -230,6 +232,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     // 하나를 보내는 캠페인에서 같은 수를 두 가지 이름으로 부르고 있었다.
     apply_headcount: String(editing?.seeding_count || editing?.max_applicants || ''),
     commission_rate: digitsOnly(editing?.groupbuy_commission_rate || ''),
+    // 커머스형 상품 가격. 정가와 인플루언서 진행 가격(할인가)을 따로 받는다.
+    product_price: formatNumberWithCommas(digitsOnly(editing?.groupbuy_product_price || '')),
+    sale_price: formatNumberWithCommas(digitsOnly(editing?.groupbuy_sale_price || '')),
     upload_from: editing?.upload_from || '',
     upload_to: editing?.upload_to || '',
     video_concept: editing?.video_concept || '',
@@ -328,6 +333,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const badCommission =
     isGroupBuy &&
     (commissionRate < COMMISSION_RANGE.min || commissionRate > COMMISSION_RANGE.max);
+  const productPrice = Number(digitsOnly(form.product_price) || 0);
+  const salePrice = Number(digitsOnly(form.sale_price) || 0);
+  // 진행 가격은 할인이 들어간 판매가라 정가보다 비쌀 수 없다.
+  const badSalePrice = isGroupBuy && productPrice > 0 && salePrice > productPrice;
+  const discountRate = productPrice > 0 && salePrice > 0 && salePrice < productPrice
+    ? Math.round((1 - salePrice / productPrice) * 100)
+    : 0;
 
   // 진행 방식이 단계를 정한다. 지원을 받아 고르는 방식은 '희망 인플루언서'가 없다.
   const steps = useMemo(
@@ -469,7 +481,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         ? [{ label: '광고 집행 예산', done: budgetKrw >= cheapestFee, required: true }]
         : [{ label: mode.headcountLabel, done: applyHeadcount > 0, required: true }]),
       ...(isGroupBuy
-        ? [{ label: '판매 수수료', done: commissionRate > 0 && !badCommission, required: true }]
+        ? [
+            { label: '판매 수수료', done: commissionRate > 0 && !badCommission, required: true },
+            { label: '상품 가격', done: productPrice > 0, required: true },
+            { label: '인플루언서 진행 가격', done: salePrice > 0 && !badSalePrice, required: true },
+          ]
         : []),
       ...(hasRecruitPeriod
         ? [{ label: '모집기간', done: !!form.recruit_from && !!form.recruit_to, required: true }]
@@ -491,7 +507,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     ],
   }), [
     form, mode, picksInfluencer, isGroupBuy, hasRecruitPeriod, hasUploadSchedule, conceptLabel,
-    applyHeadcount, commissionRate,
+    applyHeadcount, commissionRate, productPrice, salePrice, badSalePrice,
     badCommission, budgetKrw, cheapestFee, headcount, overBudget,
   ]);
 
@@ -526,6 +542,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       }
       if (isGroupBuy && badCommission) {
         return `판매 수수료는 ${COMMISSION_RANGE.min}% ~ ${COMMISSION_RANGE.max}% 사이로 입력해 주세요.`;
+      }
+      if (isGroupBuy) {
+        if (productPrice < 1) return '상품 가격을 입력해 주세요.';
+        if (salePrice < 1) return '인플루언서 진행 가격을 입력해 주세요.';
+        if (badSalePrice) return '인플루언서 진행 가격은 상품 가격보다 높을 수 없습니다.';
       }
       if (hasRecruitPeriod) {
         if (!form.recruit_from || !form.recruit_to) return '모집기간을 선택해 주세요.';
@@ -638,6 +659,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         // 제품 협찬형의 협찬 인원. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다.
         seeding_count: isBarter ? applyHeadcount : 0,
         groupbuy_commission_rate: isGroupBuy ? commissionRate : 0,
+        groupbuy_product_price: isGroupBuy ? productPrice : 0,
+        groupbuy_sale_price: isGroupBuy ? salePrice : 0,
         influencer_gender: picksInfluencer ? form.influencer_gender : 'any',
         influencer_ages: picksInfluencer ? form.influencer_ages : [],
         sns_category: picksInfluencer ? form.sns_category : '',
@@ -1238,8 +1261,53 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   <p className={`text-[11px] font-medium mt-1.5 ${badCommission && form.commission_rate ? 'text-rose-500 font-black' : 'text-slate-400'}`}>
                     판매 금액에서 인플루언서에게 지급할 비율입니다. {COMMISSION_RANGE.min}% ~ {COMMISSION_RANGE.max}% 사이로 적어 주세요.
                     <br />
+                    <span className="text-blue-600 font-black">입력하신 % 안에 픽스폴리오 수수료 3%가 포함됩니다.</span>
+                    <br />
                     이 비율은 담당자에게만 전달되고 캠페인 화면에는 노출되지 않습니다. 최종 수수료는 담당자가 인플루언서와 협의해 정합니다.
                   </p>
+                </div>
+              )}
+
+              {/* 공동구매는 정가보다 싸게 파는 것이 전제라 정가와 진행 가격을 따로 받는다.
+                  두 값이 있어야 인플루언서가 "얼마짜리를 얼마에 파는지" 보고 지원을 정한다. */}
+              {isGroupBuy && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={LABEL}>상품 가격 *</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={form.product_price}
+                        onChange={e => patch('product_price', formatNumberWithCommas(digitsOnly(e.target.value).slice(0, 9)))}
+                        className={`${INPUT} max-w-[200px]`}
+                        placeholder="39,000"
+                      />
+                      <span className="text-sm font-black text-slate-500">원</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-medium mt-1.5">평소 판매하는 정가입니다.</p>
+                  </div>
+                  <div>
+                    <label className={LABEL}>인플루언서 진행 가격 *</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={form.sale_price}
+                        onChange={e => patch('sale_price', formatNumberWithCommas(digitsOnly(e.target.value).slice(0, 9)))}
+                        className={`${INPUT} max-w-[200px]`}
+                        placeholder="29,000"
+                      />
+                      <span className="text-sm font-black text-slate-500">원</span>
+                    </div>
+                    <p className={`text-[11px] font-medium mt-1.5 ${badSalePrice ? 'text-rose-500 font-black' : 'text-slate-400'}`}>
+                      {badSalePrice
+                        ? '진행 가격은 상품 가격보다 높을 수 없습니다.'
+                        : discountRate > 0
+                          ? `할인이 적용된 공동구매 판매가입니다. 정가 대비 ${discountRate}% 할인`
+                          : '할인이 적용된 공동구매 판매가입니다.'}
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -1583,6 +1651,21 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-white/50">희망 판매 수수료</span>
                       <span>{commissionRate > 0 ? `${commissionRate}% (담당자 전달용)` : '-'}</span>
+                    </div>
+                  )}
+                  {isGroupBuy && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/50">상품 가격</span>
+                      <span>{productPrice > 0 ? `${formatNumberWithCommas(productPrice)}원` : '-'}</span>
+                    </div>
+                  )}
+                  {isGroupBuy && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/50">진행 가격</span>
+                      <span>
+                        {salePrice > 0 ? `${formatNumberWithCommas(salePrice)}원` : '-'}
+                        {discountRate > 0 && <span className="text-rose-300"> ({discountRate}%↓)</span>}
+                      </span>
                     </div>
                   )}
                   <div className="flex items-center justify-between">
