@@ -3,10 +3,13 @@ import { readMetaAdsToken } from "./_shared/meta-ads.mts";
 import {
   graphGet,
   isMissingObject,
+  isReconnectError,
+  graphObjectError,
   listAdRecordOwners,
   readAdRecords,
   readRejectionNotices,
   writeRejectionNotices,
+  withAdRecordLock,
   type MetaAdRecord,
 } from "./_shared/meta-ads-graph.mts";
 import { sendPushToUser } from "./_shared/push.mts";
@@ -40,13 +43,25 @@ const daysBefore = (date: string, days: number) => {
 async function readStatuses(token: string, proof: string, ids: string[]) {
   const fields = "id,effective_status,ad_review_feedback";
   const rows: Record<string, any> = {};
+  let reconnectRequired = false;
   for (let i = 0; i < ids.length; i += 50) {
     const batch = ids.slice(i, i + 50);
     const res = await graphGet("", token, { ids: batch.join(","), fields }, proof);
     if (res.ok) {
-      Object.assign(rows, res.data || {});
+      for (const id of batch) {
+        const row = res.data?.[id];
+        const error = graphObjectError(row);
+        if (error) {
+          reconnectRequired ||= isReconnectError(error);
+          continue;
+        }
+        if (row && String(row.id) === id && row.effective_status) rows[id] = row;
+      }
+      if (reconnectRequired) break;
       continue;
     }
+    reconnectRequired ||= isReconnectError(res);
+    if (reconnectRequired) break;
     if (!isMissingObject(res)) {
       console.warn(`[meta-ads-review] 상태 조회 실패: ${res.error}`);
       continue;
@@ -54,9 +69,11 @@ async function readStatuses(token: string, proof: string, ids: string[]) {
     for (const id of batch) {
       const one = await graphGet(id, token, { fields }, proof);
       if (one.ok) rows[id] = one.data;
+      reconnectRequired ||= isReconnectError(one);
+      if (reconnectRequired) break;
     }
   }
-  return rows;
+  return { rows, reconnectRequired };
 }
 
 const reasonOf = (row: any): string => {
@@ -66,6 +83,10 @@ const reasonOf = (row: any): string => {
 };
 
 async function checkAccount(username: string, today: string): Promise<number> {
+  return (await withAdRecordLock(username, '__meta_ads_review__', () => checkAccountLocked(username, today))) ?? 0;
+}
+
+async function checkAccountLocked(username: string, today: string): Promise<number> {
   const cutoff = daysBefore(today, ENDED_GRACE_DAYS);
   const records = (await readAdRecords(username)).filter(
     (r: MetaAdRecord) => r.step === "done" && r.adId && (!r.endDate || r.endDate >= cutoff),
@@ -73,12 +94,28 @@ async function checkAccount(username: string, today: string): Promise<number> {
   if (records.length === 0) return 0;
 
   const stored = await readMetaAdsToken(username);
-  if (!stored.ok) return 0;
-
-  const rows = await readStatuses(stored.token, stored.proof, records.map((r) => r.adId!));
   const notices = await readRejectionNotices(username);
+  const notifyReconnect = async () => {
+    if (notices.__reconnect__) return 0;
+    const delivered = await sendPushToUser(username, {
+      title: 'Meta 광고 계정을 다시 연동해 주세요',
+      body: '광고 계정 연결 또는 권한을 확인하지 못했습니다. 광고 현황에서 다시 연동해 주세요.',
+      data: { type: 'meta_ads_reconnect', path: '/business-admin?tab=ads' },
+    });
+    if (!delivered) return 0;
+    notices.__reconnect__ = new Date().toISOString();
+    await writeRejectionNotices(username, notices);
+    return 1;
+  };
+  if (!stored.ok) return stored.reason === 'missing' ? 0 : notifyReconnect();
+  const { rows, reconnectRequired } = await readStatuses(stored.token, stored.proof, records.map((r) => r.adId!));
+  if (reconnectRequired) return notifyReconnect();
   let changed = false;
   let sent = 0;
+  if (Object.keys(rows).length && notices.__reconnect__) {
+    delete notices.__reconnect__;
+    changed = true;
+  }
 
   for (const r of records) {
     const row = rows[r.adId!];
@@ -96,13 +133,14 @@ async function checkAccount(username: string, today: string): Promise<number> {
     const name = (r.campaignTitle || r.name || "광고").slice(0, 60);
     const reason = reasonOf(row);
     try {
-      await sendPushToUser(username, {
+      const delivered = await sendPushToUser(username, {
         title: "광고가 메타 심사에서 반려됐어요",
         body: reason
           ? `'${name}' 광고가 반려되어 노출되지 않고 있어요. 사유: ${reason}`
           : `'${name}' 광고가 반려되어 노출되지 않고 있어요. 광고 현황에서 사유를 확인해 주세요.`,
         data: { type: "meta_ad_rejected", adId: r.adId, path: "/business-admin?tab=ads" },
       });
+      if (!delivered) continue;
     } catch (e) {
       console.error(`[meta-ads-review] 푸시 실패 (${username}):`, e);
       continue;
@@ -115,7 +153,7 @@ async function checkAccount(username: string, today: string): Promise<number> {
   // 지금 보지 않는 광고(끝났거나 기록에서 지워진 것)의 표시는 정리한다.
   const watching = new Set(records.map((r) => r.adId!));
   for (const adId of Object.keys(notices)) {
-    if (!watching.has(adId)) {
+    if (adId !== "__reconnect__" && !watching.has(adId)) {
       delete notices[adId];
       changed = true;
     }

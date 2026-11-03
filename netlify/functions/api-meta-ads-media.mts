@@ -117,7 +117,8 @@ export default async (req: Request, context: Context) => {
       proof,
     );
     if (!res.ok) return graphErrorResponse(res, "영상 업로드를 마치지 못했습니다.");
-    return Response.json({ ok: !!res.data?.success });
+    if (res.data?.success !== true) return Response.json({ error: "Meta가 영상 업로드 완료를 확인하지 못했습니다." }, { status: 502 });
+    return Response.json({ ok: true });
   }
 
   return Response.json({ error: "지원하지 않는 동작입니다." }, { status: 400 });

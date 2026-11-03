@@ -738,13 +738,13 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
    */
   const accountId = account?.id || '';
   const adsRequest = useRef(0);
-  const adsScope = `${cleanUsername}:${connected}:${accountId}:${range}`;
+  const adsScope = `${cleanUsername}:${connected}:${connectionLoading}:${accountId}:${range}`;
   const currentAdsScope = useRef(adsScope);
   currentAdsScope.current = adsScope;
   const loadAds = useCallback(async () => {
     if (currentAdsScope.current !== adsScope) return;
     const request = ++adsRequest.current;
-    if (!connected || !accountId) {
+    if (!cleanUsername || connectionLoading) {
       setMetaAds([]);
       setFetchedAt('');
       setAdsError('');
@@ -759,7 +759,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
       setMetaAds(res.ads);
       setFetchedAt(res.fetchedAt);
       setAdsError(res.errors?.length ? res.errors.join(' / ') : '');
-      setAdsNeedReconnect(false);
+      setAdsNeedReconnect(!!res.reconnectRequired);
     } else {
       setMetaAds([]);
       setFetchedAt('');
@@ -767,7 +767,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
       setAdsNeedReconnect(needsReconnect(res));
     }
     setAdsLoading(false);
-  }, [cleanUsername, connected, accountId, range, adsScope]);
+  }, [cleanUsername, connected, connectionLoading, accountId, range, adsScope]);
 
   useEffect(() => {
     setMetaAds([]);
@@ -892,6 +892,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
    * 그려도 전부 빈 값이 된다.
    */
   const showConnectGuide = !connected || !account || settingsOpen;
+  const unsupportedAccount = diagnosis?.accounts?.find(a => a.id === connection.selectedAccountId && a.currency?.toUpperCase() !== 'KRW');
 
   return (
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
@@ -900,7 +901,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl md:text-3xl font-black text-slate-900">광고 현황</h2>
             {/* 숫자가 어디서 오는지. 연동하고 계정을 골랐을 때만 붙는다. */}
-            {connected && account && (
+            {connected && account && !adsNeedReconnect && !adsError && (
               <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black">
                 Meta 실시간
               </span>
@@ -973,15 +974,33 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             diagnosis={diagnosis}
             loading={connectionLoading}
             connecting={connecting}
-            error={connectionError}
+            error={connectionError || (unsupportedAccount ? '원화(KRW) 광고 계정만 사용할 수 있습니다. 원화 계정을 선택해 주세요.' : '') || (adsNeedReconnect ? adsError : '')}
             onConnect={connect}
             onDisconnect={() => {
-              void disconnect();
-              setSettingsOpen(false);
+              void disconnect().then(ok => { if (ok) setSettingsOpen(false); });
             }}
             onSelectAccount={selectAccount}
             onBack={settingsOpen ? () => setSettingsOpen(false) : undefined}
           />
+          {(!connected || !account) && accountAds.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="text-sm font-black text-slate-900">저장된 광고 기록</h3>
+              <p className="mt-1 text-[11px] text-slate-500">연동 상태와 광고 계정 권한을 확인해 주세요. 기존 광고 기록은 유지됩니다.</p>
+              <div className="mt-3 divide-y divide-slate-100">
+                {accountAds.map(ad => (
+                  <div key={ad.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-[12px] font-bold text-slate-800">{ad.campaignTitle}</p>
+                      <p className="text-[10px] text-slate-400">{ad.adAccountId} · {ad.source.campaignId || ad.id}</p>
+                    </div>
+                    {ad.source.campaignId && (
+                      <a href={adsManagerUrl(ad.source)} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-blue-600">Meta에서 확인</a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -1288,7 +1307,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             {insightsOpen && (
               <div className="animate-in fade-in duration-200">
                 {accountAds.length > 0 || !adsLoading ? (
-                  <AdPixelPanel username={cleanUsername} adAccountId={account.id} ads={visible} rangeLabel={rangeLabel} />
+              <AdPixelPanel key={`${cleanUsername}:${account.id}`} username={cleanUsername} adAccountId={account.id} ads={visible} rangeLabel={rangeLabel} />
                 ) : null}
                 <div className="mt-6">
                   <MetaPageEngagementPanel username={cleanUsername} enabled={connected} />

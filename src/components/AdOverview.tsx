@@ -225,7 +225,14 @@ const AdOverview: React.FC<AdOverviewProps> = ({ ads, view, renderDetail }) => {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const sorted = useMemo(
-    () => [...ads].sort((a, b) => (sortValue(a, sort.key) - sortValue(b, sort.key)) * sort.dir || a.id.localeCompare(b.id)),
+    () => [...ads].sort((a, b) => {
+      const av = sortValue(a, sort.key);
+      const bv = sortValue(b, sort.key);
+      if (!Number.isFinite(av) || !Number.isFinite(bv)) {
+        return Number.isFinite(av) ? -1 : Number.isFinite(bv) ? 1 : a.id.localeCompare(b.id);
+      }
+      return (av - bv) * sort.dir || a.id.localeCompare(b.id);
+    }),
     [ads, sort],
   );
 

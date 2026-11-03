@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   MetaPage,
   fetchMetaPages,
@@ -24,11 +24,17 @@ export const useMetaPages = (username: string, enabled: boolean) => {
   const [reconnect, setReconnect] = useState(false);
   const [fetchedAt, setFetchedAt] = useState('');
   const [storedId, setStoredId] = useState(() => readSelectedPageId(username));
+  const scope = `${username}:${enabled}`;
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const requestId = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!username || !enabled) return;
+    if (!username || !enabled || currentScope.current !== scope) return;
+    const request = ++requestId.current;
     setLoading(true);
     const res = await fetchMetaPages(username);
+    if (request !== requestId.current || currentScope.current !== scope) return;
     if (res.ok) {
       setPages(res.pages);
       setFetchedAt(res.fetchedAt);
@@ -40,12 +46,21 @@ export const useMetaPages = (username: string, enabled: boolean) => {
     }
     setLoading(false);
     setLoaded(true);
-  }, [username, enabled]);
+  }, [username, enabled, scope]);
 
   useEffect(() => {
     setStoredId(readSelectedPageId(username));
+    setPages([]);
+    setLoading(false);
+    setLoaded(false);
+    setError('');
+    setReconnect(false);
+    setFetchedAt('');
     void refresh();
-    return subscribeSelectedPage(() => setStoredId(readSelectedPageId(username)));
+    const unsubscribe = subscribeSelectedPage(() => {
+      if (currentScope.current === scope) setStoredId(readSelectedPageId(username));
+    });
+    return () => { ++requestId.current; unsubscribe(); };
   }, [username, refresh]);
 
   const page = (storedId && pages.find((p) => p.id === storedId && p.canAdvertise)) || null;

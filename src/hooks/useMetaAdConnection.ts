@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MetaAdAccount,
   MetaAdConnection,
@@ -34,19 +34,26 @@ export const useMetaAdConnection = (username: string) => {
   const [error, setError] = useState('');
   /** 연동 시작 중(서버에서 authorize URL 을 받아 메타로 떠나기까지). */
   const [connecting, setConnecting] = useState(false);
+  const owner = useRef(username);
+  owner.current = username;
+  const requestId = useRef(0);
 
   /** 서버에서 다시 읽는다. 연동을 마치고 돌아온 화면이 이 값을 쓴다. */
   const refresh = useCallback(
     async (force = false) => {
-      if (!username) return;
+      if (!username || owner.current !== username) return;
+      const request = ++requestId.current;
       setLoading(readCachedDiagnosis(username) === undefined);
       try {
-        setDiagnosis(await loadAdConnection(username, { force }));
+        const next = await loadAdConnection(username, { force });
+        if (request !== requestId.current || owner.current !== username) return;
+        setDiagnosis(next);
         setError('');
       } catch (e) {
+        if (request !== requestId.current || owner.current !== username) return;
         setError((e as Error)?.message || '연동 상태를 읽지 못했습니다.');
       } finally {
-        setLoading(false);
+        if (request === requestId.current && owner.current === username) setLoading(false);
       }
     },
     [username],
@@ -56,9 +63,14 @@ export const useMetaAdConnection = (username: string) => {
     const current = readCachedDiagnosis(username);
     setDiagnosis(current ?? null);
     setLoading(current === undefined);
+    setError('');
+    setConnecting(false);
     void refresh();
     // 다른 화면이 계정을 바꾸거나 연동을 해제하면 캐시가 바뀐다. 같은 값을 다시 읽는다.
-    return subscribeAdConnection(() => setDiagnosis(readCachedDiagnosis(username) ?? null));
+    const unsubscribe = subscribeAdConnection(() => {
+      if (owner.current === username) setDiagnosis(readCachedDiagnosis(username) ?? null);
+    });
+    return () => { ++requestId.current; unsubscribe(); };
   }, [username, refresh]);
 
   const connection: MetaAdConnection = useMemo(
@@ -81,6 +93,7 @@ export const useMetaAdConnection = (username: string) => {
         ? `${window.location.pathname}${window.location.search}`
         : undefined;
     const res = await startMetaAdConnect(username, returnTo);
+    if (owner.current !== username) return;
     if (res.error) {
       setError(res.error);
       setConnecting(false);
@@ -88,9 +101,20 @@ export const useMetaAdConnection = (username: string) => {
   }, [username]);
 
   const disconnect = useCallback(async () => {
-    if (!username) return;
-    await disconnectMetaAccount(username);
-    setDiagnosis(readCachedDiagnosis(username) ?? null);
+    if (!username) return false;
+    try {
+      await disconnectMetaAccount(username);
+      if (owner.current !== username) return false;
+      ++requestId.current;
+      setLoading(false);
+      setDiagnosis(readCachedDiagnosis(username) ?? null);
+      setError('');
+      return true;
+    } catch (e) {
+      if (owner.current !== username) return false;
+      setError((e as Error)?.message || '연동 해제에 실패했습니다. 다시 시도해 주세요.');
+      return false;
+    }
   }, [username]);
 
   const selectAccount = useCallback(

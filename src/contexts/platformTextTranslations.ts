@@ -3062,6 +3062,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "확정 마진": "Confirmed Margin",
   "확정 순수익": "Confirmed net profit",
   "확정 지급액이 등록되면 계산됩니다": "Confirmed payment amount is calculated once registered",
+  "확정 광고비가 등록되면 계산됩니다": "Calculated once the confirmed ad fee is entered",
+  "· 광고비는 담당자가 조건을 확정하면 채워집니다": "· Ad fees appear once the terms are confirmed",
   "확정됨": "Confirmed",
   "확정에 실패했습니다.": "Confirmation failed.",
   "확정하고 알리기": "Confirm and notify",

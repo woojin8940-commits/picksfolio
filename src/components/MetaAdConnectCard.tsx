@@ -231,11 +231,12 @@ const MetaAdConnectCard: React.FC<MetaAdConnectCardProps> = ({
             */
             <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
               <p className="text-[11px] font-black text-slate-600">
-                이 Meta 계정에서 접근할 수 있는 광고 계정이 없습니다
+                {diagnosis?.accounts?.length ? '원화(KRW) 광고 계정만 사용할 수 있습니다' : '이 Meta 계정에서 접근할 수 있는 광고 계정이 없습니다'}
               </p>
               <p className="text-[10px] text-slate-400 font-medium mt-1 leading-relaxed">
-                광고 계정 권한이 있는 Meta 계정으로 다시 연동하거나, 비즈니스 관리자에서 이 계정에
-                광고 계정 접근 권한을 준 뒤 '다시 연동하기'를 눌러 주세요.
+                {diagnosis?.accounts?.length
+                  ? '연결된 계정은 원화 계정이 아닙니다. 원화(KRW) 광고 계정에 접근할 수 있는 Meta 계정으로 다시 연동해 주세요.'
+                  : "광고 계정 권한이 있는 Meta 계정으로 다시 연동하거나, 광고 계정 접근 권한을 준 뒤 '다시 연동하기'를 눌러 주세요."}
               </p>
             </div>
           ) : (

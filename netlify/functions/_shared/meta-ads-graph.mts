@@ -71,7 +71,7 @@ export async function graphGet<T = any>(
   query.set("appsecret_proof", proof || appSecretProof(token, metaAdsAppSecret()));
   for (const [k, v] of Object.entries(params)) if (v !== undefined) query.set(k, toParam(v));
   try {
-    return await readResult(await fetch(`${GRAPH}/${path}?${query.toString()}`));
+    return await readResult(await fetch(`${GRAPH}/${path}?${query.toString()}`, { signal: AbortSignal.timeout(8000) }));
   } catch (e) {
     return failed(e);
   }
@@ -92,7 +92,7 @@ export async function graphPost<T = any>(
   body.set("appsecret_proof", proof || appSecretProof(token, metaAdsAppSecret()));
   for (const [k, v] of Object.entries(params)) if (v !== undefined) body.set(k, toParam(v));
   try {
-    const result = await readResult(await fetch(`${GRAPH}/${path}`, { method: "POST", body }));
+    const result = await readResult(await fetch(`${GRAPH}/${path}`, { method: "POST", body, signal: AbortSignal.timeout(8000) }));
     return { ...result, uncertain: !result.ok && (result.status >= 500 || result.status < 400) };
   } catch (e) {
     return { ...failed(e), uncertain: true };
@@ -109,19 +109,33 @@ export async function graphPostForm<T = any>(
   form.set("access_token", token);
   form.set("appsecret_proof", proof || appSecretProof(token, metaAdsAppSecret()));
   try {
-    return await readResult(await fetch(`${GRAPH}/${path}`, { method: "POST", body: form }));
+    return await readResult(await fetch(`${GRAPH}/${path}`, { method: "POST", body: form, signal: AbortSignal.timeout(20000) }));
   } catch (e) {
     return failed(e);
   }
 }
 
 /** 오류를 화면에 그대로 옮길 응답. 메타 오류 코드도 같이 준다(권한 부족 = 200/10). */
+export const isReconnectError = (res: GraphResult) => !res.ok && [10, 190, 200].includes(res.errorCode || 0);
+
+export const graphObjectError = (row: any): GraphResult | null => row?.error
+  ? {
+      ok: false,
+      status: 400,
+      data: row,
+      error: String(row.error.error_user_msg || row.error.message || "광고 상태를 확인하지 못했습니다."),
+      errorCode: Number(row.error.code) || undefined,
+      errorSubcode: Number(row.error.error_subcode) || undefined,
+    }
+  : null;
+
 export const graphErrorResponse = (res: GraphResult, fallback: string, status = 502): Response =>
   Response.json(
     {
       error: res.error || fallback,
       metaErrorCode: res.errorCode,
       metaErrorSubcode: res.errorSubcode,
+      code: isReconnectError(res) ? "token_permissions" : undefined,
     },
     { status },
   );
@@ -148,6 +162,16 @@ export interface MetaAdRecord {
   id: string;
   revision?: number;
   pendingStep?: string;
+  pendingName?: string;
+  pendingDispatched?: boolean;
+  pendingCursor?: string;
+  pendingMatches?: string[];
+  pendingResume?: MetaAdRecord;
+  resumeRetryRequired?: boolean;
+  creativeAttempt?: number;
+  creativeContentId?: string;
+  creativeLookupDone?: boolean;
+  creativeLookupEmpty?: boolean;
   resumeRequestId?: string;
   createdAt: string;
   updatedAt: string;
@@ -295,6 +319,7 @@ export async function readAdRecords(username: string): Promise<MetaAdRecord[]> {
 }
 
 export async function saveAdRecord(username: string, record: MetaAdRecord): Promise<void> {
+  record.warnings = [...new Set(record.warnings || [])];
   await requireActiveAdLease();
   await importLegacyRecords(username);
   const db = await recordsDatabase();
@@ -362,15 +387,16 @@ export async function listAdRecordOwners(): Promise<string[]> {
 const rejectionKey = (username: string) => `ads_rejected_${username.replace(/^biz\//, "").toLowerCase()}`;
 
 export async function readRejectionNotices(username: string): Promise<Record<string, string>> {
-  try {
-    const found = (await store().get(rejectionKey(username), { type: "json" })) as Record<string, string> | null;
-    return found && typeof found === "object" ? found : {};
-  } catch {
-    return {};
+  const found = await store().get(rejectionKey(username), { type: "json" });
+  if (found === null) return {};
+  if (!found || typeof found !== "object" || Array.isArray(found)) {
+    throw new Error("광고 알림 발송 이력을 확인하지 못했습니다.");
   }
+  return found as Record<string, string>;
 }
 
 export async function writeRejectionNotices(username: string, notices: Record<string, string>): Promise<void> {
+  await requireActiveAdLease();
   await store().setJSON(rejectionKey(username), notices);
 }
 
@@ -681,7 +707,7 @@ export function displayStatus(effective: string, endTime?: string): AdDisplaySta
     case "DELETED":
       return "ended";
     default:
-      return "review";
+      return "issue";
   }
 }
 

@@ -275,6 +275,11 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
     if (inFlight.current) return;
     const signal = runController.current?.signal;
     if (signal?.aborted) return;
+    if (resume?.pendingStep && resume.pendingStep !== 'resume') {
+      setPhase('running');
+      await runSteps(resume);
+      return;
+    }
     if (!account) {
       setError('광고를 만들 Meta 광고 계정을 먼저 골라 주세요.');
       return;
@@ -445,7 +450,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
                   className="flex-1 py-3 rounded-xl bg-blue-600 text-white text-[12px] font-black hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  {record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
+                  {record?.pendingStep || record?.resumeRetryRequired ? '생성 결과 다시 확인' : record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
                 </button>
               )}
               {runError && !submitting && (
@@ -759,11 +764,11 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
               <button
                 type="button"
                 onClick={submit}
-                disabled={submitting || !account || !page}
+                disabled={submitting || ((!resume?.pendingStep || resume.pendingStep === 'resume') && (!account || !page))}
                 className="w-full py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                {submitting ? '집행 중' : resume ? '이 설정으로 이어서 만들기' : '집행하기'}
+                {submitting ? '집행 중' : resume?.pendingStep && resume.pendingStep !== 'resume' ? '생성 결과 다시 확인' : resume ? '이 설정으로 이어서 만들기' : '집행하기'}
               </button>
               <p className="text-[10px] text-slate-400 font-medium mt-2 text-center leading-relaxed">
                 {resume

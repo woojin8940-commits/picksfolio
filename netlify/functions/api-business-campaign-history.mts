@@ -131,8 +131,7 @@ export default async (req: Request, context: Context) => {
              start_date, end_date, budget_krw, created_at, deleted_at
       FROM campaigns
       WHERE LOWER(REPLACE(business_username, 'biz/', '')) = ${username}
-      ORDER BY created_at DESC
-      LIMIT 200
+      ORDER BY created_at DESC, id DESC
     `) as any[];
 
     const campaignIds = (campaignRows || []).map((c) => String(c.id));
@@ -233,15 +232,17 @@ export default async (req: Request, context: Context) => {
         if (uploadUrl && !cancelled) uploaded++;
         if (!cancelled) spend += intOf(collab.fee);
         if (metric && !cancelled) {
-          matched++;
-          views += metric.views;
+          if (metric.from === 'reels') {
+            matched++;
+            views += metric.views;
+          }
           likes += metric.likes;
           comments += metric.comments;
           if (metric.shares !== null) {
             shares += metric.shares;
             sharesMatched++;
           }
-          if (metric.views > 0) measuredSpend += intOf(collab.fee);
+          if (metric.from === 'reels' && metric.views > 0) measuredSpend += intOf(collab.fee);
         }
 
         return {
@@ -285,17 +286,20 @@ export default async (req: Request, context: Context) => {
       const cpv =
         views > 0 && measuredSpend > 0 ? Math.round(measuredSpend / views) : 0;
 
-      totals.campaigns++;
-      totals.collabs += list.length;
-      totals.uploaded += uploaded;
-      totals.matched += matched;
-      totals.views += views;
-      totals.reactions += likes + comments;
-      totals.comments += comments;
-      totals.shares += shares;
-      totals.sharesMatched += sharesMatched;
-      totals.spend += spend;
-      totals.measuredSpend += measuredSpend;
+      const collabs = list.filter(collab => !collab.cancelled_at && collab.status !== 'cancelled').length;
+      if (['active', 'closed', 'completed', 'inactive'].includes(String(c.status))) {
+        totals.campaigns++;
+        totals.collabs += collabs;
+        totals.uploaded += uploaded;
+        totals.matched += matched;
+        totals.views += views;
+        totals.reactions += likes + comments;
+        totals.comments += comments;
+        totals.shares += shares;
+        totals.sharesMatched += sharesMatched;
+        totals.spend += spend;
+        totals.measuredSpend += measuredSpend;
+      }
 
       return {
         id: String(c.id),
@@ -311,7 +315,7 @@ export default async (req: Request, context: Context) => {
         endDate: String(c.end_date || ""),
         budgetKrw: intOf(c.budget_krw),
         createdAt: c.created_at || null,
-        collabs: list.length,
+        collabs,
         uploaded,
         matched,
         views,

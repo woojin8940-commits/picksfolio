@@ -33,13 +33,13 @@ function isExpoToken(token: unknown): token is string {
  * write) never fails because of push. Tokens Expo reports as unregistered are
  * pruned so the table does not accumulate dead devices.
  */
-export async function sendPushToUser(username: string, payload: PushPayload): Promise<void> {
+export async function sendPushToUser(username: string, payload: PushPayload): Promise<boolean> {
   // Normalize identically to registration (api-push-register.mts): business
   // usernames are stored with a `biz/` prefix throughout the app, but tokens are
   // keyed by the bare username. Strip the prefix here or the lookup misses every
   // business device.
   const uname = (username || "").trim().toLowerCase().replace(/^biz\//, "");
-  if (!uname) return;
+  if (!uname) return false;
 
   const db = getDatabase();
 
@@ -48,11 +48,11 @@ export async function sendPushToUser(username: string, payload: PushPayload): Pr
     rows = (await db.sql`SELECT token FROM push_tokens WHERE username = ${uname}`) as { token: string }[];
   } catch (e) {
     console.error("[push] failed to read tokens:", e);
-    return;
+    return false;
   }
 
   const tokens = rows.map((r) => r.token).filter(isExpoToken);
-  if (tokens.length === 0) return;
+  if (tokens.length === 0) return false;
 
   const messages = tokens.map((to) => ({
     to,
@@ -76,7 +76,7 @@ export async function sendPushToUser(username: string, payload: PushPayload): Pr
 
     if (!resp.ok) {
       console.error(`[push] Expo responded ${resp.status}: ${await resp.text()}`);
-      return;
+      return false;
     }
 
     // Prune tokens Expo reports as no longer registered (app uninstalled, etc.).
@@ -94,7 +94,9 @@ export async function sendPushToUser(username: string, payload: PushPayload): Pr
         }
       }
     }
+    return Array.isArray(tickets) && tickets.some(ticket => ticket?.status === 'ok');
   } catch (e) {
     console.error("[push] send failed:", e);
+    return false;
   }
 }

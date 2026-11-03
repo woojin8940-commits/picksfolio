@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink, Loader2, MessageCircle, RefreshCw, Share2, ThumbsUp } from 'lucide-react';
 import { useMetaPages } from '../hooks/useMetaPages';
 import { MetaPageEngagement as Engagement, fetchPageEngagement } from '../utils/metaAdsApi';
@@ -35,11 +35,17 @@ const MetaPageEngagementPanel: React.FC<MetaPageEngagementProps> = ({ username, 
   const [data, setData] = useState<Engagement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const requestId = useRef(0);
+  const scope = `${username}:${enabled}:${page?.id || ''}`;
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
 
   const load = useCallback(async () => {
-    if (!page) return;
+    if (!page || !enabled || currentScope.current !== scope) return;
+    const request = ++requestId.current;
     setLoading(true);
     const res = await fetchPageEngagement(username, page.id);
+    if (request !== requestId.current || currentScope.current !== scope) return;
     if (res.ok) {
       setData(res);
       setError('');
@@ -48,11 +54,14 @@ const MetaPageEngagementPanel: React.FC<MetaPageEngagementProps> = ({ username, 
       setError(res.error);
     }
     setLoading(false);
-  }, [username, page?.id]);
+  }, [username, enabled, page?.id, scope]);
 
   useEffect(() => {
     setData(null);
+    setError('');
+    setLoading(false);
     void load();
+    return () => { ++requestId.current; };
   }, [load]);
 
   if (!enabled) return null;

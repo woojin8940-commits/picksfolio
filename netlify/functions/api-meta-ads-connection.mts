@@ -54,7 +54,11 @@ export default async (req: Request, context: Context) => {
     }
     // 진단 결과와 저장한 토큰을 함께 지운다. 메타 쪽 앱 권한까지 회수하려면 페이스북
     // 계정 설정에서 앱을 삭제해야 한다 — 화면 안내에 그렇게 적어 둔다.
-    await clearMetaAdsDiagnosis(username);
+    try {
+      await clearMetaAdsDiagnosis(username);
+    } catch {
+      return Response.json({ error: 'Meta 연동 해제를 완료하지 못했습니다. 다시 해제해 주세요.' }, { status: 503 });
+    }
     return Response.json({ ok: true });
   }
 
