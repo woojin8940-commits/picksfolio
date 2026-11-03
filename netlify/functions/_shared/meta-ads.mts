@@ -212,12 +212,8 @@ export async function writeMetaAdsDiagnosis(
 }
 
 export async function clearMetaAdsDiagnosis(username: string): Promise<void> {
-  try {
-    await store().delete(keyFor(username));
-    await store().delete(tokenKeyFor(username));
-  } catch (e) {
-    console.warn("[meta-ads] diagnosis delete failed:", (e as Error)?.message);
-  }
+  await store().delete(tokenKeyFor(username));
+  await store().delete(keyFor(username));
 }
 
 /**

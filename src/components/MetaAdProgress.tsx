@@ -76,7 +76,7 @@ const MetaAdProgress: React.FC<MetaAdProgressProps> = ({ upload, record, running
       )}
       {record?.warnings?.length ? (
         <div className="mt-2 space-y-1">
-          {record.warnings.map((w) => (
+          {[...new Set(record.warnings)].map((w) => (
             <p key={w} className="text-[10px] text-amber-700 font-bold leading-relaxed">
               {w}
             </p>

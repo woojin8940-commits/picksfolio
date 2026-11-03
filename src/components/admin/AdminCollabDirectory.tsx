@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
-import { compactCountEn, formatContact } from '../../utils/formatters';
+import { compactCountEn, formatContact, formatKoreanWon } from '../../utils/formatters';
 import { instagramPostUrl } from '../../utils/instagramPostUrl';
 
 interface DirApplication {
@@ -569,7 +569,7 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                     </div>
                     {it.budget > 0 && (
                       <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-600 text-[11px] font-black whitespace-nowrap">
-                        예산 {it.budget_text || it.budget.toLocaleString()}
+                        예산 {formatKoreanWon(it.budget)}
                       </span>
                     )}
                   </div>

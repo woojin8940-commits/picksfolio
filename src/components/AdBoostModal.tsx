@@ -211,7 +211,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
   // 광고 현황에서 연동·선택한 계정을 그대로 읽는다. 이 창에서 따로 연동하지는 않는다 —
   // 연동은 계정 단위의 설정이라 광고 현황의 '연동 설정' 한 군데에 둔다.
-  const { accounts, account: currentAccount, connected } = useMetaAdConnection(businessUsername);
+  const { accounts, account: currentAccount, connected, selectAccount } = useMetaAdConnection(businessUsername);
   const [adAccountId, setAdAccountId] = useState('');
 
   /**
@@ -462,6 +462,11 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     if (inFlight.current) return;
     const signal = runController.current?.signal;
     if (signal?.aborted) return;
+    if (resume?.pendingStep && resume.pendingStep !== 'resume') {
+      setPhase('running');
+      await runSteps(resume);
+      return;
+    }
     if (problems.length || !selectedAccount || !page) {
       setError(problems[0] || '설정을 확인해 주세요.');
       return;
@@ -709,7 +714,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   className="w-full py-3 rounded-xl bg-blue-600 text-white text-[12px] font-black hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  {record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
+                  {record?.pendingStep || record?.resumeRetryRequired ? '생성 결과 다시 확인' : record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
                 </button>
               )}
               {runError && !submitting && (
@@ -724,7 +729,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
               {onViewAdStatus && !submitting && (
                 <button
                   type="button"
-                  onClick={() => { onClose(); onViewAdStatus(); }}
+                  onClick={() => { if (record?.adAccountId || selectedAccount?.id) selectAccount(record?.adAccountId || selectedAccount!.id); onClose(); onViewAdStatus(); }}
                   className="w-full py-3 rounded-xl bg-slate-900 text-white text-[12px] font-black hover:bg-slate-800 transition-colors"
                 >
                   광고 현황에서 보기
@@ -1195,7 +1200,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 className="w-full py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                {submitting ? '광고 만드는 중' : resume ? '이 설정으로 이어서 만들기' : '파트너십 광고 올리기'}
+                {submitting ? '광고 만드는 중' : resume?.pendingStep && resume.pendingStep !== 'resume' ? '생성 결과 다시 확인' : resume ? '이 설정으로 이어서 만들기' : '파트너십 광고 올리기'}
               </button>
               <p className="text-[10px] text-slate-400 font-medium mt-2 text-center leading-relaxed">
                 {resume

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, Loader2, Plus, RotateCcw } from 'lucide-react';
 import { MetaPixel, createMetaPixel, fetchMetaPixels } from '../utils/metaAdsApi';
 import { inputCls, labelCls, selectCls } from './AdDeliveryFields';
@@ -91,9 +91,25 @@ export default function MetaPixelField({
   const [createError, setCreateError] = useState('');
   const [showCode, setShowCode] = useState(false);
   const [reload, setReload] = useState(0);
+  const scope = `${businessUsername}:${adAccountId}`;
+  const previousScope = useRef(scope);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const creationRequest = useRef(0);
+  useEffect(() => () => { ++creationRequest.current; }, []);
 
   useEffect(() => {
-    if (!adAccountId) return;
+    if (previousScope.current !== scope) {
+      previousScope.current = scope;
+      ++creationRequest.current;
+      setCreating(false);
+      onChange('');
+      setPixels([]);
+      setCreateOpen(false);
+      setShowCode(false);
+      setCreateError('');
+    }
+    if (!adAccountId) { setLoading(false); setLoadError(''); return; }
     let alive = true;
     setLoading(true);
     setLoadError('');
@@ -114,9 +130,12 @@ export default function MetaPixelField({
   }, [businessUsername, adAccountId, reload]);
 
   const create = async () => {
+    const request = ++creationRequest.current;
+    const requestScope = scope;
     setCreating(true);
     setCreateError('');
     const res = await createMetaPixel(businessUsername, adAccountId, name.trim() || `${businessUsername} 픽셀`);
+    if (request !== creationRequest.current || currentScope.current !== requestScope) return;
     setCreating(false);
     if (!res.ok) {
       setCreateError(

@@ -134,6 +134,7 @@ const notify = () => {
  */
 const cache = new Map<string, MetaAdDiagnosis | null>();
 const inflight = new Map<string, Promise<MetaAdDiagnosis | null>>();
+const generations = new Map<string, number>();
 
 export const readCachedDiagnosis = (username: string): MetaAdDiagnosis | null | undefined =>
   cache.get(normalize(username));
@@ -149,10 +150,13 @@ export const loadAdConnection = async (
 
   const existing = inflight.get(key);
   if (existing && !opts.force) return existing;
+  const generation = (generations.get(key) || 0) + 1;
+  generations.set(key, generation);
 
   const request = apiService
     .metaAdsConnection(key)
     .then((res) => {
+      if (generations.get(key) !== generation) return cache.get(key) ?? null;
       // 오류는 "연동 없음"과 다르다. 잠깐 끊긴 것이라면 다음 시도에서 살아나야 하므로
       // 캐시에 null 을 박아 두지 않는다 — 박아 두면 화면이 연동을 해제된 것으로 읽는다.
       if (res.error) throw new Error(res.error);
@@ -161,7 +165,7 @@ export const loadAdConnection = async (
       return res.connection || null;
     })
     .finally(() => {
-      inflight.delete(key);
+      if (inflight.get(key) === request) inflight.delete(key);
     });
 
   inflight.set(key, request);
@@ -221,7 +225,10 @@ export const startMetaAdConnect = async (
 export const disconnectMetaAccount = async (username: string): Promise<MetaAdConnection> => {
   const key = normalize(username);
   const ok = await apiService.metaAdsDisconnect(key);
+  if (!ok) throw new Error('Meta 연동 해제를 완료하지 못했습니다. 다시 해제해 주세요.');
   if (ok) {
+    generations.set(key, (generations.get(key) || 0) + 1);
+    inflight.delete(key);
     cache.set(key, null);
     try {
       localStorage.removeItem(selectionKey(username));

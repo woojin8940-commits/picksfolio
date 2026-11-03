@@ -248,7 +248,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const visible = useMemo(() => {
     const rows = campaigns.filter((c) => {
       if (status === 'open' && c.status !== 'active') return false;
-      if (status === 'closed' && c.status === 'active') return false;
+      if (status === 'closed' && !['closed', 'completed', 'inactive'].includes(c.status)) return false;
       return true;
     });
     if (sort === 'recent') return rows;
@@ -276,6 +276,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const shown = useMemo(() => {
     const base = { ...EMPTY_TOTALS };
     for (const c of visible) {
+      if (!['active', 'closed', 'completed', 'inactive'].includes(c.status)) continue;
       base.campaigns++;
       base.collabs += c.collabs;
       base.uploaded += c.uploaded;
@@ -371,8 +372,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           pending={shown.cpv === 0}
           hint={
             shown.measuredSpend > 0
-              ? `집계된 게시물 지급액 ${formatKoreanWon(shown.measuredSpend)} ÷ 그 게시물 조회수`
-              : '확정 지급액이 등록되면 계산됩니다'
+              ? `집계된 게시물 광고비 ${formatKoreanWon(shown.measuredSpend)} ÷ 그 게시물 조회수`
+              : '확정 광고비가 등록되면 계산됩니다'
           }
         />
       </div>
@@ -668,7 +669,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                     {c.budgetKrw > 0 && (
                       <p className="text-[10px] text-slate-400 font-medium mt-3">
                         등록 예산 {formatKoreanWon(c.budgetKrw)}
-                        {c.spend > 0 ? ` · 확정 지급액 합계 ${formatKoreanWon(c.spend)}` : ' · 확정 지급액은 담당자가 조건을 확정하면 채워집니다'}
+                        {c.spend > 0 ? ` · 광고비 합계 ${formatKoreanWon(c.spend)}` : ' · 광고비는 담당자가 조건을 확정하면 채워집니다'}
                       </p>
                     )}
                   </div>

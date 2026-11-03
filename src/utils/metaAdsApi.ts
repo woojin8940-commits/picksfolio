@@ -59,8 +59,8 @@ async function call<T>(
 }
 
 /** 토큰이 없거나 만료돼 다시 연동해야 하는 오류인지. */
-export const needsReconnect = (res: { ok: boolean; code?: string }) =>
-  !res.ok && typeof res.code === 'string' && res.code.startsWith('token_');
+export const needsReconnect = (res: { ok: boolean; code?: string; metaErrorCode?: number }) =>
+  !res.ok && ((typeof res.code === 'string' && res.code.startsWith('token_')) || [10, 190, 200].includes(res.metaErrorCode || 0));
 
 /* ---------------------------------------------------------------------------------------- */
 /* 페이지                                                                                   */
@@ -229,7 +229,7 @@ export async function uploadAdImage(
 }
 
 /** 영상 조각 크기. base64 로 늘어나도(×4/3) 함수 본문 상한 안에 들어간다. */
-const VIDEO_CHUNK = 4 * 1024 * 1024;
+const VIDEO_CHUNK = 3 * 1024 * 1024;
 
 /**
  * 영상을 메타의 분할 업로드로 올린다. 조각마다 진행률을 알려 준다.
@@ -249,6 +249,12 @@ export async function uploadAdVideo(
   );
   if (!start.ok) return start;
 
+  const validRange = (from: number, to: number) =>
+    Number.isSafeInteger(from) && Number.isSafeInteger(to) && from >= 0 && from <= to && to <= file.size &&
+    (from < to || from === file.size);
+  if (!start.sessionId || !start.videoId || !validRange(start.startOffset, start.endOffset)) {
+    return { ok: false, status: 502, error: 'Meta에서 영상 업로드 범위를 확인하지 못했습니다.' };
+  }
   let startOffset = start.startOffset;
   let endOffset = start.endOffset;
   while (startOffset < endOffset) {
@@ -264,10 +270,14 @@ export async function uploadAdVideo(
       120_000,
     );
     if (!res.ok) return res;
+    if (!validRange(res.startOffset, res.endOffset) || res.startOffset <= startOffset || res.startOffset > end) {
+      return { ok: false, status: 502, error: '영상 업로드가 진행되지 않았습니다. 다시 업로드해 주세요.' };
+    }
     startOffset = res.startOffset;
     endOffset = res.endOffset;
     onProgress?.(Math.min(1, startOffset / file.size));
   }
+  if (startOffset !== file.size) return { ok: false, status: 502, error: '영상 전송이 완료되지 않았습니다.' };
 
   const finish = await call<{ ok: boolean }>(username, path, {
     method: 'POST',
@@ -289,6 +299,9 @@ export type MetaAdDisplayStatus = 'draft' | 'review' | 'active' | 'paused' | 're
 /** 서버가 저장한 집행 기록(만든 메타 객체의 ID 와 픽스폴리오 쪽 맥락). */
 export type MetaAdRecord = {
   id: string;
+  pendingStep?: string;
+  pendingName?: string;
+  resumeRetryRequired?: boolean;
   createdAt: string;
   updatedAt: string;
   source: 'partnership' | 'own';
@@ -402,7 +415,7 @@ export const fetchMetaAds = (username: string, adAccountId?: string, range: AdDa
   if (adAccountId) query.set('account', adAccountId);
   if (range !== 'maximum') query.set('range', range);
   const qs = query.toString();
-  return call<{ ads: MetaAdWithLive[]; errors: string[]; fetchedAt: string; source: string }>(
+  return call<{ ads: MetaAdWithLive[]; errors: string[]; reconnectRequired?: boolean; fetchedAt: string; source: string }>(
     username,
     `${adsPath(username)}${qs ? `?${qs}` : ''}`,
   );
@@ -437,7 +450,7 @@ export type MetaAdDraft = {
   placements: string[];
 } & AdAdvancedSettings;
 
-type StepResult = MetaApiResult<{ record: MetaAdRecord; pending?: boolean }> & { record?: MetaAdRecord };
+type StepResult = MetaApiResult<{ record: MetaAdRecord; pending?: boolean; note?: string; retryAfterMs?: number }> & { record?: MetaAdRecord; pendingName?: string };
 
 export const createMetaAd = (username: string, draft: MetaAdDraft, requestId: string, signal?: AbortSignal) =>
   call<{ record: MetaAdRecord }>(username, adsPath(username), {
@@ -450,6 +463,13 @@ export const continueMetaAd = (username: string, id: string, signal?: AbortSigna
   call<{ record: MetaAdRecord; pending?: boolean }>(username, adsPath(username), {
     method: 'POST',
     body: JSON.stringify({ action: 'continue', id }),
+    signal,
+  }) as Promise<StepResult>;
+
+export const recoverMetaAd = (username: string, record: MetaAdRecord, signal?: AbortSignal, recovery: { objectId?: string; confirmNotCreated?: boolean; pendingName?: string } = {}) =>
+  call(username, adsPath(username), {
+    method: 'POST',
+    body: JSON.stringify({ action: 'recover', id: record.id, ...recovery }),
     signal,
   }) as Promise<StepResult>;
 
@@ -511,16 +531,28 @@ export async function runRemainingSteps(
   let waits = 0;
   while (current.step !== 'done') {
     if (signal?.aborted) return { record: current, error: '요청을 중단했습니다. 광고 현황에서 진행 상태를 확인해 주세요.' };
-    const res = await continueMetaAd(username, current.id, signal);
+    let res = current.pendingStep || current.resumeRetryRequired
+      ? await recoverMetaAd(username, current, signal)
+      : await continueMetaAd(username, current.id, signal);
+    if (!res.ok && current.pendingStep && ['AD_NOT_FOUND', 'AD_RESULT_UNKNOWN', 'AD_RESULT_AMBIGUOUS'].includes(res.code || '') && !signal?.aborted) {
+      const name = res.pendingName || current.pendingName || current.name;
+      const objectId = window.prompt(`Meta 광고 관리자에서 '${name}' 생성 여부를 확인해 주세요. 이미 생성됐다면 해당 객체 ID를 입력하세요. 생성되지 않은 것이 확실하면 '미생성'을 입력하세요. 취소하면 재생성하지 않습니다.`);
+      if (signal?.aborted) return { record: res.record || current, error: '요청을 중단했습니다.' };
+      if (objectId?.trim() === '미생성') {
+        res = await recoverMetaAd(username, current, signal, { confirmNotCreated: true, pendingName: name });
+      } else if (objectId?.trim()) {
+        res = await recoverMetaAd(username, current, signal, { objectId: objectId.trim() });
+      }
+    }
     if (signal?.aborted) return { record: res.record || current, error: '요청을 중단했습니다. 광고 현황에서 진행 상태를 확인해 주세요.' };
     if (!res.ok) return { record: res.record || current, error: res.error };
+    current = res.record;
     if (res.pending) {
-      if (++waits > 40) return { record: current, error: 'Meta의 영상 처리가 길어지고 있습니다. 광고 현황에서 이어서 만들어 주세요.' };
-      onStep(current, 'Meta가 영상을 처리하고 있습니다');
-      await sleep(5000);
+      if (++waits > 200) return { record: current, error: 'Meta 처리가 길어지고 있습니다. 광고 현황에서 다시 확인해 주세요.' };
+      onStep(current, res.note || 'Meta가 영상을 처리하고 있습니다');
+      await sleep(Math.max(300, Math.min(5000, res.retryAfterMs || 5000)));
       continue;
     }
-    current = res.record;
     onStep(current);
   }
   return { record: current };

@@ -401,8 +401,8 @@ export const platformTextPatterns = [
     "replacement": "$1 Please write down what you want to change in scene."
   },
   {
-    "source": "^집계된 게시물 지급액 (.+?) ÷ 그 게시물 조회수$",
-    "replacement": "$1 paid out across the counted posts ÷ the views on those posts"
+    "source": "^집계된 게시물 광고비 (.+?) ÷ 그 게시물 조회수$",
+    "replacement": "Ad fees $1 across the counted posts ÷ the views on those posts"
   },
   {
     "source": "^'(.+?)' 계정이 올린 콘텐츠는 목록에 없습니다\\.$",
@@ -789,8 +789,8 @@ export const platformTextPatterns = [
     "replacement": "Latest Reels and short-form · $1"
   },
   {
-    "source": "^· 확정 지급액 합계 (.+?)$",
-    "replacement": "· Total confirmed payment amount $1"
+    "source": "^· 광고비 합계 (.+?)$",
+    "replacement": "· Total ad fees $1"
   },
   {
     "source": "^국세청 확인 완료 · (.+?)$",
