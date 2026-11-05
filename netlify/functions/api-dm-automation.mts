@@ -889,7 +889,9 @@ const handle = async (req: Request, context: Context) => {
     if (!access.allowed) {
       return Response.json(
         {
-          error: DM_AUTOMATION_REQUIRED_MESSAGE,
+          error: access.creatorRequired
+            ? "자동 디엠은 크리에이터 승인 후 사용할 수 있어요. 크리에이터 지원서를 내면 담당자가 확인 후 승인해 드립니다."
+            : DM_AUTOMATION_REQUIRED_MESSAGE,
           code: "DM_AUTOMATION_PLAN_REQUIRED",
           requiredTier: DM_AUTOMATION_TIER,
         },

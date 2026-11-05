@@ -5,6 +5,49 @@ import { collabHeaders } from './apiService';
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected';
 export type ProductStatus = 'draft' | 'on_sale' | 'paused';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+/** 브랜드 선정 뒤 픽스폴리오 담당자의 연락 단계. */
+export type ManagerStatus = 'waiting' | 'contacting' | 'done';
+
+export const MANAGER_STATUS_LABEL: Record<ManagerStatus, string> = {
+  waiting: '담당자 연락 대기',
+  contacting: '담당자 연락 중',
+  done: '진행 확정',
+};
+export const MANAGER_STATUS_STYLE: Record<ManagerStatus, string> = {
+  waiting: 'bg-amber-50 text-amber-600',
+  contacting: 'bg-blue-50 text-blue-600',
+  done: 'bg-emerald-50 text-emerald-600',
+};
+
+/** 담당자 연락 큐 한 줄(운영 콘솔). */
+export interface ManagerSelection extends StoreRequest {
+  businessUsername: string;
+  salePrice: number;
+  commissionRate: number;
+  managerUsername: string;
+  managerNote: string;
+  managerUpdatedAt: string | null;
+  brandContact: { name: string; phone: string; email: string };
+  creatorContact: { name: string; phone: string; instagramUrl: string };
+}
+
+export type CreatorStatus = 'approved' | 'pending' | 'rejected' | 'none';
+export interface CreatorAccess { status: CreatorStatus; legacy: boolean; approved: boolean; rejectReason: string }
+export interface CreatorApplication {
+  username: string;
+  source: 'application' | 'legacy';
+  name: string;
+  contact: string;
+  instagramUrl: string;
+  privacyConsentedAt: string | null;
+  status: Exclude<CreatorStatus, 'none'>;
+  rejectReason: string;
+  reviewedBy: string;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CreatorApplicationInput { name: string; contact: string; instagramUrl: string; privacyConsent: boolean }
 
 export interface StoreApplication {
   id: string;
@@ -97,7 +140,9 @@ export interface StoreRequest {
   channelUrl: string;
   status: RequestStatus;
   brandNote: string;
-  /** 승인되면 생기는 인플루언서 전용 링크 코드(/shop/<코드>). */
+  /** 선정 뒤 담당자 연락 단계. '' 은 해당 없음(대기 · 반려 등). */
+  managerStatus: ManagerStatus | '';
+  /** 담당자가 진행 완료로 바꾸면 생기는 인플루언서 전용 링크 코드(/shop/<코드>). */
   linkCode: string;
   clickCount: number;
   createdAt: string;
@@ -218,7 +263,7 @@ export const PRODUCT_STATUS_LABEL: Record<ProductStatus, string> = {
 
 export const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
   pending: '검토 대기',
-  approved: '승인',
+  approved: '선정',
   rejected: '반려',
   cancelled: '취소',
 };
@@ -246,6 +291,7 @@ async function call<T>(method: 'GET' | 'POST', url: string, body?: unknown, opts
 
 const URL_BASE = '/api/affiliate-store';
 const OPS = '/api/affiliate-store-ops';
+const CREATOR_URL = '/api/creator-application';
 
 export const affiliateStoreService = {
   // 브랜드
@@ -313,6 +359,28 @@ export const affiliateStoreService = {
   },
   cancelRequest(id: string) {
     return call<{ ok: true }>('POST', URL_BASE, { action: 'cancel_request', id });
+  },
+
+  // 담당자 — 브랜드가 선정한 신청의 연락 진행
+  listSelections(token: string) {
+    return call<{ selections: ManagerSelection[] }>('GET', `${URL_BASE}?scope=selections`, undefined, { token });
+  },
+  updateSelection(token: string, id: string, managerStatus: ManagerStatus, note?: string) {
+    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'manager_update', id, managerStatus, note }, { token });
+  },
+
+  // 크리에이터 지원 · 승인(/api/creator-application)
+  creatorAccess() {
+    return call<{ access: CreatorAccess; application: CreatorApplication | null }>('GET', CREATOR_URL);
+  },
+  applyCreator(input: CreatorApplicationInput) {
+    return call<{ application: CreatorApplication }>('POST', CREATOR_URL, { action: 'apply', ...input });
+  },
+  listCreatorApplications(token: string) {
+    return call<{ applications: CreatorApplication[] }>('GET', `${CREATOR_URL}?scope=admin`, undefined, { token });
+  },
+  reviewCreator(token: string, username: string, decision: 'approve' | 'reject', reason = '') {
+    return call<{ application: CreatorApplication }>('POST', CREATOR_URL, { action: 'review', username, decision, reason }, { token });
   },
 
   // 운영자

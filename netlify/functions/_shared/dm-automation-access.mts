@@ -21,6 +21,7 @@
 
 import { membershipPlanState } from './membership-access.mts'
 import { readInfluencerDmAccess } from './dm-access-control.mts'
+import { readCreatorAccess, type CreatorStatus } from './creator-access.mts'
 import { findProfileByUsername } from './user-auth.mts'
 import type { MembershipTier } from './membership-billing.mts'
 
@@ -42,6 +43,13 @@ export type DmAutomationStatus = {
   /** 인플루언서: 담당자가 중단했는지와 그 사유. */
   suspended?: boolean
   suspendedReason?: string
+  /**
+   * 인플루언서: 크리에이터 승인이 필요한 새 계정인지(기존 계정은 false)와 지원 상태.
+   * 승인 전에는 자동 디엠을 쓸 수 없고, 화면은 크리에이터 지원 안내를 띄운다.
+   */
+  creatorRequired?: boolean
+  creatorStatus?: CreatorStatus
+  creatorRejectReason?: string
   /**
    * 판정 근거를 읽지 못했다(프로필 · 등록서 · 멤버십 조회 실패). 이때 allowed 는 false
    * 지만 "권한 없음"이 아니라 "지금은 모른다"는 뜻이다.
@@ -125,13 +133,31 @@ const computeStatus = async (
     }
   }
 
+  // 기존 인플루언서는 지금처럼 매칭 등록으로 열린다. 새로 들어온 인플루언서는 크리에이터
+  // 승인을 받아야 열린다(승인 뒤 담당자가 중단하면 멈추는 것은 같다).
+  const creator = await readCreatorAccess(clean)
+  if (!creator || !access) {
+    return { allowed: false, accountType: 'influencer', lookupFailed: true }
+  }
+  if (!creator.legacy) {
+    return {
+      allowed: creator.approved && !access.suspended,
+      accountType: 'influencer',
+      registered: !!access.registered,
+      suspended: !!access.suspended,
+      suspendedReason: access.reason || '',
+      creatorRequired: !creator.approved,
+      creatorStatus: creator.status,
+      creatorRejectReason: creator.rejectReason,
+    }
+  }
+
   return {
-    allowed: !!access?.allowed,
+    allowed: !!access.allowed,
     accountType: 'influencer',
-    registered: !!access?.registered,
-    suspended: !!access?.suspended,
-    suspendedReason: access?.reason || '',
-    ...(access ? {} : { lookupFailed: true }),
+    registered: !!access.registered,
+    suspended: !!access.suspended,
+    suspendedReason: access.reason || '',
   }
 }
 

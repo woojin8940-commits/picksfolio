@@ -3,6 +3,7 @@ import ManagerInfluencerDirectory from './ManagerInfluencerDirectory';
 import ManagerCampaignsPanel, { isMyTurn } from './ManagerCampaignsPanel';
 import ManagerBrandPicksPanel from './ManagerBrandPicksPanel';
 import ManagerDmAccessPanel from './ManagerDmAccessPanel';
+import AdminAffiliateSelections from '../admin/AdminAffiliateSelections';
 import { apiService } from '../../services/apiService';
 
 /**
@@ -37,13 +38,14 @@ interface ManagerDashboardProps {
   onNavigateCreator?: () => void;
 }
 
-type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'dm-access';
+type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'dm-access' | 'affiliate';
 
 const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 진행하기' },
   { key: 'influencers', label: '인플루언서', hint: '카테고리별 전체 명부' },
   { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정과 검수' },
   { key: 'dm-access', label: '자동 디엠 관리', hint: '매칭 등록자 · 제안 거절 · 이용 중단' },
+  { key: 'affiliate', label: '어필리에이트 연락', hint: '브랜드가 선정한 판매 신청 · 양쪽 연락' },
 ];
 
 const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
@@ -55,7 +57,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   const initialParams = new URLSearchParams(window.location.search);
   const requestedTab = initialParams.get('tab');
   const [tab, setTab] = useState<ManagerTab>(
-    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'dm-access'
+    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'dm-access' || requestedTab === 'affiliate'
       ? requestedTab
       : 'picks',
   );
@@ -189,6 +191,8 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
         )}
         {tab === 'influencers' && <ManagerInfluencerDirectory onNotify={notify} />}
         {tab === 'dm-access' && <ManagerDmAccessPanel onNotify={notify} />}
+        {/* 담당자는 서비스 계정으로 로그인한다 — 토큰 없이 부르면 서비스 계정 인증이 실린다. */}
+        {tab === 'affiliate' && <AdminAffiliateSelections token="" />}
         {tab === 'campaigns' && (
           <ManagerCampaignsPanel
             managerUsername={username}

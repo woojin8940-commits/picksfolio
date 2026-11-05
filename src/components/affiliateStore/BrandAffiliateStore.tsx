@@ -5,6 +5,8 @@ import {
   won,
   PRODUCT_STATUS_LABEL,
   REQUEST_STATUS_LABEL,
+  MANAGER_STATUS_LABEL,
+  MANAGER_STATUS_STYLE,
   type CategoryNode,
   type FeeRates,
   type StoreApplication,
@@ -189,6 +191,8 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       const input = window.prompt('반려 사유를 적어 주세요(인플루언서에게 보입니다).', '');
       if (input === null) return;
       note = input;
+    } else if (!window.confirm(`@${r.influencerUsername} 님을 선정할까요?\n선정하면 픽스폴리오 담당자가 중간에서 양쪽에 연락해 조건 · 일정을 조율합니다.`)) {
+      return;
     }
     setBusyId(r.id);
     const res = await affiliateStoreService.reviewRequest(businessUsername, r.id, decision, note);
@@ -324,6 +328,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
           </div>
         ) : (
           <div className="space-y-2.5">
+            <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
+              함께할 인플루언서를 선정하면 픽스폴리오 담당자가 중간에서 양쪽에 연락해 조건 · 일정을 조율합니다. 진행이 확정되면 인플루언서의 전용 판매 링크가 열립니다.
+            </div>
             {requests.map(r => (
               <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col md:flex-row md:items-center gap-3">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -343,8 +350,11 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                 </div>
                 <div className="flex items-center gap-1.5 justify-end shrink-0">
                   <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
+                  {r.status === 'approved' && r.managerStatus && (
+                    <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
+                  )}
                   {r.status !== 'approved' && (
-                    <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black disabled:opacity-50">승인</button>
+                    <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black disabled:opacity-50">선정</button>
                   )}
                   {r.status !== 'rejected' && (
                     <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-8 px-3 rounded-lg border border-slate-200 text-slate-600 text-[11px] font-black disabled:opacity-50">반려</button>

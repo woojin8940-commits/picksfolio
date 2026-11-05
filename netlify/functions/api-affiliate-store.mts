@@ -1,7 +1,8 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
-import { requireOperator } from "./_shared/manager-auth.mts";
+import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
+import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
 import { SALE_STATUSES, STORE_TESTERS, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
 
@@ -20,6 +21,11 @@ import { SALE_STATUSES, STORE_TESTERS, currentFeeRates } from "./_shared/affilia
  *     (주문 · 취소 · 반품 · 문의는 api-affiliate-store-ops)
  *     인플루언서 request · cancel_request
  *     운영자    review_application
+ *     담당자    manager_update  (GET scope=selections: 브랜드가 선정한 신청 — 담당자 연락 큐)
+ *
+ * 선정 이후 흐름: 브랜드가 선정(approve)하면 manager_status = 'waiting' 이 되고, 픽스폴리오
+ * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 인플루언서 전용 링크가 열린다.
+ * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
  *
  * 정식 오픈 전이라 브랜드 · 인플루언서 쪽은 테스트 계정(TESTERS)만 쓸 수 있다.
  * 오픈할 때는 TESTERS 검사를 없애면 된다(프론트의 utils/featureFlags 도 같이).
@@ -118,7 +124,9 @@ function shapeRequest(r: any) {
     channelUrl: r.channel_url,
     status: r.status,
     brandNote: r.brand_note,
-    linkCode: r.link_code || "",
+    /** 선정 뒤 담당자 연락 단계: '' | 'waiting' | 'contacting' | 'done' */
+    managerStatus: r.manager_status || "",
+    linkCode: r.manager_status === "done" ? r.link_code || "" : "",
     clickCount: Number(r.click_count) || 0,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -384,14 +392,19 @@ async function brandReviewRequest(db: any, username: string, body: any) {
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
   const note = clip(body.note, 500);
+  // 선정하면 담당자 연락 대기로 넘어간다. 전용 링크는 담당자가 진행 완료로 바꿀 때 열린다.
+  // 이미 진행 완료된 신청을 다시 선정하면 그 상태를 그대로 둔다.
   const rows = (await db.sql`
-    UPDATE affiliate_store_requests SET status = ${decision}, brand_note = ${note}, updated_at = NOW()
+    UPDATE affiliate_store_requests SET status = ${decision}, brand_note = ${note},
+      manager_status = CASE
+        WHEN ${decision}::text = 'approved' AND manager_status <> 'done' THEN 'waiting'
+        ELSE manager_status
+      END,
+      updated_at = NOW()
     WHERE id = ${id} AND business_username = ${username} AND status IN ('pending', 'approved', 'rejected')
     RETURNING *
   `) as any[];
   if (!rows[0]) return err("신청을 찾을 수 없습니다.", 404);
-  // 승인하면 인플루언서 전용 링크가 생긴다.
-  if (decision === "approved") rows[0].link_code = await ensureLinkCode(db, rows[0].id);
   return Response.json({ request: shapeRequest(rows[0]) });
 }
 
@@ -408,7 +421,7 @@ async function creatorMyAffiliate(db: any, username: string) {
     FROM affiliate_store_requests r
     JOIN affiliate_store_products p ON p.id = r.product_id
     LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
-    WHERE r.influencer_username = ${username} AND r.status = 'approved'
+    WHERE r.influencer_username = ${username} AND r.status = 'approved' AND r.manager_status = 'done'
     ORDER BY r.updated_at DESC
   `) as any[];
   for (const r of rows) if (!r.link_code) r.link_code = await ensureLinkCode(db, r.id);
@@ -633,6 +646,59 @@ async function adminReview(db: any, operator: string, body: any) {
   return Response.json({ application: shapeApplication(rows[0]) });
 }
 
+// ─────────────────────────── 담당자(선정 후 연락) ───────────────────────────
+
+const MANAGER_STATUSES = ["waiting", "contacting", "done"] as const;
+
+/** 브랜드가 선정한 신청 — 담당자가 양쪽에 연락해 진행한다. 연락처를 함께 내려준다. */
+async function managerSelections(db: any) {
+  const rows = (await db.sql`
+    SELECT r.*, p.name AS product_name, p.image_urls, p.sale_price, p.commission_rate,
+           a.brand_name, a.contact_name AS brand_contact_name, a.contact_phone AS brand_contact_phone,
+           a.contact_email AS brand_contact_email,
+           c.name AS creator_name, c.contact AS creator_contact, c.instagram_url AS creator_instagram
+    FROM affiliate_store_requests r
+    JOIN affiliate_store_products p ON p.id = r.product_id
+    LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
+    LEFT JOIN creator_applications c ON c.username = r.influencer_username
+    WHERE r.status = 'approved' AND r.manager_status IN ('waiting', 'contacting', 'done')
+    ORDER BY (r.manager_status = 'waiting') DESC, (r.manager_status = 'contacting') DESC, r.updated_at DESC
+    LIMIT 500
+  `) as any[];
+  return Response.json({
+    selections: rows.map((r) => ({
+      ...shapeRequest(r),
+      linkCode: r.link_code || "",
+      businessUsername: r.business_username,
+      salePrice: Number(r.sale_price) || 0,
+      commissionRate: Number(r.commission_rate) || 0,
+      managerUsername: r.manager_username || "",
+      managerNote: r.manager_note || "",
+      managerUpdatedAt: r.manager_updated_at,
+      brandContact: { name: r.brand_contact_name || "", phone: r.brand_contact_phone || "", email: r.brand_contact_email || "" },
+      creatorContact: { name: r.creator_name || "", phone: r.creator_contact || "", instagramUrl: r.creator_instagram || "" },
+    })),
+  });
+}
+
+async function managerUpdate(db: any, manager: string, body: any) {
+  const id = clip(body.id, 60);
+  const next = String(body.managerStatus || "");
+  if (!(MANAGER_STATUSES as readonly string[]).includes(next)) return err("진행 상태를 선택해 주세요.");
+  const note = body.note === undefined ? null : clip(body.note, 2000);
+  const rows = (await db.sql`
+    UPDATE affiliate_store_requests
+    SET manager_status = ${next}, manager_note = COALESCE(${note}, manager_note),
+        manager_username = ${manager}, manager_updated_at = NOW(), updated_at = NOW()
+    WHERE id = ${id} AND status = 'approved'
+    RETURNING *
+  `) as any[];
+  if (!rows[0]) return err("선정된 신청을 찾을 수 없습니다.", 404);
+  // 진행 완료되면 인플루언서 전용 판매 링크를 연다.
+  if (next === "done") rows[0].link_code = await ensureLinkCode(db, rows[0].id);
+  return Response.json({ request: { ...shapeRequest(rows[0]), managerNote: rows[0].manager_note } });
+}
+
 // ─────────────────────────── 진입 ───────────────────────────
 
 export default async (req: Request) => {
@@ -651,11 +717,36 @@ export default async (req: Request) => {
     return scope === "admin" ? adminGet(db) : adminReview(db, op.username, body);
   }
 
+  if (scope === "selections" || action === "manager_update") {
+    const mgr = await requireManager(req);
+    if (!mgr.ok) return mgr.response;
+    try {
+      return scope === "selections" ? await managerSelections(db) : await managerUpdate(db, mgr.managerUsername, body);
+    } catch (e) {
+      console.error("[affiliate-store]", action || scope, e);
+      return err("요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.", 500);
+    }
+  }
+
   const caller = await requireSignedInUser(req);
   if (!caller.ok) return caller.response;
   const username = norm(caller.username);
   if (!username) return err("로그인이 필요합니다.", 401);
   if (!TESTERS.has(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
+
+  // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
+  const creatorScope = ["creator", "brands", "my-requests", "my-affiliate"].includes(String(scope || ""))
+    || action === "request" || action === "cancel_request";
+  if (creatorScope && !caller.isAdmin) {
+    const creator = await readCreatorAccess(username);
+    if (!creator) return err("크리에이터 승인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+    if (!creator.approved) {
+      return Response.json(
+        { error: CREATOR_APPROVAL_REQUIRED_MESSAGE, code: "CREATOR_APPROVAL_REQUIRED", creatorStatus: creator.status },
+        { status: 403 },
+      );
+    }
+  }
 
   try {
     if (req.method === "GET") {
