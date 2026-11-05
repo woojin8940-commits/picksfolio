@@ -87,7 +87,8 @@ export interface ApplicationInput {
   csPhone: string;
 }
 
-export interface ProductOption { name: string; stock: number }
+/** 브랜드 화면에서는 stock(재고)이 오고, 인플루언서 화면에서는 재고 대신 soldOut(품절 여부)만 온다. */
+export interface ProductOption { name: string; stock: number; soldOut?: boolean }
 
 /** 상위 카테고리와 그 하위 카테고리. 서버(TAXONOMY)가 내려준다. */
 export interface CategoryNode { name: string; subs: string[] }
@@ -114,6 +115,8 @@ export interface StoreProduct {
   summary: string;
   description: string;
   imageUrls: string[];
+  /** 상세페이지 이미지(위에서 아래로 이어 붙여 보여 준다). */
+  detailImageUrls: string[];
   options: ProductOption[];
   retailPrice: number;
   salePrice: number;

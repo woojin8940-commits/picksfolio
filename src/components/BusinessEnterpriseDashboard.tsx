@@ -642,9 +642,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           {showAffiliateStore && (
             <NavItem icon="🏬" label="어필리에이트" active={currentSubView === 'affiliate-store'} onClick={() => setCurrentSubView('affiliate-store')} />
           )}
-          {showAffiliateStore && (
-            <NavItem icon="🧾" label="내 주문 내역" active={false} onClick={() => { window.location.href = '/my/orders'; }} />
-          )}
           <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           {/* 광고 현황은 이력에서 고른 콘텐츠의 다음 단계라, 이력 바로 아래에 둔다. */}
           <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
@@ -706,9 +703,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               {showAffiliateStore && (
                 <NavItem icon="🏬" label="어필리에이트" active={currentSubView === 'affiliate-store'} onClick={() => { setCurrentSubView('affiliate-store'); setIsMobileMenuOpen(false); }} />
-              )}
-              {showAffiliateStore && (
-                <NavItem icon="🧾" label="내 주문 내역" active={false} onClick={() => { window.location.href = '/my/orders'; }} />
               )}
               <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => { setCurrentSubView('campaign-history'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => { setCurrentSubView('ad-status'); setIsMobileMenuOpen(false); }} />

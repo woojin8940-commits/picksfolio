@@ -97,6 +97,7 @@ function shapeProduct(r: any, forCreator = false) {
     summary: r.summary,
     description: r.description,
     imageUrls: Array.isArray(r.image_urls) ? r.image_urls : [],
+    detailImageUrls: Array.isArray(r.detail_image_urls) ? r.detail_image_urls : [],
     options: Array.isArray(r.options) ? r.options : [],
     retailPrice: Number(r.retail_price) || 0,
     salePrice: Number(r.sale_price) || 0,
@@ -108,7 +109,14 @@ function shapeProduct(r: any, forCreator = false) {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
-  if (forCreator) return base;
+  if (forCreator) {
+    // 재고 수량 · 배송비는 브랜드만 보고 관리한다. 인플루언서에게는 옵션 이름과 품절 여부만 준다.
+    const { stock: _stock, shippingFee: _shippingFee, ...rest } = base;
+    return {
+      ...rest,
+      options: base.options.map((o: any) => ({ name: String(o?.name ?? ""), soldOut: !(Number(o?.stock) > 0) })),
+    };
+  }
   return { ...base, requestCounts: { pending: Number(r.pending_count) || 0, approved: Number(r.approved_count) || 0 } };
 }
 
@@ -326,6 +334,10 @@ async function brandSaveProduct(db: any, username: string, body: any) {
     .filter((u: string) => u.startsWith("/") || /^https:\/\//.test(u))
     .slice(0, 10);
   if (imageUrls.length === 0) return err("대표 이미지를 한 장 이상 올려 주세요.");
+  const detailImageUrls = (Array.isArray(p.detailImageUrls) ? p.detailImageUrls : [])
+    .map((u: unknown) => clip(u, 1000))
+    .filter((u: string) => u.startsWith("/") || /^https:\/\//.test(u))
+    .slice(0, 20);
   const options = (Array.isArray(p.options) ? p.options : [])
     .map((o: any) => ({ name: clip(o?.name, 80), stock: int(o?.stock, 0, 1_000_000) }))
     .filter((o: any) => o.name && Number.isFinite(o.stock))
@@ -348,6 +360,9 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (status === "on_sale" && stock <= 0) return err("재고가 0개인 상품은 판매중으로 둘 수 없습니다.");
 
   const imgs = JSON.stringify(imageUrls);
+  const detailImgs = JSON.stringify(detailImageUrls);
+  // 상세페이지 칸을 보내지 않은 저장(예: 예전 화면)은 기존 상세페이지를 그대로 둔다.
+  const keepDetail = !Array.isArray(p.detailImageUrls);
   const opts = JSON.stringify(options);
   const id = clip(p.id, 60);
   let rows: any[];
@@ -355,7 +370,7 @@ async function brandSaveProduct(db: any, username: string, body: any) {
     rows = (await db.sql`
       UPDATE affiliate_store_products SET
         name = ${name}, category = ${category}, subcategory = ${subcategory}, summary = ${summary}, description = ${description},
-        image_urls = ${imgs}::jsonb, options = ${opts}::jsonb, retail_price = ${retailPrice}, sale_price = ${salePrice},
+        image_urls = ${imgs}::jsonb, detail_image_urls = CASE WHEN ${keepDetail}::boolean THEN detail_image_urls ELSE ${detailImgs}::jsonb END, options = ${opts}::jsonb, retail_price = ${retailPrice}, sale_price = ${salePrice},
         commission_rate = ${commissionRate}, stock = ${stock}, shipping_fee = ${shippingFee},
         product_url = ${productUrl}, status = ${status}, updated_at = NOW()
       WHERE id = ${id} AND business_username = ${username} AND deleted_at IS NULL
@@ -365,10 +380,10 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   } else {
     rows = (await db.sql`
       INSERT INTO affiliate_store_products
-        (id, business_username, name, category, subcategory, summary, description, image_urls, options,
+        (id, business_username, name, category, subcategory, summary, description, image_urls, detail_image_urls, options,
          retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status)
       VALUES
-        (${newId("asp")}, ${username}, ${name}, ${category}, ${subcategory}, ${summary}, ${description}, ${imgs}::jsonb, ${opts}::jsonb,
+        (${newId("asp")}, ${username}, ${name}, ${category}, ${subcategory}, ${summary}, ${description}, ${imgs}::jsonb, ${detailImgs}::jsonb, ${opts}::jsonb,
          ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status})
       RETURNING *
     `) as any[];
