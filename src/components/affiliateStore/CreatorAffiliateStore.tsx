@@ -178,7 +178,7 @@ const ProductList: React.FC<ProductListProps> = ({ taxonomy, onTaxonomy, request
         />
       ) : (
         <>
-          <div className={`grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4 ${loading ? 'opacity-60' : ''}`}>
+          <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4 ${loading ? 'opacity-60' : ''}`}>
             {products.map(p => {
               const r = requestByProduct.get(p.id);
               return (
@@ -323,8 +323,8 @@ const ProductDetailPage: React.FC<DetailProps> = ({
       </div>
 
       <div className="max-w-3xl mx-auto">
-        {/* 이미지 */}
-        <div className="w-full max-w-[520px] mx-auto md:mt-6">
+        {/* 이미지 — 캠페인 협업 상세와 같은 크기로 둔다. */}
+        <div className="w-full max-w-[420px] md:max-w-[460px] mx-auto md:mt-4">
           <div className="relative aspect-square bg-slate-100 overflow-hidden md:rounded-3xl md:shadow-[0_20px_44px_-20px_rgba(15,23,42,0.5)]">
             {images[imageIndex] ? (
               <img src={images[imageIndex]} alt={detail.name} className="w-full h-full object-cover" />
@@ -382,25 +382,14 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             </div>
           </div>
 
-          {/* 판매 정보 */}
-          <div className="py-5 border-b border-slate-100 grid grid-cols-2 gap-3">
-            <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-[0_6px_18px_-8px_rgba(15,23,42,0.22)]">
-              <p className="text-[10px] text-slate-400 font-black">재고</p>
-              <p className="text-lg font-black text-slate-900 mt-1">{detail.stock.toLocaleString('ko-KR')}개</p>
-            </div>
-            <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-[0_6px_18px_-8px_rgba(15,23,42,0.22)]">
-              <p className="text-[10px] text-slate-400 font-black">배송비</p>
-              <p className="text-lg font-black text-slate-900 mt-1">{detail.shippingFee ? won(detail.shippingFee) : '무료배송'}</p>
-            </div>
-          </div>
-
+          {/* 옵션 — 재고 · 배송비는 브랜드만 관리해 여기서는 보여 주지 않는다. */}
           {detail.options.length > 0 && (
             <div className="py-5 border-b border-slate-100">
               <h3 className="text-sm font-black text-slate-900 mb-3">옵션</h3>
               <div className="flex flex-wrap gap-1.5">
                 {detail.options.map((o, i) => (
-                  <span key={i} className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${o.stock > 0 ? 'border-slate-200 text-slate-600' : 'border-slate-100 text-slate-300 line-through'}`}>
-                    {o.name} · {o.stock}개
+                  <span key={i} className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${o.soldOut ? 'border-slate-100 text-slate-300' : 'border-slate-200 text-slate-600'}`}>
+                    {o.name}{o.soldOut ? ' (품절)' : ''}
                   </span>
                 ))}
               </div>
@@ -412,6 +401,17 @@ const ProductDetailPage: React.FC<DetailProps> = ({
               <h3 className="text-sm font-black text-slate-900 mb-3">상품 상세 설명</h3>
               <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100">
                 <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8]">{detail.description}</p>
+              </div>
+            </div>
+          )}
+
+          {(detail.detailImageUrls?.length || 0) > 0 && (
+            <div className="py-5 border-b border-slate-100">
+              <h3 className="text-sm font-black text-slate-900 mb-3">상세페이지</h3>
+              <div className="-mx-4 md:mx-0 md:rounded-2xl overflow-hidden border-y md:border border-slate-100 bg-white">
+                {detail.detailImageUrls.map((u, i) => (
+                  <img key={u + i} src={u} alt={`${detail.name} 상세 ${i + 1}`} className="block w-full h-auto" loading="lazy" />
+                ))}
               </div>
             </div>
           )}

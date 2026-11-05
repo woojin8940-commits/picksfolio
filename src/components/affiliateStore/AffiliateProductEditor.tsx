@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ArrowLeft, ImagePlus, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, ImagePlus, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { apiService } from '../../services/apiService';
 import {
   affiliateStoreService,
@@ -13,7 +13,8 @@ import {
 
 /**
  * 상품 등록 · 수정 화면(카페24 상품 등록처럼 섹션별로 나눈 한 장짜리 양식).
- * 기본 정보 → 이미지 → 판매가 · 수수료 → 재고 · 옵션 → 상세 설명 → 판매 상태.
+ * 기본 정보 → 이미지 → 판매가 · 수수료 → 재고 · 옵션 → 상세페이지 · 상세 설명 → 판매 상태.
+ * 재고 · 배송비는 브랜드만 보고 관리한다(인플루언서 화면에는 옵션 이름만 보인다).
  */
 
 interface Props {
@@ -27,6 +28,7 @@ interface Props {
 }
 
 const MAX_IMAGES = 10;
+const MAX_DETAIL_IMAGES = 20;
 
 const toInput = (p: StoreProduct | null): ProductInput => ({
   id: p?.id,
@@ -36,6 +38,7 @@ const toInput = (p: StoreProduct | null): ProductInput => ({
   summary: p?.summary || '',
   description: p?.description || '',
   imageUrls: p?.imageUrls || [],
+  detailImageUrls: p?.detailImageUrls || [],
   options: p?.options || [],
   retailPrice: p?.retailPrice || 0,
   salePrice: p?.salePrice || 0,
@@ -98,9 +101,11 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
   const [form, setForm] = useState<ProductInput>(() => toInput(product));
   const [useOptions, setUseOptions] = useState((product?.options?.length || 0) > 0);
   const [uploading, setUploading] = useState(false);
+  const [detailUploading, setDetailUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const detailFileRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof ProductInput>(k: K, v: ProductInput[K]) => setForm(f => ({ ...f, [k]: v }));
 
@@ -133,6 +138,33 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
     if (urls.length < picked.length) setError('일부 이미지를 올리지 못했습니다. 5MB 이하 이미지로 다시 시도해 주세요.');
     setForm(f => ({ ...f, imageUrls: [...f.imageUrls, ...urls].slice(0, MAX_IMAGES) }));
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  /** 상세페이지 이미지. 고른 순서대로 아래에 이어 붙는다. */
+  const uploadDetailFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setError('');
+    const room = MAX_DETAIL_IMAGES - form.detailImageUrls.length;
+    const picked = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, room);
+    if (picked.length === 0) return;
+    setDetailUploading(true);
+    const urls: string[] = [];
+    for (const f of picked) {
+      const url = await apiService.uploadImage(businessUsername, f, f.name);
+      if (url) urls.push(url);
+    }
+    setDetailUploading(false);
+    if (urls.length < picked.length) setError('일부 상세페이지 이미지를 올리지 못했습니다. 5MB 이하 이미지로 나눠서 다시 시도해 주세요.');
+    setForm(f => ({ ...f, detailImageUrls: [...f.detailImageUrls, ...urls].slice(0, MAX_DETAIL_IMAGES) }));
+    if (detailFileRef.current) detailFileRef.current.value = '';
+  };
+
+  const moveDetailImage = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= form.detailImageUrls.length) return;
+    const next = [...form.detailImageUrls];
+    [next[i], next[j]] = [next[j], next[i]];
+    set('detailImageUrls', next);
   };
 
   const moveImage = (i: number, dir: -1 | 1) => {
@@ -284,7 +316,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         )}
       </Section>
 
-      <Section title="재고 · 옵션">
+      <Section title="재고 · 옵션" desc="재고 수량은 브랜드만 볼 수 있어요. 인플루언서에게는 옵션 이름만 보입니다.">
         <Row label="옵션 사용">
           <div className="flex gap-2">
             {[false, true].map(v => (
@@ -350,6 +382,52 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         )}
       </Section>
 
+      <Section
+        title="상세페이지"
+        desc={`자사몰 상세페이지처럼 세로로 긴 이미지를 올려 주세요. 위에서부터 순서대로 이어서 보여 줍니다(최대 ${MAX_DETAIL_IMAGES}장, 장당 5MB 이하). 인플루언서 상품 상세와 구매 페이지에 노출됩니다.`}
+      >
+        {form.detailImageUrls.length > 0 && (
+          <div className="space-y-2">
+            {form.detailImageUrls.map((u, i) => (
+              <div key={u + i} className="flex items-center gap-3 p-2 rounded-xl border border-slate-200 bg-slate-50">
+                <div className="w-16 h-24 shrink-0 rounded-lg overflow-hidden bg-white border border-slate-100">
+                  <img src={u} alt="" className="w-full h-full object-cover object-top" />
+                </div>
+                <p className="flex-1 text-xs font-bold text-slate-600">상세 이미지 {i + 1}</p>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => moveDetailImage(i, -1)} disabled={i === 0} className="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-500 disabled:opacity-30 flex items-center justify-center" aria-label="위로">
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button type="button" onClick={() => moveDetailImage(i, 1)} disabled={i === form.detailImageUrls.length - 1} className="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-500 disabled:opacity-30 flex items-center justify-center" aria-label="아래로">
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => set('detailImageUrls', form.detailImageUrls.filter((_, j) => j !== i))}
+                    className="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-red-500 flex items-center justify-center"
+                    aria-label="상세 이미지 삭제"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {form.detailImageUrls.length < MAX_DETAIL_IMAGES && (
+          <button
+            type="button"
+            onClick={() => detailFileRef.current?.click()}
+            disabled={detailUploading}
+            className="w-full h-24 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500 flex flex-col items-center justify-center gap-1 text-xs font-bold"
+          >
+            {detailUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5" />}
+            {detailUploading ? '올리는 중' : '상세페이지 이미지 추가'}
+          </button>
+        )}
+        <input ref={detailFileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => uploadDetailFiles(e.target.files)} />
+      </Section>
+
       <Section title="상세 설명" desc="소재 · 사이즈 · 사용법 · 셀링 포인트 등 인플루언서가 콘텐츠를 만들 때 참고할 내용을 적어 주세요.">
         <textarea
           className="w-full min-h-[200px] p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
@@ -382,7 +460,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <button onClick={onClose} className="h-11 px-5 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-600">취소</button>
         <button
           onClick={() => save()}
-          disabled={saving || uploading}
+          disabled={saving || uploading || detailUploading}
           className="h-11 px-6 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center gap-2"
         >
           {saving && <Loader2 className="w-4 h-4 animate-spin" />}

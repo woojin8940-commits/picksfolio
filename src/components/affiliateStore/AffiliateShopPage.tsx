@@ -33,6 +33,7 @@ interface ShopProduct {
   summary: string;
   description: string;
   imageUrls: string[];
+  detailImageUrls?: string[];
   options: { name: string; soldOut: boolean }[];
   retailPrice: number;
   salePrice: number;
@@ -411,6 +412,15 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               <section className="px-5 mt-8 pt-6 border-t border-slate-100">
                 <h2 className="text-sm font-black mb-3">상품 정보</h2>
                 <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">{product.description}</p>
+              </section>
+            )}
+
+            {(product.detailImageUrls?.length || 0) > 0 && (
+              <section className="mt-8 pt-6 border-t border-slate-100">
+                <h2 className="text-sm font-black mb-3 px-5">상세페이지</h2>
+                {product.detailImageUrls!.map((u, i) => (
+                  <img key={u + i} src={u} alt={`${product.name} 상세 ${i + 1}`} className="block w-full h-auto" loading="lazy" />
+                ))}
               </section>
             )}
 
