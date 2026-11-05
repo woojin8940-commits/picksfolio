@@ -110,7 +110,9 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
   const commissionAmount = Math.floor((form.salePrice * (form.commissionRate || 0)) / 100);
   // 1개 판매 시 예상 정산액(배송비 제외). PG 수수료는 결제 수단마다 다를 수 있어 높은 쪽으로 보수적으로 잡는다.
   const pgRate = feeRates ? Math.max(feeRates.pgCard, feeRates.pgKakaopay) : 0;
-  const platformFee = feeRates ? Math.floor((form.salePrice * feeRates.platform) / 100) : 0;
+  // 픽스폴리오 수수료는 5%(운영 설정값). 설정을 아직 못 읽었으면 5%로 안내한다.
+  const platformRate = feeRates ? feeRates.platform : 5;
+  const platformFee = Math.floor((form.salePrice * platformRate) / 100);
   const pgFee = Math.floor((form.salePrice * pgRate) / 100);
   const estimate = form.salePrice - commissionAmount - pgFee - platformFee;
   const totalStock = useOptions ? form.options.reduce((s, o) => s + (Number(o.stock) || 0), 0) : form.stock;
@@ -236,7 +238,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => uploadFiles(e.target.files)} />
       </Section>
 
-      <Section title="판매 정보" desc="정산 시 인플루언서 수수료, 결제 수수료(PG), 픽스폴리오 수수료를 차감한 금액이 지급됩니다.">
+      <Section title="판매 정보" desc="정산 시 인플루언서 수수료, 픽스폴리오 수수료, 카드 결제 수수료를 각각 차감한 금액이 지급됩니다.">
         <Row label="정가(소비자가)" required>
           <NumberInput value={form.retailPrice} onChange={n => set('retailPrice', n)} suffix="원" placeholder="0" />
         </Row>
@@ -246,6 +248,25 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <Row label="인플루언서 수수료" required hint={commissionAmount > 0 ? `1개 판매 시 인플루언서 수수료 약 ${won(commissionAmount)}` : '판매가 대비 %로 입력해 주세요.'}>
           <NumberInput value={form.commissionRate} onChange={n => set('commissionRate', Math.min(90, n))} suffix="%" placeholder="예: 15" />
         </Row>
+        {/* 인플루언서 수수료와 별도로 붙는 수수료 — 수수료율을 정할 때 함께 보이게 둔다. */}
+        <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3.5 text-xs">
+          <p className="font-black text-slate-900 mb-2">수수료는 각각 별도로 차감됩니다</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="bg-white rounded-lg px-3 py-2 border border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400">인플루언서 수수료</p>
+              <p className="text-sm font-black text-slate-900">{form.commissionRate || 0}% <span className="text-[10px] font-bold text-slate-400">직접 입력</span></p>
+            </div>
+            <div className="bg-white rounded-lg px-3 py-2 border border-blue-200">
+              <p className="text-[10px] font-bold text-blue-500">픽스폴리오 수수료</p>
+              <p className="text-sm font-black text-blue-700">{platformRate}% <span className="text-[10px] font-bold text-blue-400">별도</span></p>
+            </div>
+            <div className="bg-white rounded-lg px-3 py-2 border border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400">카드 결제 수수료</p>
+              <p className="text-sm font-black text-slate-900">{feeRates ? `${pgRate}%` : '결제 수단별'} <span className="text-[10px] font-bold text-slate-400">별도</span></p>
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-500 mt-2">인플루언서 수수료 · 픽스폴리오 수수료는 판매가(배송비 제외) 기준, 카드 결제 수수료는 결제 금액 기준입니다.</p>
+        </div>
         <Row label="배송비" hint="0원이면 무료배송으로 표시됩니다.">
           <NumberInput value={form.shippingFee} onChange={n => set('shippingFee', n)} suffix="원" placeholder="0" />
         </Row>
@@ -255,8 +276,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
             <p className="text-slate-500">배송비 제외 기준 · 판매가 {won(form.salePrice)}</p>
             <div className="grid grid-cols-3 gap-2 pt-1 text-slate-600">
               <span>인플루언서 수수료 −{won(commissionAmount)}</span>
-              <span>PG 수수료{feeRates ? `(${pgRate}%)` : ''} −{won(pgFee)}</span>
-              <span>픽스폴리오 수수료{feeRates ? `(${feeRates.platform}%)` : ''} −{won(platformFee)}</span>
+              <span>픽스폴리오 수수료({platformRate}%) −{won(platformFee)}</span>
+              <span>카드 결제 수수료{feeRates ? `(${pgRate}%)` : ''} −{won(pgFee)}</span>
             </div>
             <p className="text-[10px] text-slate-400 pt-1">실제 정산액은 주문 시점 수수료율과 결제 수단(카드 {feeRates?.pgCard ?? '-'}% · 카카오페이 {feeRates?.pgKakaopay ?? '-'}%)으로 계산되며, 배송비를 받은 주문은 배송비에도 PG 수수료가 붙습니다.</p>
           </div>

@@ -16,6 +16,7 @@ import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { setUnsavedWork } from '../utils/unsavedWork';
 import ManualDmModal from './ManualDmModal';
 import CollabMatchRegister from './CollabMatchRegister';
+import CreatorApplicationGate from './CreatorApplicationGate';
 import Toggle from './DmToggle';
 import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmSendStatusSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 import { instagramPostUrl } from '../utils/instagramPostUrl';
@@ -2865,7 +2866,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 구독으로 열린다. 서버가 자격(entitled)과 이유(dmAccess)를 함께 내려주며, 자격이
   // 없으면 저장·발송이 403 으로 막히므로 화면에서도 무엇을 하면 열리는지 안내한다.
   const [entitled, setEntitled] = useState(() => cachedSettings?.entitled !== false);
-  const [dmAccess, setDmAccess] = useState<{ suspended?: boolean; suspendedReason?: string } | null>(
+  const [dmAccess, setDmAccess] = useState<{ suspended?: boolean; suspendedReason?: string; creatorRequired?: boolean } | null>(
     () => (cachedSettings as any)?.dmAccess || null,
   );
 
@@ -3118,7 +3119,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     if (!entitled) {
       const text = isBusiness
         ? '브랜드 계정의 자동 디엠은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있어요.'
-        : dmAccess?.suspended
+        : dmAccess?.creatorRequired
+          ? '자동 디엠은 크리에이터 승인 후 사용할 수 있어요. 크리에이터 지원서를 내면 담당자가 확인 후 승인해 드립니다.'
+          : dmAccess?.suspended
           ? '담당자 판단으로 자동 디엠 이용이 중단되었어요. 유가시딩 캠페인 제안을 수락하면 다시 열립니다.'
           : '자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요.';
       setBanner({ type: 'err', text });
@@ -3503,7 +3506,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       {/* 자동 디엠 이용 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
           인플루언서는 브랜드 매칭받기 등록(결제 없음), 브랜드는 자동 디엠 플랜 구독으로 열린다.
           담당자가 중단한 경우에는 사유와 다시 여는 방법을 함께 보여 준다. */}
-      {!entitled && (
+      {/* 새로 가입한 인플루언서는 크리에이터 승인을 받아야 자동 디엠이 열린다(기존 계정은 그대로). */}
+      {!entitled && !isBusiness && dmAccess?.creatorRequired && (
+        <section className="mb-6">
+          <CreatorApplicationGate feature="자동 디엠" />
+        </section>
+      )}
+
+      {!entitled && !(!isBusiness && dmAccess?.creatorRequired) && (
         <section className="mb-6 rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-xl shrink-0 shadow-md">

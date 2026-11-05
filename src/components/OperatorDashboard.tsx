@@ -22,6 +22,8 @@ import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminBrandDeckRequests from './admin/AdminBrandDeckRequests';
 import AdminAffiliateStoreApplications from './admin/AdminAffiliateStoreApplications';
 import AdminAffiliateStoreIssues from './admin/AdminAffiliateStoreIssues';
+import AdminAffiliateSelections from './admin/AdminAffiliateSelections';
+import AdminCreatorApplications from './admin/AdminCreatorApplications';
 import AdminSalesLinks from './admin/AdminSalesLinks';
 import AdminCommerceCampaigns from './admin/AdminCommerceCampaigns';
 import { isTestProposal } from '../utils/testData';
@@ -54,6 +56,8 @@ type OperatorTab =
   | 'brandleads'
   | 'affiliate-store'
   | 'affiliate-issues'
+  | 'affiliate-selections'
+  | 'creator-applications'
   | 'saleslinks'
   | 'users'
   | 'managers'
@@ -333,6 +337,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'influencerdb', label: '인플루언서 DB' },
         { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
         { key: 'applicants', label: '인플루언서 지원자' },
+        // 새로 가입한 인플루언서의 크리에이터 지원. 승인하면 자동 디엠 · 어필리에이트가 열린다.
+        { key: 'creator-applications', label: '크리에이터 지원' },
         { key: 'saleslinks', label: '브랜드 영업 링크' },
       ],
     },
@@ -342,6 +348,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'brandleads', label: '브랜드 신청자' },
         // 어필리에이트(ZVZO 방식) 입점 신청. 승인하면 그 브랜드의 상품 등록이 열린다.
         { key: 'affiliate-store', label: '어필리에이트 입점 신청' },
+        // 브랜드가 선정한 판매 신청 — 담당자가 양쪽에 연락해 진행한다.
+        { key: 'affiliate-selections', label: '어필리에이트 선정 연락' },
         { key: 'affiliate-issues', label: '미처리 취소·반품·문의' },
       ],
     },
@@ -861,6 +869,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {/* 브랜드 신청자 (메타 광고 서비스 소개서 신청) */}
         {activeTab === 'affiliate-store' && adminToken && <AdminAffiliateStoreApplications token={adminToken} />}
         {activeTab === 'affiliate-issues' && adminToken && <AdminAffiliateStoreIssues token={adminToken} />}
+        {activeTab === 'affiliate-selections' && adminToken && <AdminAffiliateSelections token={adminToken} />}
+        {activeTab === 'creator-applications' && adminToken && <AdminCreatorApplications token={adminToken} />}
         {activeTab === 'brandleads' && (
           adminToken
             ? (
