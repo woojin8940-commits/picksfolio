@@ -1,9 +1,13 @@
 /**
- * 잠시 꺼 둔 기능 스위치.
+ * 어필리에이트 스토어(ZVZO 방식 — 입점 신청 → 운영자 승인 → 상품 등록 → 인플루언서 신청).
  *
- * 판매 연동형(어필리에이트) 캠페인은 카페24 앱 심사가 보류되어 당분간 쓸 수 없다.
- * 그동안 브랜드 '판매 캠페인' 메뉴(쇼핑몰 연동 포함), 인플루언서 '어필리에이트' 탭 · 칩,
- * 운영 콘솔의 판매 연동 탭을 숨기고, 예전 커머스(공동구매) 캠페인을 다시 쓴다.
- * 코드와 데이터는 그대로 두었으므로 심사가 끝나면 true 로 바꾸면 다시 열린다.
+ * 정식 오픈 전 테스트 기간에는 아래 계정에만 메뉴가 보인다. 서버
+ * (netlify/functions/api-affiliate-store.mts 의 TESTERS)도 같은 명단으로 막는다.
+ * 오픈할 때는 두 곳의 명단 검사를 함께 없앤다.
  */
-export const AFFILIATE_ENABLED = false;
+export const AFFILIATE_STORE_TESTERS = ['dnwlsdnwls', 'inplace'];
+
+export function canSeeAffiliateStore(username: string | null | undefined): boolean {
+  const name = String(username || '').trim().toLowerCase().replace(/^biz\//, '');
+  return AFFILIATE_STORE_TESTERS.includes(name);
+}

@@ -3,7 +3,6 @@ import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul, form
 import { apiService, authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
-import { AFFILIATE_ENABLED } from '../../utils/featureFlags';
 import {
   REWARD_MODES, rewardModeOf, normalizeRewardMode, COMMISSION_RANGE,
   TIERS, tierFeeLabel, stageMarksFor,
@@ -304,12 +303,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const mode = rewardModeOf(form.reward_mode);
   const isBarter = form.reward_mode === 'barter';
   const isGroupBuy = form.reward_mode === 'groupbuy';
-  // 고를 수 있는 진행 방식. 판매 캠페인(어필리에이트)이 켜져 있는 동안에는 커머스형을 그쪽에
-  // 맡기고, 예전 커머스형 캠페인을 고칠 때만 남겨 둔다. 카페24 심사 보류로 판매 캠페인을
-  // 꺼 둔 지금은 커머스형(공동구매)을 다시 고를 수 있다(utils/featureFlags).
-  const pickableModes = REWARD_MODES.filter(
-    m => !AFFILIATE_ENABLED || m.value !== 'groupbuy' || normalizeRewardMode(editing?.reward_mode) === 'groupbuy',
-  );
+  const pickableModes = REWARD_MODES;
   // 모집기간을 브랜드가 정하는 방식인지. 지원을 받는 방식에만 모집 시작·마감이 있다.
   const hasRecruitPeriod = mode.openApply;
   // 희망 업로드 일정을 묻는지. 커머스형(공동구매)은 모집기간만 정하면 되고, 게시 시점은
@@ -1102,12 +1096,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     );
                   })}
                 </div>
-                {AFFILIATE_ENABLED && (
-                  <p className="text-[10px] text-slate-400 font-bold mt-2 leading-relaxed break-keep">
-                    판매 수수료형 캠페인은 '판매 캠페인' 메뉴에서 등록합니다. 쇼핑몰을 연동하면 판매가
-                    자동으로 집계됩니다.
-                  </p>
-                )}
               </div>
 
               {/* 진행 방식이 정하는 단계. 협업 화면에 실제로 생기는 단계와 짝을 맞춰 둔다.

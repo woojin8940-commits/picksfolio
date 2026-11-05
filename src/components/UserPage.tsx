@@ -505,6 +505,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
           design={design}
           shareTitle={`${username}님의 픽스폴리오`}
           shareUrl={typeof window !== 'undefined' ? window.location.href : `/${normalizedUsername}`}
+          ownerUsername={normalizedUsername}
         />
 
         {/* Product Detail Drawer */}

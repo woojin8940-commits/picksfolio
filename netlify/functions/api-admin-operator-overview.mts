@@ -6,6 +6,16 @@ import { authActivityById, BUSINESS_ROLES } from './_shared/auth-user-activity.m
 import type { Config, Context } from '@netlify/functions'
 
 /**
+ * 인플루언서로 셀 계정인지: 아이디(username)를 정한 계정만이다. 카카오로 로그인만 하고 아이디를
+ * 정하지 않은 계정(어필리에이트 스토어에서 구매만 한 계정 포함)은 인플루언서 명단 · 통계에 넣지 않는다.
+ * '_kakao_' · '_kk_' 로 시작하는 값은 아이디를 정하기 전의 임시 값이다(kakao-profile-setup 과 같은 규칙).
+ */
+const hasRealUsername = (u: unknown) => {
+  const name = String(u || '').trim()
+  return !!name && !name.startsWith('_kakao_') && !name.startsWith('_kk_') && !name.startsWith('biz/')
+}
+
+/**
  * 운영자 전체 현황 집계 — GET /api/admin/operator-overview
  *
  * 운영자가 대시보드를 열었을 때 제일 먼저 답이 필요한 세 가지를 한 번에 계산한다.
@@ -90,14 +100,15 @@ async function accountCounts() {
     // profiles 에는 가입 시각 칸이 없어 Auth 의 가입 시각을 붙인다. 비즈니스 가입은
     // role 을 'operator' 로 저장한다(BUSINESS_ROLES).
     const [{ data: infIds, error: infError }, { data: bizIds, error: bizError }, activity] = await Promise.all([
-      supabase.from('profiles').select('id').or('role.is.null,role.eq.user'),
+      supabase.from('profiles').select('id, username').or('role.is.null,role.eq.user'),
       supabase.from('profiles').select('id').in('role', BUSINESS_ROLES),
       authActivityById(supabase),
     ])
     if (infError || bizError) throw infError || bizError
     const withCreatedAt = (rows: any[] | null) =>
       (rows || []).map((p) => ({ created_at: activity.get(p.id)?.created_at || null }))
-    const infRows = withCreatedAt(infIds)
+    // 인플루언서 수는 아이디를 정한 계정만 센다(구매만 한 계정 · 아이디 설정 전 계정 제외).
+    const infRows = withCreatedAt((infIds || []).filter((p: any) => hasRealUsername(p.username)))
     const bizRows = withCreatedAt(bizIds)
     const now = Date.now()
     const todayStr = new Date(now).toISOString().slice(0, 10)

@@ -3,6 +3,16 @@ import { requireAdmin } from './_shared/admin-auth.mts'
 import { authActivityById } from './_shared/auth-user-activity.mts'
 import type { Config, Context } from '@netlify/functions'
 
+/**
+ * 인플루언서로 셀 계정인지: 아이디(username)를 정한 계정만이다. 카카오로 로그인만 하고 아이디를
+ * 정하지 않은 계정(어필리에이트 스토어에서 구매만 한 계정 포함)은 인플루언서 명단 · 통계에 넣지 않는다.
+ * '_kakao_' · '_kk_' 로 시작하는 값은 아이디를 정하기 전의 임시 값이다(kakao-profile-setup 과 같은 규칙).
+ */
+const hasRealUsername = (u: unknown) => {
+  const name = String(u || '').trim()
+  return !!name && !name.startsWith('_kakao_') && !name.startsWith('_kk_') && !name.startsWith('biz/')
+}
+
 // Admin growth metrics
 // GET /api/admin/growth
 // Returns:
@@ -38,7 +48,8 @@ export default async (req: Request, _context: Context) => {
         .or('role.is.null,role.eq.user'),
       authActivityById(supabase),
     ])
-    const influencerProfiles = (profileRows || []).map((p: any) => ({
+    // 아이디가 있는 계정만 인플루언서로 센다(구매만 한 계정 · 아이디 설정 전 계정 제외).
+    const influencerProfiles = (profileRows || []).filter((p: any) => hasRealUsername(p.username)).map((p: any) => ({
       username: p.username as string,
       created_at: activity.get(p.id)?.created_at || null,
       last_login_at: activity.get(p.id)?.last_login_at || null,
