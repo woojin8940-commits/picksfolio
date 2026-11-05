@@ -323,8 +323,8 @@ const ProductDetailPage: React.FC<DetailProps> = ({
       </div>
 
       <div className="max-w-3xl mx-auto">
-        {/* 이미지 — 캠페인 협업 상세와 같은 크기로 둔다. */}
-        <div className="w-full max-w-[420px] md:max-w-[460px] mx-auto md:mt-4">
+        {/* 이미지 — 하단 판매 신청하기 버튼과 같은 너비로, 정사각 비율을 유지한다. */}
+        <div className="w-full md:px-4 md:mt-4">
           <div className="relative aspect-square bg-slate-100 overflow-hidden md:rounded-3xl md:shadow-[0_20px_44px_-20px_rgba(15,23,42,0.5)]">
             {images[imageIndex] ? (
               <img src={images[imageIndex]} alt={detail.name} className="w-full h-full object-cover" />
