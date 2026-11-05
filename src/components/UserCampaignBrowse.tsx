@@ -4,8 +4,6 @@ import { apiService, authHeaders } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { rewardModeOf, contentFormatLabel } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
-import AffiliateBrowse from './affiliate/AffiliateBrowse';
-import { AFFILIATE_ENABLED } from '../utils/featureFlags';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useDragScroll } from '../hooks/useDragScroll';
@@ -92,7 +90,6 @@ const RETIRED_CATEGORIES = new Set(['entertainment']);
 const PAGE_SIZE = 12;
 
 /** 진행 방식 칩 중 판매 연동형(어필리에이트) 캠페인을 여는 값. 캠페인 API 의 type 이 아니다. */
-const AFFILIATE_FILTER = 'affiliate';
 
 type CampaignBrowseListCache = {
   campaigns: Campaign[];
@@ -245,13 +242,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const rewardFilters = [
     { value: '', label: isEn ? 'All' : '전체' },
     { value: 'ad_collab', label: isEn ? 'Product Sponsorship' : '제품 협찬' },
-    /* 판매 연동형(어필리에이트)이 켜져 있으면 이 자리에 그 칩을 둔다. 목록은 이 화면의
-       캠페인 API 가 아니라 affiliateService 에서 오므로 아래 목록·페이지 대신
-       AffiliateBrowse 를 그린다. 카페24 심사 보류로 꺼 둔 동안에는 예전처럼
-       커머스(공동구매) 캠페인을 보여 준다(utils/featureFlags). */
-    AFFILIATE_ENABLED
-      ? { value: AFFILIATE_FILTER, label: isEn ? 'Affiliate' : '어필리에이트' }
-      : { value: 'group_buy', label: isEn ? 'Commerce' : '커머스' },
+    { value: 'group_buy', label: isEn ? 'Commerce' : '커머스' },
   ];
 
   /* 칩 줄은 한 줄로 두고 가로로 넘긴다 — 손가락은 그대로, 마우스는 끌어서. */
@@ -264,9 +255,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [loading, setLoading] = useState(() => !initialListCache);
 
   const [activeFilter, setActiveFilter] = useState('');
-  const isAffiliateFilter = activeFilter === AFFILIATE_FILTER;
-  const [affiliateCount, setAffiliateCount] = useState(0);
-  const [affiliateDetailOpen, setAffiliateDetailOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -344,12 +332,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   }, [userName]);
 
   const fetchCampaignsList = useCallback(async (signal: AbortSignal, useCache = true) => {
-    // 어필리에이트 칩은 다른 API(AffiliateBrowse)에서 목록을 읽는다. 여기서
-    // type=affiliate 로 캠페인 API 를 부르면 빈 목록만 받아 온다.
-    if (activeFilter === AFFILIATE_FILTER) {
-      setLoading(false);
-      return;
-    }
     const key = campaignListCacheKey(userName, activeFilter, activeCategory, searchTerm, page);
     const cached = useCache ? readJson<CampaignBrowseListCache>(key) : null;
     if (cached) {
@@ -1024,32 +1006,27 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   }
 
   // --- Campaign List View ---
-  // 어필리에이트 상세가 열려 있으면 제품 협찬 상세처럼 그 페이지만 보이게 제목 · 검색 ·
-  // 칩 줄을 숨긴다. AffiliateBrowse 는 같은 자리에 그대로 두어 목록 상태가 유지된다.
-  const hideListChrome = isAffiliateFilter && affiliateDetailOpen;
   return (
-    <div className={hideListChrome ? 'w-full' : 'p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-4xl mx-auto'}>
-      {!hideListChrome && onBack && (
+    <div className="p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-4xl mx-auto">
+      {onBack && (
         <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-700 font-bold text-sm mb-4 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           {isEn ? 'Back' : '뒤로'}
         </button>
       )}
 
-      {!hideListChrome && <div className="mb-6">
+      <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">{isEn ? 'Campaigns' : '캠페인'}</h2>
         <p className="text-sm text-slate-400 font-medium">
-          {AFFILIATE_ENABLED
-            ? (isEn ? 'Apply directly to product sponsorship & affiliate campaigns to find collaboration opportunities' : '제품 협찬 · 어필리에이트 캠페인에 직접 지원하고 협업 기회를 잡아보세요')
-            : (isEn ? 'Apply directly to product sponsorship & commerce campaigns to find collaboration opportunities' : '제품 협찬 · 커머스 캠페인에 직접 지원하고 협업 기회를 잡아보세요')}
+          {(isEn ? 'Apply directly to product sponsorship & commerce campaigns to find collaboration opportunities' : '제품 협찬 · 커머스 캠페인에 직접 지원하고 협업 기회를 잡아보세요')}
         </p>
-      </div>}
+      </div>
 
       {/* 이 화면은 새 캠페인을 찾는 자리 하나만 한다. 진행 중인 캠페인의 단계 ·
           인사이트 · 정산은 '협업 캠페인' 메뉴에서 브랜드 화면과 같은 모양
           (CreatorCampaignCollabs)으로 열고, 받은 광고 제안도 여기 얹지 않는다.
           두 곳에 같은 상자를 두면 어느 쪽이 지금 상태인지 매번 맞춰 봐야 한다. */}
-      {!hideListChrome && <div className="flex flex-col gap-3 mb-6">
+      <div className="flex flex-col gap-3 mb-6">
         {/* 연동한 인스타 계정 지표는 검색보다 위, 대신 한 줄로.
             브랜드에게 전달되는 숫자라 화면을 열 때 한 번은 눈에 닿아야 하지만,
             여기서 실제로 하는 일은 캠페인을 찾는 것이다. 카드로 두면 그 숫자를
@@ -1085,7 +1062,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               {f.label}
             </button>
           ))}
-          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{isAffiliateFilter ? affiliateCount : total}{isEn ? ' total' : '개'}</span>
+          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{total}{isEn ? ' total' : '개'}</span>
         </div>
 
         {/* 카테고리 칩. 줄을 접지 않고 한 줄로 세운다 — 필터가 화면을 두 줄씩 먹으면
@@ -1121,18 +1098,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             </button>
           ))}
         </div>
-      </div>}
+      </div>
 
-      {isAffiliateFilter ? (
-        <AffiliateBrowse
-          userName={userName}
-          category={activeCategory}
-          q={searchTerm}
-          categoryLabels={categoriesMap}
-          onCount={setAffiliateCount}
-          onDetailChange={setAffiliateDetailOpen}
-        />
-      ) : loading ? (
+      {loading ? (
         <div className="text-center py-16">
           <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-slate-400 font-bold">{isEn ? 'Loading campaigns...' : '캠페인 불러오는 중...'}</p>
@@ -1231,7 +1199,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       )}
 
-      {!isAffiliateFilter && !loading && totalPages > 1 && (
+      {!loading && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1.5 mt-8">
           <button
             onClick={() => goToPage(page - 1)}

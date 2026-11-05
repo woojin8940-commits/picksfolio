@@ -3,6 +3,7 @@ import { Share2 } from 'lucide-react';
 import { DesignSettings } from '../types';
 import { themeIsDark } from '../utils/themeColor';
 import { shareOrCopy } from '../utils/clipboard';
+import { canSeeAffiliateStore } from '../utils/featureFlags';
 
 /**
  * 개인페이지 맨 아래 — 공유 버튼과 약관 링크.
@@ -22,9 +23,14 @@ interface PublicPageFooterProps {
   shareTitle: string;
   /** 공유·복사할 주소. 공개 페이지는 지금 보고 있는 주소, 미리보기는 자기 페이지 주소. */
   shareUrl: string;
+  /**
+   * 이 페이지 주인의 아이디. 어필리에이트 스토어 "주문 내역 확인" 링크를 보일지 정한다
+   * (지금은 테스트 계정 페이지에만 보인다).
+   */
+  ownerUsername?: string;
 }
 
-const PublicPageFooter: React.FC<PublicPageFooterProps> = ({ design, shareTitle, shareUrl }) => {
+const PublicPageFooter: React.FC<PublicPageFooterProps> = ({ design, shareTitle, shareUrl, ownerUsername }) => {
   const isDark = themeIsDark(design);
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
@@ -61,6 +67,15 @@ const PublicPageFooter: React.FC<PublicPageFooterProps> = ({ design, shareTitle,
             개인정보처리방침
           </a>
         </div>
+        {/* 어필리에이트 스토어 구매자용 주문 내역. 로그인이 안 돼 있으면 마이페이지가 카카오 로그인 후
+            /my/orders 로 돌아오게 한다(구매 경로 로그인이라 아이디 설정 화면으로 가지 않는다). */}
+        {canSeeAffiliateStore(ownerUsername) && (
+          <div className="pt-1">
+            <a href="/my/orders" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+              주문 내역 확인
+            </a>
+          </div>
+        )}
       </div>
     </footer>
   );

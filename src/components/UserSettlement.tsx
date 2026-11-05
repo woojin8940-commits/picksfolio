@@ -2,7 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
 import { formatKRW } from '../utils/formatters';
 import { apiService, authHeaders } from '../services/apiService';
-import { creatorPayoutLabel } from '../services/affiliateService';
+/** 예전 판매 수수료 정산의 지급 예정일(정산월 다음 달 말일). */
+const creatorPayoutLabel = (period: string | null | undefined) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(period || ''));
+  if (!m) return '';
+  const month = Number(m[2]);
+  const next = month === 12 ? 1 : month + 1;
+  const last = new Date(Date.UTC(Number(m[1]), month + 1, 0)).getUTCDate();
+  return `${next}월 ${last}일`;
+};
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface UserSettlementProps {

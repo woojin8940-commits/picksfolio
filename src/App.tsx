@@ -41,6 +41,9 @@ const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalend
 const OpenScheduleManagement = lazyWithRetry(() => import('./components/OpenScheduleManagement'));
 const UserCampaignBrowse = lazyWithRetry(() => import('./components/UserCampaignBrowse'));
 const CreatorCampaignCollabs = lazyWithRetry(() => import('./components/CreatorCampaignCollabs'));
+// 어필리에이트 스토어(ZVZO 방식) 인플루언서 화면. 오픈 전에는 테스트 계정에만 보인다.
+import { canSeeAffiliateStore } from './utils/featureFlags';
+const CreatorAffiliateStore = lazyWithRetry(() => import('./components/affiliateStore/CreatorAffiliateStore'));
 const MembershipPlan = lazyWithRetry(() => import('./components/MembershipPlan'));
 const OperatorLogin = lazyWithRetry(() => import('./components/OperatorLogin'));
 const OperatorDashboard = lazyWithRetry(() => import('./components/OperatorDashboard'));
@@ -98,10 +101,10 @@ const clearAllLinkCacheLazy = () => {
 };
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
-type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs';
+type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs' | 'affiliate-store';
 
 /** 다시 뜬 페이지가 되살려도 되는 탭(utils/resumeTab). */
-const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'campaigns', 'my-collabs'];
+const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'campaigns', 'my-collabs', 'affiliate-store'];
 
 const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   dashboard: 'dashboard',
@@ -140,7 +143,7 @@ const SLASH_ALIASES: Record<string, View> = {
  */
 const RESERVED_PATHS = new Set([
   'settings', 'checkout', 'success', 'fail', 'profile', 'business',
-  'api', 'assets', 'toss', 'portone', 'index.html', 'favicon.ico',
+  'api', 'assets', 'toss', 'portone', 'shop', 'my', 'index.html', 'favicon.ico',
 ]);
 
 function initialPublicProfileUsername(): string {
@@ -2190,6 +2193,9 @@ const App: React.FC = () => {
       case 'my-collabs':
         subComponent = <CreatorCampaignCollabs userName={userName} initialCollabId={collabFocusId || undefined} />;
         break;
+      case 'affiliate-store':
+        subComponent = canSeeAffiliateStore(userName) ? <CreatorAffiliateStore userName={userName} /> : null;
+        break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
     }
@@ -2239,6 +2245,7 @@ const App: React.FC = () => {
         onNavigateMembership={() => setSubView('membership')}
         onNavigateCampaigns={() => setSubView('campaigns')}
         onNavigateMyCollabs={() => setSubView('my-collabs')}
+        onNavigateAffiliateStore={canSeeAffiliateStore(userName) ? () => setSubView('affiliate-store') : undefined}
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>

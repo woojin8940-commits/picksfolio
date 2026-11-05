@@ -21,6 +21,8 @@ const RESERVED_PATHS = new Set([
   'manager', 'membership', 'settings',
   'checkout', 'success', 'fail', 'toss', 'portone', 'profile',
   'assets', 'vendor', 'robots.txt', 'sitemap.xml',
+  // 어필리에이트 스토어 구매자 마이페이지(/my/orders …)
+  'my', 'shop',
 ])
 
 export default async (req: Request, context: Context) => {
@@ -40,7 +42,9 @@ export default async (req: Request, context: Context) => {
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/.netlify/') ||
     // 브랜드 영업용 링크(/pick/<토큰>)는 사용자 페이지가 아니다.
-    url.pathname.startsWith('/pick/')
+    url.pathname.startsWith('/pick/') ||
+    // 어필리에이트 인플루언서 전용 상품 링크(/shop/<코드>)도 사용자 페이지가 아니다.
+    url.pathname.startsWith('/shop/')
   ) {
     return
   }

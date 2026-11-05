@@ -80,6 +80,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
           미리보기를 끝까지 내렸을 때 나오는 것이 실제 페이지와 같아야 한다. */}
       <PublicPageFooter
         design={fullDesign}
+        ownerUsername={username}
         shareTitle={`${profile?.name || username || '픽스폴리오'}님의 픽스폴리오`}
         shareUrl={
           username

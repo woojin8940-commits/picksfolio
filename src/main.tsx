@@ -6,6 +6,7 @@ import App from './App';
 import SalesLinkPage from './components/SalesLinkPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LanguageProvider } from './contexts/LanguageContext';
+import { lazyWithRetry, LazyRoute } from './utils/lazyRoute';
 import { completeKakaoSdkLogin, isKakaoSdkCallback } from './utils/kakaoLogin';
 import { purgeRemovedLoginSaveKeys } from './utils/loginPersistence';
 import { installStaleBuildReload } from './utils/staleBuildReload';
@@ -42,7 +43,30 @@ const root = ReactDOM.createRoot(rootElement);
 // 거치지 않고 바로 그린다.
 const salesLinkToken = window.location.pathname.match(/^\/pick\/([A-Za-z0-9_-]{6,64})\/?$/)?.[1];
 
-const renderApp = () =>
+// 어필리에이트 스토어: 인플루언서 전용 상품 링크(/shop/<코드>)와 구매자 마이페이지(/my/...).
+// 대시보드와 무관한 화면이라 App 을 거치지 않는다. 카카오 로그인 콜백이 주소를 원래 경로로
+// 되돌린 뒤에 판단해야 하므로 renderApp 안에서 주소를 읽는다.
+const AffiliateShopPage = lazyWithRetry(() => import('./components/affiliateStore/AffiliateShopPage'));
+const BuyerMyPage = lazyWithRetry(() => import('./components/affiliateStore/BuyerMyPage'));
+
+const renderStandalone = (node: React.ReactNode) =>
+  root.render(
+    <React.StrictMode>
+      <ErrorBoundary fallback={RootFallback}>
+        <LazyRoute>{node}</LazyRoute>
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+
+const renderApp = () => {
+  const path = window.location.pathname;
+  const shopCode = path.match(/^\/shop\/([A-Za-z0-9]{6,32})\/?$/)?.[1];
+  if (shopCode) return renderStandalone(<AffiliateShopPage code={shopCode} />);
+  if (/^\/my(\/|$)/.test(path)) return renderStandalone(<BuyerMyPage />);
+  return renderMain();
+};
+
+const renderMain = () =>
   salesLinkToken
     ? root.render(
       <React.StrictMode>

@@ -16,6 +16,16 @@ import {
 } from './_shared/operator-membership-grants.mts'
 import type { Config, Context } from '@netlify/functions'
 
+/**
+ * 인플루언서로 셀 계정인지: 아이디(username)를 정한 계정만이다. 카카오로 로그인만 하고 아이디를
+ * 정하지 않은 계정(어필리에이트 스토어에서 구매만 한 계정 포함)은 인플루언서 명단 · 통계에 넣지 않는다.
+ * '_kakao_' · '_kk_' 로 시작하는 값은 아이디를 정하기 전의 임시 값이다(kakao-profile-setup 과 같은 규칙).
+ */
+const hasRealUsername = (u: unknown) => {
+  const name = String(u || '').trim()
+  return !!name && !name.startsWith('_kakao_') && !name.startsWith('_kk_') && !name.startsWith('biz/')
+}
+
 type MembershipPlan = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live'
 
 type SellerVerificationBlob = SellerMembershipRecord
@@ -113,6 +123,8 @@ export default async (req: Request, context: Context) => {
         } else {
           profiles = filtered.data || []
         }
+        // 아이디가 있는 계정만 인플루언서 명단에 올린다(구매만 한 계정 · 아이디 설정 전 계정 제외).
+        profiles = profiles.filter((p: any) => hasRealUsername(p.username))
       }
 
       // 2) Aggregate analytics (total clicks/views per username)
@@ -301,7 +313,11 @@ export default async (req: Request, context: Context) => {
 
         {
           const users = authUsers
-          const orphans = users.filter(u => !profileIds.has(u.id)).map(u => {
+          // 프로필이 없는 Auth 계정은 가입 메타데이터에 아이디가 있을 때만 붙인다. 아이디 없이
+          // 로그인만 한 계정(어필리에이트 구매 경로 등)은 인플루언서가 아니다.
+          const orphans = users
+            .filter(u => !profileIds.has(u.id) && hasRealUsername((u.user_metadata as any)?.username))
+            .map(u => {
             const meta = (u.user_metadata || {}) as Record<string, any>
             const emailLocal = (u.email || '').split('@')[0] || ''
             let username = String(meta.username || emailLocal || u.id.slice(0, 8)).toLowerCase()

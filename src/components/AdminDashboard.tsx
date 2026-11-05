@@ -17,7 +17,7 @@ import { useCloseOnBack } from '../hooks/useCloseOnBack';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs';
+  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs' | 'affiliate-store';
   onNavigateDashboard: () => void;
   onViewMyPage: () => void;
   onNavigateLinks: () => void;
@@ -31,6 +31,8 @@ interface AdminDashboardProps {
   onNavigateCampaigns: () => void;
   /** 이미 시작한 협업만 보는 화면. 캠페인 찾기와 자리를 나눠 둔다. */
   onNavigateMyCollabs: () => void;
+  /** 어필리에이트 스토어. 오픈 전에는 테스트 계정에만 넘어온다(없으면 메뉴를 숨긴다). */
+  onNavigateAffiliateStore?: () => void;
   children?: React.ReactNode;
 }
 
@@ -48,6 +50,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateOpenSchedule,
   onNavigateCampaigns,
   onNavigateMyCollabs,
+  onNavigateAffiliateStore,
   children
 }) => {
   const { t } = useLanguage();
@@ -262,6 +265,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClick={onNavigateMyCollabs}
             badge={collabUnread}
           />
+          {onNavigateAffiliateStore && (
+            <NavItem
+              icon="🏬"
+              label={t('nav.affiliateStore', '어필리에이트', 'Affiliate')}
+              active={currentSubView === 'affiliate-store'}
+              onClick={onNavigateAffiliateStore}
+            />
+          )}
+          {/* 어필리에이트 스토어에서 구매한 주문. 구매자 마이페이지(/my/orders)로 간다. */}
+          {onNavigateAffiliateStore && (
+            <NavItem icon="🧾" label={t('nav.myOrders', '내 주문 내역', 'My Orders')} active={false} onClick={() => { window.location.href = '/my/orders'; }} />
+          )}
           <NavItem
             icon="📨"
             label={t('nav.inbox', '비즈니스 수신함', 'Inbox')}
@@ -326,6 +341,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <MobileNavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="🤝" label={t('nav.barCollabs', '협업', 'Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+            {onNavigateAffiliateStore && (
+              <MobileNavItem icon="🏬" label={t('nav.affiliateStore', '어필리에이트', 'Affiliate')} active={currentSubView === 'affiliate-store'} onClick={() => { onNavigateAffiliateStore(); setIsMobileMenuOpen(false); }} />
+            )}
             <MobileNavItem icon="📨" label={t('nav.barInbox', '수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="📅" label={t('nav.barCalendar', '협업현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="🗓️" label={t('nav.barSchedule', '오픈일정', 'Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
@@ -369,6 +387,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🤝" label={t('nav.myCollabs', '협업 캠페인', 'Collab Campaigns')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+              {onNavigateAffiliateStore && (
+                <NavItem icon="🏬" label={t('nav.affiliateStore', '어필리에이트', 'Affiliate')} active={currentSubView === 'affiliate-store'} onClick={() => { onNavigateAffiliateStore(); setIsMobileMenuOpen(false); }} />
+              )}
+              {onNavigateAffiliateStore && (
+                <NavItem icon="🧾" label={t('nav.myOrders', '내 주문 내역', 'My Orders')} active={false} onClick={() => { window.location.href = '/my/orders'; }} />
+              )}
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
