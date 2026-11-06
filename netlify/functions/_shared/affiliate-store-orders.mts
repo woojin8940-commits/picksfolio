@@ -8,7 +8,7 @@ import { STORE_TESTERS } from "./store-testers.mts";
  *
  *   - 결제 가드(affiliate_store_checkout_open)와 테스트 계정
  *   - 결제 확인(구매자 화면 · 포트원 웹훅 · 시간별 점검이 같은 함수): 검증 → 재고 차감 → 수수료 예정 (멱등)
- *   - 주문 취소: 포트원 취소(전액 · 반품 부분 환불) → 재고 복구 → 인플루언서 수수료 취소 · 재계산 (멱등)
+ *   - 주문 취소: 포트원 취소(발송 전 취소 = 전액 · 반품 = 상품 금액만 부분 취소) → 재고 복구 → 인플루언서 수수료 취소 (멱등)
  *   - 주문 처리 내역(이벤트) · 화면 알림 + 푸시
  *
  * 로그 규칙: 구매자 개인정보, 결제 키 · 토큰, 포트원 응답 원문은 남기지 않는다.
@@ -36,8 +36,24 @@ export const MIN_DAYS_AFTER_RETURN_REJECT = 3;
 export const DELIVER_MIN_HOURS_AFTER_SHIP = 24;
 /** 결제창을 열고 이 시간(분)이 지나도 결제 완료가 안 된 주문은 시간별 점검에서 포트원에 조회해 정리한다. */
 export const PENDING_PAYMENT_EXPIRE_MINUTES = 30;
-/** 반품 단순 변심일 때만 왕복 배송비 차감(부분 환불)을 허용한다. 불량 · 오배송 등은 전액 환불. */
-export const PARTIAL_REFUND_REASONS = ["단순 변심"];
+/**
+ * (예전 규칙) 단순 변심 반품의 왕복 배송비 차감. 지금은 반품 사유와 관계없이 상품 금액 전액을 환불하고
+ * 배송비는 환불하지 않으므로 차감에 쓰지 않는다. 예전 화면 · 응답과의 호환을 위해 이름만 남겨 둔다.
+ */
+export const PARTIAL_REFUND_REASONS: string[] = [];
+
+/**
+ * 반품 환불 금액 = 상품 금액 전액(판매가 × 수량). 반품 사유와 관계없이 같다.
+ * 주문 배송비는 환불하지 않는다(왕복 배송비는 브랜드와 구매자가 플랫폼 밖에서 협의).
+ * 배송비가 0원이면 상품 금액 = 결제 금액이므로 전액 취소가 된다(partial 없음).
+ */
+export function returnRefundPlan(o: { unit_price: number; quantity: number; total_amount: number }) {
+  const product = Math.max(0, Number(o.unit_price) * Number(o.quantity) || 0);
+  const total = Number(o.total_amount) || 0;
+  const refundAmount = Math.min(product, total);
+  const keptShipping = Math.max(0, total - refundAmount);
+  return { refundAmount, keptShipping, full: keptShipping <= 0 };
+}
 
 /**
  * 반품 기간 · 자동 구매확정의 기준 시각 = 배송 완료 시각과 반품 거절 시각(return_window_from) 중 늦은 쪽.
@@ -168,9 +184,9 @@ export interface CancelOptions {
   /** 구매자 문자 문구(생략하면 "취소 · 환불 완료" 기본 문구). */
   buyerSms?: string;
   /**
-   * 부분 환불(반품 단순 변심 · 왕복 배송비 차감). 없으면 전액 환불.
-   * refundAmount: 구매자에게 돌려줄 금액, deduction: 차감한 왕복 배송비.
-   * 인플루언서 수수료는 상품 환불 비율대로 다시 계산하고, 남는 수수료는 확정한다(반품 처리가 끝난 주문).
+   * 부분 환불(반품: 상품 금액만 환불 · 배송비는 환불하지 않음). 없으면 전액 환불.
+   * refundAmount: 구매자에게 돌려줄 상품 금액, deduction: 환불하지 않은 금액(= 주문 배송비).
+   * 상품 금액 전액을 돌려주므로 인플루언서 수수료는 0원(commission_status 'cancelled')이 된다.
    */
   partial?: { refundAmount: number; deduction: number };
 }
@@ -261,7 +277,8 @@ export async function cancelOrderFully(db: any, orderId: string, opt: CancelOpti
         );
       }
       const refund = partial ? partial.refundAmount : Number(order.total_amount);
-      const keptCommission = partial ? partialRefundSplit(order, refund).commission : 0;
+      // 반품은 상품 금액 전액을 돌려주므로 인플루언서 수수료도 0원(취소)이다.
+      const keptCommission = 0;
       const beforeCommission = Number(order.commission_amount) || 0;
       order = (await client.query(
         `UPDATE affiliate_store_orders SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = $2,
@@ -276,7 +293,7 @@ export async function cancelOrderFully(db: any, orderId: string, opt: CancelOpti
       if (opt.inTransaction) await opt.inTransaction(client, order);
       didCancel = true;
       const amountNote = partial
-        ? `부분 환불 ${refund.toLocaleString("ko-KR")}원(왕복 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 차감) · 인플루언서 수수료 ${beforeCommission.toLocaleString("ko-KR")}원 → ${keptCommission.toLocaleString("ko-KR")}원`
+        ? `반품 환불(상품 금액) ${refund.toLocaleString("ko-KR")}원 · 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 환불 안 함(PG 수수료 뺀 금액 브랜드 정산) · 인플루언서 수수료 ${beforeCommission.toLocaleString("ko-KR")}원 → ${keptCommission.toLocaleString("ko-KR")}원`
         : `전액 환불 ${Number(order.total_amount).toLocaleString("ko-KR")}원`;
       await logEvent(client, orderId, opt.actorType, opt.actor, "cancelled",
         `${amountNote} · ${opt.reason}${opt.memo ? ` · ${opt.memo}` : ""}`);
@@ -294,7 +311,7 @@ export async function cancelOrderFully(db: any, orderId: string, opt: CancelOpti
   // 문자는 취소가 끝난 뒤 보낸다. 실패해도 취소 결과는 그대로다.
   if (didCancel) await sendBuyerSms(order, opt.buyerSms
     || (partial
-      ? `${order.product_name} 반품 환불 ${partial.refundAmount.toLocaleString("ko-KR")}원이 처리되었습니다(왕복 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 차감).`
+      ? `${order.product_name} 반품 환불(상품 금액) ${partial.refundAmount.toLocaleString("ko-KR")}원이 처리되었습니다. 배송비는 환불되지 않으며, 필요하면 판매자와 협의해 주세요.`
       : `${order.product_name} 주문이 취소되어 ${Number(order.total_amount).toLocaleString("ko-KR")}원이 전액 환불되었습니다.`),
     orderLink(order.id));
   return { ok: true, order, alreadyCancelled: false };
@@ -417,12 +434,13 @@ export async function currentFeeRates(db: any) {
  * 브랜드 정산 예정액(표시만 · 지급 없음). 주문에 고정된 수수료율로 계산하므로 설정을 바꿔도
  * 이미 생긴 주문의 값은 그대로다.
  *
- *   정산액 = 결제 금액(상품 + 배송비) − 인플루언서 수수료 − PG 수수료 − 플랫폼 수수료
- *   인플루언서 · 플랫폼 수수료: 상품 금액(배송비 제외) 기준
- *   PG 수수료: 결제 금액 전체(배송비 포함) 기준
+ *   정산액 = 결제 금액(상품 + 배송비) − 인플루언서 수수료 − 이용료(상품 금액 × platform_rate) − PG 수수료(결제 금액 × pg_rate)
+ *   인플루언서 수수료 · 이용료: 상품 금액(판매가 × 수량)에만 붙는다(배송비 제외).
+ *   PG 수수료: 결제 금액(상품 + 배송비) 기준.
  *
  * 전액 취소 · 환불된 주문은 모든 공제가 0 이고 정산 대상이 아니다(included: false).
- * 반품 부분 환불(왕복 배송비 차감)된 주문은 돌려주지 않은 금액만 정산 대상이다.
+ * 반품 환불(상품 금액만 환불)된 주문은 남은 배송비에서 PG 수수료(남은 배송비 × pg_rate)만 떼고 정산한다
+ * (인플루언서 수수료 · 이용료 0).
  */
 export function brandSettlement(o: {
   unit_price: number; quantity: number; shipping_fee: number; total_amount?: number;
