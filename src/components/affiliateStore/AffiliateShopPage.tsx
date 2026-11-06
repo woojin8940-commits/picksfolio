@@ -13,11 +13,11 @@ import {
   type PortOnePayMethod,
 } from '../../utils/portonePayments';
 import { buyerHeaders, buyerService, isSignedIn, loginWithKakao } from '../../services/affiliateBuyerService';
-import { KakaoLoginButton, PlatformLegalFooter } from './ShopCommon';
+import { KakaoLoginButton, PlatformLegalFooter, SellerInquiry } from './ShopCommon';
 
 /**
- * 인플루언서 전용 상품 링크(/shop/<코드>). 상품은 로그인 없이 보고, 구매 · 문의 · 마이페이지는
- * 카카오 로그인한 구매자 계정으로 한다.
+ * 인플루언서 전용 상품 링크(/shop/<코드>). 상품은 로그인 없이 보고, 구매 · 마이페이지는
+ * 카카오 로그인한 구매자 계정으로 한다. 상품 문의는 브랜드 자사몰 · 고객센터 링크(새 창)로 연결한다.
  *
  * 로그인하러 나갔다 돌아와도 보던 상품 · 고른 옵션 · 수량 · 링크 코드가 그대로 남도록
  * 로그인 전에 그 상태를 저장해 두고(RESUME_KEY), 돌아온 뒤 이어서 주문서를 연다.
@@ -45,8 +45,11 @@ interface ShopProduct {
   salePrice: number;
   shippingFee: number;
   onSale: boolean;
+  /** 고정 상한(10). 재고 부족은 주문서 · 결제 단계에서 서버가 알려 준다. */
   maxQuantity: number;
-  seller: { businessName: string; businessNumber: string };
+  seller: { businessName: string; businessNumber: string; ceoName?: string; address?: string; phone?: string; mailOrderNumber?: string };
+  /** 브랜드 문의 링크(https://). 없으면 '' */
+  inquiryUrl?: string;
 }
 
 interface ShopOrder {
@@ -58,7 +61,7 @@ interface ShopOrder {
   totalAmount: number;
 }
 
-type ResumeIntent = { code: string; option: string; quantity: number; next: 'checkout' | 'inquiry'; savedAt: number };
+type ResumeIntent = { code: string; option: string; quantity: number; next: 'checkout'; savedAt: number };
 const RESUME_KEY = 'picks_shop_resume';
 
 function saveResume(intent: Omit<ResumeIntent, 'savedAt'>) {
@@ -161,13 +164,9 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
   const [done, setDone] = useState<ShopOrder | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
-  const [loginPrompt, setLoginPrompt] = useState<null | 'checkout' | 'inquiry' | 'mypage'>(null);
+  const [loginPrompt, setLoginPrompt] = useState<null | 'checkout' | 'mypage'>(null);
   const [loginNotice, setLoginNotice] = useState('');
   const [sellerOpen, setSellerOpen] = useState(false);
-  const [inquiryOpen, setInquiryOpen] = useState(false);
-  const [inquiryText, setInquiryText] = useState('');
-  const [inquirySending, setInquirySending] = useState(false);
-  const [inquiryMsg, setInquiryMsg] = useState('');
   const clicked = useRef(false);
 
   const set = (k: keyof typeof form, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
@@ -216,7 +215,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
         setOption(resume.option);
         setQuantity(Math.max(1, resume.quantity || 1));
         if (resume.next === 'checkout') setCheckout(true);
-        if (resume.next === 'inquiry') setInquiryOpen(true);
       }
       if (ok) prefill();
     });
@@ -268,7 +266,7 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
     !!form.address1.trim() &&
     agreeTerms && agreeProvide;
 
-  const goLogin = (next: 'checkout' | 'inquiry' | 'mypage') => {
+  const goLogin = (next: 'checkout' | 'mypage') => {
     if (next === 'mypage') {
       loginWithKakao('/my/orders');
       return;
@@ -287,15 +285,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
   const openMyPage = () => {
     if (!signedIn) { setLoginPrompt('mypage'); return; }
     window.location.href = '/my/orders';
-  };
-
-  const sendInquiry = async () => {
-    setInquirySending(true);
-    const res = await buyerService.inquire({ code, body: inquiryText });
-    setInquirySending(false);
-    if (res.error) { setInquiryMsg(res.error); return; }
-    setInquiryText('');
-    setInquiryMsg('문의를 보냈어요. 답변은 마이페이지 "내 문의"에서 확인할 수 있어요.');
   };
 
   const pay = async () => {
@@ -466,9 +455,9 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               </section>
             )}
 
-            {/* 배송 · 교환 · 반품 안내: 브랜드가 상품 등록 때 적은 안내(글 · 이미지)를 그대로 보여 준다. */}
+            {/* 배송 · 반품 안내: 브랜드가 상품 등록 때 적은 안내(글 · 이미지)를 그대로 보여 준다. */}
             <section className="px-5 mt-8 pt-6 border-t border-slate-100">
-              <h2 className="text-sm font-black mb-2">배송 · 교환 · 반품 안내</h2>
+              <h2 className="text-sm font-black mb-2">배송 · 반품 안내</h2>
               {(product.deliveryGuide || '').trim() || (product.deliveryGuideImageUrls?.length || 0) > 0 ? (
                 <>
                   {(product.deliveryGuide || '').trim() && (
@@ -477,13 +466,13 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
                   {(product.deliveryGuideImageUrls?.length || 0) > 0 && (
                     <div className={(product.deliveryGuide || '').trim() ? 'mt-4' : ''}>
                       {product.deliveryGuideImageUrls!.map((u, n) => (
-                        <img key={u + n} src={u} alt={`배송 · 교환 · 반품 안내 ${n + 1}`} className="block w-full h-auto" loading="lazy" />
+                        <img key={u + n} src={u} alt={`배송 · 반품 안내 ${n + 1}`} className="block w-full h-auto" loading="lazy" />
                       ))}
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-xs text-slate-500 leading-relaxed">판매자가 등록한 교환·반품 안내가 없습니다. 교환·반품은 배송 완료 후 마이페이지에서 요청할 수 있어요.</p>
+                <p className="text-xs text-slate-500 leading-relaxed">판매자가 등록한 배송 · 반품 안내가 없습니다. 반품은 상품 발송 후 마이페이지 주문 상세에서 요청할 수 있어요.</p>
               )}
             </section>
 
@@ -496,12 +485,18 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
                 <dl className="mt-3 text-xs space-y-1.5 bg-slate-50 rounded-xl p-4">
                   {[
                     ['상호', product.seller.businessName],
+                    ['대표자', product.seller.ceoName || ''],
                     ['사업자등록번호', bizNo(product.seller.businessNumber)],
+                    ['통신판매업 신고번호', product.seller.mailOrderNumber || ''],
+                    ['사업장 주소', product.seller.address || ''],
+                    ['고객센터', product.seller.phone || ''],
                   ].map(([k, v]) => (
-                    <div key={k} className="flex gap-3"><dt className="w-24 shrink-0 text-slate-400">{k}</dt><dd className="text-slate-700">{v || '-'}</dd></div>
+                    <div key={k} className="flex gap-3"><dt className="w-28 shrink-0 text-slate-400">{k}</dt><dd className="text-slate-700 break-all">{v || '-'}</dd></div>
                   ))}
                 </dl>
               )}
+              {/* 상품 문의 → 브랜드 자사몰 · 고객센터(새 창) */}
+              <SellerInquiry inquiryUrl={product.inquiryUrl} compact className="mt-3" />
             </section>
 
             <div className="px-5 mt-6">
@@ -596,11 +591,11 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               <div className="border-t border-slate-100" />
               <label className="flex items-start gap-2.5 text-xs text-slate-600 leading-relaxed">
                 <input type="checkbox" className="mt-0.5 w-4 h-4 accent-slate-900" checked={agreeTerms} onChange={e => setAgreeTerms(e.target.checked)} />
-                <span>[필수] 주문 상품 · 금액 · 배송 및 교환·반품 조건을 확인했으며 구매에 동의합니다.</span>
+                <span>[필수] 주문 상품 · 금액 · 배송 및 반품 조건을 확인했으며 구매에 동의합니다.</span>
               </label>
               <label className="flex items-start gap-2.5 text-xs text-slate-600 leading-relaxed">
                 <input type="checkbox" className="mt-0.5 w-4 h-4 accent-slate-900" checked={agreeProvide} onChange={e => setAgreeProvide(e.target.checked)} />
-                <span>[필수] 배송을 위해 주문자 · 받는 분 이름, 연락처, 주소, 배송 메모를 판매자({product.seller.businessName || product.brandName})에게 제공하는 것에 동의합니다. 제공 정보는 배송 · 교환·반품 처리 후 관계 법령에 따라 보관 후 파기됩니다.</span>
+                <span>[필수] 배송을 위해 주문자 · 받는 분 이름, 연락처, 주소, 배송 메모를 판매자({product.seller.businessName || product.brandName})에게 제공하는 것에 동의합니다. 제공 정보는 배송 · 반품 처리 후 관계 법령에 따라 보관 후 파기됩니다.</span>
               </label>
             </div>
             {payError && <p className="text-xs font-bold text-red-500">{payError}</p>}
@@ -659,7 +654,7 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
           <div className="relative bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-6 text-center">
             <button onClick={() => setLoginPrompt(null)} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center" aria-label="닫기"><X className="w-4 h-4" /></button>
             <p className="text-lg font-black text-slate-900 mt-2">
-              {loginPrompt === 'checkout' ? '간편한 구매를 위해 로그인해 주세요' : loginPrompt === 'inquiry' ? '문의하려면 로그인해 주세요' : '마이페이지는 로그인 후 볼 수 있어요'}
+              {loginPrompt === 'checkout' ? '간편한 구매를 위해 로그인해 주세요' : '마이페이지는 로그인 후 볼 수 있어요'}
             </p>
             <p className="text-xs text-slate-500 mt-1.5">
               {loginPrompt === 'checkout' ? '로그인 후 고른 옵션과 수량 그대로 주문을 이어갈 수 있어요.' : '카카오로 3초 만에 로그인할 수 있어요.'}
@@ -669,30 +664,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
         </div>
       )}
 
-      {/* 문의하기 */}
-      {inquiryOpen && (
-        <div className="fixed inset-0 z-[300] flex items-end md:items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setInquiryOpen(false)} />
-          <div className="relative bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-6">
-            <p className="text-base font-black text-slate-900">판매자에게 문의하기</p>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">{product.brandName} · {product.name}</p>
-            <textarea
-              value={inquiryText}
-              onChange={e => setInquiryText(e.target.value)}
-              maxLength={2000}
-              placeholder="사이즈, 배송, 재입고 등 궁금한 점을 적어 주세요."
-              className="mt-4 w-full min-h-[120px] p-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-slate-900"
-            />
-            {inquiryMsg && <p className="text-xs font-bold text-blue-600 mt-2">{inquiryMsg}</p>}
-            <div className="flex gap-2 mt-4">
-              <button onClick={() => setInquiryOpen(false)} className="flex-1 h-12 rounded-xl bg-slate-100 text-sm font-bold text-slate-600">닫기</button>
-              <button onClick={sendInquiry} disabled={inquirySending || inquiryText.trim().length < 2} className="flex-1 h-12 rounded-xl bg-slate-900 text-white text-sm font-black disabled:bg-slate-300">
-                {inquirySending ? '보내는 중' : '문의 보내기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

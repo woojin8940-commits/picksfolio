@@ -7,11 +7,13 @@ import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { resolveContentType, safeExtension } from "./_shared/upload-media.mts";
 import {
   BUYER_CANCELLABLE,
+  BUYER_RETURNABLE,
   LIVE_ORDER_STATUSES,
   RETURN_WINDOW_DAYS,
   cancelOrderFully,
   logEvent,
   notify,
+  returnWindowStart,
   trackingUrl,
 } from "./_shared/affiliate-store-orders.mts";
 
@@ -21,9 +23,15 @@ import {
  *   GET  ?scope=me              구매자 계정(처음이면 만든다) · 저장된 배송지 · 안 읽은 알림 수
  *   GET  ?scope=orders          내 주문(최신순)
  *   GET  ?scope=order&id=       주문 상세(처리 내역 · 반품 · 문의 · 판매자 · 추천 인플루언서)
- *   GET  ?scope=inquiries       내 문의
+ *   GET  ?scope=inquiries       내 문의(화면에서는 숨김 — 문의는 브랜드 자사몰 링크로 연결한다. 기존 데이터 보존용)
  *   GET  ?scope=notifications   내 알림
  *   POST { action: cancel | confirm | return_request | inquiry | read_notifications }
+ *
+ * 구매자 신청은 두 가지뿐이다(교환 기능 없음).
+ *   주문취소: 발송 전(paid · preparing) — 즉시 전액 환불
+ *   반품 요청: 송장 입력 후(shipped · delivered) ~ 구매확정 전. 배송 완료 뒤에는 7일 안에만
+ *             (반품이 거절되면 거절 시점부터 다시 7일). 배송 중에는 기간 제한이 없다.
+ * 구매확정(confirmed) 이후에는 둘 다 막는다.
  *   POST multipart(photo)       반품 사진 업로드
  *
  * 남의 주문 ID 로 부르면 404 다(있다는 것도 알려 주지 않는다).
@@ -37,7 +45,10 @@ const CANCEL_REASONS = ["단순 변심", "옵션 잘못 선택", "배송 지연"
 const RETURN_REASONS = ["단순 변심", "상품 불량", "오배송", "기타"];
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
-const daysSince = (iso: string | null) => (iso ? (Date.now() - new Date(iso).getTime()) / 86400_000 : Infinity);
+const daysSince = (d: string | Date | null) => (d ? (Date.now() - new Date(d).getTime()) / 86400_000 : Infinity);
+/** 배송 완료 주문이 아직 반품 기간 안인지(배송 완료 · 반품 거절 중 늦은 시각부터 7일). */
+const inReturnWindow = (o: any) => daysSince(returnWindowStart(o)) <= RETURN_WINDOW_DAYS;
+const httpsOnly = (u: unknown) => (/^https:\/\/\S+$/i.test(String(u || "")) ? String(u) : "");
 
 function shapeListOrder(o: any) {
   return {
@@ -56,7 +67,7 @@ function shapeListOrder(o: any) {
 async function loadOwnOrder(db: any, id: string, userId: string) {
   const rows = (await db.sql`
     SELECT o.*, p.image_urls, p.deleted_at AS product_deleted_at, a.brand_name, a.business_name, a.business_number,
-           a.ceo_name, a.business_address, a.cs_phone, a.contact_phone
+           a.ceo_name, a.business_address, a.cs_phone, a.contact_phone, a.mail_order_number, a.inquiry_url
     FROM affiliate_store_orders o
     JOIN affiliate_store_products p ON p.id = o.product_id
     LEFT JOIN affiliate_store_applications a ON a.business_username = o.business_username
@@ -74,7 +85,9 @@ async function orderDetail(db: any, id: string, userId: string) {
     db.sql`SELECT * FROM affiliate_store_inquiries WHERE order_id = ${id} AND buyer_user_id = ${userId} ORDER BY created_at DESC` as Promise<any[]>,
   ]);
   const ret = returns[0];
-  const inWindow = daysSince(o.delivered_at) <= RETURN_WINDOW_DAYS;
+  const inWindow = inReturnWindow(o);
+  const returnWindowEndsAt = o.status === "delivered" && returnWindowStart(o)
+    ? new Date(returnWindowStart(o)!.getTime() + RETURN_WINDOW_DAYS * 86400_000).toISOString() : null;
   return Response.json({
     order: {
       ...shapeListOrder(o),
@@ -108,11 +121,16 @@ async function orderDetail(db: any, id: string, userId: string) {
         ceoName: o.ceo_name || "",
         phone: o.cs_phone || o.contact_phone || "",
         address: o.business_address || "",
+        mailOrderNumber: o.mail_order_number || "",
+        // 구매자 "문의하기"가 여는 브랜드 자사몰 · 고객센터 주소(없으면 화면이 픽스폴리오 고객센터를 안내한다).
+        inquiryUrl: httpsOnly(o.inquiry_url),
       },
       // 화면이 버튼을 고르는 기준. 서버에서도 같은 조건으로 다시 막는다.
       canCancel: BUYER_CANCELLABLE.includes(o.status) && !o.tracking_number,
-      canReturn: o.status === "delivered" && inWindow && (!ret || ret.status === "rejected"),
+      canReturn: BUYER_RETURNABLE.includes(o.status) && !!o.tracking_number
+        && (o.status === "shipped" || inWindow) && (!ret || ret.status === "rejected"),
       returnExpired: o.status === "delivered" && !inWindow,
+      returnWindowEndsAt,
       canConfirm: o.status === "delivered",
     },
     events: events.map((e) => ({ actorType: e.actor_type, action: e.action, note: e.note, createdAt: e.created_at })),
@@ -120,6 +138,7 @@ async function orderDetail(db: any, id: string, userId: string) {
       reason: ret.reason, memo: ret.memo, photoUrls: ret.photo_urls || [], status: ret.status,
       returnAddress: ret.return_address, pickupMessage: ret.pickup_message, rejectReason: ret.reject_reason,
       requestedAt: ret.requested_at, decidedAt: ret.decided_at, refundedAt: ret.refunded_at,
+      refundAmount: Number(ret.refund_amount) || 0, shippingDeduction: Number(ret.shipping_deduction) || 0,
     } : null,
     inquiries: inquiries.map(shapeInquiry),
   });
@@ -141,7 +160,8 @@ async function buyerCancel(db: any, userId: string, body: any) {
   // 송장이 들어간 주문은 바로 취소하지 않는다(배송이 시작됨).
   const cur = await loadOwnOrder(db, id, userId);
   if (!cur) return err("주문을 찾을 수 없습니다.", 404);
-  if (cur.tracking_number && cur.status !== "cancelled") return err("배송이 시작되어 바로 취소할 수 없어요. 판매자에게 문의해 주세요.");
+  if (cur.status === "confirmed") return err("구매확정된 주문은 취소할 수 없어요.");
+  if (cur.tracking_number && cur.status !== "cancelled") return err("배송이 시작되어 바로 취소할 수 없어요. 주문 상세에서 반품을 요청해 주세요.");
   const r = await cancelOrderFully(db, id, {
     actorType: "buyer", actor: userId, reason, memo, allowed: BUYER_CANCELLABLE, buyerUserId: userId,
   });
@@ -181,22 +201,23 @@ async function buyerReturn(db: any, userId: string, body: any) {
     .slice(0, 5);
   const o = await loadOwnOrder(db, id, userId);
   if (!o) return err("주문을 찾을 수 없습니다.", 404);
-  if (o.status !== "delivered") return err("배송 완료된 주문만 교환·반품을 요청할 수 있어요.");
-  if (daysSince(o.delivered_at) > RETURN_WINDOW_DAYS) return err("반품 가능 기간이 지났어요. 판매자에게 문의해 주세요.");
+  if (o.status === "confirmed") return err("구매확정된 주문은 반품을 요청할 수 없어요.");
+  if (!BUYER_RETURNABLE.includes(o.status) || !o.tracking_number) return err("송장이 입력된(발송된) 주문만 반품을 요청할 수 있어요.");
+  if (o.status === "delivered" && !inReturnWindow(o)) return err("반품 가능 기간이 지났어요. 판매자에게 문의해 주세요.");
 
   const client = await db.pool.connect();
   try {
     await client.query("BEGIN");
     const locked = (await client.query(`SELECT status FROM affiliate_store_orders WHERE id = $1 FOR UPDATE`, [id])).rows[0];
-    if (locked?.status !== "delivered") { await client.query("ROLLBACK"); return err("이미 요청했거나 처리할 수 없는 주문입니다."); }
+    if (!BUYER_RETURNABLE.includes(locked?.status)) { await client.query("ROLLBACK"); return err("이미 요청했거나 처리할 수 없는 주문입니다."); }
     const existing = (await client.query(`SELECT status FROM affiliate_store_returns WHERE order_id = $1`, [id])).rows[0];
-    if (existing && existing.status !== "rejected") { await client.query("ROLLBACK"); return err("이미 교환·반품을 요청한 주문입니다."); }
+    if (existing && existing.status !== "rejected") { await client.query("ROLLBACK"); return err("이미 반품을 요청한 주문입니다."); }
     await client.query(
       `INSERT INTO affiliate_store_returns (id, order_id, business_username, buyer_user_id, reason, memo, photo_urls)
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
        ON CONFLICT (order_id) DO UPDATE SET reason = EXCLUDED.reason, memo = EXCLUDED.memo, photo_urls = EXCLUDED.photo_urls,
          status = 'requested', return_address = '', pickup_message = '', reject_reason = '', requested_at = NOW(),
-         decided_at = NULL, refunded_at = NULL, updated_at = NOW()`,
+         decided_at = NULL, refunded_at = NULL, refund_amount = 0, shipping_deduction = 0, updated_at = NOW()`,
       [newId("ret"), id, o.business_username, userId, reason, memo, JSON.stringify(photos)],
     );
     // 반품 요청 중인 주문은 구매확정(자동 포함)되지 않는다.
@@ -211,8 +232,8 @@ async function buyerReturn(db: any, userId: string, body: any) {
   }
   await notify(db, {
     recipientType: "brand", recipient: o.business_username, kind: "return_requested",
-    title: "교환·반품 요청이 들어왔어요",
-    body: `${o.product_name} · ${reason}`,
+    title: "반품 요청이 들어왔어요",
+    body: `${o.product_name} · ${reason}${o.status === "shipped" ? " · 배송 중 요청" : ""}`,
     link: "/business-admin?tab=affiliate",
   });
   return Response.json({ ok: true });

@@ -4,7 +4,10 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireOperator } from "./_shared/manager-auth.mts";
 import {
   STORE_TESTERS,
+  DELIVER_MIN_HOURS_AFTER_SHIP,
   FEE_SETTING_KEYS,
+  PARTIAL_REFUND_REASONS,
+  PLATFORM_RATE,
   brandSettlement,
   currentFeeRates,
   businessDaysSince,
@@ -19,14 +22,23 @@ import {
 } from "./_shared/affiliate-store-orders.mts";
 
 /**
- * 어필리에이트 스토어 주문 운영 — 브랜드 주문 관리 · 취소 · 교환/반품 · 문의, 운영자 미처리 목록.
+ * 어필리에이트 스토어 주문 운영 — 브랜드 주문 관리 · 취소 · 반품, 운영자 미처리 목록.
  *
- *   GET  ?scope=brand          브랜드: 내 주문(반품 포함) · 문의 · 알림
- *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 · 문의 + 결제 가드 + 처리 기록
+ *   GET  ?scope=brand          브랜드: 내 주문(취소 · 반품 이력 포함) · 알림
+ *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 + 결제 가드 + 처리 기록
  *   POST { action, ... }
  *     브랜드  prepare · ship · deliver · cancel · return_approve · return_reject · return_refund
- *             · answer_inquiry · read_notifications · mark_seen
- *     운영자  admin_refund · admin_remind · set_checkout_open · set_fee_rates
+ *             · answer_inquiry(예전 문의 답변 · 화면에서는 숨김) · read_notifications · mark_seen
+ *     운영자  admin_refund · admin_return_reject · admin_remind · set_checkout_open · set_fee_rates
+ *
+ * 반품 규칙(구매자 신청 → 브랜드 승인 · 거절 → 승인 시 브랜드가 주문 배송지로 직접 회수 → 브랜드 "환불 처리")
+ *   - 승인은 입력 없이 바로 된다. 회수 방법 · 일정 연락은 브랜드가 진행하고 플랫폼은 관여하지 않는다.
+ *   - 브랜드는 요청(requested)된 반품만 승인 · 거절한다(거절 사유는 선택). 승인 뒤에는 거절로 바꿀 수 없다
+ *     (return_reject 는 approved 에서 막힌다). 승인 뒤 분쟁은 운영자 환불로 처리한다.
+ *   - 거절하면 주문은 원래 단계(배송 중 · 배송 완료)로 돌아가고, 반품 기간 · 구매확정 기준일은 거절 시점부터 다시 센다.
+ *   - 환불: 단순 변심이면 왕복 배송비를 뺀 부분 환불(포트원 부분 취소, 수수료는 상품 환불 비율대로 재계산),
+ *     불량 · 오배송 등은 전액 환불.
+ *   - 운영자는 구매확정된 주문도 환불할 수 있고, 이때 수수료는 취소된다.
  *
  * 브랜드는 자기 브랜드 주문만, 운영자는 전체를 본다. 환불은 모두 cancelOrderFully
  * (포트원 취소 → 재고 복구 → 수수료 취소, 멱등)를 거친다.
@@ -35,6 +47,7 @@ import {
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const OVERDUE_BUSINESS_DAYS = 3;
+
 const BRAND_LINK = "/business-admin?tab=affiliate";
 
 /** 주문의 구매자에게 문자(실패해도 처리는 계속된다). */
@@ -101,7 +114,11 @@ function shapeBrandOrder(o: any) {
       status: o.ret_status, reason: o.ret_reason, memo: o.ret_memo, photoUrls: o.ret_photos || [],
       returnAddress: o.ret_address, pickupMessage: o.ret_pickup, rejectReason: o.ret_reject,
       requestedAt: o.ret_requested_at, decidedAt: o.ret_decided_at, refundedAt: o.ret_refunded_at,
+      refundAmount: Number(o.ret_refund_amount) || 0, shippingDeduction: Number(o.ret_shipping_deduction) || 0,
+      partialAllowed: PARTIAL_REFUND_REASONS.includes(o.ret_reason),
     } : null,
+    // 브랜드 '배송 완료' 버튼: 송장 입력 후 하루가 지나야 누를 수 있다.
+    deliverableAt: o.shipped_at ? new Date(new Date(o.shipped_at).getTime() + DELIVER_MIN_HOURS_AFTER_SHIP * 3600_000).toISOString() : null,
   };
 }
 
@@ -112,10 +129,11 @@ async function brandGet(db: any, brand: string) {
     db.sql`
       SELECT o.*, r.status AS ret_status, r.reason AS ret_reason, r.memo AS ret_memo, r.photo_urls AS ret_photos,
              r.return_address AS ret_address, r.pickup_message AS ret_pickup, r.reject_reason AS ret_reject,
-             r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at
+             r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at,
+             r.refund_amount AS ret_refund_amount, r.shipping_deduction AS ret_shipping_deduction
       FROM affiliate_store_orders o
       LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
-      WHERE o.business_username = ${brand} AND o.status <> 'pending_payment'
+      WHERE o.business_username = ${brand} AND o.status NOT IN ('pending_payment', 'expired')
       ORDER BY o.created_at DESC LIMIT 1000
     ` as Promise<any[]>,
     db.sql`
@@ -146,6 +164,54 @@ async function setStatus(db: any, brand: string, id: string, from: string[], to:
         UPDATE affiliate_store_orders SET status = ${to}, delivered_at = NOW(), updated_at = NOW()
         WHERE id = ${id} AND business_username = ${brand} AND status = ANY(${from}::text[]) RETURNING *`) as any[];
   return rows[0] || null;
+}
+
+/**
+ * 반품 거절(브랜드: 요청 단계만 · 운영자: 승인 뒤 분쟁도). 주문은 원래 단계로 돌린다
+ * (배송 완료 전이면 배송 중, 아니면 배송 완료). 반품 기간 · 구매확정 기준일은 거절 시점부터 다시 센다.
+ * 성공하면 null, 실패하면 오류 응답을 돌려준다.
+ */
+async function rejectReturn(
+  db: any,
+  id: string,
+  opt: { actorType: "brand" | "operator"; actor: string; reason: string; businessUsername?: string; allowed: string[] },
+): Promise<Response | null> {
+  // 거절 사유는 선택이다(빈칸 허용).
+  const brand = opt.businessUsername || "";
+  const client = await db.pool.connect();
+  let buyerUserId = "";
+  try {
+    await client.query("BEGIN");
+    const ret = (await client.query(
+      `UPDATE affiliate_store_returns SET status = 'rejected', reject_reason = $3, decided_at = NOW(), updated_at = NOW()
+       WHERE order_id = $1 AND ($2 = '' OR business_username = $2) AND status = ANY($4::text[]) RETURNING buyer_user_id, status`,
+      [id, brand, opt.reason, opt.allowed],
+    )).rows[0];
+    if (!ret) {
+      await client.query("ROLLBACK");
+      const cur = ((await db.sql`SELECT status FROM affiliate_store_returns WHERE order_id = ${id} AND (${brand} = '' OR business_username = ${brand})`) as any[])[0];
+      if (cur?.status === "approved" && opt.actorType === "brand") return err("승인한 반품은 거절로 바꿀 수 없어요. 문제가 있으면 픽스폴리오 고객센터로 문의해 주세요.");
+      return err("거절할 반품 요청이 없습니다.");
+    }
+    buyerUserId = ret.buyer_user_id;
+    await client.query(
+      `UPDATE affiliate_store_orders SET status = CASE WHEN delivered_at IS NULL THEN 'shipped' ELSE 'delivered' END,
+         return_window_from = NOW(), brand_seen_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND status = 'return_requested'`,
+      [id],
+    );
+    await logEvent(client, id, opt.actorType, opt.actor, "return_rejected", opt.reason || "사유 없음");
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+  await notifyBuyer(db, buyerUserId, "return_rejected", "반품 요청이 거절되었어요",
+    opt.reason ? `판매자가 따로 연락드릴 거예요. 사유: ${opt.reason}` : "판매자가 따로 연락드릴 거예요.", id);
+  await smsForOrder(db, id, `반품 요청이 거절되었습니다. 판매자가 따로 연락드릴 거예요.${opt.reason ? ` 사유: ${opt.reason}` : ""}`);
+  return null;
 }
 
 async function brandAction(db: any, brand: string, body: any) {
@@ -180,10 +246,21 @@ async function brandAction(db: any, brand: string, body: any) {
   }
 
   if (action === "deliver") {
-    const o = await setStatus(db, brand, id, ["shipped"], "delivered", "delivered");
-    if (!o) return err("배송 중인 주문만 배송 완료로 바꿀 수 있어요.");
+    // 송장 입력 후 최소 하루가 지나야 브랜드가 직접 배송 완료로 바꿀 수 있다(바로 눌러 반품 기간을 앞당기지 않게).
+    const rows = (await db.sql`
+      UPDATE affiliate_store_orders SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
+      WHERE id = ${id} AND business_username = ${brand} AND status = 'shipped'
+        AND shipped_at IS NOT NULL AND shipped_at <= NOW() - (${String(DELIVER_MIN_HOURS_AFTER_SHIP)} || ' hours')::interval
+      RETURNING *
+    `) as any[];
+    const o = rows[0];
+    if (!o) {
+      const cur = ((await db.sql`SELECT status, shipped_at FROM affiliate_store_orders WHERE id = ${id} AND business_username = ${brand}`) as any[])[0];
+      if (cur?.status === "shipped") return err("송장 입력 후 하루가 지나야 배송 완료로 바꿀 수 있어요.");
+      return err("배송 중인 주문만 배송 완료로 바꿀 수 있어요.");
+    }
     await logEvent(db, id, "brand", brand, "delivered", "배송 완료");
-    await notifyBuyer(db, o.buyer_user_id, "delivered", "배송이 완료되었어요", `${o.product_name} · 7일 이내 교환·반품을 요청할 수 있어요.`, id);
+    await notifyBuyer(db, o.buyer_user_id, "delivered", "배송이 완료되었어요", `${o.product_name} · 7일 이내 반품을 요청할 수 있어요.`, id);
     return Response.json({ ok: true });
   }
 
@@ -199,63 +276,58 @@ async function brandAction(db: any, brand: string, body: any) {
   }
 
   if (action === "return_approve") {
-    const address = clip(body.returnAddress, 300);
-    const message = clip(body.pickupMessage, 1000);
-    if (!address) return err("반품 받을 주소를 입력해 주세요.");
+    // 입력 없이 바로 승인한다. 승인하면 브랜드가 주문 배송지로 직접 회수하고(연락 · 일정은 브랜드가 진행),
+    // 회수 뒤 "환불 처리"를 누른다. 반품 주소 · 회수 안내 칸은 더 받지 않는다(DB 컬럼은 남겨 둔다).
     const rows = (await db.sql`
-      UPDATE affiliate_store_returns SET status = 'approved', return_address = ${address}, pickup_message = ${message},
-        decided_at = NOW(), updated_at = NOW()
+      UPDATE affiliate_store_returns SET status = 'approved', decided_at = NOW(), updated_at = NOW()
       WHERE order_id = ${id} AND business_username = ${brand} AND status = 'requested' RETURNING buyer_user_id
     `) as any[];
     if (!rows[0]) return err("승인할 반품 요청이 없습니다.");
-    await logEvent(db, id, "brand", brand, "return_approved", `반품 주소: ${address}${message ? ` · ${message}` : ""}`);
-    await notifyBuyer(db, rows[0].buyer_user_id, "return_approved", "반품 요청이 승인되었어요", "주문 상세에서 반품 주소와 회수 안내를 확인해 주세요.", id);
-    await smsForOrder(db, id, `반품 요청이 승인되었습니다. 반품 주소: ${address}${message ? ` / ${message}` : ""}`);
+    await logEvent(db, id, "brand", brand, "return_approved", "반품 승인 · 판매자가 주문 배송지로 회수 예정");
+    await notifyBuyer(db, rows[0].buyer_user_id, "return_approved", "반품 요청이 승인되었어요", "판매자가 주문하신 주소로 상품을 회수할 예정이에요.", id);
+    await smsForOrder(db, id, "반품 요청이 승인되었습니다. 판매자가 주문하신 배송지로 상품을 회수할 예정이에요. 회수가 확인되면 환불됩니다.");
     return Response.json({ ok: true });
   }
 
   if (action === "return_reject") {
-    const reason = clip(body.rejectReason, 500);
-    if (!reason) return err("거절 사유를 입력해 주세요.");
-    const client = await db.pool.connect();
-    let buyerUserId = "";
-    try {
-      await client.query("BEGIN");
-      const ret = (await client.query(
-        `UPDATE affiliate_store_returns SET status = 'rejected', reject_reason = $3, decided_at = NOW(), updated_at = NOW()
-         WHERE order_id = $1 AND business_username = $2 AND status IN ('requested', 'approved') RETURNING buyer_user_id`,
-        [id, brand, reason],
-      )).rows[0];
-      if (!ret) { await client.query("ROLLBACK"); return err("거절할 반품 요청이 없습니다."); }
-      buyerUserId = ret.buyer_user_id;
-      // 주문은 배송 완료로 되돌린다. 반품 기간이 지났으면 자동 구매확정 대상이 된다.
-      await client.query(`UPDATE affiliate_store_orders SET status = 'delivered', updated_at = NOW() WHERE id = $1 AND status = 'return_requested'`, [id]);
-      await logEvent(client, id, "brand", brand, "return_rejected", reason);
-      await client.query("COMMIT");
-    } catch (e) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw e;
-    } finally {
-      client.release();
-    }
-    await notifyBuyer(db, buyerUserId, "return_rejected", "반품 요청이 거절되었어요", reason, id);
-    await smsForOrder(db, id, `반품 요청이 거절되었습니다. 사유: ${reason}`);
+    // 브랜드는 아직 승인하지 않은(requested) 반품만 거절할 수 있다. 승인 뒤 분쟁은 운영자가 처리한다.
+    const r = await rejectReturn(db, id, { actorType: "brand", actor: brand, reason: clip(body.rejectReason, 500), businessUsername: brand, allowed: ["requested"] });
+    if (r) return r;
     return Response.json({ ok: true });
   }
 
   if (action === "return_refund") {
-    const ret = (await db.sql`SELECT status FROM affiliate_store_returns WHERE order_id = ${id} AND business_username = ${brand}`) as any[];
+    const ret = (await db.sql`SELECT status, reason FROM affiliate_store_returns WHERE order_id = ${id} AND business_username = ${brand}`) as any[];
     if (!ret[0]) return err("반품 요청을 찾을 수 없습니다.", 404);
     if (ret[0].status === "requested") return err("반품을 먼저 승인하고, 상품 회수를 확인한 뒤 환불해 주세요.");
     if (ret[0].status !== "approved" && ret[0].status !== "refunded") return err("환불할 수 없는 반품 요청입니다.");
+
+    // 단순 변심이면 왕복 배송비를 빼고 부분 환불할 수 있다. 불량 · 오배송 등은 전액 환불.
+    const deduction = Math.max(0, Math.round(Number(body.shippingDeduction) || 0));
+    let partial: { refundAmount: number; deduction: number } | undefined;
+    if (deduction > 0) {
+      if (!PARTIAL_REFUND_REASONS.includes(ret[0].reason)) return err("단순 변심 반품만 왕복 배송비를 차감할 수 있어요. 불량 · 오배송은 전액 환불해 주세요.");
+      const o = ((await db.sql`SELECT total_amount FROM affiliate_store_orders WHERE id = ${id} AND business_username = ${brand}`) as any[])[0];
+      if (!o) return err("주문을 찾을 수 없습니다.", 404);
+      if (deduction >= Number(o.total_amount)) return err("차감할 배송비가 결제 금액보다 작아야 해요.");
+      if (deduction > 100_000) return err("왕복 배송비를 확인해 주세요.");
+      partial = { refundAmount: Number(o.total_amount) - deduction, deduction };
+    }
     const r = await cancelOrderFully(db, id, {
-      actorType: "brand", actor: brand, reason: "반품 환불", allowed: ["return_requested"], businessUsername: brand,
-      inTransaction: async (client) => {
-        await client.query(`UPDATE affiliate_store_returns SET status = 'refunded', refunded_at = NOW(), updated_at = NOW() WHERE order_id = $1`, [id]);
+      actorType: "brand", actor: brand, reason: "반품 환불", allowed: ["return_requested"], businessUsername: brand, partial,
+      inTransaction: async (client, order) => {
+        await client.query(
+          `UPDATE affiliate_store_returns SET status = 'refunded', refunded_at = NOW(), refund_amount = $2, shipping_deduction = $3, updated_at = NOW() WHERE order_id = $1`,
+          [id, Number(order.refund_amount) || 0, partial ? partial.deduction : 0],
+        );
       },
     });
     if (r.ok === false) return err(r.error, r.status);
-    if (!r.alreadyCancelled) await notifyBuyer(db, r.order.buyer_user_id, "refunded", "반품 환불이 완료되었어요", `${r.order.product_name} · ${Number(r.order.total_amount).toLocaleString("ko-KR")}원`, id);
+    if (!r.alreadyCancelled) {
+      const refunded = Number(r.order.refund_amount) || 0;
+      await notifyBuyer(db, r.order.buyer_user_id, "refunded", "반품 환불이 완료되었어요",
+        `${r.order.product_name} · ${refunded.toLocaleString("ko-KR")}원${partial ? ` (왕복 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 차감)` : ""}`, id);
+    }
     return Response.json({ ok: true });
   }
 
@@ -289,7 +361,7 @@ async function brandAction(db: any, brand: string, body: any) {
     return Response.json({ ok: true });
   }
   if (action === "mark_seen") {
-    await db.sql`UPDATE affiliate_store_orders SET brand_seen_at = NOW() WHERE business_username = ${brand} AND brand_seen_at IS NULL AND status <> 'pending_payment'`;
+    await db.sql`UPDATE affiliate_store_orders SET brand_seen_at = NOW() WHERE business_username = ${brand} AND brand_seen_at IS NULL AND status NOT IN ('pending_payment', 'expired')`;
     return Response.json({ ok: true });
   }
   return err("알 수 없는 요청입니다.");
@@ -351,10 +423,15 @@ async function adminIssues(db: any) {
  * 누가 언제 무엇을 바꿨는지 남긴다. 이미 생긴 주문은 주문에 고정된 수수료율을 쓰므로 영향이 없다.
  */
 async function setFeeRates(db: any, operator: string, body: any) {
-  const input: Record<string, unknown> = { platform: body.platform, pgCard: body.pgCard, pgKakaopay: body.pgKakaopay };
+  // 픽스폴리오(플랫폼) 수수료는 5% 고정이라 바꾸지 않는다. PG 수수료만 바꾼다.
+  const input: Record<string, unknown> = { pgCard: body.pgCard, pgKakaopay: body.pgKakaopay };
+  if (body.platform !== undefined && body.platform !== null && body.platform !== "" && Number(body.platform) !== PLATFORM_RATE) {
+    return err(`픽스폴리오 수수료는 ${PLATFORM_RATE}%로 고정되어 있어요.`);
+  }
   const current = await currentFeeRates(db);
   const changes: { key: string; oldValue: string; newValue: string }[] = [];
   for (const [field, key] of Object.entries(FEE_SETTING_KEYS)) {
+    if (field === "platform") continue;
     if (input[field] === undefined || input[field] === null || input[field] === "") continue;
     const n = Math.round(Number(input[field]) * 100) / 100;
     if (!Number.isFinite(n) || n < 0 || n >= 50) return err("수수료율은 0 이상 50 미만의 숫자로 입력해 주세요.");
@@ -402,9 +479,10 @@ async function adminAction(db: any, operator: string, body: any) {
   if (action === "admin_refund") {
     const id = clip(body.orderId, 120);
     const reason = clip(body.reason, 200) || "운영자 환불";
+    // 운영자는 구매확정된 주문도 환불할 수 있다(이때 수수료는 취소된다).
     const r = await cancelOrderFully(db, id, {
       actorType: "operator", actor: operator, reason,
-      allowed: ["paid", "preparing", "shipped", "delivered", "return_requested"],
+      allowed: ["paid", "preparing", "shipped", "delivered", "return_requested", "confirmed"],
       inTransaction: async (client) => {
         await client.query(
           `UPDATE affiliate_store_returns SET status = 'refunded', refunded_at = NOW(), updated_at = NOW()
@@ -419,6 +497,15 @@ async function adminAction(db: any, operator: string, body: any) {
         title: "운영팀이 주문을 환불 처리했어요", body: `${r.order.product_name} · ${reason}`, link: BRAND_LINK,
       });
     }
+    return Response.json({ ok: true });
+  }
+
+  if (action === "admin_return_reject") {
+    // 승인 뒤 분쟁 처리: 운영자는 승인된 반품도 거절할 수 있다.
+    const r = await rejectReturn(db, clip(body.orderId, 120), {
+      actorType: "operator", actor: operator, reason: clip(body.reason, 500), allowed: ["requested", "approved"],
+    });
+    if (r) return r;
     return Response.json({ ok: true });
   }
 

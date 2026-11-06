@@ -64,6 +64,10 @@ export interface StoreApplication {
   ceoName: string;
   businessAddress: string;
   csPhone: string;
+  /** 통신판매업 신고번호 */
+  mailOrderNumber: string;
+  /** 구매자 "문의하기"가 여는 자사몰 · 고객센터 주소(https://) */
+  inquiryUrl: string;
   status: ApplicationStatus;
   rejectReason: string;
   reviewedAt: string | null;
@@ -85,7 +89,23 @@ export interface ApplicationInput {
   ceoName: string;
   businessAddress: string;
   csPhone: string;
+  mailOrderNumber: string;
+  inquiryUrl: string;
 }
+
+/** 구매자 문의 링크 규칙(서버와 같다): https:// 로 시작하는 주소만. */
+export const isHttpsUrl = (v: string) => /^https:\/\/[^\s/?#]+\.[^\s]+$/i.test(v.trim());
+
+/** 판매자 정보 · 문의 링크가 다 채워졌는지(브랜드 화면 상단 등록 요청 배너 기준). */
+export const sellerInfoMissing = (a: Pick<StoreApplication, 'ceoName' | 'businessAddress' | 'csPhone' | 'mailOrderNumber' | 'inquiryUrl'>) => {
+  const missing: string[] = [];
+  if (!isHttpsUrl(a.inquiryUrl || '')) missing.push('고객 문의 링크');
+  if (!a.ceoName?.trim()) missing.push('대표자');
+  if (!a.businessAddress?.trim()) missing.push('사업장 주소');
+  if (!a.csPhone?.trim()) missing.push('고객센터 연락처');
+  if (!a.mailOrderNumber?.trim()) missing.push('통신판매업 신고번호');
+  return missing;
+};
 
 /** 브랜드 화면에서는 stock(재고)이 오고, 인플루언서 화면에서는 재고 대신 soldOut(품절 여부)만 온다. */
 export interface ProductOption { name: string; stock: number; soldOut?: boolean }
@@ -119,7 +139,7 @@ export interface StoreProduct {
   detailImageUrls: string[];
   /** 사이즈 가이드(글). 구매 페이지 SIZE GUIDE 칸에 나간다. */
   sizeGuide: string;
-  /** 배송 · 교환 · 반품 안내(글). 구매 페이지 DELIVERY GUIDE 칸에 나간다. */
+  /** 배송 · 반품 안내(글). 구매 페이지 "배송 · 반품 안내" 칸에 나간다. */
   deliveryGuide: string;
   /** 상품 정보 칸마다 글 아래에 이어 붙여 보여 주는 이미지. */
   descriptionImageUrls: string[];
@@ -162,10 +182,11 @@ export interface StoreRequest {
   insights?: Record<string, any> | null;
 }
 
-export type OrderStatus = 'pending_payment' | 'paid' | 'preparing' | 'shipped' | 'delivered' | 'confirmed' | 'return_requested' | 'cancelled';
+export type OrderStatus = 'pending_payment' | 'expired' | 'paid' | 'preparing' | 'shipped' | 'delivered' | 'confirmed' | 'return_requested' | 'cancelled';
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   pending_payment: '결제 대기',
+  expired: '결제 안 됨',
   paid: '결제 완료',
   preparing: '배송 준비',
   shipped: '배송 중',
@@ -185,6 +206,9 @@ export interface OrderReturn {
   reason: string; memo: string; photoUrls: string[];
   returnAddress: string; pickupMessage: string; rejectReason: string;
   requestedAt: string; decidedAt: string | null; refundedAt: string | null;
+  refundAmount?: number; shippingDeduction?: number;
+  /** 단순 변심 반품이라 왕복 배송비를 빼고 부분 환불할 수 있는지 */
+  partialAllowed?: boolean;
 }
 
 export interface BrandInquiry {
@@ -241,7 +265,9 @@ export interface StoreOrder {
   pgRate?: number;
   payMethod?: string;
   /** 브랜드 정산 예정액(표시만). 취소 · 환불 주문은 included=false, 모든 값 0. */
-  settlement?: { payment: number; product: number; shipping: number; commission: number; pgFee: number; platformFee: number; amount: number; included: boolean };
+  settlement?: { payment: number; product: number; shipping: number; commission: number; pgFee: number; platformFee: number; amount: number; included: boolean; partialRefund?: number };
+  /** 브랜드가 '배송 완료'를 누를 수 있는 시각(송장 입력 후 하루). */
+  deliverableAt?: string | null;
   isNew?: boolean;
   returnRequest?: OrderReturn | null;
   createdAt: string;
@@ -326,7 +352,7 @@ export const affiliateStoreService = {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'review_request', id, decision, note }, { account });
   },
 
-  updateSeller(account: string, input: { ceoName: string; businessAddress: string; csPhone: string }) {
+  updateSeller(account: string, input: { ceoName: string; businessAddress: string; csPhone: string; mailOrderNumber: string; inquiryUrl: string }) {
     return call<{ application: StoreApplication }>('POST', URL_BASE, { action: 'update_seller_info', ...input }, { account });
   },
 
@@ -342,7 +368,7 @@ export const affiliateStoreService = {
   adminIssues(token: string) {
     return call<AdminIssues>('GET', `${OPS}?scope=admin-issues`, undefined, { token });
   },
-  adminAction(token: string, action: 'admin_refund' | 'admin_remind' | 'set_checkout_open' | 'set_fee_rates', payload: Record<string, unknown>) {
+  adminAction(token: string, action: 'admin_refund' | 'admin_remind' | 'admin_return_reject' | 'set_checkout_open' | 'set_fee_rates', payload: Record<string, unknown>) {
     return call<{ ok: true; checkoutOpen?: boolean; feeRates?: FeeRates }>('POST', OPS, { action, ...payload }, { token });
   },
 

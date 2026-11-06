@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Clock, Loader2, MessageCircle, Package, Plus, RefreshCw, Store, Truck, Users } from 'lucide-react';
+import { AlertTriangle, Clock, Loader2, Package, Plus, RefreshCw, RotateCcw, Store, Truck, Users } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -7,6 +7,7 @@ import {
   REQUEST_STATUS_LABEL,
   MANAGER_STATUS_LABEL,
   MANAGER_STATUS_STYLE,
+  sellerInfoMissing,
   type CategoryNode,
   type FeeRates,
   type StoreApplication,
@@ -57,9 +58,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [categories, setCategories] = useState<string[]>([]);
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
   const [feeRates, setFeeRates] = useState<FeeRates | null>(null);
-  const [opsCounts, setOpsCounts] = useState({ newOrders: 0, returns: 0, inquiries: 0, unread: 0 });
+  const [opsCounts, setOpsCounts] = useState({ newOrders: 0, claimsNeedAction: 0, unread: 0 });
   const onOpsCounts = useCallback((c: typeof opsCounts) => setOpsCounts(c), []);
-  const [tab, setTab] = useState<'products' | 'requests' | 'orders' | 'inquiries' | 'seller'>('products');
+  const [tab, setTab] = useState<'products' | 'requests' | 'orders' | 'claims' | 'seller'>('products');
   const [editing, setEditing] = useState<StoreProduct | 'new' | null>(null);
   const [reapply, setReapply] = useState(false);
   const [busyId, setBusyId] = useState('');
@@ -168,6 +169,8 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   }
 
   const pendingRequests = requests.filter(r => r.status === 'pending').length;
+  // 이미 승인된 브랜드는 고객 문의 링크 · 판매자 정보(통신판매업 신고번호 등)가 비어 있을 수 있다 → 상단 배너로 등록 요청.
+  const sellerMissing = sellerInfoMissing(application);
   const onSale = products.filter(p => p.status === 'on_sale').length;
 
   const removeProduct = async (p: StoreProduct) => {
@@ -223,6 +226,24 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         </button>
       </header>
 
+      {sellerMissing.length > 0 && (
+        <button
+          onClick={() => setTab('seller')}
+          className="w-full text-left mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3"
+        >
+          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <span className="min-w-0">
+            <span className="block text-sm font-black text-amber-800">
+              {sellerMissing.includes('고객 문의 링크') ? '고객 문의 링크를 등록해 주세요' : '판매자 정보를 등록해 주세요'}
+            </span>
+            <span className="block text-xs text-amber-700 mt-0.5">
+              비어 있는 항목: {sellerMissing.join(', ')}. 구매자가 문의하기를 누르면 고객 문의 링크(자사몰 · 카카오톡 채널 등)로 이동하고, 판매자 정보는 상품 페이지에 표시돼요.
+              <b className="underline ml-1">판매자 정보에서 등록하기</b>
+            </span>
+          </span>
+        </button>
+      )}
+
       <div className="grid grid-cols-3 gap-2.5 md:gap-4 mb-6">
         {[
           { label: '등록 상품', value: products.length },
@@ -240,9 +261,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         {([
           { key: 'products', label: '상품 관리', icon: Package },
           { key: 'requests', label: '판매 신청', icon: Users, badge: pendingRequests },
-          { key: 'orders', label: '주문 관리', icon: Truck, badge: opsCounts.newOrders + opsCounts.returns },
-          { key: 'inquiries', label: '문의', icon: MessageCircle, badge: opsCounts.inquiries },
-          { key: 'seller', label: '판매자 정보', icon: Store, badge: application.ceoName && application.businessAddress ? 0 : 1 },
+          { key: 'orders', label: '주문 관리', icon: Truck, badge: opsCounts.newOrders },
+          { key: 'claims', label: '취소·반품 현황', icon: RotateCcw, badge: opsCounts.claimsNeedAction },
+          { key: 'seller', label: '판매자 정보', icon: Store, badge: sellerMissing.length > 0 ? 1 : 0 },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -310,11 +331,11 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         )
       )}
 
-      {(tab === 'orders' || tab === 'inquiries') && (
+      {(tab === 'orders' || tab === 'claims') && (
         <BrandAffiliateOrders key={tab} businessUsername={businessUsername} view={tab} onCounts={onOpsCounts} />
       )}
       {/* 주문 관리 탭을 열기 전에도 배지가 보이도록 숨겨서 한 번 읽는다. */}
-      {tab !== 'orders' && tab !== 'inquiries' && (
+      {tab !== 'orders' && tab !== 'claims' && (
         <div className="hidden"><BrandAffiliateOrders businessUsername={businessUsername} view="orders" onCounts={onOpsCounts} /></div>
       )}
       {tab === 'seller' && (

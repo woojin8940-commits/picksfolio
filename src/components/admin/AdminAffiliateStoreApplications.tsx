@@ -116,10 +116,13 @@ const AdminAffiliateStoreApplications: React.FC<{ token: string }> = ({ token })
                   <p className="text-[10px] font-black text-slate-400">사업자</p>
                   <p className="font-bold text-slate-800">{r.businessName}</p>
                   <p className="text-slate-600">{bizNo(r.businessNumber)}</p>
+                  {r.ceoName && <p className="text-slate-600">대표 {r.ceoName}</p>}
+                  <p className="text-slate-600">통신판매업 {r.mailOrderNumber || '미등록'}</p>
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3 space-y-1">
                   <p className="text-[10px] font-black text-slate-400">브랜드</p>
                   <a href={r.channelUrl} target="_blank" rel="noreferrer" className="block font-bold text-blue-600 truncate">{r.channelUrl}</a>
+                  <p className="text-slate-600 truncate">문의 링크 {r.inquiryUrl ? <a href={r.inquiryUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold">{r.inquiryUrl}</a> : '미등록'}</p>
                   <div className="flex flex-wrap gap-1">
                     {r.categories.map(c => <span key={c} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-bold text-slate-600">{c}</span>)}
                   </div>

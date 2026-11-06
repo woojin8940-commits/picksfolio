@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { affiliateStoreService, type ApplicationInput, type StoreApplication } from '../../services/affiliateStoreService';
+import { affiliateStoreService, isHttpsUrl, type ApplicationInput, type StoreApplication } from '../../services/affiliateStoreService';
 
 /**
  * 어필리에이트 입점 신청서.
@@ -65,9 +65,12 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     ceoName: previous?.ceoName || '',
     businessAddress: previous?.businessAddress || '',
     csPhone: previous?.csPhone || '',
+    mailOrderNumber: previous?.mailOrderNumber || '',
+    inquiryUrl: previous?.inquiryUrl || '',
     brandName: previous?.brandName || '',
     channelUrl: previous?.channelUrl || '',
-    categories: previous?.categories || [],
+    // 카테고리 목록이 상품 카테고리와 하나로 합쳐졌다 — 예전 신청서의 없는 항목은 뺀다.
+    categories: (previous?.categories || []).filter(c => categories.includes(c)),
     contactName: previous?.contactName || '',
     contactPosition: previous?.contactPosition || '',
     contactPhone: previous?.contactPhone || '',
@@ -81,8 +84,10 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
 
   const stepValid = useMemo(() => {
     if (step === 0) return form.businessName.trim().length > 0 && form.businessNumber.replace(/\D/g, '').length === 10
-      && form.ceoName.trim().length > 0 && form.businessAddress.trim().length > 0 && form.csPhone.replace(/\D/g, '').length >= 8;
-    if (step === 1) return form.brandName.trim().length > 0 && /^https?:\/\/\S+\.\S+/.test(form.channelUrl.trim()) && form.categories.length > 0;
+      && form.ceoName.trim().length > 0 && form.businessAddress.trim().length > 0 && form.csPhone.replace(/\D/g, '').length >= 8
+      && form.mailOrderNumber.trim().length > 0;
+    if (step === 1) return form.brandName.trim().length > 0 && /^https?:\/\/\S+\.\S+/.test(form.channelUrl.trim()) && form.categories.length > 0
+      && isHttpsUrl(form.inquiryUrl);
     return (
       form.contactName.trim().length > 0 &&
       form.contactPhone.replace(/\D/g, '').length >= 9 &&
@@ -166,8 +171,11 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
             <Field label="사업장 주소" required hint="상품 페이지의 판매자 정보에 표시됩니다.">
               <input className={inputCls} placeholder="사업자등록증의 사업장 주소" value={form.businessAddress} onChange={e => set('businessAddress', e.target.value)} maxLength={300} />
             </Field>
-            <Field label="고객 문의 연락처" required hint="구매자가 문의할 때 보이는 번호예요.">
+            <Field label="고객센터 연락처" required hint="상품 페이지의 판매자 정보에 표시되는 번호예요.">
               <input className={inputCls} inputMode="tel" placeholder="02-000-0000" value={form.csPhone} onChange={e => set('csPhone', e.target.value)} maxLength={20} />
+            </Field>
+            <Field label="통신판매업 신고번호" required hint="상품 페이지의 판매자 정보에 표시됩니다.">
+              <input className={inputCls} placeholder="예: 제 2026-서울강남-0000 호" value={form.mailOrderNumber} onChange={e => set('mailOrderNumber', e.target.value)} maxLength={60} />
             </Field>
           </>
         )}
@@ -180,9 +188,13 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
             <Field label="대표 판매 채널 주소" required hint="자사몰, 스마트스토어 등 판매가 잘 이뤄지고 있는 주소를 입력해 주세요.">
               <input className={inputCls} placeholder="https://example.com" value={form.channelUrl} onChange={e => set('channelUrl', e.target.value.trim())} maxLength={500} inputMode="url" />
             </Field>
+            <Field label="고객 문의 링크(자사몰 주소)" required hint="구매자가 문의하기를 누르면 이 주소로 이동해요. 자사몰 고객센터나 카카오톡 채널 주소를 넣어도 돼요.">
+              <input className={`${inputCls} ${form.inquiryUrl && !isHttpsUrl(form.inquiryUrl) ? 'border-red-300' : ''}`} placeholder="https://" value={form.inquiryUrl} onChange={e => set('inquiryUrl', e.target.value.trim())} maxLength={500} inputMode="url" />
+              {form.inquiryUrl && !isHttpsUrl(form.inquiryUrl) && <p className="text-[11px] font-bold text-red-500 mt-1.5">https:// 로 시작하는 주소만 쓸 수 있어요.</p>}
+            </Field>
             <div className="border-t border-slate-200 my-8" />
             <Field label="주요 카테고리" required hint="브랜드와 가장 가까운 카테고리를 하나 이상 선택해 주세요.">
-              <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {categories.map(c => {
                   const on = form.categories.includes(c);
                   return (
