@@ -1,27 +1,52 @@
 import { SolapiMessageService } from "solapi";
 import { sendPushToUser } from "./push.mts";
+import { verifyPortOnePayment } from "./portone-payment.mts";
+import { STORE_TESTERS } from "./store-testers.mts";
 
 /**
  * 어필리에이트 스토어 주문 공통 로직.
  *
  *   - 결제 가드(affiliate_store_checkout_open)와 테스트 계정
- *   - 주문 전액 취소: 포트원 취소 → 재고 복구 → 인플루언서 수수료 취소 (멱등)
+ *   - 결제 확인(구매자 화면 · 포트원 웹훅 · 시간별 점검이 같은 함수): 검증 → 재고 차감 → 수수료 예정 (멱등)
+ *   - 주문 취소: 포트원 취소(전액 · 반품 부분 환불) → 재고 복구 → 인플루언서 수수료 취소 · 재계산 (멱등)
  *   - 주문 처리 내역(이벤트) · 화면 알림 + 푸시
  *
  * 로그 규칙: 구매자 개인정보, 결제 키 · 토큰, 포트원 응답 원문은 남기지 않는다.
  * 실패 로그에는 주문번호와 HTTP 상태 · 오류 코드만 남긴다.
  */
 
-export const STORE_TESTERS = new Set(["dnwlsdnwls", "inplace"]);
+// 테스트 계정 명단은 store-testers.mts 한 곳에서 관리한다(여기서는 다시 내보내기만).
+export { STORE_TESTERS };
 
 /** 구매자에게 보이는 주문 상태(결제 대기는 목록에서 뺀다). */
 export const LIVE_ORDER_STATUSES = ["paid", "preparing", "shipped", "delivered", "confirmed", "return_requested", "cancelled"];
 /** 인플루언서 판매로 세는 상태. 취소된 주문은 수수료도 취소다. */
 export const SALE_STATUSES = ["paid", "preparing", "shipped", "delivered", "confirmed", "return_requested"];
+/** 결제 확인으로 결제완료가 될 수 있는 상태. expired: 결제 대기 30분이 지나 정리된 주문(늦게 결제가 확인되면 살린다). */
+export const PAYABLE_STATUSES = ["pending_payment", "expired"];
 /** 구매자가 바로 취소할 수 있는 상태(송장 입력 전). */
 export const BUYER_CANCELLABLE = ["paid", "preparing"];
-/** 배송 완료 후 교환 · 반품 요청 가능 기간. 지나면 자동 구매확정된다. */
+/** 구매자가 반품을 요청할 수 있는 상태(송장 입력 후 ~ 구매확정 전). */
+export const BUYER_RETURNABLE = ["shipped", "delivered"];
+/** 배송 완료 후 반품 요청 가능 기간. 지나면 자동 구매확정된다. (배송 중 상태는 기간 제한 없음) */
 export const RETURN_WINDOW_DAYS = 7;
+/** 반품 거절 뒤 구매확정까지 최소한 남겨 두는 여유(일). 거절 시점부터 반품 기간을 다시 세므로 늘 이보다 길다. */
+export const MIN_DAYS_AFTER_RETURN_REJECT = 3;
+/** 브랜드가 '배송 완료'를 직접 누를 수 있는 시점: 송장 입력 후 이 시간이 지나야 한다. */
+export const DELIVER_MIN_HOURS_AFTER_SHIP = 24;
+/** 결제창을 열고 이 시간(분)이 지나도 결제 완료가 안 된 주문은 시간별 점검에서 포트원에 조회해 정리한다. */
+export const PENDING_PAYMENT_EXPIRE_MINUTES = 30;
+/** 반품 단순 변심일 때만 왕복 배송비 차감(부분 환불)을 허용한다. 불량 · 오배송 등은 전액 환불. */
+export const PARTIAL_REFUND_REASONS = ["단순 변심"];
+
+/**
+ * 반품 기간 · 자동 구매확정의 기준 시각 = 배송 완료 시각과 반품 거절 시각(return_window_from) 중 늦은 쪽.
+ * 반품이 거절되면 그 시점부터 다시 센다. SQL 에서도 같은 식(GREATEST(return_window_from, delivered_at))을 쓴다.
+ */
+export const returnWindowStart = (o: { return_window_from?: string | Date | null; delivered_at?: string | Date | null }): Date | null => {
+  const t = [o.return_window_from, o.delivered_at].filter(Boolean).map((v) => new Date(v as any).getTime()).filter(Number.isFinite);
+  return t.length ? new Date(Math.max(...t)) : null;
+};
 
 export const CANCEL_FAILED_MESSAGE = "취소 처리에 실패했습니다. 고객센터로 문의해 주세요.";
 
@@ -73,8 +98,28 @@ export async function notify(
 
 type CancelResult = { ok: true } | { ok: false; status: number; code?: string };
 
-/** 포트원 결제 전액 취소. 이미 취소된 결제면 성공으로 본다(멱등). */
-async function portoneCancel(paymentId: string, reason: string): Promise<CancelResult> {
+/** 포트원 결제 단건 조회(원본 응답은 로그에 남기지 않는다). */
+export async function fetchPortOnePayment(paymentId: string): Promise<{ ok: true; payment: any } | { ok: false; status: number }> {
+  const secret = process.env.PORTONE_V2_API_SECRET;
+  if (!secret) return { ok: false, status: 503 };
+  try {
+    const res = await fetch(`https://api.portone.io/payments/${encodeURIComponent(paymentId)}`, {
+      headers: { Authorization: `PortOne ${secret}` },
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    return { ok: true, payment: await res.json() };
+  } catch {
+    return { ok: false, status: 502 };
+  }
+}
+
+/**
+ * 포트원 결제 취소. partial 이 없으면 전액, 있으면 그 금액만 부분 취소한다.
+ * 전액: 이미 취소된 결제면 성공으로 본다(멱등).
+ * 부분: currentCancellableAmount 로 "지금 취소 가능 금액이 결제 금액 그대로일 때만" 취소한다. 지난 시도에서
+ *       이미 같은 금액이 취소됐다면(마무리 단계만 실패한 경우) 다시 취소하지 않고 성공으로 본다.
+ */
+async function portoneCancel(paymentId: string, reason: string, partial?: { amount: number; cancellable: number }): Promise<CancelResult> {
   const secret = process.env.PORTONE_V2_API_SECRET;
   if (!secret) return { ok: false, status: 503, code: "NO_SECRET" };
   const headers = { Authorization: `PortOne ${secret}`, "Content-Type": "application/json" };
@@ -82,7 +127,10 @@ async function portoneCancel(paymentId: string, reason: string): Promise<CancelR
     const res = await fetch(`https://api.portone.io/payments/${encodeURIComponent(paymentId)}/cancel`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ reason: reason.slice(0, 200) || "주문 취소" }),
+      body: JSON.stringify({
+        reason: reason.slice(0, 200) || "주문 취소",
+        ...(partial ? { amount: partial.amount, currentCancellableAmount: partial.cancellable } : {}),
+      }),
     });
     const json: any = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -91,7 +139,12 @@ async function portoneCancel(paymentId: string, reason: string): Promise<CancelR
       return { ok: false, status: 502, code: st || "UNKNOWN" };
     }
     const type = String(json?.type || "");
-    if (type === "PAYMENT_ALREADY_CANCELLED") return { ok: true };
+    if (!partial && type === "PAYMENT_ALREADY_CANCELLED") return { ok: true };
+    if (partial && (type === "CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN" || type === "PAYMENT_ALREADY_CANCELLED")) {
+      const cur = await fetchPortOnePayment(paymentId);
+      const cancelled = cur.ok ? Number(cur.payment?.amount?.cancelled) || 0 : -1;
+      if (cancelled === partial.amount) return { ok: true };
+    }
     return { ok: false, status: res.status, code: type };
   } catch {
     return { ok: false, status: 502, code: "NETWORK" };
@@ -114,6 +167,24 @@ export interface CancelOptions {
   restoreStock?: boolean;
   /** 구매자 문자 문구(생략하면 "취소 · 환불 완료" 기본 문구). */
   buyerSms?: string;
+  /**
+   * 부분 환불(반품 단순 변심 · 왕복 배송비 차감). 없으면 전액 환불.
+   * refundAmount: 구매자에게 돌려줄 금액, deduction: 차감한 왕복 배송비.
+   * 인플루언서 수수료는 상품 환불 비율대로 다시 계산하고, 남는 수수료는 확정한다(반품 처리가 끝난 주문).
+   */
+  partial?: { refundAmount: number; deduction: number };
+}
+
+/**
+ * 부분 환불 뒤 남는 상품 금액 · 인플루언서 수수료. 환불액은 상품 금액부터 돌려준 것으로 본다
+ * (= 차감액이 원래 배송비를 넘는 만큼만 상품 금액이 남는다).
+ */
+export function partialRefundSplit(o: { unit_price: number; quantity: number; commission_amount: number }, refundAmount: number) {
+  const product = Number(o.unit_price) * Number(o.quantity);
+  const productRefunded = Math.min(product, Math.max(0, refundAmount));
+  const productKept = product - productRefunded;
+  const commission = product > 0 ? Math.floor((Number(o.commission_amount) || 0) * productKept / product) : 0;
+  return { product, productRefunded, productKept, commission };
 }
 
 export type CancelOutcome =
@@ -128,6 +199,7 @@ export type CancelOutcome =
 export async function cancelOrderFully(db: any, orderId: string, opt: CancelOptions): Promise<CancelOutcome> {
   const buyer = opt.buyerUserId || "";
   const brand = opt.businessUsername || "";
+  const partial = opt.partial || null;
   const claimed = (await db.sql`
     UPDATE affiliate_store_orders SET cancel_lock_at = NOW()
     WHERE id = ${orderId}
@@ -152,7 +224,12 @@ export async function cancelOrderFully(db: any, orderId: string, opt: CancelOpti
     return { ok: false, status: 400, error: "지금 상태에서는 바로 취소할 수 없어요." };
   }
 
-  const pc = await portoneCancel(orderId, opt.reason);
+  const total = Number(claimed[0].total_amount) || 0;
+  if (partial && !(partial.refundAmount > 0 && partial.refundAmount < total)) {
+    await db.sql`UPDATE affiliate_store_orders SET cancel_lock_at = NULL WHERE id = ${orderId}`;
+    return { ok: false, status: 400, error: "환불 금액을 확인해 주세요." };
+  }
+  const pc = await portoneCancel(orderId, opt.reason, partial ? { amount: partial.refundAmount, cancellable: total } : undefined);
   if (!pc.ok) {
     console.error("[affiliate-store] portone cancel failed", orderId, pc.status, pc.code || "");
     await db.sql`UPDATE affiliate_store_orders SET cancel_lock_at = NULL WHERE id = ${orderId}`;
@@ -183,17 +260,26 @@ export async function cancelOrderFully(db: any, orderId: string, opt: CancelOpti
           [order.product_id, JSON.stringify(options), stock],
         );
       }
+      const refund = partial ? partial.refundAmount : Number(order.total_amount);
+      const keptCommission = partial ? partialRefundSplit(order, refund).commission : 0;
+      const beforeCommission = Number(order.commission_amount) || 0;
       order = (await client.query(
         `UPDATE affiliate_store_orders SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = $2,
-           cancel_reason = $3, cancel_memo = $4, refund_amount = total_amount, commission_status = 'cancelled',
+           cancel_reason = $3, cancel_memo = $4, refund_amount = $5,
+           commission_amount = CASE WHEN $6::boolean THEN $7 ELSE commission_amount END,
+           commission_status = CASE WHEN $6::boolean AND $7 > 0 THEN 'confirmed' ELSE 'cancelled' END,
+           commission_confirmed_at = CASE WHEN $6::boolean AND $7 > 0 THEN NOW() ELSE commission_confirmed_at END,
            cancel_lock_at = NULL, brand_seen_at = NULL, updated_at = NOW()
          WHERE id = $1 RETURNING *`,
-        [orderId, opt.actorType, opt.reason.slice(0, 100), (opt.memo || "").slice(0, 500)],
+        [orderId, opt.actorType, opt.reason.slice(0, 100), (opt.memo || "").slice(0, 500), refund, !!partial, keptCommission],
       )).rows[0];
       if (opt.inTransaction) await opt.inTransaction(client, order);
       didCancel = true;
+      const amountNote = partial
+        ? `부분 환불 ${refund.toLocaleString("ko-KR")}원(왕복 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 차감) · 인플루언서 수수료 ${beforeCommission.toLocaleString("ko-KR")}원 → ${keptCommission.toLocaleString("ko-KR")}원`
+        : `전액 환불 ${Number(order.total_amount).toLocaleString("ko-KR")}원`;
       await logEvent(client, orderId, opt.actorType, opt.actor, "cancelled",
-        `전액 환불 ${Number(order.total_amount).toLocaleString("ko-KR")}원 · ${opt.reason}${opt.memo ? ` · ${opt.memo}` : ""}`);
+        `${amountNote} · ${opt.reason}${opt.memo ? ` · ${opt.memo}` : ""}`);
     }
     await client.query("COMMIT");
   } catch (e: any) {
@@ -207,7 +293,9 @@ export async function cancelOrderFully(db: any, orderId: string, opt: CancelOpti
   }
   // 문자는 취소가 끝난 뒤 보낸다. 실패해도 취소 결과는 그대로다.
   if (didCancel) await sendBuyerSms(order, opt.buyerSms
-    || `${order.product_name} 주문이 취소되어 ${Number(order.total_amount).toLocaleString("ko-KR")}원이 전액 환불되었습니다.`,
+    || (partial
+      ? `${order.product_name} 반품 환불 ${partial.refundAmount.toLocaleString("ko-KR")}원이 처리되었습니다(왕복 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 차감).`
+      : `${order.product_name} 주문이 취소되어 ${Number(order.total_amount).toLocaleString("ko-KR")}원이 전액 환불되었습니다.`),
     orderLink(order.id));
   return { ok: true, order, alreadyCancelled: false };
 }
@@ -284,15 +372,12 @@ export async function sendBuyerSms(order: { id?: string; buyer_phone?: string } 
 }
 
 
-/** 주문 시점에 고정할 플랫폼 수수료율(%). 운영 설정 affiliate_platform_rate, 없으면 0. */
-export async function platformRate(db: any): Promise<number> {
-  try {
-    const rows = (await db.sql`SELECT value FROM platform_settings WHERE key = 'affiliate_platform_rate'`) as any[];
-    const n = Number(rows[0]?.value);
-    return Number.isFinite(n) && n >= 0 && n < 90 ? n : 0;
-  } catch {
-    return 0;
-  }
+/** 픽스폴리오(플랫폼) 수수료율은 모든 주문에 5% 고정이다. 운영 설정으로 바꾸지 않는다. */
+export const PLATFORM_RATE = 5;
+
+/** 주문 시점에 고정할 플랫폼 수수료율(%). 항상 PLATFORM_RATE(5%). */
+export async function platformRate(_db?: any): Promise<number> {
+  return PLATFORM_RATE;
 }
 
 /** 운영자가 바꿀 수 있는 수수료율 설정 키. */
@@ -301,7 +386,8 @@ export const FEE_SETTING_KEYS = {
   pgCard: "affiliate_pg_rate_card",
   pgKakaopay: "affiliate_pg_rate_kakaopay",
 } as const;
-const DEFAULT_PG_RATE = 3.3;
+/** PG 수수료 기본값(카드 · 카카오페이 모두). 운영 설정이 없거나 읽지 못하면 이 값을 쓴다. */
+const DEFAULT_PG_RATE = 4;
 
 async function readRate(db: any, key: string, fallback: number): Promise<number> {
   try {
@@ -320,12 +406,11 @@ export async function pgRateFor(db: any, payMethod: string): Promise<number> {
 
 /** 지금 설정된 수수료율 세 가지(상품 등록 화면의 예상 정산액 · 운영 콘솔 표시용). */
 export async function currentFeeRates(db: any) {
-  const [platform, pgCard, pgKakaopay] = await Promise.all([
-    readRate(db, FEE_SETTING_KEYS.platform, 0),
+  const [pgCard, pgKakaopay] = await Promise.all([
     readRate(db, FEE_SETTING_KEYS.pgCard, DEFAULT_PG_RATE),
     readRate(db, FEE_SETTING_KEYS.pgKakaopay, DEFAULT_PG_RATE),
   ]);
-  return { platform, pgCard, pgKakaopay };
+  return { platform: PLATFORM_RATE, pgCard, pgKakaopay };
 }
 
 /**
@@ -337,16 +422,30 @@ export async function currentFeeRates(db: any) {
  *   PG 수수료: 결제 금액 전체(배송비 포함) 기준
  *
  * 전액 취소 · 환불된 주문은 모든 공제가 0 이고 정산 대상이 아니다(included: false).
+ * 반품 부분 환불(왕복 배송비 차감)된 주문은 돌려주지 않은 금액만 정산 대상이다.
  */
 export function brandSettlement(o: {
   unit_price: number; quantity: number; shipping_fee: number; total_amount?: number;
   commission_amount: number; platform_rate: number | string; pg_rate?: number | string; status?: string;
+  refund_amount?: number; commission_status?: string;
 }) {
   const product = Number(o.unit_price) * Number(o.quantity);
   const shipping = Number(o.shipping_fee) || 0;
   const payment = Number(o.total_amount) || product + shipping;
   if (o.status === "cancelled") {
-    return { payment, product, shipping, commission: 0, pgFee: 0, platformFee: 0, amount: 0, included: false };
+    const refund = Number(o.refund_amount) || 0;
+    const kept = payment - refund;
+    if (refund <= 0 || kept <= 0) {
+      return { payment, product, shipping, commission: 0, pgFee: 0, platformFee: 0, amount: 0, included: false };
+    }
+    const productKept = Math.max(0, product - refund);
+    const commission = o.commission_status === "cancelled" ? 0 : Number(o.commission_amount) || 0;
+    const platformFee = Math.floor((productKept * (Number(o.platform_rate) || 0)) / 100);
+    const pgFee = Math.floor((kept * (Number(o.pg_rate) || 0)) / 100);
+    return {
+      payment: kept, product: productKept, shipping: kept - productKept, commission, pgFee, platformFee,
+      amount: kept - commission - pgFee - platformFee, included: true, partialRefund: refund,
+    };
   }
   const commission = Number(o.commission_amount) || 0;
   const platformFee = Math.floor((product * (Number(o.platform_rate) || 0)) / 100);
@@ -354,3 +453,116 @@ export function brandSettlement(o: {
   return { payment, product, shipping, commission, pgFee, platformFee, amount: payment - commission - pgFee - platformFee, included: true };
 }
 
+// ─────────────────────────── 결제 확인(공용) ───────────────────────────
+
+export type FinalizeOutcome =
+  | { ok: true; order: any; justPaid: boolean }
+  | { ok: false; status: number; error: string; code?: string };
+
+/**
+ * 결제 확인 → 결제완료 처리. 구매자 화면(complete) · 포트원 웹훅 · 시간별 점검이 모두 이 함수를 쓴다.
+ *
+ *   1) 포트원에서 결제 건을 직접 조회해 금액 · 주문자(customer.id = 구매자 user id)가 주문과 같은지 확인
+ *   2) 재고를 조건부 UPDATE 로 원자적으로 줄이고(남은 재고보다 많이 팔리지 않게) 주문을 결제완료 · 수수료 예정으로
+ *   3) 재고가 모자라면 결제를 바로 전액 취소
+ *
+ * 이미 처리된 주문(결제완료 이후 상태)이면 아무것도 하지 않는다(멱등). 같은 주문을 여러 곳에서 동시에
+ * 불러도 행 잠금으로 한 번만 처리된다. 결제 대기 시간이 지나 expired 로 정리된 주문도 실제로 결제됐다면
+ * 여기서 결제완료로 살린다.
+ */
+export async function finalizePaidOrder(
+  db: any,
+  orderId: string,
+  opt: { buyerUserId?: string; source: "buyer" | "webhook" | "reconcile" },
+): Promise<FinalizeOutcome> {
+  const buyer = opt.buyerUserId || "";
+  const rows = (await db.sql`
+    SELECT * FROM affiliate_store_orders WHERE id = ${orderId} AND (${buyer} = '' OR buyer_user_id = ${buyer})
+  `) as any[];
+  const order = rows[0];
+  if (!order) return { ok: false, status: 404, error: "주문을 찾을 수 없습니다." };
+  if (!PAYABLE_STATUSES.includes(order.status)) return { ok: true, order, justPaid: false };
+
+  const verified = await verifyPortOnePayment({
+    paymentId: orderId,
+    expectedKrw: Number(order.total_amount),
+    payMethod: order.pay_method,
+    expectedOwner: String(order.buyer_user_id || ""),
+  });
+  if (verified.ok === false) return { ok: false, status: verified.status, error: verified.error };
+
+  let soldOut = false;
+  let justPaid = false;
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    const locked = (await client.query(`SELECT status FROM affiliate_store_orders WHERE id = $1 FOR UPDATE`, [orderId])).rows[0];
+    if (locked && PAYABLE_STATUSES.includes(locked.status)) {
+      let ok = false;
+      if (order.option_name) {
+        // 옵션 재고: 해당 옵션의 stock 이 수량 이상일 때만 그 옵션과 합계를 함께 줄인다.
+        const r = await client.query(
+          `UPDATE affiliate_store_products p SET
+             options = (SELECT jsonb_agg(CASE WHEN e->>'name' = $2
+                          THEN jsonb_set(e, '{stock}', to_jsonb((e->>'stock')::int - $3)) ELSE e END ORDER BY ord)
+                        FROM jsonb_array_elements(p.options) WITH ORDINALITY AS t(e, ord)),
+             stock = p.stock - $3, updated_at = NOW()
+           WHERE p.id = $1 AND p.stock >= $3
+             AND EXISTS (SELECT 1 FROM jsonb_array_elements(p.options) e WHERE e->>'name' = $2 AND (e->>'stock')::int >= $3)
+           RETURNING p.id`,
+          [order.product_id, order.option_name, order.quantity],
+        );
+        ok = r.rowCount === 1;
+      } else {
+        const r = await client.query(
+          `UPDATE affiliate_store_products SET stock = stock - $2, updated_at = NOW() WHERE id = $1 AND stock >= $2 RETURNING id`,
+          [order.product_id, order.quantity],
+        );
+        ok = r.rowCount === 1;
+      }
+      if (ok) {
+        await client.query(
+          `UPDATE affiliate_store_orders SET status = 'paid', pg_tx_id = $2, paid_at = NOW(), commission_status = 'pending', updated_at = NOW() WHERE id = $1`,
+          [orderId, String(verified.payment.pgTxId || "")],
+        );
+        justPaid = true;
+      } else {
+        soldOut = true;
+      }
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  if (soldOut) {
+    // 재고를 줄이지 않았으므로 되돌릴 재고도 없다(restoreStock: false).
+    const r = await cancelOrderFully(db, orderId, {
+      actorType: "system", actor: "", reason: "품절", allowed: PAYABLE_STATUSES, restoreStock: false,
+      buyerSms: `${order.product_name} 주문이 품절로 결제가 취소되었습니다. 결제 금액은 전액 환불됩니다.`,
+    });
+    if (r.ok === false) {
+      console.error("[affiliate-store] sold-out cancel failed", orderId);
+      return { ok: false, status: 409, error: "품절로 결제를 취소하지 못했습니다. 고객센터로 문의해 주세요." };
+    }
+    return { ok: false, status: 409, error: "품절로 결제가 취소되었습니다.", code: "SOLD_OUT" };
+  }
+
+  const fresh = ((await db.sql`SELECT * FROM affiliate_store_orders WHERE id = ${orderId}`) as any[])[0];
+  if (justPaid && fresh) {
+    const via = opt.source === "buyer" ? "" : opt.source === "webhook" ? " · 결제 알림(웹훅)으로 확인" : " · 결제 누락 점검으로 확인";
+    await logEvent(db, orderId, opt.source === "buyer" ? "buyer" : "system", "", "paid",
+      `결제 완료 ${Number(fresh.total_amount).toLocaleString("ko-KR")}원${via}`).catch(() => {});
+    await notify(db, {
+      recipientType: "brand", recipient: fresh.business_username, kind: "new_order",
+      title: "새 주문이 들어왔어요",
+      body: `${fresh.product_name}${fresh.option_name ? ` · ${fresh.option_name}` : ""} ${fresh.quantity}개 (@${fresh.influencer_username} 링크)`,
+      link: "/business-admin?tab=affiliate",
+    });
+    await sendBuyerSms(fresh, `${fresh.product_name} 결제가 완료되었습니다(${Number(fresh.total_amount).toLocaleString("ko-KR")}원). 주문 상세에서 배송 상황을 확인할 수 있어요.`, orderLink(orderId));
+  }
+  return { ok: true, order: fresh || order, justPaid };
+}

@@ -4,7 +4,8 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
-import { SALE_STATUSES, STORE_TESTERS, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
+import { SALE_STATUSES, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
+import { STORE_TESTERS } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 
 /**
@@ -29,8 +30,8 @@ import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-list
  * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 링크가 열렸다.)
  * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
  *
- * 정식 오픈 전이라 브랜드 · 인플루언서 쪽은 테스트 계정(TESTERS)만 쓸 수 있다.
- * 오픈할 때는 TESTERS 검사를 없애면 된다(프론트의 utils/featureFlags 도 같이).
+ * 정식 오픈 전이라 브랜드 · 인플루언서 쪽은 테스트 계정만 쓸 수 있다. 명단은 _shared/store-testers.mts
+ * 한 곳(화면은 src/utils/featureFlags.ts)에서 관리한다.
  */
 
 const TESTERS = STORE_TESTERS;
@@ -39,8 +40,9 @@ const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}${randomB
 const norm = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
 
 /**
- * 상품 카테고리. 인플루언서 화면은 상위 → 하위 순서로 걸러 본다.
- * 화면은 이 목록을 API 응답(taxonomy)으로 받아 그대로 그린다 — 바꿀 곳은 여기 하나다.
+ * 카테고리(상품 · 입점 신청 공용). 상품은 상위 → 하위를 고르고, 입점 신청서의 "주요 카테고리"는
+ * 같은 목록의 상위 카테고리에서 고른다. 화면은 이 목록을 API 응답(taxonomy · categories)으로 받아
+ * 그대로 그린다 — 바꿀 곳은 여기 하나다.
  */
 const TAXONOMY: { name: string; subs: string[] }[] = [
   { name: "뷰티", subs: ["메이크업", "베이스", "립", "아이", "헤어", "바디", "향수", "네일"] },
@@ -49,11 +51,8 @@ const TAXONOMY: { name: string; subs: string[] }[] = [
   { name: "라이프스타일", subs: ["리빙", "주방", "푸드", "건강식품", "디지털", "반려동물", "캠핑·레저"] },
 ];
 
-/** 입점 신청서의 "주요 카테고리"(브랜드 성격을 넓게 고르는 칸). */
-const CATEGORIES = [
-  "우먼 패션", "리빙", "잡화", "뷰티", "라이프", "푸드",
-  "키즈", "맨 패션", "건강식품", "인테리어", "캠핑", "기타",
-];
+/** 입점 신청서의 "주요 카테고리" = 상품 카테고리의 상위 목록(하나로 통일). */
+const CATEGORIES = TAXONOMY.map((t) => t.name);
 
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const int = (v: unknown, min = 0, max = 1_000_000_000) => {
@@ -62,6 +61,8 @@ const int = (v: unknown, min = 0, max = 1_000_000_000) => {
 };
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const isUrl = (v: string) => /^https?:\/\/[^\s.]+\.[^\s]+$/i.test(v);
+/** 구매자 문의 링크: https:// 로 시작하는 주소만 받는다(화면도 같은 규칙으로 막는다). */
+const isHttpsUrl = (v: string) => /^https:\/\/[^\s/?#]+\.[^\s]+$/i.test(v);
 
 function shapeApplication(r: any) {
   if (!r) return null;
@@ -80,6 +81,8 @@ function shapeApplication(r: any) {
     ceoName: r.ceo_name || "",
     businessAddress: r.business_address || "",
     csPhone: r.cs_phone || "",
+    mailOrderNumber: r.mail_order_number || "",
+    inquiryUrl: r.inquiry_url || "",
     status: r.status,
     rejectReason: r.reject_reason,
     reviewedAt: r.reviewed_at,
@@ -255,17 +258,24 @@ async function brandGet(db: any, username: string) {
   });
 }
 
-/** 판매자 정보(대표자 · 사업장 주소 · 고객 문의 연락처). 승인 뒤에도 고칠 수 있다. */
+/**
+ * 판매자 정보(대표자 · 사업장 주소 · 고객센터 연락처 · 통신판매업 신고번호)와 구매자 문의 링크.
+ * 승인 뒤에도 언제든 고칠 수 있다. 문의 링크는 https:// 주소만 받는다.
+ */
 async function brandUpdateSeller(db: any, username: string, body: any) {
   const ceoName = clip(body.ceoName, 50);
   const businessAddress = clip(body.businessAddress, 300);
   const csPhone = clip(body.csPhone, 20);
+  const mailOrderNumber = clip(body.mailOrderNumber, 60);
+  const inquiryUrl = clip(body.inquiryUrl, 500);
   if (!ceoName) return err("대표자 이름을 입력해 주세요.");
   if (!businessAddress) return err("사업장 주소를 입력해 주세요.");
-  if (csPhone.replace(/\D/g, "").length < 8) return err("고객 문의 연락처를 정확히 입력해 주세요.");
+  if (csPhone.replace(/\D/g, "").length < 8) return err("고객센터 연락처를 정확히 입력해 주세요.");
+  if (!mailOrderNumber) return err("통신판매업 신고번호를 입력해 주세요.");
+  if (!isHttpsUrl(inquiryUrl)) return err("고객 문의 링크는 https:// 로 시작하는 주소로 입력해 주세요.");
   const rows = (await db.sql`
     UPDATE affiliate_store_applications SET ceo_name = ${ceoName}, business_address = ${businessAddress},
-      cs_phone = ${csPhone}, updated_at = NOW()
+      cs_phone = ${csPhone}, mail_order_number = ${mailOrderNumber}, inquiry_url = ${inquiryUrl}, updated_at = NOW()
     WHERE business_username = ${username} RETURNING *
   `) as any[];
   if (!rows[0]) return err("입점 신청서를 찾을 수 없습니다.", 404);
@@ -291,15 +301,19 @@ async function brandApply(db: any, username: string, body: any) {
   const ceoName = clip(body.ceoName, 50);
   const businessAddress = clip(body.businessAddress, 300);
   const csPhone = clip(body.csPhone, 20);
+  const mailOrderNumber = clip(body.mailOrderNumber, 60);
+  const inquiryUrl = clip(body.inquiryUrl, 500);
 
   if (!businessName) return err("사업자명을 입력해 주세요.");
   if (businessNumber.length !== 10) return err("사업자 등록번호 10자리를 입력해 주세요.");
   if (!ceoName) return err("대표자 이름을 입력해 주세요.");
   if (!businessAddress) return err("사업장 주소를 입력해 주세요.");
-  if (csPhone.replace(/\D/g, "").length < 8) return err("고객 문의 연락처를 정확히 입력해 주세요.");
+  if (csPhone.replace(/\D/g, "").length < 8) return err("고객센터 연락처를 정확히 입력해 주세요.");
+  if (!mailOrderNumber) return err("통신판매업 신고번호를 입력해 주세요.");
   if (!brandName) return err("대표 브랜드명을 입력해 주세요.");
   if (!isUrl(channelUrl)) return err("대표 판매 채널 주소를 https:// 로 시작하는 주소로 입력해 주세요.");
   if (categories.length === 0) return err("주요 카테고리를 하나 이상 선택해 주세요.");
+  if (!isHttpsUrl(inquiryUrl)) return err("고객 문의 링크(자사몰 주소)를 https:// 로 시작하는 주소로 입력해 주세요.");
   if (!contactName) return err("담당자 이름을 입력해 주세요.");
   if (contactPhone.replace(/\D/g, "").length < 9) return err("담당자 연락처를 정확히 입력해 주세요.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return err("담당자 이메일을 정확히 입력해 주세요.");
@@ -308,16 +322,19 @@ async function brandApply(db: any, username: string, body: any) {
   const rows = (await db.sql`
     INSERT INTO affiliate_store_applications
       (id, business_username, business_name, business_number, brand_name, channel_url, categories,
-       contact_name, contact_position, contact_phone, contact_email, ceo_name, business_address, cs_phone, status)
+       contact_name, contact_position, contact_phone, contact_email, ceo_name, business_address, cs_phone,
+       mail_order_number, inquiry_url, status)
     VALUES
       (${newId("asa")}, ${username}, ${businessName}, ${businessNumber}, ${brandName}, ${channelUrl}, ${cats}::jsonb,
-       ${contactName}, ${contactPosition}, ${contactPhone}, ${contactEmail}, ${ceoName}, ${businessAddress}, ${csPhone}, 'pending')
+       ${contactName}, ${contactPosition}, ${contactPhone}, ${contactEmail}, ${ceoName}, ${businessAddress}, ${csPhone},
+       ${mailOrderNumber}, ${inquiryUrl}, 'pending')
     ON CONFLICT (business_username) DO UPDATE SET
       business_name = EXCLUDED.business_name, business_number = EXCLUDED.business_number,
       brand_name = EXCLUDED.brand_name, channel_url = EXCLUDED.channel_url, categories = EXCLUDED.categories,
       contact_name = EXCLUDED.contact_name, contact_position = EXCLUDED.contact_position,
       contact_phone = EXCLUDED.contact_phone, contact_email = EXCLUDED.contact_email,
       ceo_name = EXCLUDED.ceo_name, business_address = EXCLUDED.business_address, cs_phone = EXCLUDED.cs_phone,
+      mail_order_number = EXCLUDED.mail_order_number, inquiry_url = EXCLUDED.inquiry_url,
       status = 'pending', reject_reason = '', reviewed_by = '', reviewed_at = NULL, updated_at = NOW()
     WHERE affiliate_store_applications.status = 'rejected'
     RETURNING *
@@ -386,14 +403,14 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (!Number.isFinite(stock)) return err("재고 수량을 입력해 주세요.");
   if (productUrl && !isUrl(productUrl)) return err("상품 상세 주소는 https:// 로 시작하는 주소로 입력해 주세요.");
   if (status === "on_sale" && stock <= 0) return err("재고가 0개인 상품은 판매중으로 둘 수 없습니다.");
-  // 상품 설명 · 사이즈 가이드 · 배송/교환/반품 안내는 칸마다 글이나 이미지 중 하나가 꼭 있어야 한다.
+  // 상품 설명 · 사이즈 가이드 · 배송/반품 안내는 칸마다 글이나 이미지 중 하나가 꼭 있어야 한다.
   // 새로 등록할 때와 판매중으로 둘 때 확인한다(예전 상품을 판매중지로 돌리는 것은 막지 않는다).
   // 칸을 보내지 않은 예전 화면의 저장은 기존 값을 그대로 두므로 확인하지 않는다.
   if (!keepGuides && !keepGuideImages && (!clip(p.id, 60) || status === "on_sale")) {
     const missing = [
       [description, p.descriptionImageUrls, "상품 설명"],
       [sizeGuide, p.sizeGuideImageUrls, "사이즈 가이드"],
-      [deliveryGuide, p.deliveryGuideImageUrls, "배송 · 교환 · 반품 안내"],
+      [deliveryGuide, p.deliveryGuideImageUrls, "배송 · 반품 안내"],
     ].filter(([text, imgs]) => !String(text).trim() && guideImages(imgs).length === 0).map(([, , label]) => label);
     if (missing.length > 0) return err(`${missing.join(", ")}을(를) 글이나 이미지로 입력해 주세요.`);
   }
@@ -489,12 +506,13 @@ async function creatorMyAffiliate(db: any, username: string) {
 
   const stats = (await db.sql`
     SELECT request_id, COUNT(*)::int AS orders, COALESCE(SUM(quantity), 0)::int AS units,
-           COALESCE(SUM(total_amount - shipping_fee), 0)::bigint AS sales,
+           COALESCE(SUM(GREATEST(0, total_amount - shipping_fee - refund_amount)), 0)::bigint AS sales,
            COALESCE(SUM(commission_amount), 0)::bigint AS commission,
            COALESCE(SUM(commission_amount) FILTER (WHERE commission_status = 'pending'), 0)::bigint AS pending,
            COALESCE(SUM(commission_amount) FILTER (WHERE commission_status = 'confirmed'), 0)::bigint AS confirmed
     FROM affiliate_store_orders
-    WHERE influencer_username = ${username} AND status = ANY(${SALE_STATUSES}::text[])
+    WHERE influencer_username = ${username}
+      AND (status = ANY(${SALE_STATUSES}::text[]) OR status = 'cancelled')
       AND commission_status IN ('pending', 'confirmed')
     GROUP BY request_id
   `) as any[];
@@ -502,11 +520,11 @@ async function creatorMyAffiliate(db: any, username: string) {
   // 취소된 판매의 수수료(표시용).
   const cancelledRows = (await db.sql`
     SELECT COALESCE(SUM(commission_amount), 0)::bigint AS n FROM affiliate_store_orders
-    WHERE influencer_username = ${username} AND commission_status = 'cancelled' AND status <> 'pending_payment'
+    WHERE influencer_username = ${username} AND commission_status = 'cancelled' AND status NOT IN ('pending_payment', 'expired')
   `) as any[];
   const orders = (await db.sql`
     SELECT * FROM affiliate_store_orders
-    WHERE influencer_username = ${username} AND status <> 'pending_payment'
+    WHERE influencer_username = ${username} AND status NOT IN ('pending_payment', 'expired')
     ORDER BY created_at DESC LIMIT 300
   `) as any[];
 
@@ -659,9 +677,10 @@ async function creatorRequest(db: any, username: string, body: any) {
     VALUES (${newId("asr")}, ${productId}, ${product.business_username}, ${username}, ${message}, ${channelUrl})
     ON CONFLICT (product_id, influencer_username) DO UPDATE SET
       message = EXCLUDED.message, channel_url = EXCLUDED.channel_url, status = 'pending', brand_note = '', updated_at = NOW()
-    WHERE affiliate_store_requests.status = 'cancelled'
+    WHERE affiliate_store_requests.status IN ('cancelled', 'rejected')
     RETURNING *
   `) as any[];
+  // 취소했거나 반려된 신청은 다시 낼 수 있다. 대기 중이거나 이미 선정된 신청만 막는다.
   if (!rows[0]) return err("이미 신청한 상품입니다.");
   return Response.json({ request: shapeRequest(rows[0]) }, { status: 201 });
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, ChevronLeft, ChevronRight, ImagePlus, Loader2, MessageCircle, Package, X } from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, ImagePlus, Loader2, Package, X } from 'lucide-react';
 import {
   BUYER_STATUS_LABEL,
   BUYER_STATUS_STYLE,
@@ -9,20 +9,21 @@ import {
   isSignedIn,
   loginWithKakao,
   safeBuyerReturnTo,
-  type BuyerInquiry,
   type BuyerOrderDetail,
   type BuyerOrderListItem,
   type OrderEvent,
   type ReturnRequestInfo,
 } from '../../services/affiliateBuyerService';
-import { KakaoLoginButton, PlatformLegalFooter } from './ShopCommon';
+import { KakaoLoginButton, PlatformLegalFooter, SellerInquiry } from './ShopCommon';
 
 /**
  * 구매자 마이페이지. 대시보드 메뉴 없이 따로 뜨는 화면이다(main.tsx 가 /my/* 에서 그린다).
  *
  *   /my/orders          주문 내역(최신순)
- *   /my/orders/<주문ID>  주문 상세 · 취소 · 교환/반품 · 문의
- *   /my/inquiries       내 문의
+ *   /my/orders/<주문ID>  주문 상세 · 주문취소 · 반품 요청 · 문의하기(브랜드 자사몰로 연결)
+ *
+ * 구매자 신청은 "주문취소"(발송 전) · "반품 요청"(송장 입력 후 ~ 구매확정 전) 두 가지뿐이다(교환 기능 없음).
+ * 예전의 픽스폴리오 안 문의(/my/inquiries)는 화면에서 숨겼다 — 주소로 들어오면 주문 내역을 보여 준다.
  */
 
 const won = (n: number) => `${(Number(n) || 0).toLocaleString('ko-KR')}원`;
@@ -32,20 +33,76 @@ const bizNo = (v: string) => (v.length === 10 ? `${v.slice(0, 3)}-${v.slice(3, 5
 
 const EVENT_LABEL: Record<string, string> = {
   paid: '결제 완료', preparing: '배송 준비', shipped: '발송', delivered: '배송 완료', confirmed: '구매확정',
-  cancelled: '취소 · 환불 완료', return_requested: '교환·반품 요청', return_approved: '반품 승인',
+  cancelled: '취소 · 환불 완료', return_requested: '반품 요청', return_approved: '반품 승인',
   return_rejected: '반품 거절',
 };
 const ACTOR_LABEL: Record<string, string> = { buyer: '구매자', brand: '판매자', operator: '픽스폴리오', system: '자동' };
-const RETURN_STATUS_LABEL: Record<string, string> = { requested: '판매자 확인 중', approved: '반품 승인 · 회수 대기', rejected: '반품 거절', refunded: '환불 완료' };
+const RETURN_STATUS_LABEL: Record<string, string> = { requested: '판매자 확인 중', approved: '반품 승인 · 회수 예정', rejected: '반품 거절', refunded: '환불 완료' };
 
-type Route = { view: 'orders' } | { view: 'order'; id: string } | { view: 'inquiries' };
+type Route = { view: 'orders' } | { view: 'order'; id: string };
 
 function parseRoute(path: string): Route {
   const m = path.match(/^\/my\/orders\/([^/]+)\/?$/);
   if (m) return { view: 'order', id: decodeURIComponent(m[1]) };
-  if (/^\/my\/inquiries\/?$/.test(path)) return { view: 'inquiries' };
   return { view: 'orders' };
 }
+
+/** 반품 진행 단계: 반품 신청 → 승인(판매자가 주문 배송지로 회수) → 환불 완료 (또는 거절). */
+const ReturnProgress: React.FC<{ ret: ReturnRequestInfo; totalAmount: number }> = ({ ret, totalAmount }) => {
+  const rejected = ret.status === 'rejected';
+  const steps = [
+    { key: 'requested', label: '반품 신청', at: ret.requestedAt },
+    { key: 'approved', label: rejected ? '거절' : '승인', at: ret.decidedAt },
+    ...(rejected ? [] : [{ key: 'refunded', label: '환불 완료', at: ret.refundedAt }]),
+  ];
+  const idx = rejected ? 1 : ret.status === 'refunded' ? 2 : ret.status === 'approved' ? 1 : 0;
+  const refund = Number(ret.refundAmount) || 0;
+  return (
+    <section className={`rounded-2xl border p-4 text-xs space-y-3 ${rejected ? 'border-red-100 bg-red-50/40' : 'border-orange-100 bg-orange-50/50'}`}>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-black text-slate-900">반품 진행</p>
+        <span className={`text-[10px] font-black px-2 py-0.5 rounded bg-white ${rejected ? 'text-red-500' : 'text-orange-600'}`}>{RETURN_STATUS_LABEL[ret.status]}</span>
+      </div>
+      <div className="flex items-center">
+        {steps.map((st, i) => (
+          <React.Fragment key={st.key}>
+            <div className="flex flex-col items-center gap-1 shrink-0 max-w-[30%] text-center">
+              <div className={`w-2.5 h-2.5 rounded-full ${i <= idx ? (rejected && i === 1 ? 'bg-red-500' : 'bg-orange-500') : 'bg-slate-200'}`} />
+              <span className={`text-[10px] font-bold leading-tight ${i <= idx ? 'text-slate-900' : 'text-slate-300'}`}>{st.label}</span>
+              {i <= idx && st.at && <span className="text-[9px] text-slate-400">{date(st.at)}</span>}
+            </div>
+            {i < steps.length - 1 && <div className={`flex-1 h-0.5 mb-6 ${i < idx ? (rejected ? 'bg-red-300' : 'bg-orange-400') : 'bg-slate-200'}`} />}
+          </React.Fragment>
+        ))}
+      </div>
+      <p className="text-slate-600">사유: {ret.reason}{ret.memo ? ` · ${ret.memo}` : ''}</p>
+      {ret.photoUrls.length > 0 && (
+        <div className="flex gap-1.5">{ret.photoUrls.map(u => <img key={u} src={u} alt="" className="w-12 h-12 rounded-lg object-cover" />)}</div>
+      )}
+      {ret.status === 'requested' && <p className="text-slate-500">판매자가 요청을 확인하고 있어요. 승인되면 판매자가 주문하신 주소로 상품을 회수해요.</p>}
+      {ret.status === 'approved' && (
+        <div className="bg-white rounded-xl p-3 space-y-1">
+          <p className="font-black text-slate-800">판매자가 주문하신 주소로 회수할 예정이에요</p>
+          <p className="text-slate-400 pt-1">
+            회수 일정은 판매자가 따로 연락드려요. 회수가 끝나면 환불됩니다.{ret.reason === '단순 변심' ? ' 단순 변심 반품은 왕복 배송비가 환불 금액에서 빠질 수 있어요.' : ''}
+          </p>
+        </div>
+      )}
+      {ret.status === 'refunded' && (
+        <p className="font-bold text-slate-700">
+          환불 금액 {won(refund || totalAmount)}
+          {(ret.shippingDeduction || 0) > 0 && <span className="text-slate-500 font-normal"> (왕복 배송비 {won(ret.shippingDeduction || 0)} 차감)</span>}
+        </p>
+      )}
+      {rejected && (
+        <div className="text-red-500">
+          <p className="font-bold">반품이 거절되었어요. 판매자가 따로 연락드릴 거예요.</p>
+          {ret.rejectReason && <p className="mt-0.5">사유: {ret.rejectReason}</p>}
+        </div>
+      )}
+    </section>
+  );
+};
 
 const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-[300] flex items-end md:items-center justify-center">
@@ -108,9 +165,9 @@ const STEPS: { key: string; label: string }[] = [
 ];
 
 const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }> = ({ id, go }) => {
-  const [data, setData] = useState<{ order: BuyerOrderDetail; events: OrderEvent[]; returnRequest: ReturnRequestInfo | null; inquiries: BuyerInquiry[] } | null>(null);
+  const [data, setData] = useState<{ order: BuyerOrderDetail; events: OrderEvent[]; returnRequest: ReturnRequestInfo | null } | null>(null);
   const [error, setError] = useState('');
-  const [modal, setModal] = useState<null | 'cancel' | 'return' | 'inquiry'>(null);
+  const [modal, setModal] = useState<null | 'cancel' | 'return'>(null);
   const [reason, setReason] = useState('');
   const [memo, setMemo] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
@@ -126,25 +183,24 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
-  const open = (m: 'cancel' | 'return' | 'inquiry') => { setModal(m); setReason(''); setMemo(''); setPhotos([]); setActionError(''); };
+  const open = (m: 'cancel' | 'return') => { setModal(m); setReason(''); setMemo(''); setPhotos([]); setActionError(''); };
 
   const submit = async () => {
     if (!data) return;
     setBusy(true);
     setActionError('');
-    const res =
-      modal === 'cancel' ? await buyerService.cancel(id, reason, memo)
-      : modal === 'return' ? await buyerService.requestReturn(id, reason, memo, photos)
-      : await buyerService.inquire({ orderId: id, body: memo });
+    const res = modal === 'cancel'
+      ? await buyerService.cancel(id, reason, memo)
+      : await buyerService.requestReturn(id, reason, memo, photos);
     setBusy(false);
     if (res.error) { setActionError(res.error); return; }
     setModal(null);
-    setToast(modal === 'cancel' ? '주문이 취소되고 전액 환불되었어요.' : modal === 'return' ? '교환·반품을 요청했어요. 판매자가 확인 후 안내해 드려요.' : '문의를 보냈어요.');
+    setToast(modal === 'cancel' ? '주문이 취소되고 전액 환불되었어요.' : '반품을 요청했어요. 판매자가 확인 후 안내해 드려요.');
     load();
   };
 
   const confirm = async () => {
-    if (!window.confirm('구매확정하면 교환·반품을 요청할 수 없어요. 구매확정할까요?')) return;
+    if (!window.confirm('구매확정하면 주문취소 · 반품을 요청할 수 없어요. 구매확정할까요?')) return;
     const res = await buyerService.confirm(id);
     if (res.error) window.alert(res.error);
     else load();
@@ -173,9 +229,8 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
   }
   if (!data) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-300" /></div>;
 
-  const { order: o, events, returnRequest: ret, inquiries } = data;
+  const { order: o, events, returnRequest: ret } = data;
   const stepIdx = STEPS.findIndex(s => s.key === o.status);
-  const inquiryMode = modal === 'inquiry';
 
   return (
     <div className="space-y-5 pb-6">
@@ -215,25 +270,21 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
         </div>
       </div>
 
-      {/* 상태별 동작 */}
+      {/* 구매자 신청: 주문취소(발송 전) · 반품 요청(송장 입력 후 ~ 구매확정 전). 구매확정 뒤에는 둘 다 없다. */}
       <div className="space-y-2">
         {o.canCancel && (
-          <button onClick={() => open('cancel')} className="w-full h-12 rounded-xl border border-slate-300 text-sm font-black text-slate-700">주문 취소</button>
-        )}
-        {o.status === 'shipped' && (
-          <div className="rounded-xl bg-amber-50 p-4">
-            <p className="text-xs font-bold text-amber-700">배송이 시작되어 바로 취소할 수 없어요. 판매자에게 문의해 주세요.</p>
-            <button onClick={() => open('inquiry')} className="mt-2 h-9 px-4 rounded-lg bg-white border border-amber-200 text-xs font-black text-amber-700">문의하기</button>
-          </div>
+          <button onClick={() => open('cancel')} className="w-full h-12 rounded-xl border border-slate-300 text-sm font-black text-slate-700">주문취소</button>
         )}
         {o.canReturn && (
-          <button onClick={() => open('return')} className="w-full h-12 rounded-xl border border-slate-300 text-sm font-black text-slate-700">교환·반품 요청</button>
+          <>
+            <button onClick={() => open('return')} className="w-full h-12 rounded-xl border border-slate-300 text-sm font-black text-slate-700">반품 요청</button>
+            {o.status === 'delivered' && o.returnWindowEndsAt && (
+              <p className="text-[11px] text-slate-400 text-center">반품은 {date(o.returnWindowEndsAt)}까지 요청할 수 있어요.</p>
+            )}
+          </>
         )}
         {o.returnExpired && (
-          <div className="rounded-xl bg-slate-50 p-4">
-            <p className="text-xs font-bold text-slate-600">반품 가능 기간이 지났어요. 판매자에게 문의해 주세요.</p>
-            <button onClick={() => open('inquiry')} className="mt-2 h-9 px-4 rounded-lg bg-white border border-slate-200 text-xs font-black text-slate-600">문의하기</button>
-          </div>
+          <p className="rounded-xl bg-slate-50 p-4 text-xs font-bold text-slate-600">반품 가능 기간이 지났어요. 아래 문의하기로 판매자에게 문의해 주세요.</p>
         )}
         {o.canConfirm && (
           <button onClick={confirm} className="w-full h-12 rounded-xl bg-slate-900 text-white text-sm font-black">구매확정</button>
@@ -241,27 +292,13 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
       </div>
 
       {/* 반품 진행 */}
-      {ret && (
-        <section className="rounded-2xl border border-orange-100 bg-orange-50/50 p-4 text-xs space-y-1.5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-black text-slate-900">교환·반품</p>
-            <span className="text-[10px] font-black px-2 py-0.5 rounded bg-white text-orange-600">{RETURN_STATUS_LABEL[ret.status]}</span>
-          </div>
-          <p className="text-slate-600">사유: {ret.reason}{ret.memo ? ` · ${ret.memo}` : ''}</p>
-          {ret.photoUrls.length > 0 && (
-            <div className="flex gap-1.5">{ret.photoUrls.map(u => <img key={u} src={u} alt="" className="w-12 h-12 rounded-lg object-cover" />)}</div>
-          )}
-          {ret.status === 'approved' && (
-            <div className="bg-white rounded-xl p-3 mt-2 space-y-1">
-              <p className="font-black text-slate-800">반품 보낼 주소</p>
-              <p className="text-slate-700 whitespace-pre-wrap">{ret.returnAddress}</p>
-              {ret.pickupMessage && <p className="text-slate-500 whitespace-pre-wrap pt-1">{ret.pickupMessage}</p>}
-              <p className="text-slate-400 pt-1">판매자가 상품 회수를 확인하면 전액 환불됩니다.</p>
-            </div>
-          )}
-          {ret.status === 'rejected' && <p className="text-red-500 font-bold">거절 사유: {ret.rejectReason}</p>}
-        </section>
-      )}
+      {ret && <ReturnProgress ret={ret} totalAmount={o.totalAmount} />}
+
+      {/* 문의하기: 모든 상태에서 보인다. 브랜드 자사몰 · 고객센터로 새 창 연결. */}
+      <section className="rounded-2xl border border-slate-100 p-4">
+        <p className="text-sm font-black mb-2">문의하기</p>
+        <SellerInquiry inquiryUrl={o.seller.inquiryUrl} orderId={o.id} />
+      </section>
 
       <section className="rounded-2xl border border-slate-100 p-4 text-sm space-y-1.5">
         <p className="text-sm font-black mb-1">결제 정보</p>
@@ -270,7 +307,7 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
         <div className="flex justify-between"><span className="text-slate-500">배송비</span><span className="font-bold">{o.shippingFee ? won(o.shippingFee) : '무료'}</span></div>
         <div className="flex justify-between pt-2 border-t border-slate-100"><span className="font-black">결제 금액</span><span className="font-black">{won(o.totalAmount)}</span></div>
         {o.status === 'cancelled' && (
-          <div className="flex justify-between text-red-500"><span className="font-bold">환불 금액</span><span className="font-black">{won(o.refundAmount)}</span></div>
+          <div className="flex justify-between text-red-500"><span className="font-bold">환불 금액</span><span className="font-black">{won(o.refundAmount)}{o.refundAmount < o.totalAmount ? ' (부분 환불)' : ''}</span></div>
         )}
       </section>
 
@@ -291,22 +328,10 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
         <p className="text-sm font-black mb-1">판매자 정보</p>
         {[
           ['상호', o.seller.businessName], ['사업자등록번호', bizNo(o.seller.businessNumber)], ['대표자', o.seller.ceoName],
-          ['연락처', o.seller.phone], ['주소', o.seller.address], ['추천 크리에이터', `@${o.influencer}`],
-        ].map(([k, v]) => <div key={k} className="flex gap-3"><span className="w-24 shrink-0 text-slate-400">{k}</span><span className="text-slate-700">{v || '-'}</span></div>)}
-        <button onClick={() => open('inquiry')} className="mt-3 h-9 px-4 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 flex items-center gap-1.5"><MessageCircle className="w-3.5 h-3.5" /> 문의하기</button>
+          ['사업장 주소', o.seller.address], ['고객센터', o.seller.phone], ['통신판매업 신고번호', o.seller.mailOrderNumber || ''],
+          ['추천 크리에이터', `@${o.influencer}`],
+        ].map(([k, v]) => <div key={k} className="flex gap-3"><span className="w-28 shrink-0 text-slate-400">{k}</span><span className="text-slate-700 break-all">{v || '-'}</span></div>)}
       </section>
-
-      {inquiries.length > 0 && (
-        <section className="rounded-2xl border border-slate-100 p-4 space-y-3">
-          <p className="text-sm font-black">이 주문의 문의</p>
-          {inquiries.map(q => (
-            <div key={q.id} className="text-xs">
-              <p className="text-slate-700 whitespace-pre-wrap">Q. {q.body}</p>
-              {q.answer ? <p className="mt-1 text-blue-700 bg-blue-50 rounded-lg p-2.5 whitespace-pre-wrap">A. {q.answer}</p> : <p className="mt-1 text-slate-400">답변 대기 중</p>}
-            </div>
-          ))}
-        </section>
-      )}
 
       {events.length > 0 && (
         <section className="rounded-2xl border border-slate-100 p-4">
@@ -324,26 +349,22 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
 
       {modal && (
         <Modal
-          title={modal === 'cancel' ? '주문 취소' : modal === 'return' ? '교환·반품 요청' : '판매자에게 문의하기'}
+          title={modal === 'cancel' ? '주문취소' : '반품 요청'}
           onClose={() => setModal(null)}
         >
-          {!inquiryMode && (
-            <>
-              <p className="text-xs font-bold text-slate-500 mb-2">사유를 골라 주세요</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(modal === 'cancel' ? CANCEL_REASONS : RETURN_REASONS).map(r => (
-                  <button key={r} onClick={() => setReason(r)} className={`h-11 rounded-xl border text-xs font-bold ${reason === r ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'}`}>
-                    {r}{r === '기타' && modal === 'cancel' ? ' (메모)' : ''}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          <p className="text-xs font-bold text-slate-500 mb-2">사유를 골라 주세요</p>
+          <div className="grid grid-cols-2 gap-2">
+            {(modal === 'cancel' ? CANCEL_REASONS : RETURN_REASONS).map(r => (
+              <button key={r} onClick={() => setReason(r)} className={`h-11 rounded-xl border text-xs font-bold ${reason === r ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'}`}>
+                {r}{r === '기타' && modal === 'cancel' ? ' (메모)' : ''}
+              </button>
+            ))}
+          </div>
           <textarea
             value={memo}
             onChange={e => setMemo(e.target.value)}
-            maxLength={inquiryMode ? 2000 : 1000}
-            placeholder={inquiryMode ? '문의 내용을 적어 주세요.' : '메모 (선택)'}
+            maxLength={1000}
+            placeholder="메모 (선택)"
             className="mt-3 w-full min-h-[90px] p-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-slate-900"
           />
           {modal === 'return' && (
@@ -363,50 +384,21 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
                   </label>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 mt-3">단순 변심 반품은 반품 배송비를 구매자가 부담합니다. 지금은 전액 환불만 지원하며, 교환은 판매자와 문의로 진행해 주세요.</p>
+              <p className="text-[11px] text-slate-400 mt-3">단순 변심 반품은 왕복 배송비를 구매자가 부담하며, 판매자가 환불 금액에서 차감할 수 있어요. 상품 불량 · 오배송은 전액 환불됩니다.</p>
             </>
           )}
           {modal === 'cancel' && <p className="text-[11px] text-slate-400 mt-3">확인을 누르면 결제가 즉시 전액 취소됩니다.</p>}
           {actionError && <p className="text-xs font-bold text-red-500 mt-3">{actionError}</p>}
           <button
             onClick={submit}
-            disabled={busy || uploading || (inquiryMode ? memo.trim().length < 2 : !reason || (modal === 'cancel' && reason === '기타' && !memo.trim()))}
+            disabled={busy || uploading || !reason || (modal === 'cancel' && reason === '기타' && !memo.trim())}
             className="mt-4 w-full h-12 rounded-xl bg-slate-900 text-white text-sm font-black disabled:bg-slate-300 flex items-center justify-center gap-2"
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            {modal === 'cancel' ? '주문 취소하기' : modal === 'return' ? '요청하기' : '문의 보내기'}
+            {modal === 'cancel' ? '주문취소하기' : '반품 요청하기'}
           </button>
         </Modal>
       )}
-    </div>
-  );
-};
-
-// ─────────────────────────── 내 문의 ───────────────────────────
-
-const InquiryList: React.FC = () => {
-  const [items, setItems] = useState<BuyerInquiry[] | null>(null);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    buyerService.inquiries().then(res => (res.error ? setError(res.error) : setItems(res.inquiries || [])));
-  }, []);
-  if (error) return <p className="text-sm font-bold text-red-500 py-10 text-center">{error}</p>;
-  if (!items) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-300" /></div>;
-  if (items.length === 0) return <p className="py-16 text-center text-sm font-black text-slate-500">아직 남긴 문의가 없어요</p>;
-  return (
-    <div className="space-y-3">
-      {items.map(q => (
-        <div key={q.id} className="rounded-2xl border border-slate-100 p-4 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] text-slate-400 truncate">{q.brandName} · {q.productName}</p>
-            <span className={`text-[10px] font-black px-2 py-0.5 rounded ${q.answer ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>{q.answer ? '답변 완료' : '답변 대기'}</span>
-          </div>
-          <p className="mt-1.5 text-slate-800 whitespace-pre-wrap">{q.body}</p>
-          <p className="text-[11px] text-slate-400 mt-1">{dateTime(q.createdAt)}</p>
-          {q.answer && <p className="mt-2 text-blue-800 bg-blue-50 rounded-xl p-3 whitespace-pre-wrap text-xs">{q.answer}<span className="block text-[10px] text-blue-400 mt-1">{dateTime(q.answeredAt)}</span></p>}
-          {q.orderId && <a href={`/my/orders/${encodeURIComponent(q.orderId)}`} className="inline-block mt-2 text-[11px] font-bold text-slate-500 underline">주문 보기</a>}
-        </div>
-      ))}
     </div>
   );
 };
@@ -478,26 +470,23 @@ const BuyerMyPage: React.FC = () => {
         ) : !signedIn ? (
           <div className="py-16 text-center">
             <p className="text-lg font-black">로그인하고 주문 내역을 확인하세요</p>
-            <p className="text-xs text-slate-500 mt-1.5">픽스폴리오에서 구매한 주문 · 교환/반품 · 문의를 한곳에서 볼 수 있어요.</p>
+            <p className="text-xs text-slate-500 mt-1.5">픽스폴리오에서 구매한 주문 · 취소 · 반품을 한곳에서 볼 수 있어요.</p>
             <KakaoLoginButton className="mt-6 max-w-xs mx-auto" onClick={() => loginWithKakao(returnTo || window.location.pathname)} />
           </div>
         ) : (
           <>
+            {/* "내 문의" 메뉴는 숨겼다(문의는 주문 상세의 문의하기 → 브랜드 자사몰). */}
             <nav className="flex gap-5 border-b border-slate-100 mt-2">
-              {([['orders', '주문 내역', '/my/orders'], ['inquiries', '내 문의', '/my/inquiries']] as const).map(([v, label, path]) => (
-                <button
-                  key={v}
-                  onClick={() => go(v === 'orders' ? { view: 'orders' } : { view: 'inquiries' }, path)}
-                  className={`py-3 text-sm font-black border-b-2 -mb-px ${(route.view === v || (v === 'orders' && route.view === 'order')) ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}
-                >
-                  {label}
-                </button>
-              ))}
+              <button
+                onClick={() => go({ view: 'orders' }, '/my/orders')}
+                className="py-3 text-sm font-black border-b-2 -mb-px border-slate-900 text-slate-900"
+              >
+                주문 내역
+              </button>
             </nav>
             <main className="pt-4">
               {route.view === 'orders' && <OrderList go={go} />}
               {route.view === 'order' && <OrderDetail key={route.id} id={route.id} go={go} />}
-              {route.view === 'inquiries' && <InquiryList />}
             </main>
           </>
         )}

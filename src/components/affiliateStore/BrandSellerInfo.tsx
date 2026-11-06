@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { affiliateStoreService, type StoreApplication } from '../../services/affiliateStoreService';
+import { affiliateStoreService, isHttpsUrl, type StoreApplication } from '../../services/affiliateStoreService';
 
 /**
- * 판매자 정보. 상품 페이지의 "판매자 정보 보기"와 구매자 주문 상세에 그대로 보인다
- * (상호 · 사업자등록번호는 입점 신청 값, 대표자 · 연락처 · 주소는 여기서 고친다).
+ * 판매자 정보 · 고객 문의 링크. 상품 페이지의 "판매자 정보 보기"와 구매자 주문 상세에 그대로 보인다
+ * (상호 · 사업자등록번호는 입점 신청 값, 나머지는 여기서 언제든 고친다).
+ * 고객 문의 링크는 구매자가 "문의하기"를 누르면 새 창으로 열린다 — https:// 주소만 받는다(서버도 같은 규칙).
  */
 const inputCls = 'w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-blue-600';
 
@@ -12,13 +13,17 @@ const BrandSellerInfo: React.FC<{ businessUsername: string; application: StoreAp
   const [ceoName, setCeoName] = useState(application.ceoName || '');
   const [businessAddress, setBusinessAddress] = useState(application.businessAddress || '');
   const [csPhone, setCsPhone] = useState(application.csPhone || application.contactPhone || '');
+  const [mailOrderNumber, setMailOrderNumber] = useState(application.mailOrderNumber || '');
+  const [inquiryUrl, setInquiryUrl] = useState(application.inquiryUrl || '');
+  const urlOk = isHttpsUrl(inquiryUrl);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
   const save = async () => {
-    setSaving(true);
     setMsg('');
-    const res = await affiliateStoreService.updateSeller(businessUsername, { ceoName, businessAddress, csPhone });
+    if (!urlOk) { setMsg('고객 문의 링크는 https:// 로 시작하는 주소로 입력해 주세요.'); return; }
+    setSaving(true);
+    const res = await affiliateStoreService.updateSeller(businessUsername, { ceoName, businessAddress, csPhone, mailOrderNumber, inquiryUrl: inquiryUrl.trim() });
     setSaving(false);
     if (res.error || !res.application) { setMsg(res.error || '저장하지 못했습니다.'); return; }
     onSaved(res.application);
@@ -39,9 +44,16 @@ const BrandSellerInfo: React.FC<{ businessUsername: string; application: StoreAp
         <div><p className="text-[11px] font-bold text-slate-400 mb-1">상호</p><p className="font-bold text-slate-800">{application.businessName}</p></div>
         <div><p className="text-[11px] font-bold text-slate-400 mb-1">사업자등록번호</p><p className="font-bold text-slate-800">{bizNo}</p></div>
       </div>
+      <label className="block">
+        <span className="text-xs font-bold text-slate-700">고객 문의 링크(자사몰 주소) *</span>
+        <input className={`${inputCls} mt-1 ${inquiryUrl && !urlOk ? 'border-red-300' : ''}`} value={inquiryUrl} onChange={e => setInquiryUrl(e.target.value.trim())} maxLength={500} inputMode="url" placeholder="https://" />
+        <span className="block text-[11px] text-slate-500 mt-1">구매자가 문의하기를 누르면 이 주소로 이동해요. 자사몰 고객센터나 카카오톡 채널 주소를 넣어도 돼요.</span>
+        {inquiryUrl && !urlOk && <span className="block text-[11px] font-bold text-red-500 mt-0.5">https:// 로 시작하는 주소만 쓸 수 있어요.</span>}
+      </label>
       <label className="block"><span className="text-xs font-bold text-slate-700">대표자 *</span><input className={`${inputCls} mt-1`} value={ceoName} onChange={e => setCeoName(e.target.value)} maxLength={50} /></label>
-      <label className="block"><span className="text-xs font-bold text-slate-700">고객 문의 연락처 *</span><input className={`${inputCls} mt-1`} value={csPhone} onChange={e => setCsPhone(e.target.value)} maxLength={20} inputMode="tel" /></label>
+      <label className="block"><span className="text-xs font-bold text-slate-700">고객센터 연락처 *</span><input className={`${inputCls} mt-1`} value={csPhone} onChange={e => setCsPhone(e.target.value)} maxLength={20} inputMode="tel" /></label>
       <label className="block"><span className="text-xs font-bold text-slate-700">사업장 주소 *</span><input className={`${inputCls} mt-1`} value={businessAddress} onChange={e => setBusinessAddress(e.target.value)} maxLength={300} /></label>
+      <label className="block"><span className="text-xs font-bold text-slate-700">통신판매업 신고번호 *</span><input className={`${inputCls} mt-1`} value={mailOrderNumber} onChange={e => setMailOrderNumber(e.target.value)} maxLength={60} placeholder="예: 제 2026-서울강남-0000 호" /></label>
       {msg && <p className="text-xs font-bold text-blue-600">{msg}</p>}
       <button onClick={save} disabled={saving} className="h-11 px-6 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center gap-2">
         {saving && <Loader2 className="w-4 h-4 animate-spin" />}저장

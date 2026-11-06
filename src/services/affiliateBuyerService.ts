@@ -102,7 +102,16 @@ export interface BuyerOrderListItem {
   optionName: string; quantity: number; totalAmount: number; status: BuyerOrderStatus;
 }
 
-export interface SellerInfo { brandName?: string; businessName: string; businessNumber: string; ceoName: string; phone: string; address: string }
+export interface SellerInfo {
+  brandName?: string; businessName: string; businessNumber: string; ceoName: string; phone: string; address: string;
+  /** 통신판매업 신고번호 */
+  mailOrderNumber?: string;
+  /** 구매자 "문의하기"가 새 창으로 여는 브랜드 자사몰 · 고객센터 주소(https:// 만). 없으면 '' */
+  inquiryUrl?: string;
+}
+
+/** 판매자 문의 링크가 없을 때 안내하는 픽스폴리오 고객센터. */
+export const PICKSFOLIO_CS_EMAIL = 'business@picks-folio.com';
 
 export interface BuyerOrderDetail extends BuyerOrderListItem {
   code: string; productId: string; unitPrice: number; productAmount: number; shippingFee: number; payMethod: string;
@@ -111,12 +120,16 @@ export interface BuyerOrderDetail extends BuyerOrderListItem {
   shippedAt: string | null; deliveredAt: string | null; confirmedAt: string | null; cancelledAt: string | null;
   cancelledBy: string; cancelReason: string; refundAmount: number; influencer: string; seller: SellerInfo;
   canCancel: boolean; canReturn: boolean; returnExpired: boolean; canConfirm: boolean;
+  /** 배송 완료 주문의 반품 가능 기간 끝(반품 거절 시 거절 시점부터 다시 센다). */
+  returnWindowEndsAt?: string | null;
 }
 
 export interface ReturnRequestInfo {
   reason: string; memo: string; photoUrls: string[]; status: 'requested' | 'approved' | 'rejected' | 'refunded';
   returnAddress: string; pickupMessage: string; rejectReason: string;
   requestedAt: string; decidedAt: string | null; refundedAt: string | null;
+  /** 환불 완료 금액 · 차감한 왕복 배송비(단순 변심 부분 환불일 때). */
+  refundAmount?: number; shippingDeduction?: number;
 }
 
 export interface OrderEvent { actorType: string; action: string; note: string; createdAt: string }

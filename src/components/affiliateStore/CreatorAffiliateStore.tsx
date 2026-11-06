@@ -406,7 +406,7 @@ const ProductDetailPage: React.FC<DetailProps> = ({
           {[
             { title: '상품 설명', body: detail.description || '', images: detail.descriptionImageUrls || [] },
             { title: '사이즈 가이드', body: detail.sizeGuide || '', images: detail.sizeGuideImageUrls || [] },
-            { title: '배송 · 교환 · 반품 안내', body: detail.deliveryGuide || '', images: detail.deliveryGuideImageUrls || [] },
+            { title: '배송 · 반품 안내', body: detail.deliveryGuide || '', images: detail.deliveryGuideImageUrls || [] },
           ].filter(b => b.body.trim() || b.images.length > 0).map(b => (
             <div key={b.title} className="py-5 border-b border-slate-100">
               <h3 className="text-sm font-black text-slate-900 mb-3">{b.title}</h3>

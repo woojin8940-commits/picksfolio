@@ -1,10 +1,9 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { randomBytes } from "node:crypto";
-import { verifyPortOnePayment } from "./_shared/portone-payment.mts";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
-import { STORE_TESTERS, cancelOrderFully, checkoutOpen, logEvent, notify, orderLink, pgRateFor, platformRate, sendBuyerSms } from "./_shared/affiliate-store-orders.mts";
+import { STORE_TESTERS, checkoutOpen, finalizePaidOrder, pgRateFor, platformRate } from "./_shared/affiliate-store-orders.mts";
 
 /**
  * 어필리에이트 공개 상품 페이지(/shop/<코드>)의 주문 · 결제. 로그인 없이 쓴다.
@@ -14,6 +13,9 @@ import { STORE_TESTERS, cancelOrderFully, checkoutOpen, logEvent, notify, orderL
  *   POST { action: 'click', code }                       방문 기록
  *   POST { action: 'create_order', code, ... }           (로그인) 결제 전 주문서 → 주문번호 · 금액
  *   POST { action: 'complete', orderId }                 (로그인) 포트원 결제 검증 → 결제완료 · 재고 차감
+ *
+ * 결제 확인은 포트원 웹훅(portone-webhook)과 시간별 점검(scheduled-affiliate-store-confirm)도
+ * 같은 함수(finalizePaidOrder)로 한다 — 구매자가 결제 후 창을 닫아도 주문이 빠지지 않는다.
  *
  * 상품 페이지는 로그인 없이 보지만, 주문은 카카오 로그인한 구매자 계정(Supabase user id)에
  * 묶어 저장한다. 결제 가드(affiliate_store_checkout_open)가 꺼져 있으면 테스트 계정만 결제한다.
@@ -26,6 +28,8 @@ import { STORE_TESTERS, cancelOrderFully, checkoutOpen, logEvent, notify, orderL
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const CODE_RE = /^[A-Za-z0-9]{6,32}$/;
+/** 한 번에 고를 수 있는 수량 상한. 재고와 상관없이 고정이며, 재고 부족은 주문서 · 결제 단계에서만 알린다. */
+const MAX_QUANTITY = 10;
 
 /** 링크가 살아 있는 조건: 승인된 신청(운영자가 닫지 않은 링크) · 판매중 상품 · 승인된 브랜드. */
 async function loadLink(db: any, code: string) {
@@ -33,7 +37,7 @@ async function loadLink(db: any, code: string) {
   const rows = (await db.sql`
     SELECT r.id AS request_id, r.influencer_username, r.link_code, r.status AS request_status,
            p.*, a.brand_name, a.business_name, a.business_number, a.ceo_name, a.business_address,
-           a.cs_phone, a.contact_phone
+           a.cs_phone, a.contact_phone, a.mail_order_number, a.inquiry_url
     FROM affiliate_store_requests r
     JOIN affiliate_store_products p ON p.id = r.product_id
     JOIN affiliate_store_applications a ON a.business_username = p.business_username
@@ -67,12 +71,19 @@ function publicProduct(r: any) {
     salePrice: Number(r.sale_price) || 0,
     shippingFee: Number(r.shipping_fee) || 0,
     onSale: r.status === "on_sale" && Number(r.stock) > 0,
-    maxQuantity: Math.max(0, Math.min(99, Number(r.stock) || 0)),
-    // 상품 페이지 "판매자 정보 보기". 입점 신청서에 적은 상호 · 사업자등록번호만 보여 준다.
+    // 재고 수량이 화면에 드러나지 않도록 고정 상한을 준다. 재고 부족은 주문 · 결제 때 안내한다.
+    maxQuantity: MAX_QUANTITY,
+    // 상품 페이지 "판매자 정보 보기"(전자상거래법 표시 항목). 입점 신청서 · 판매자 정보 값.
     seller: {
       businessName: r.business_name || "",
       businessNumber: r.business_number || "",
+      ceoName: r.ceo_name || "",
+      address: r.business_address || "",
+      phone: r.cs_phone || "",
+      mailOrderNumber: r.mail_order_number || "",
     },
+    // 구매자 "문의하기" → 브랜드 자사몰 · 고객센터(https:// 주소만 저장된다).
+    inquiryUrl: /^https:\/\//i.test(String(r.inquiry_url || "")) ? r.inquiry_url : "",
   };
 }
 
@@ -99,7 +110,7 @@ async function createOrder(db: any, body: any, buyer: { userId: string; username
   if (link.status !== "on_sale") return err("지금은 판매하지 않는 상품입니다.");
 
   const quantity = Math.round(Number(body.quantity));
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) return err("수량을 확인해 주세요.");
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) return err(`수량은 1~${MAX_QUANTITY}개로 선택해 주세요.`);
 
   const options = Array.isArray(link.options) ? link.options : [];
   let optionName = "";
@@ -171,101 +182,19 @@ async function createOrder(db: any, body: any, buyer: { userId: string; username
     orderName,
     totalAmount,
     payMethod,
-    customer: { fullName: buyerName, phoneNumber: buyerPhone.replace(/\D/g, ""), email: buyerEmail || undefined },
+    // customerId = 구매자 user id. 결제 확인 때 이 값으로 주문자 본인 결제인지 확인한다(expectedOwner).
+    customer: { customerId: buyer.userId, fullName: buyerName, phoneNumber: buyerPhone.replace(/\D/g, ""), email: buyerEmail || undefined },
   }, { status: 201 });
 }
 
-/**
- * 결제 확인. 포트원에서 결제 건을 직접 조회해 금액이 주문 금액과 같을 때만 결제완료로 바꾸고
- * 재고를 줄인다. 같은 주문을 여러 번 불러도(리다이렉트 + 팝업 응답) 한 번만 처리된다.
- */
+/** 결제 확인(구매자 화면). 웹훅 · 시간별 점검과 같은 함수로 처리한다 — 이미 처리된 주문이면 그대로 돌려준다. */
 async function completeOrder(db: any, body: any, buyerUserId: string) {
   const orderId = clip(body.orderId, 120);
-  const rows = (await db.sql`SELECT * FROM affiliate_store_orders WHERE id = ${orderId} AND buyer_user_id = ${buyerUserId}`) as any[];
-  const order = rows[0];
-  if (!order) return err("주문을 찾을 수 없습니다.", 404);
-  if (order.status !== "pending_payment") return Response.json({ order: publicOrder(order) });
-
-  const verified = await verifyPortOnePayment({
-    paymentId: orderId,
-    expectedKrw: Number(order.total_amount),
-    payMethod: order.pay_method,
-  });
-  if (verified.ok === false) return err(verified.error, verified.status);
-
-  // 재고 차감은 조건부 UPDATE 로 원자적으로 한다(재고 >= 수량일 때만 줄어든다). 같은 상품을
-  // 여러 명이 동시에 결제해도 남은 재고보다 많이 팔리지 않는다. 모자라면 결제를 바로 전액 취소한다.
-  let soldOut = false;
-  const client = await db.pool.connect();
-  try {
-    await client.query("BEGIN");
-    const locked = (await client.query(`SELECT status FROM affiliate_store_orders WHERE id = $1 FOR UPDATE`, [orderId])).rows[0];
-    if (locked?.status === "pending_payment") {
-      let ok = false;
-      if (order.option_name) {
-        // 옵션 재고: 해당 옵션의 stock 이 수량 이상일 때만 그 옵션과 합계를 함께 줄인다.
-        const r = await client.query(
-          `UPDATE affiliate_store_products p SET
-             options = (SELECT jsonb_agg(CASE WHEN e->>'name' = $2
-                          THEN jsonb_set(e, '{stock}', to_jsonb((e->>'stock')::int - $3)) ELSE e END ORDER BY ord)
-                        FROM jsonb_array_elements(p.options) WITH ORDINALITY AS t(e, ord)),
-             stock = p.stock - $3, updated_at = NOW()
-           WHERE p.id = $1 AND p.stock >= $3
-             AND EXISTS (SELECT 1 FROM jsonb_array_elements(p.options) e WHERE e->>'name' = $2 AND (e->>'stock')::int >= $3)
-           RETURNING p.id`,
-          [order.product_id, order.option_name, order.quantity],
-        );
-        ok = r.rowCount === 1;
-      } else {
-        const r = await client.query(
-          `UPDATE affiliate_store_products SET stock = stock - $2, updated_at = NOW() WHERE id = $1 AND stock >= $2 RETURNING id`,
-          [order.product_id, order.quantity],
-        );
-        ok = r.rowCount === 1;
-      }
-      if (ok) {
-        await client.query(
-          `UPDATE affiliate_store_orders SET status = 'paid', pg_tx_id = $2, paid_at = NOW(), commission_status = 'pending', updated_at = NOW() WHERE id = $1`,
-          [orderId, String(verified.payment.pgTxId || "")],
-        );
-      } else {
-        soldOut = true;
-      }
-    }
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
+  const r = await finalizePaidOrder(db, orderId, { buyerUserId, source: "buyer" });
+  if (r.ok === false) {
+    return r.code ? Response.json({ error: r.error, code: r.code }, { status: r.status }) : err(r.error, r.status);
   }
-
-  if (soldOut) {
-    // 재고를 줄이지 않았으므로 되돌릴 재고도 없다(restoreStock: false).
-    const r = await cancelOrderFully(db, orderId, {
-      actorType: "system", actor: "", reason: "품절", allowed: ["pending_payment"], buyerUserId: buyerUserId,
-      restoreStock: false, buyerSms: `${order.product_name} 주문이 품절로 결제가 취소되었습니다. 결제 금액은 전액 환불됩니다.`,
-    });
-    if (r.ok === false) {
-      console.error("[affiliate-shop] sold-out cancel failed", orderId);
-      return err("품절로 결제를 취소하지 못했습니다. 고객센터로 문의해 주세요.", 409);
-    }
-    return Response.json({ error: "품절로 결제가 취소되었습니다.", code: "SOLD_OUT" }, { status: 409 });
-  }
-
-  const fresh = (await db.sql`SELECT * FROM affiliate_store_orders WHERE id = ${orderId}`) as any[];
-  const o = fresh[0];
-  if (o?.status === "paid" && order.status === "pending_payment") {
-    await logEvent(db, orderId, "buyer", "", "paid", `결제 완료 ${Number(o.total_amount).toLocaleString("ko-KR")}원`).catch(() => {});
-    await notify(db, {
-      recipientType: "brand", recipient: o.business_username, kind: "new_order",
-      title: "새 주문이 들어왔어요",
-      body: `${o.product_name}${o.option_name ? ` · ${o.option_name}` : ""} ${o.quantity}개 (@${o.influencer_username} 링크)`,
-      link: "/business-admin?tab=affiliate",
-    });
-    await sendBuyerSms(o, `${o.product_name} 결제가 완료되었습니다(${Number(o.total_amount).toLocaleString("ko-KR")}원). 주문 상세에서 배송 상황을 확인할 수 있어요.`, orderLink(orderId));
-  }
-  return Response.json({ order: publicOrder(o) });
+  return Response.json({ order: publicOrder(r.order) });
 }
 
 export default async (req: Request) => {

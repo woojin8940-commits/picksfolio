@@ -47,11 +47,12 @@ const DELIVERY_GUIDE_PLACEHOLDER = `[배송비]
 [배송 기간]
 · 결제 완료 후 2~5일(주말·공휴일 제외)
 
-[교환/반품 안내]
-· 상품 수령 후 7일 이내에 요청해 주세요.
-· 단순 변심에 의한 교환/반품은 왕복 배송비를 구매자가 부담합니다.
+[반품 안내]
+· 상품 수령 후 7일 이내에 마이페이지 주문 상세에서 요청해 주세요.
+· 반품이 승인되면 판매자가 주문하신 배송지로 회수합니다.
+· 단순 변심에 의한 반품은 왕복 배송비를 구매자가 부담합니다.
 
-[교환/반품이 불가능한 경우]
+[반품이 불가능한 경우]
 · 착용 흔적이 있거나 상품이 훼손·오염된 경우`;
 
 const SIZE_GUIDE_PLACEHOLDER = `예) 단위: cm
@@ -354,7 +355,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
     const missing = ([
       [form.description, form.descriptionImageUrls, '상품 설명'],
       [form.sizeGuide, form.sizeGuideImageUrls, '사이즈 가이드'],
-      [form.deliveryGuide, form.deliveryGuideImageUrls, '배송 · 교환 · 반품 안내'],
+      [form.deliveryGuide, form.deliveryGuideImageUrls, '배송 · 반품 안내'],
     ] as [string, string[], string][]).filter(([text, imgs]) => !text.trim() && imgs.length === 0).map(([, , label]) => label);
     if (missing.length > 0) {
       setError(`${missing.join(', ')}을(를) 글이나 이미지로 입력해 주세요. 구매자와 인플루언서가 보는 필수 상품 정보입니다.`);
@@ -641,8 +642,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
           {...guideImageProps('sizeGuideImageUrls')}
         />
         <GuideField
-          label="배송 · 교환 · 반품 안내 (필수)"
-          hint="배송비 · 배송 기간 · 교환/반품 방법 등. 글이나 이미지 중 하나는 꼭 넣어 주세요. 새 상품을 등록할 때는 마지막으로 적은 안내가 미리 채워집니다."
+          label="배송 · 반품 안내 (필수)"
+          hint="배송비 · 배송 기간 · 반품 방법 등. 글이나 이미지 중 하나는 꼭 넣어 주세요. 새 상품을 등록할 때는 마지막으로 적은 안내가 미리 채워집니다."
           value={form.deliveryGuide}
           onChange={v => set('deliveryGuide', v)}
           placeholder={DELIVERY_GUIDE_PLACEHOLDER}
