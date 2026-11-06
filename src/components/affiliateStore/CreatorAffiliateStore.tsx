@@ -24,10 +24,10 @@ import { useCloseOnBack } from '../../hooks/useCloseOnBack';
  *           카테고리와 검색어(상품명 · 브랜드명)로 판매중인 상품을 찾는다.
  *   브랜드  입점한 브랜드 전체. 수천 개가 될 것이라 검색 + 더 보기로 나눠 읽는다.
  *           브랜드를 누르면 그 브랜드의 상품만 본다.
- *   내 신청 브랜드의 선정 · 반려 결과와, 선정 뒤 담당자 연락 진행 상황.
+ *   내 신청 브랜드의 선정 · 반려 결과. 선정되면 바로 전용 링크가 열린다.
  *
  * 상품을 누르면 캠페인처럼 큰 상세 화면으로 들어간다. 수수료율은 목록 · 상세에 보이지 않는다 —
- * 선정되면 픽스폴리오 담당자가 조건을 안내하고 진행한다.
+ * 선정되면 MY 어필리에이트에서 수수료율과 전용 링크를 확인한다.
  * 새로 들어온 인플루언서는 크리에이터 승인을 받아야 이 메뉴를 쓴다(기존 계정은 그대로).
  *
  * 목록은 서버에서 거르고 페이지로 받는다(api-affiliate-store scope=creator · brands).
@@ -284,8 +284,7 @@ const BrandList: React.FC<{ onOpen: (b: StoreBrand) => void }> = ({ onOpen }) =>
 const FLOW_STEPS = [
   { title: '판매 신청', desc: '상품을 보고 판매 신청을 보내요.' },
   { title: '브랜드 선정', desc: '브랜드가 신청을 확인하고 함께할 크리에이터를 선정해요.' },
-  { title: '담당자 연락', desc: '픽스폴리오 담당자가 중간에서 조건 · 일정을 조율해 드려요.' },
-  { title: '판매 시작', desc: '진행이 확정되면 MY 어필리에이트에서 전용 링크가 열려요.' },
+  { title: '판매 시작', desc: '선정되면 바로 MY 어필리에이트에서 전용 링크가 열려요.' },
 ];
 
 interface DetailProps {
@@ -449,14 +448,14 @@ const ProductDetailPage: React.FC<DetailProps> = ({
                   </div>
                 </div>
                 {request.status === 'approved' && request.managerStatus !== 'done' && (
-                  <p className="text-xs text-blue-600 font-bold mt-2">브랜드에 선정되었어요. 픽스폴리오 담당자가 곧 연락드려요.</p>
+                  <p className="text-xs text-blue-600 font-bold mt-2">브랜드에 선정되었어요. MY 어필리에이트에서 전용 링크를 확인하세요.</p>
                 )}
                 <button onClick={onMine} className="mt-3 text-xs font-black text-slate-600 underline">내 신청 보기</button>
               </div>
             ) : (
               <>
                 <h3 className="text-base font-black text-slate-900 mb-1">판매 신청</h3>
-                <p className="text-xs text-slate-500">아래 지원하기를 누르면 연동한 인스타그램 계정으로 바로 지원돼요. 브랜드가 선정하면 픽스폴리오 담당자가 중간에서 연락해 진행을 도와드려요.</p>
+                <p className="text-xs text-slate-500">아래 지원하기를 누르면 연동한 인스타그램 계정으로 바로 지원돼요. 브랜드가 선정하면 바로 전용 판매 링크가 열려요.</p>
               </>
             )}
           </div>
@@ -613,7 +612,7 @@ const ApplySheet: React.FC<ApplySheetProps> = ({
                 <span className="px-2 py-1 rounded-md text-[10px] font-black bg-emerald-50 text-emerald-600 shrink-0">연동됨</span>
               </div>
               <p className="text-xs text-slate-500 leading-relaxed">브랜드는 이 계정의 프로필과 최근 릴스 3편을 보고 함께할 크리에이터를 선정해요.</p>
-              <p className="text-[11px] text-slate-400">브랜드가 선정하면 픽스폴리오 담당자가 중간에서 연락해 진행을 도와드려요.</p>
+              <p className="text-[11px] text-slate-400">브랜드가 선정하면 바로 전용 판매 링크가 열려요.</p>
               {sendError && <p className="text-xs font-bold text-red-500">{sendError}</p>}
             </>
           )}
@@ -858,8 +857,8 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
                   {r.status === 'rejected' && r.brandNote && <p className="text-[11px] text-red-500 mt-0.5 line-clamp-2">반려 사유: {r.brandNote}</p>}
                   {r.status === 'approved' && (
                     r.managerStatus === 'done'
-                      ? <p className="text-[11px] text-emerald-600 font-bold mt-0.5">진행이 확정되었어요! MY 어필리에이트에서 전용 링크를 받아 판매를 시작하세요.</p>
-                      : <p className="text-[11px] text-blue-600 font-bold mt-0.5">브랜드에 선정되었어요! 픽스폴리오 담당자가 곧 연락드려 조건과 일정을 안내해 드려요.</p>
+                      ? <p className="text-[11px] text-emerald-600 font-bold mt-0.5">브랜드에 선정되었어요! MY 어필리에이트에서 전용 링크를 받아 판매를 시작하세요.</p>
+                      : <p className="text-[11px] text-blue-600 font-bold mt-0.5">브랜드에 선정되었어요! 전용 링크를 준비하고 있어요.</p>
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">

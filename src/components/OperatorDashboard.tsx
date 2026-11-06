@@ -349,7 +349,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         // 어필리에이트(ZVZO 방식) 입점 신청. 승인하면 그 브랜드의 상품 등록이 열린다.
         { key: 'affiliate-store', label: '어필리에이트 입점 신청' },
         // 브랜드가 선정한 판매 신청 — 담당자가 양쪽에 연락해 진행한다.
-        { key: 'affiliate-selections', label: '어필리에이트 선정 연락' },
+        { key: 'affiliate-selections', label: '어필리에이트 선정 · 링크' },
         { key: 'affiliate-issues', label: '미처리 취소·반품·문의' },
       ],
     },

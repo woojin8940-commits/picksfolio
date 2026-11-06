@@ -24,8 +24,9 @@ import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-list
  *     운영자    review_application
  *     담당자    manager_update  (GET scope=selections: 브랜드가 선정한 신청 — 담당자 연락 큐)
  *
- * 선정 이후 흐름: 브랜드가 선정(approve)하면 manager_status = 'waiting' 이 되고, 픽스폴리오
- * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 인플루언서 전용 링크가 열린다.
+ * 선정 이후 흐름: 브랜드가 선정(approve)하면 담당자 연락 없이 바로 manager_status = 'done' 이 되고
+ * 인플루언서 전용 링크가 열린다. (예전 흐름: 'waiting' 이 되고, 픽스폴리오
+ * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 링크가 열렸다.)
  * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
  *
  * 정식 오픈 전이라 브랜드 · 인플루언서 쪽은 테스트 계정(TESTERS)만 쓸 수 있다.
@@ -415,19 +416,19 @@ async function brandReviewRequest(db: any, username: string, body: any) {
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
   const note = clip(body.note, 500);
-  // 선정하면 담당자 연락 대기로 넘어간다. 전용 링크는 담당자가 진행 완료로 바꿀 때 열린다.
-  // 이미 진행 완료된 신청을 다시 선정하면 그 상태를 그대로 둔다.
+  // 선정하면 담당자 연락 없이 바로 진행 확정(done)이 되고 인플루언서 전용 링크가 열린다.
+  // 반려하면 신청 상태가 'rejected' 라 링크는 닫힌다(다시 선정하면 같은 링크가 살아난다).
+  // 운영자가 링크를 잠시 닫은('contacting') 신청은 브랜드가 다시 선정해도 닫힌 채로 둔다.
   const rows = (await db.sql`
     UPDATE affiliate_store_requests SET status = ${decision}, brand_note = ${note},
-      manager_status = CASE
-        WHEN ${decision}::text = 'approved' AND manager_status <> 'done' THEN 'waiting'
-        ELSE manager_status
-      END,
+      manager_status = CASE WHEN ${decision}::text = 'approved' AND manager_status <> 'contacting' THEN 'done' ELSE manager_status END,
+      manager_updated_at = CASE WHEN ${decision}::text = 'approved' AND manager_status <> 'done' THEN NOW() ELSE manager_updated_at END,
       updated_at = NOW()
     WHERE id = ${id} AND business_username = ${username} AND status IN ('pending', 'approved', 'rejected')
     RETURNING *
   `) as any[];
   if (!rows[0]) return err("신청을 찾을 수 없습니다.", 404);
+  if (decision === "approved" && !rows[0].link_code) rows[0].link_code = await ensureLinkCode(db, rows[0].id);
   return Response.json({ request: shapeRequest(rows[0]) });
 }
 
@@ -717,7 +718,7 @@ async function managerUpdate(db: any, manager: string, body: any) {
     RETURNING *
   `) as any[];
   if (!rows[0]) return err("선정된 신청을 찾을 수 없습니다.", 404);
-  // 진행 완료되면 인플루언서 전용 판매 링크를 연다.
+  // 운영 콘솔에서 링크를 다시 열거나(done) 잠시 닫는다(contacting). done 이면 링크 코드를 붙인다.
   if (next === "done") rows[0].link_code = await ensureLinkCode(db, rows[0].id);
   return Response.json({ request: { ...shapeRequest(rows[0]), managerNote: rows[0].manager_note } });
 }

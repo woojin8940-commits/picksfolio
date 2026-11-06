@@ -12,9 +12,8 @@ import { formatPhone } from '../../utils/formatters';
 /**
  * 어필리에이트 선정 연락 — 인플루언서가 판매 신청하고 브랜드가 선정한 건.
  *
- * 담당자가 브랜드 · 인플루언서 양쪽에 연락해 조건과 일정을 맞춘다.
- *   연락 대기 → 연락 중 → 진행 확정
- * 진행 확정으로 바꾸면 인플루언서의 전용 판매 링크(MY 어필리에이트)가 열린다.
+ * 브랜드가 선정하면 담당자 연락 없이 바로 인플루언서 전용 판매 링크가 열린다(링크 발급).
+ * 이 화면은 선정 · 링크 현황을 보는 곳이다. 문제가 있는 건은 상태를 되돌려 링크를 잠시 닫을 수 있다.
  */
 
 type Filter = 'all' | ManagerStatus;
@@ -24,7 +23,7 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
   const [rows, setRows] = useState<ManagerSelection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<Filter>('waiting');
+  const [filter, setFilter] = useState<Filter>('done');
   const [busy, setBusy] = useState('');
   const [notes, setNotes] = useState<Record<string, string>>({});
 
@@ -50,7 +49,8 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
   const visible = filter === 'all' ? rows : rows.filter(r => r.managerStatus === filter);
 
   const update = async (r: ManagerSelection, next: ManagerStatus) => {
-    if (next === 'done' && !window.confirm('진행 확정으로 바꿀까요? 인플루언서에게 전용 판매 링크가 열립니다.')) return;
+    if (next === 'done' && !window.confirm('링크를 다시 열까요? 인플루언서의 전용 판매 링크로 다시 주문을 받을 수 있습니다.')) return;
+    if (next !== 'done' && !window.confirm('링크를 잠시 닫을까요? 닫는 동안 이 인플루언서 링크로는 주문할 수 없습니다.')) return;
     setBusy(r.id);
     const res = await affiliateStoreService.updateSelection(token, r.id, next, notes[r.id] ?? '');
     setBusy('');
@@ -62,14 +62,14 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-2 flex-wrap">
         <div>
-          <h3 className="text-sm font-black text-slate-900">어필리에이트 선정 연락</h3>
-          <p className="text-[10px] font-bold text-slate-400 mt-0.5">브랜드가 선정한 판매 신청입니다. 양쪽에 연락해 조건 · 일정을 맞춘 뒤 '진행 확정'으로 바꾸면 인플루언서의 판매 링크가 열립니다.</p>
+          <h3 className="text-sm font-black text-slate-900">어필리에이트 선정 · 링크 현황</h3>
+          <p className="text-[10px] font-bold text-slate-400 mt-0.5">브랜드가 선정한 판매 신청입니다. 선정과 동시에 인플루언서의 판매 링크가 자동으로 열립니다. 문제가 있으면 상태를 바꿔 링크를 잠시 닫을 수 있습니다.</p>
         </div>
         <button onClick={load} className="px-3 py-1.5 rounded-lg bg-slate-100 text-[11px] font-black text-slate-600 hover:bg-slate-200">새로고침</button>
       </div>
 
       <div className="flex gap-1.5 flex-wrap">
-        {(['waiting', 'contacting', 'done', 'all'] as Filter[]).map(f => (
+        {(['done', 'contacting', 'all'] as Filter[]).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -107,14 +107,11 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    {status === 'waiting' && (
-                      <button disabled={busy === r.id} onClick={() => update(r, 'contacting')} className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black disabled:opacity-50">연락 시작</button>
-                    )}
                     {status !== 'done' && (
-                      <button disabled={busy === r.id} onClick={() => update(r, 'done')} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black disabled:opacity-50">진행 확정</button>
+                      <button disabled={busy === r.id} onClick={() => update(r, 'done')} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black disabled:opacity-50">링크 다시 열기</button>
                     )}
                     {status === 'done' && (
-                      <button disabled={busy === r.id} onClick={() => update(r, 'contacting')} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black disabled:opacity-50">연락 중으로 되돌리기</button>
+                      <button disabled={busy === r.id} onClick={() => update(r, 'contacting')} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black disabled:opacity-50">링크 잠시 닫기</button>
                     )}
                   </div>
                 </div>
