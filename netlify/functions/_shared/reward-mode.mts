@@ -46,3 +46,12 @@ export const MANAGER_LISTUP_MODES: RewardModeValue[] = ["paid", "groupbuy"];
 
 export const isManagerListupMode = (raw: unknown): boolean =>
   MANAGER_LISTUP_MODES.includes(normalizeRewardMode(raw));
+
+/**
+ * 더는 새로 등록할 수 없는 방식. 커머스형(공동구매)은 어필리에이트 스토어로 대체되어
+ * 등록 · 수정 · 공개 목록에서 빠졌다. 값 자체는 지난 이력 표기를 위해 남겨 둔다.
+ */
+export const RETIRED_REWARD_MODES: RewardModeValue[] = ["groupbuy"];
+
+export const isRetiredRewardMode = (raw: unknown): boolean =>
+  RETIRED_REWARD_MODES.includes(normalizeRewardMode(raw));

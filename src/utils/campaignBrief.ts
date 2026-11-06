@@ -161,8 +161,24 @@ export const rewardModeOf = (value: string | null | undefined): RewardModeDef =>
 export const normalizeRewardMode = (value: unknown): RewardMode =>
   rewardModeOf(typeof value === 'string' ? value : '').value;
 
+/**
+ * 더는 새로 고를 수 없는 방식. 커머스형(공동구매)은 어필리에이트로 대체되었다.
+ * 정의는 지난 캠페인 이력 표기를 위해 남겨 두고, 등록 화면 · 공개 목록에서만 뺀다.
+ * 서버(_shared/reward-mode.mts)의 RETIRED_REWARD_MODES 와 짝이다.
+ */
+export const RETIRED_REWARD_MODES: RewardMode[] = ['groupbuy'];
+
+/** 브랜드가 캠페인 등록 화면에서 고를 수 있는 진행 방식들. */
+export const PICKABLE_REWARD_MODES: RewardModeDef[] = REWARD_MODES.filter(m => !RETIRED_REWARD_MODES.includes(m.value));
+
+/** 등록 화면에 채울 진행 방식. 그만둔 방식은 기본값('paid')으로 돌린다. */
+export const normalizePickableRewardMode = (value: unknown): RewardMode => {
+  const mode = normalizeRewardMode(value);
+  return RETIRED_REWARD_MODES.includes(mode) ? PICKABLE_REWARD_MODES[0].value : mode;
+};
+
 /** 캠페인 협업 목록에 노출되는 진행 방식들. 서버 필터와 짝이다. */
-export const OPEN_APPLY_MODES: RewardMode[] = REWARD_MODES.filter(m => m.openApply).map(m => m.value);
+export const OPEN_APPLY_MODES: RewardMode[] = PICKABLE_REWARD_MODES.filter(m => m.openApply).map(m => m.value);
 
 /**
  * 담당자 리스트업이 붙는 진행 방식들. 서버(_shared/reward-mode.mts) 의 같은 이름과 짝이다.

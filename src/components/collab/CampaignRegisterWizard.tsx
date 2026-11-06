@@ -4,7 +4,7 @@ import { apiService, authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
 import {
-  REWARD_MODES, rewardModeOf, normalizeRewardMode, COMMISSION_RANGE,
+  PICKABLE_REWARD_MODES, rewardModeOf, normalizePickableRewardMode, COMMISSION_RANGE,
   TIERS, tierFeeLabel, stageMarksFor,
   PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, CONTENT_FORMATS, GENDERS, AGE_BANDS,
   INFLUENCER_STYLES, EXCLUDE_KEYWORDS,
@@ -210,7 +210,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     contact_phone: formatPhoneInput(String(editing?.contact_phone || '')),
     contact_email: editing?.contact_email || '',
 
-    reward_mode: normalizeRewardMode(editing?.reward_mode),
+    reward_mode: normalizePickableRewardMode(editing?.reward_mode),
     upload_channel: editing?.upload_channel || CHANNELS[0],
     // 숏폼(릴스)인가 피드 게시물인가. 인플루언서의 지급 단가가 이 값으로 갈린다.
     // 커머스형은 형식을 묻지 않으므로(hasContentFormat) 저장할 때 빈 값이 된다.
@@ -277,7 +277,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
   const restoreDraft = () => {
     if (!savedDraft) return;
-    setForm(p => ({ ...p, ...savedDraft, reward_mode: normalizeRewardMode(savedDraft.reward_mode) }));
+    setForm(p => ({ ...p, ...savedDraft, reward_mode: normalizePickableRewardMode(savedDraft.reward_mode) }));
     setThumbnailPreview(savedDraft.thumbnail_url || '');
     setSavedDraft(null);
   };
@@ -303,7 +303,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const mode = rewardModeOf(form.reward_mode);
   const isBarter = form.reward_mode === 'barter';
   const isGroupBuy = form.reward_mode === 'groupbuy';
-  const pickableModes = REWARD_MODES;
+  const pickableModes = PICKABLE_REWARD_MODES;
   // 모집기간을 브랜드가 정하는 방식인지. 지원을 받는 방식에만 모집 시작·마감이 있다.
   const hasRecruitPeriod = mode.openApply;
   // 희망 업로드 일정을 묻는지. 커머스형(공동구매)은 모집기간만 정하면 되고, 게시 시점은

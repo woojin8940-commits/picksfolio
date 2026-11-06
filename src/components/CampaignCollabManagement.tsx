@@ -146,7 +146,6 @@ interface CampaignCollabManagementProps {
 const CAMPAIGN_TYPES = [
   { value: '', label: '전체' },
   { value: 'ad_collab', label: '광고 협업' },
-  { value: 'group_buy', label: '커머스' },
   { value: 'other', label: '기타' },
 ];
 

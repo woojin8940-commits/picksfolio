@@ -1,7 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { isRecruitClosed, todayInSeoul, withCampaignLock } from "./_shared/campaign-recruit.mts";
-import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
+import { isOpenApplyMode, isRetiredRewardMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -250,7 +250,7 @@ export default async (req: Request) => {
       // 브랜드 관리 화면(business 파라미터)에서는 마감된 캠페인도, 광고비 지급형도
       // 그대로 보여 준다 — 수정·재개·삭제해야 하므로.
       if (!business) {
-        const open = campaigns.filter((c) => !c.recruit_closed && isOpenApplyMode(c.reward_mode));
+        const open = campaigns.filter((c) => !c.recruit_closed && isOpenApplyMode(c.reward_mode) && !isRetiredRewardMode(c.reward_mode));
         const paged = paginate(stripContact(stripPrivateFields(open)), pageParam, limitParam);
         return Response.json({
           campaigns: paged.rows,
@@ -286,6 +286,11 @@ export default async (req: Request) => {
       // 남의 브랜드 이름으로 캠페인을 올릴 수 없도록 계정 주인인지 확인한다.
       const auth = await requireAccountOwner(req, String(body.business_username));
       if (!auth.ok) return auth.response;
+
+      // 커머스형(공동구매)은 어필리에이트로 대체되어 더는 등록받지 않는다.
+      if (body.type === "group_buy" || isRetiredRewardMode(body.reward_mode)) {
+        return Response.json({ error: "커머스 캠페인은 더 이상 등록할 수 없습니다. 어필리에이트를 이용해 주세요." }, { status: 400 });
+      }
 
       // 담당자 이름 · 연락처는 등록할 때마다 받는다. 화면에서도 막지만 서버에서
       // 한 번 더 본다 — 이 값이 비면 담당자는 다시 "누구에게 전화하나"로 돌아간다.
@@ -369,6 +374,9 @@ export default async (req: Request) => {
 
       const c = existing[0] as Record<string, any>;
       if (c.deleted_at) return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
+      if (updates.type === "group_buy" || (updates.reward_mode !== undefined && isRetiredRewardMode(updates.reward_mode))) {
+        return Response.json({ error: "커머스 캠페인은 더 이상 등록할 수 없습니다. 어필리에이트를 이용해 주세요." }, { status: 400 });
+      }
 
       // 캠페인 ID 만 알면 남의 캠페인을 고칠 수 있었다. 등록한 브랜드(또는 관리자)만
       // 수정할 수 있도록 확인한다.
