@@ -391,24 +391,26 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             </div>
           )}
 
-          <div className="py-5 border-b border-slate-100">
-            <h3 className="text-sm font-black text-slate-900 mb-3">상세페이지</h3>
-            {(detail.detailImageUrls?.length || 0) > 0 ? (
+          {[
+            { title: '상품 설명', body: detail.description },
+            { title: '사이즈 가이드', body: detail.sizeGuide },
+            { title: '배송 · 교환 · 반품 안내', body: detail.deliveryGuide },
+          ].filter(b => b.body?.trim()).map(b => (
+            <div key={b.title} className="py-5 border-b border-slate-100">
+              <h3 className="text-sm font-black text-slate-900 mb-3">{b.title}</h3>
+              <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100">
+                <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8] break-words">{b.body}</p>
+              </div>
+            </div>
+          ))}
+
+          {(detail.detailImageUrls?.length || 0) > 0 && (
+            <div className="py-5 border-b border-slate-100">
+              <h3 className="text-sm font-black text-slate-900 mb-3">상세페이지</h3>
               <div className="-mx-4 md:mx-0 md:rounded-2xl overflow-hidden border-y md:border border-slate-100 bg-white">
                 {detail.detailImageUrls.map((u, i) => (
                   <img key={u + i} src={u} alt={`${detail.name} 상세 ${i + 1}`} className="block w-full h-auto" loading="lazy" />
                 ))}
-              </div>
-            ) : (
-              <p className="text-xs font-bold text-slate-400 bg-slate-50 rounded-2xl p-5 border border-slate-100">브랜드가 아직 상세페이지를 올리지 않았어요.</p>
-            )}
-          </div>
-
-          {detail.description && (
-            <div className="py-5 border-b border-slate-100">
-              <h3 className="text-sm font-black text-slate-900 mb-3">상품 상세 설명</h3>
-              <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100">
-                <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8]">{detail.description}</p>
               </div>
             </div>
           )}
