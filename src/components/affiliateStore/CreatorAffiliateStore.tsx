@@ -26,8 +26,8 @@ import { useCloseOnBack } from '../../hooks/useCloseOnBack';
  *           브랜드를 누르면 그 브랜드의 상품만 본다.
  *   내 신청 브랜드의 선정 · 반려 결과. 선정되면 바로 전용 링크가 열린다.
  *
- * 상품을 누르면 캠페인처럼 큰 상세 화면으로 들어간다. 수수료율은 목록 · 상세에 보이지 않는다 —
- * 선정되면 MY 어필리에이트에서 수수료율과 전용 링크를 확인한다.
+ * 상품을 누르면 캠페인처럼 큰 상세 화면으로 들어간다. 수수료율 · 개당 수수료는 상세 화면에서 보인다
+ * (목록에는 보이지 않는다). 선정되면 MY 어필리에이트에서 전용 링크와 판매 성과를 확인한다.
  * 새로 들어온 인플루언서는 크리에이터 승인을 받아야 이 메뉴를 쓴다(기존 계정은 그대로).
  *
  * 목록은 서버에서 거르고 페이지로 받는다(api-affiliate-store scope=creator · brands).
@@ -375,6 +375,18 @@ const ProductDetailPage: React.FC<DetailProps> = ({
               <span className="text-2xl font-black text-slate-900">{won(detail.salePrice)}</span>
               {discount > 0 && <span className="text-sm text-slate-400 line-through">{won(detail.retailPrice)}</span>}
             </div>
+            {detail.commissionRate > 0 && (
+              <div className="mt-4 rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black text-blue-600">인플루언서 수수료</p>
+                  <p className="text-[11px] text-blue-500/80 mt-0.5">판매가 {won(detail.salePrice)} 기준</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-xl font-black text-blue-600">{detail.commissionRate}%</span>
+                  <p className="text-xs font-black text-slate-700">1개당 {won(Math.floor(detail.salePrice * detail.commissionRate / 100))}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 옵션 — 재고 · 배송비는 브랜드만 관리해 여기서는 보여 주지 않는다. */}
