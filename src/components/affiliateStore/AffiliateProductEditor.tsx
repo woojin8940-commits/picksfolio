@@ -351,8 +351,13 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
 
   const save = async (statusOverride?: ProductStatus) => {
     setError('');
-    if ((statusOverride || form.status) === 'on_sale' && form.detailImageUrls.length === 0 && !form.description.trim() && form.descriptionImageUrls.length === 0) {
-      setError('판매중으로 두려면 상품 설명(글 또는 이미지)을 넣거나 상세페이지 이미지를 1장 이상 올려 주세요. 구매자와 인플루언서가 보는 상품 정보입니다.');
+    const missing = ([
+      [form.description, form.descriptionImageUrls, '상품 설명'],
+      [form.sizeGuide, form.sizeGuideImageUrls, '사이즈 가이드'],
+      [form.deliveryGuide, form.deliveryGuideImageUrls, '배송 · 교환 · 반품 안내'],
+    ] as [string, string[], string][]).filter(([text, imgs]) => !text.trim() && imgs.length === 0).map(([, , label]) => label);
+    if (missing.length > 0) {
+      setError(`${missing.join(', ')}을(를) 글이나 이미지로 입력해 주세요. 구매자와 인플루언서가 보는 필수 상품 정보입니다.`);
       return;
     }
     const payload: ProductInput = {
@@ -615,11 +620,11 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
 
       <Section
         title="상품 정보"
-        desc="구매 페이지에서 DESCRIPTION · SIZE GUIDE · DELIVERY GUIDE 칸으로 나뉘어 보입니다. 칸마다 글을 적거나 이미지(사이즈표 · 배송 안내 이미지 등)를 올릴 수 있어요. 인플루언서도 판매 신청 전에 같은 내용을 봅니다. 비워 둔 칸은 보이지 않습니다."
+        desc="구매 페이지에서 DESCRIPTION · SIZE GUIDE · DELIVERY GUIDE 칸으로 나뉘어 보입니다. 세 칸 모두 필수이며, 칸마다 글을 적거나 이미지(사이즈표 · 배송 안내 이미지 등)를 올리면 됩니다. 인플루언서도 판매 신청 전에 같은 내용을 봅니다."
       >
         <GuideField
-          label="상품 설명"
-          hint="소재 · 핏 · 사용법 · 셀링 포인트 등. 상세페이지 이미지가 없으면 판매중으로 두려면 글이나 이미지를 꼭 넣어 주세요."
+          label="상품 설명 (필수)"
+          hint="소재 · 핏 · 사용법 · 셀링 포인트 등. 글이나 이미지 중 하나는 꼭 넣어 주세요."
           value={form.description}
           onChange={v => set('description', v)}
           placeholder="상품 설명을 입력해 주세요."
@@ -627,8 +632,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
           {...guideImageProps('descriptionImageUrls')}
         />
         <GuideField
-          label="사이즈 가이드"
-          hint="사이즈별 실측 · 모델 착용 정보 등"
+          label="사이즈 가이드 (필수)"
+          hint="사이즈별 실측 · 모델 착용 정보 등. 글이나 이미지 중 하나는 꼭 넣어 주세요."
           value={form.sizeGuide}
           onChange={v => set('sizeGuide', v)}
           placeholder={SIZE_GUIDE_PLACEHOLDER}
@@ -636,8 +641,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
           {...guideImageProps('sizeGuideImageUrls')}
         />
         <GuideField
-          label="배송 · 교환 · 반품 안내"
-          hint="배송비 · 배송 기간 · 교환/반품 방법 등. 새 상품을 등록할 때는 마지막으로 적은 안내가 미리 채워집니다."
+          label="배송 · 교환 · 반품 안내 (필수)"
+          hint="배송비 · 배송 기간 · 교환/반품 방법 등. 글이나 이미지 중 하나는 꼭 넣어 주세요. 새 상품을 등록할 때는 마지막으로 적은 안내가 미리 채워집니다."
           value={form.deliveryGuide}
           onChange={v => set('deliveryGuide', v)}
           placeholder={DELIVERY_GUIDE_PLACEHOLDER}
