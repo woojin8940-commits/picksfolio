@@ -192,7 +192,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       const input = window.prompt('반려 사유를 적어 주세요(인플루언서에게 보입니다).', '');
       if (input === null) return;
       note = input;
-    } else if (!window.confirm(`@${r.influencerUsername} 님을 선정할까요?\n선정하면 픽스폴리오 담당자가 중간에서 양쪽에 연락해 조건 · 일정을 조율합니다.`)) {
+    } else if (!window.confirm(`@${r.influencerUsername} 님을 선정할까요?\n선정하면 인플루언서에게 바로 전용 판매 링크가 열립니다.`)) {
       return;
     }
     setBusyId(r.id);
@@ -330,7 +330,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : (
           <div className="space-y-2.5">
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
-              함께할 인플루언서를 선정하면 픽스폴리오 담당자가 중간에서 양쪽에 연락해 조건 · 일정을 조율합니다. 진행이 확정되면 인플루언서의 전용 판매 링크가 열립니다.
+              함께할 인플루언서를 선정하면 바로 인플루언서의 전용 판매 링크가 열려 판매를 시작할 수 있습니다.
             </div>
             {/* 지원자는 캠페인 지원자와 같은 카드로 본다 — 인스타 프로필 · 팔로워 · 최근 릴스 3편. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">

@@ -45,7 +45,7 @@ const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'influencers', label: '인플루언서', hint: '카테고리별 전체 명부' },
   { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정과 검수' },
   { key: 'dm-access', label: '자동 디엠 관리', hint: '매칭 등록자 · 제안 거절 · 이용 중단' },
-  { key: 'affiliate', label: '어필리에이트 연락', hint: '브랜드가 선정한 판매 신청 · 양쪽 연락' },
+  { key: 'affiliate', label: '어필리에이트 링크', hint: '브랜드가 선정한 판매 신청 · 링크 현황' },
 ];
 
 const ManagerDashboard: React.FC<ManagerDashboardProps> = ({

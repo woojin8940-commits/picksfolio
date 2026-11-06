@@ -5,13 +5,13 @@ import { collabHeaders } from './apiService';
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected';
 export type ProductStatus = 'draft' | 'on_sale' | 'paused';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
-/** 브랜드 선정 뒤 픽스폴리오 담당자의 연락 단계. */
+/** 선정된 신청의 링크 상태. 선정하면 바로 'done'(링크 발급), 운영자가 잠시 닫으면 'contacting'. */
 export type ManagerStatus = 'waiting' | 'contacting' | 'done';
 
 export const MANAGER_STATUS_LABEL: Record<ManagerStatus, string> = {
-  waiting: '담당자 연락 대기',
-  contacting: '담당자 연락 중',
-  done: '진행 확정',
+  waiting: '링크 대기',
+  contacting: '링크 닫힘',
+  done: '링크 발급',
 };
 export const MANAGER_STATUS_STYLE: Record<ManagerStatus, string> = {
   waiting: 'bg-amber-50 text-amber-600',
@@ -145,7 +145,7 @@ export interface StoreRequest {
   brandNote: string;
   /** 선정 뒤 담당자 연락 단계. '' 은 해당 없음(대기 · 반려 등). */
   managerStatus: ManagerStatus | '';
-  /** 담당자가 진행 완료로 바꾸면 생기는 인플루언서 전용 링크 코드(/shop/<코드>). */
+  /** 브랜드가 선정하면 바로 생기는 인플루언서 전용 링크 코드(/shop/<코드>). */
   linkCode: string;
   clickCount: number;
   createdAt: string;

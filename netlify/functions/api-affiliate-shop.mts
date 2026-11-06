@@ -27,7 +27,7 @@ const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const CODE_RE = /^[A-Za-z0-9]{6,32}$/;
 
-/** 링크가 살아 있는 조건: 승인된 신청 · 판매중 상품 · 승인된 브랜드. */
+/** 링크가 살아 있는 조건: 승인된 신청(운영자가 닫지 않은 링크) · 판매중 상품 · 승인된 브랜드. */
 async function loadLink(db: any, code: string) {
   if (!CODE_RE.test(code)) return null;
   const rows = (await db.sql`
@@ -38,7 +38,7 @@ async function loadLink(db: any, code: string) {
     JOIN affiliate_store_products p ON p.id = r.product_id
     JOIN affiliate_store_applications a ON a.business_username = p.business_username
     WHERE r.link_code = ${code}
-      AND r.status = 'approved' AND a.status = 'approved'
+      AND r.status = 'approved' AND r.manager_status = 'done' AND a.status = 'approved'
       AND p.deleted_at IS NULL
   `) as any[];
   return rows[0] || null;
@@ -294,7 +294,7 @@ export default async (req: Request) => {
       if (!limited.ok) return Response.json({ ok: true });
       const code = clip(body.code, 40);
       if (CODE_RE.test(code)) {
-        await db.sql`UPDATE affiliate_store_requests SET click_count = click_count + 1 WHERE link_code = ${code} AND status = 'approved'`;
+        await db.sql`UPDATE affiliate_store_requests SET click_count = click_count + 1 WHERE link_code = ${code} AND status = 'approved' AND manager_status = 'done'`;
       }
       return Response.json({ ok: true });
     }
