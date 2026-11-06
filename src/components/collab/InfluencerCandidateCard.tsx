@@ -431,6 +431,8 @@ interface InfluencerCandidateCardProps {
    * 담당자 화면은 넘기지 않는다 — 등록 단가를 보고 제시가를 정해야 하기 때문이다.
    */
   managerPrice?: { fee?: number; secondUseFee?: number } | null;
+  /** 광고비 줄을 감춘다. 수수료로 정산하는 어필리에이트 지원자 목록처럼 단가가 의미 없는 자리에서 쓴다. */
+  hidePrice?: boolean;
 }
 
 const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
@@ -443,6 +445,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   mediaMode = 'mixed',
   contentFormat,
   managerPrice,
+  hidePrice,
 }) => {
   const [expanded, setExpanded] = useState(!!defaultExpanded);
   const m = metricsFrom(data);
@@ -689,6 +692,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
 
         {/* 광고비는 폭 전체를 쓴다. 자유 문장이라 길이를 정할 수 없으므로 자르지 않고
             줄을 늘린다 — 단가를 못 읽으면 브랜드는 이 카드에서 결정을 못 한다. */}
+        {!hidePrice && (
         <div className="mt-2 pt-2 border-t border-slate-200/70">
           <p className="text-[10px] text-slate-400 font-black uppercase">광고비</p>
           {managerPrice !== undefined ? (
@@ -739,6 +743,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
             <p className="text-[15px] md:text-[17px] text-slate-300 font-black">미기재</p>
           )}
         </div>
+        )}
       </div>
 
       {hasMore && (

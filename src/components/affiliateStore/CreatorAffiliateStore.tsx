@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, Search, ShoppingBag, Store, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Instagram, Loader2, Search, ShoppingBag, Store, X } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -14,6 +14,8 @@ import {
 } from '../../services/affiliateStoreService';
 import MyAffiliate from './MyAffiliate';
 import CreatorApplicationGate from '../CreatorApplicationGate';
+import { apiService } from '../../services/apiService';
+import { useCloseOnBack } from '../../hooks/useCloseOnBack';
 
 /**
  * 인플루언서 어필리에이트 메뉴.
@@ -290,18 +292,12 @@ interface DetailProps {
   product: StoreProduct;
   request?: StoreRequest;
   onBack: () => void;
-  channelUrl: string;
-  setChannelUrl: (v: string) => void;
-  message: string;
-  setMessage: (v: string) => void;
-  sending: boolean;
-  sendError: string;
-  onSend: () => void;
+  onApply: () => void;
   onMine: () => void;
 }
 
 const ProductDetailPage: React.FC<DetailProps> = ({
-  product: detail, request, onBack, channelUrl, setChannelUrl, message, setMessage, sending, sendError, onSend, onMine,
+  product: detail, request, onBack, onApply, onMine,
 }) => {
   const [imageIndex, setImageIndex] = useState(0);
   const images = detail.imageUrls;
@@ -460,21 +456,7 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             ) : (
               <>
                 <h3 className="text-base font-black text-slate-900 mb-1">판매 신청</h3>
-                <p className="text-xs text-slate-500 mb-4">브랜드가 선정하면 픽스폴리오 담당자가 중간에서 연락해 진행을 도와드려요.</p>
-                <input
-                  value={channelUrl}
-                  onChange={e => setChannelUrl(e.target.value.trim())}
-                  placeholder="판매할 채널 주소 (선택) https://instagram.com/..."
-                  className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm text-slate-900 mb-2 focus:outline-none focus:border-blue-600"
-                />
-                <textarea
-                  value={message}
-                  onChange={e => setMessage(e.target.value)}
-                  maxLength={1000}
-                  placeholder="브랜드에 전할 말 (선택) — 콘텐츠 계획, 판매 예정일 등"
-                  className="w-full min-h-[110px] p-3.5 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
-                />
-                {sendError && <p className="text-xs font-bold text-red-500 mt-2">{sendError}</p>}
+                <p className="text-xs text-slate-500">아래 지원하기를 누르면 연동한 인스타그램 계정으로 바로 지원돼요. 브랜드가 선정하면 픽스폴리오 담당자가 중간에서 연락해 진행을 도와드려요.</p>
               </>
             )}
           </div>
@@ -486,16 +468,197 @@ const ProductDetailPage: React.FC<DetailProps> = ({
         <div className="sticky bottom-0 z-20 bg-white/95 backdrop-blur border-t border-slate-100">
           <div className="max-w-3xl mx-auto px-4 py-3">
             <button
-              onClick={onSend}
-              disabled={sending}
-              className="w-full h-12 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+              onClick={onApply}
+              className="w-full h-12 rounded-xl bg-blue-600 text-white text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
             >
-              {sending && <Loader2 className="w-4 h-4 animate-spin" />}
-              판매 신청하기
+              지원하기
             </button>
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ───────────────────────────── 지원하기 시트 ─────────────────────────────
+
+/**
+ * 인스타그램 연동을 마치고 돌아올 때 쓰는 표시와 임시 저장.
+ * 연동은 메타로 나갔다 돌아오는 흐름이라 페이지가 새로 뜨므로, 보고 있던 상품을
+ * 적어 두었다가 돌아오면 같은 상품의 지원하기 창을 다시 연다.
+ */
+const IG_RETURN_FLAG = 'ig_affiliate';
+const APPLY_DRAFT_KEY = 'picks_affiliate_apply_draft_v1';
+
+interface ApplyDraft { product: StoreProduct }
+
+const IG_ERROR_TEXT: Record<string, string> = {
+  state_browser_mismatch: '연동하기를 누른 브라우저(또는 앱)와 다른 곳에서 동의가 끝나 연동하지 않았어요. 연동하기를 누른 곳에서 다시 시도해 주세요.',
+  not_professional_account: '개인 계정이나 비공개 계정은 연동할 수 없어요. 인스타그램 앱의 설정 → 계정 유형 및 도구에서 프로페셔널 계정(크리에이터 또는 비즈니스)으로 전환한 뒤 다시 연동해 주세요.',
+  missing_permissions: '인스타그램 동의 화면에서 일부 권한이 꺼진 채로 진행돼 연동하지 않았어요. 다시 연동하면서 모든 항목을 허용해 주세요.',
+};
+
+interface IgState { status: 'loading' | 'linked' | 'reauth' | 'none' | 'error'; handle: string; followers: number }
+
+interface ApplySheetProps {
+  userName: string;
+  product: StoreProduct;
+  sending: boolean;
+  sendError: string;
+  notice: string;
+  /** 연동 직후 돌아왔을 때 콜백이 실어 보낸 아이디. 서버 응답 전 첫 화면을 채운다. */
+  initialHandle?: string;
+  onClose: () => void;
+  onSubmit: (channelUrl: string) => void;
+}
+
+const ApplySheet: React.FC<ApplySheetProps> = ({
+  userName, product, sending, sendError, notice, initialHandle, onClose, onSubmit,
+}) => {
+  const [ig, setIg] = useState<IgState>(
+    initialHandle ? { status: 'linked', handle: initialHandle, followers: 0 } : { status: 'loading', handle: '', followers: 0 },
+  );
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState('');
+
+  useCloseOnBack(true, onClose);
+
+  // 연동 상태는 자동 디엠 · 인사이트 · 브랜드 매칭받기와 함께 쓰는 하나다. 창을 열 때마다 서버에 묻는다.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await apiService.getCreatorChannel(userName);
+      if (!alive) return;
+      if (res?.error) {
+        setIg(prev => (prev.status === 'linked' ? prev : { status: 'error', handle: '', followers: 0 }));
+        return;
+      }
+      const c = res?.channel || {};
+      const handle = String(res?.igUsername || c.instagramHandle || '');
+      const followers = Number(c.followers || 0);
+      if (res?.metaLinked) setIg({ status: 'linked', handle, followers });
+      else if (res?.needsReauth) setIg({ status: 'reauth', handle, followers });
+      else setIg({ status: 'none', handle: '', followers: 0 });
+    })();
+    return () => { alive = false; };
+  }, [userName]);
+
+  const connect = async () => {
+    setLinking(true);
+    setLinkError('');
+    try {
+      sessionStorage.setItem(APPLY_DRAFT_KEY, JSON.stringify({ product } satisfies ApplyDraft));
+    } catch {
+      // 임시 저장이 막혀도 연동은 진행한다. 돌아와서 상품을 다시 고르면 된다.
+    }
+    const returnTo = `${window.location.pathname}?${IG_RETURN_FLAG}=1`;
+    const res = await apiService.instagramConnectUrl(userName, returnTo);
+    if (!res.url) {
+      setLinking(false);
+      setLinkError(res.error || '연동을 시작하지 못했습니다.');
+      return;
+    }
+    window.location.href = res.url;
+  };
+
+  const linked = ig.status === 'linked';
+  const channelUrl = ig.handle ? `https://www.instagram.com/${ig.handle.replace(/^@/, '')}` : '';
+
+  return (
+    <div className="fixed inset-0 z-[190] flex items-end md:items-center justify-center p-0 md:p-6">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="modal-card relative w-full md:max-w-lg bg-white rounded-t-3xl md:rounded-3xl shadow-[0_-18px_44px_-16px_rgba(15,23,42,0.55)] max-h-[85vh] modal-maxh-85 overflow-hidden sheet-rise flex flex-col">
+        <div className="shrink-0 px-5 pt-3 pb-4 border-b border-slate-100">
+          <div className="md:hidden w-10 h-1.5 bg-slate-200 rounded-full mx-auto mb-3" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-black text-slate-900">{linked ? '판매 지원하기' : '인스타그램 연동하기'}</h3>
+              <p className="text-xs text-slate-400 font-medium mt-1 truncate">{product.brandName} · {product.name}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="닫기"
+              className="shrink-0 w-11 h-11 md:w-9 md:h-9 -mt-1.5 -mr-2 md:mt-0 md:mr-0 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="modal-body flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {notice && (
+            <p className={`text-xs font-bold rounded-xl px-3.5 py-2.5 ${notice.startsWith('✓') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>{notice.replace(/^✓\s*/, '')}</p>
+          )}
+
+          {ig.status === 'loading' && (
+            <div className="py-10 flex flex-col items-center gap-2 text-slate-400">
+              <Loader2 className="w-6 h-6 animate-spin" />
+              <p className="text-xs font-bold">인스타그램 연동 상태를 확인하고 있어요</p>
+            </div>
+          )}
+
+          {linked && (
+            <>
+              <div className="flex items-center gap-3 bg-slate-50 rounded-2xl p-4">
+                <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 flex items-center justify-center shrink-0">
+                  <Instagram className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-slate-900 truncate">{ig.handle ? `@${ig.handle.replace(/^@/, '')}` : '연동된 계정'}</p>
+                  <p className="text-[11px] text-slate-500 font-bold">
+                    {ig.followers > 0 ? `팔로워 ${ig.followers.toLocaleString('ko-KR')}명 · ` : ''}이 계정으로 지원돼요
+                  </p>
+                </div>
+                <span className="px-2 py-1 rounded-md text-[10px] font-black bg-emerald-50 text-emerald-600 shrink-0">연동됨</span>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">브랜드는 이 계정의 프로필과 최근 릴스 3편을 보고 함께할 크리에이터를 선정해요.</p>
+              <p className="text-[11px] text-slate-400">브랜드가 선정하면 픽스폴리오 담당자가 중간에서 연락해 진행을 도와드려요.</p>
+              {sendError && <p className="text-xs font-bold text-red-500">{sendError}</p>}
+            </>
+          )}
+
+          {(ig.status === 'none' || ig.status === 'reauth' || ig.status === 'error') && (
+            <div className="text-center py-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-pink-500/20">
+                <Instagram className="w-7 h-7 text-white" />
+              </div>
+              <p className="text-sm font-black text-slate-900">
+                {ig.status === 'reauth' ? '인스타그램 연동이 만료되었어요' : ig.status === 'error' ? '연동 상태를 확인하지 못했어요' : '인스타그램 연동이 필요해요'}
+              </p>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed whitespace-pre-line">
+                {ig.status === 'reauth'
+                  ? `${ig.handle ? `@${ig.handle.replace(/^@/, '')} ` : ''}계정을 다시 연동하면 바로 지원할 수 있어요.`
+                  : '어필리에이트는 연동한 인스타그램 계정으로 지원해요.\n한 번 연동하면 다음부터는 바로 지원돼요.'}
+              </p>
+              {linkError && <p className="text-xs font-bold text-red-500 mt-3">{linkError}</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] border-t border-slate-100 flex gap-2">
+          <button onClick={onClose} className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 shrink-0">취소</button>
+          {linked ? (
+            <button
+              onClick={() => onSubmit(channelUrl)}
+              disabled={sending}
+              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2 shadow-[0_10px_24px_-10px_rgba(37,99,235,0.75)]"
+            >
+              {sending && <Loader2 className="w-4 h-4 animate-spin" />}
+              {sending ? '지원 중...' : '지원하기'}
+            </button>
+          ) : (
+            <button
+              onClick={connect}
+              disabled={linking || ig.status === 'loading'}
+              className="flex-1 bg-gradient-to-r from-pink-500 to-purple-600 text-white py-3.5 rounded-xl font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {linking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Instagram className="w-4 h-4" />}
+              {ig.status === 'reauth' ? '인스타 다시 연동하기' : '인스타 연동하기'}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -517,10 +680,40 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
   const [brandPage, setBrandPage] = useState<StoreBrand | null>(null);
   const [brandInfo, setBrandInfo] = useState<BrandInfo | null>(null);
   const [detail, setDetail] = useState<StoreProduct | null>(null);
-  const [message, setMessage] = useState('');
-  const [channelUrl, setChannelUrl] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [applyNotice, setApplyNotice] = useState('');
+  const [returnedHandle, setReturnedHandle] = useState('');
+
+  // 인스타그램 연동을 마치고 돌아온 경우 — 보던 상품의 지원하기 창을 다시 연다.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get(IG_RETURN_FLAG)) return;
+    let draft: ApplyDraft | null = null;
+    try {
+      const raw = sessionStorage.getItem(APPLY_DRAFT_KEY);
+      draft = raw ? (JSON.parse(raw) as ApplyDraft) : null;
+      sessionStorage.removeItem(APPLY_DRAFT_KEY);
+    } catch {
+      draft = null;
+    }
+    const failed = params.get('ig_error');
+    if (draft?.product?.id) {
+      setDetail(draft.product);
+      setApplyNotice(
+        failed
+          ? IG_ERROR_TEXT[failed] || '인스타그램 연동에 실패했어요. 다시 시도해 주세요.'
+          : params.get('ig_connected') ? '✓ 인스타그램 계정이 연동되었어요. 이제 바로 지원할 수 있어요.' : '',
+      );
+      if (!failed && params.get('ig_connected')) setReturnedHandle(params.get('ig_handle') || '');
+      setApplyOpen(true);
+    }
+    [IG_RETURN_FLAG, 'ig_connected', 'ig_error', 'ig_metrics', 'ig_handle', 'ig_followers', 'ig_following', 'ig_views']
+      .forEach(k => params.delete(k));
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+  }, []);
 
   const loadRequests = useCallback(async () => {
     const res = await affiliateStoreService.myRequests();
@@ -536,20 +729,24 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
   const activeRequests = requests.filter(r => r.status !== 'cancelled');
 
   const openDetail = (p: StoreProduct) => {
-    setDetail(p); setMessage(''); setSendError('');
+    setDetail(p); setSendError(''); setApplyOpen(false); setApplyNotice(''); setReturnedHandle('');
     window.scrollTo({ top: 0 });
   };
   const closeDetail = () => setDetail(null);
 
-  const send = async () => {
+  const send = async (channelUrl: string) => {
     if (!detail) return;
     setSending(true);
     setSendError('');
-    const res = await affiliateStoreService.request(detail.id, message, channelUrl);
+    const res = await affiliateStoreService.request(detail.id, '', channelUrl);
     setSending(false);
     if (res.error) { setSendError(res.error); return; }
+    setApplyOpen(false);
+    setApplyNotice('');
     await loadRequests();
   };
+  const openApply = () => { setSendError(''); setApplyNotice(''); setApplyOpen(true); };
+  const closeApply = () => setApplyOpen(false);
 
   const cancel = async (r: StoreRequest) => {
     if (!window.confirm('이 판매 신청을 취소할까요?')) return;
@@ -568,14 +765,20 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
           product={detail}
           request={detailRequest}
           onBack={closeDetail}
-          channelUrl={channelUrl}
-          setChannelUrl={setChannelUrl}
-          message={message}
-          setMessage={setMessage}
+          onApply={openApply}
+          onMine={() => { closeDetail(); switchTab('mine'); }}
+        />
+      )}
+      {detail && applyOpen && !detailRequest && (
+        <ApplySheet
+          userName={userName}
+          product={detail}
           sending={sending}
           sendError={sendError}
-          onSend={send}
-          onMine={() => { closeDetail(); switchTab('mine'); }}
+          notice={applyNotice}
+          initialHandle={returnedHandle}
+          onClose={closeApply}
+          onSubmit={send}
         />
       )}
       {/* 상세를 보는 동안 목록은 숨겨 두기만 한다 — 돌아왔을 때 검색어 · 카테고리 · 더 보기가 그대로 남게. */}

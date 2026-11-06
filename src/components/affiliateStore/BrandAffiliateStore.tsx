@@ -17,6 +17,7 @@ import AffiliateStoreApplication from './AffiliateStoreApplication';
 import AffiliateProductEditor from './AffiliateProductEditor';
 import BrandAffiliateOrders from './BrandAffiliateOrders';
 import BrandSellerInfo from './BrandSellerInfo';
+import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
 
 /**
  * 브랜드 어필리에이트 메뉴(ZVZO 방식).
@@ -331,37 +332,41 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
               함께할 인플루언서를 선정하면 픽스폴리오 담당자가 중간에서 양쪽에 연락해 조건 · 일정을 조율합니다. 진행이 확정되면 인플루언서의 전용 판매 링크가 열립니다.
             </div>
+            {/* 지원자는 캠페인 지원자와 같은 카드로 본다 — 인스타 프로필 · 팔로워 · 최근 릴스 3편. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
             {requests.map(r => (
-              <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col md:flex-row md:items-center gap-3">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  {r.productImage && <img src={r.productImage} alt="" className="w-12 h-12 rounded-xl object-cover bg-slate-100 shrink-0" />}
-                  <div className="min-w-0">
-                    <p className="text-sm font-black text-slate-900 truncate">
-                      <a href={`/${r.influencerUsername}`} target="_blank" rel="noreferrer" className="hover:text-blue-600">@{r.influencerUsername}</a>
-                      <span className="text-slate-300 font-bold mx-1.5">→</span>
-                      <span className="text-slate-600 font-bold">{r.productName}</span>
-                    </p>
-                    {r.message && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 whitespace-pre-wrap">{r.message}</p>}
-                    <div className="flex flex-wrap gap-x-3 text-[11px] text-slate-400 mt-1">
-                      <span>{dateText(r.createdAt)}</span>
-                      {r.channelUrl && <a href={r.channelUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold truncate max-w-[220px]">채널 보기</a>}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 justify-end shrink-0">
-                  <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
-                  {r.status === 'approved' && r.managerStatus && (
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
-                  )}
+              <InfluencerCandidateCard
+                key={r.id}
+                data={{
+                  ...(r.insights || {}),
+                  username: r.influencerUsername,
+                  instagramUrl: r.insights?.instagramUrl || r.channelUrl || '',
+                }}
+                mediaMode="reels"
+                hidePrice
+                badges={
+                  <>
+                    <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
+                    {r.status === 'approved' && r.managerStatus && (
+                      <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
+                    )}
+                    <span className="text-[11px] text-slate-300 font-bold">{dateText(r.createdAt)}</span>
+                  </>
+                }
+              >
+                <div className="flex items-center gap-2 pt-1">
+                  {r.productImage && <img src={r.productImage} alt="" className="w-9 h-9 rounded-lg object-cover bg-slate-100 shrink-0" />}
+                  <p className="text-xs font-bold text-slate-600 truncate flex-1 min-w-0">{r.productName}</p>
                   {r.status !== 'approved' && (
-                    <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black disabled:opacity-50">선정</button>
+                    <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black disabled:opacity-50 shrink-0">선정</button>
                   )}
                   {r.status !== 'rejected' && (
-                    <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-8 px-3 rounded-lg border border-slate-200 text-slate-600 text-[11px] font-black disabled:opacity-50">반려</button>
+                    <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-8 px-3 rounded-lg border border-slate-200 text-slate-600 text-[11px] font-black disabled:opacity-50 shrink-0">반려</button>
                   )}
                 </div>
-              </div>
+              </InfluencerCandidateCard>
             ))}
+            </div>
           </div>
         )
       )}
