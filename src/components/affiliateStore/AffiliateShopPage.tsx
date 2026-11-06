@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ChevronDown, Loader2, MessageCircle, Minus, Plus, User, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Loader2, Minus, Plus, User, X } from 'lucide-react';
 import { loadPortOne } from '../../utils/externalScripts';
+import { openPostcodeSearch } from '../../utils/daumPostcode';
 import {
   PORTONE_STORE_ID,
   cardParam,
@@ -110,6 +111,7 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeProvide, setAgreeProvide] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [postcodeFailed, setPostcodeFailed] = useState(false);
   const [payError, setPayError] = useState('');
   const [done, setDone] = useState<ShopOrder | null>(null);
   const [finishing, setFinishing] = useState(false);
@@ -124,6 +126,15 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
   const clicked = useRef(false);
 
   const set = (k: keyof typeof form, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
+  /** 주소 검색으로 우편번호·기본 주소를 채우고, 남은 상세 주소 칸으로 커서를 옮긴다. */
+  const searchAddress = async () => {
+    const ok = await openPostcodeSearch(({ postcode, address }) => {
+      setForm(f => ({ ...f, postcode, address1: address }));
+      setPostcodeFailed(false);
+      setTimeout(() => document.getElementById('shop-address-detail')?.focus(), 100);
+    });
+    if (!ok) setPostcodeFailed(true);
+  };
 
   /** 로그인 뒤 저장된 배송지를 주문서에 채운다. */
   const prefill = async () => {
@@ -231,12 +242,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
   const openMyPage = () => {
     if (!signedIn) { setLoginPrompt('mypage'); return; }
     window.location.href = '/my/orders';
-  };
-
-  const openInquiry = () => {
-    if (!signedIn) { setLoginPrompt('inquiry'); return; }
-    setInquiryOpen(true);
-    setInquiryMsg('');
   };
 
   const sendInquiry = async () => {
@@ -363,10 +368,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
           <p className="text-sm font-black truncate">{product.brandName}</p>
           <p className="text-[10px] font-black tracking-widest text-slate-400">PICKSFOLIO</p>
         </header>
-        {/* 필수 표시: 추천 고지 */}
-        <div className="px-5 py-2.5 bg-blue-50 text-[12px] font-bold text-blue-700">
-          @{product.influencer}님이 픽스폴리오를 통해 추천하는 상품입니다
-        </div>
         {loginNotice && <p className="px-5 py-2 text-xs font-bold text-red-500 bg-red-50">{loginNotice}</p>}
 
         {!checkout ? (
@@ -403,21 +404,10 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
                 </p>
               </div>
               <p className="text-xs text-slate-500 mt-2">배송비 {product.shippingFee ? won(product.shippingFee) : '무료'}</p>
-              <button onClick={openInquiry} className="mt-4 h-10 px-4 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 flex items-center gap-1.5">
-                <MessageCircle className="w-4 h-4" /> 판매자에게 문의하기
-              </button>
             </section>
-
-            {product.description && (
-              <section className="px-5 mt-8 pt-6 border-t border-slate-100">
-                <h2 className="text-sm font-black mb-3">상품 정보</h2>
-                <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">{product.description}</p>
-              </section>
-            )}
 
             {(product.detailImageUrls?.length || 0) > 0 && (
               <section className="mt-8 pt-6 border-t border-slate-100">
-                <h2 className="text-sm font-black mb-3 px-5">상세페이지</h2>
                 {product.detailImageUrls!.map((u, i) => (
                   <img key={u + i} src={u} alt={`${product.name} 상세 ${i + 1}`} className="block w-full h-auto" loading="lazy" />
                 ))}
@@ -492,9 +482,33 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
                   <input className={inputCls} placeholder="받는 분 휴대폰 번호" inputMode="tel" value={form.recipientPhone} onChange={e => set('recipientPhone', phoneFmt(e.target.value))} />
                 </>
               )}
-              <input className={inputCls} placeholder="우편번호 (선택)" inputMode="numeric" value={form.postcode} onChange={e => set('postcode', e.target.value.replace(/\D/g, '').slice(0, 5))} />
-              <input className={inputCls} placeholder="주소" value={form.address1} onChange={e => set('address1', e.target.value)} maxLength={300} />
-              <input className={inputCls} placeholder="상세 주소" value={form.address2} onChange={e => set('address2', e.target.value)} maxLength={200} />
+              <div className="flex gap-2">
+                <input
+                  className={`${inputCls} ${postcodeFailed ? '' : 'cursor-pointer bg-slate-50'}`}
+                  placeholder="우편번호"
+                  inputMode="numeric"
+                  value={form.postcode}
+                  readOnly={!postcodeFailed}
+                  onClick={postcodeFailed ? undefined : searchAddress}
+                  onChange={postcodeFailed ? e => set('postcode', e.target.value.replace(/\D/g, '').slice(0, 5)) : undefined}
+                />
+                <button type="button" onClick={searchAddress} className="shrink-0 h-12 px-4 rounded-xl bg-slate-900 text-white text-sm font-black">
+                  주소 검색
+                </button>
+              </div>
+              <input
+                className={`${inputCls} ${postcodeFailed ? '' : 'cursor-pointer bg-slate-50'}`}
+                placeholder={postcodeFailed ? '주소' : '주소 검색을 눌러 주소를 선택해 주세요'}
+                value={form.address1}
+                readOnly={!postcodeFailed}
+                onClick={postcodeFailed ? undefined : searchAddress}
+                onChange={postcodeFailed ? e => set('address1', e.target.value) : undefined}
+                maxLength={300}
+              />
+              <input id="shop-address-detail" className={inputCls} placeholder="상세 주소 (동·호수)" value={form.address2} onChange={e => set('address2', e.target.value)} maxLength={200} />
+              {postcodeFailed && (
+                <p className="text-[11px] font-bold text-amber-600">주소 검색을 열지 못했어요. 우편번호와 주소를 직접 입력해 주세요.</p>
+              )}
               <input className={inputCls} placeholder="배송 메모 (선택)" value={form.deliveryMemo} onChange={e => set('deliveryMemo', e.target.value)} maxLength={200} />
               <p className="text-[11px] text-slate-400">입력한 배송지는 계정에 저장되어 다음 구매 때 불러와요.</p>
             </div>
