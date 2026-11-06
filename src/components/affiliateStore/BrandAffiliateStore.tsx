@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Clock, Loader2, Package, Plus, RefreshCw, RotateCcw, Store, Truck, Users } from 'lucide-react';
+import { AlertTriangle, Clock, Loader2, Package, Plus, RefreshCw, RotateCcw, Store, Truck, Users, Wallet } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -18,6 +18,7 @@ import AffiliateStoreApplication from './AffiliateStoreApplication';
 import AffiliateProductEditor from './AffiliateProductEditor';
 import BrandAffiliateOrders from './BrandAffiliateOrders';
 import BrandSellerInfo from './BrandSellerInfo';
+import AffiliatePayouts from './AffiliatePayouts';
 import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
 
 /**
@@ -60,7 +61,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [feeRates, setFeeRates] = useState<FeeRates | null>(null);
   const [opsCounts, setOpsCounts] = useState({ newOrders: 0, claimsNeedAction: 0, unread: 0 });
   const onOpsCounts = useCallback((c: typeof opsCounts) => setOpsCounts(c), []);
-  const [tab, setTab] = useState<'products' | 'requests' | 'orders' | 'claims' | 'seller'>('products');
+  const [tab, setTab] = useState<'products' | 'requests' | 'orders' | 'claims' | 'seller' | 'payouts'>('products');
   const [editing, setEditing] = useState<StoreProduct | 'new' | null>(null);
   const [reapply, setReapply] = useState(false);
   const [busyId, setBusyId] = useState('');
@@ -264,6 +265,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
           { key: 'orders', label: '주문 관리', icon: Truck, badge: opsCounts.newOrders },
           { key: 'claims', label: '취소·반품 현황', icon: RotateCcw, badge: opsCounts.claimsNeedAction },
           { key: 'seller', label: '판매자 정보', icon: Store, badge: sellerMissing.length > 0 ? 1 : 0 },
+          { key: 'payouts', label: '정산', icon: Wallet },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -338,6 +340,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       {tab !== 'orders' && tab !== 'claims' && (
         <div className="hidden"><BrandAffiliateOrders businessUsername={businessUsername} view="orders" onCounts={onOpsCounts} /></div>
       )}
+      {tab === 'payouts' && <AffiliatePayouts as="brand" account={businessUsername} />}
       {tab === 'seller' && (
         <BrandSellerInfo
           businessUsername={businessUsername}

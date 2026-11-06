@@ -16,6 +16,7 @@ import MyAffiliate from './MyAffiliate';
 import CreatorApplicationGate from '../CreatorApplicationGate';
 import { apiService } from '../../services/apiService';
 import { useCloseOnBack } from '../../hooks/useCloseOnBack';
+import AffiliatePayouts from './AffiliatePayouts';
 
 /**
  * 인플루언서 어필리에이트 메뉴.
@@ -698,7 +699,7 @@ const CreatorAffiliateStore: React.FC<{ userName: string }> = ({ userName }) => 
 );
 
 const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
-  const [tab, setTab] = useState<'products' | 'brands' | 'my' | 'mine'>('products');
+  const [tab, setTab] = useState<'products' | 'brands' | 'my' | 'mine' | 'payouts'>('products');
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
   const [requests, setRequests] = useState<StoreRequest[]>([]);
   const [brandPage, setBrandPage] = useState<StoreBrand | null>(null);
@@ -819,6 +820,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
           { key: 'brands', label: '브랜드' },
           { key: 'my', label: 'MY 어필리에이트' },
           { key: 'mine', label: `내 신청 ${activeRequests.length}` },
+          { key: 'payouts', label: '정산' },
         ] as const).map(t => (
           <button key={t.key} onClick={() => switchTab(t.key)} className={`h-9 px-4 rounded-lg text-xs font-black whitespace-nowrap ${tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
             {t.label}
@@ -864,6 +866,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
       )}
 
       {tab === 'my' && <MyAffiliate onBrowse={() => switchTab('products')} />}
+      {tab === 'payouts' && <AffiliatePayouts as="influencer" />}
 
       {tab === 'mine' && (
         activeRequests.length === 0 ? (
