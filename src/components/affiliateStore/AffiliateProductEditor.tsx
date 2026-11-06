@@ -177,6 +177,10 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
 
   const save = async (statusOverride?: ProductStatus) => {
     setError('');
+    if ((statusOverride || form.status) === 'on_sale' && form.detailImageUrls.length === 0) {
+      setError('판매중으로 두려면 상세페이지 이미지를 1장 이상 올려 주세요. 구매자와 인플루언서가 보는 상품 설명입니다.');
+      return;
+    }
     const payload: ProductInput = {
       ...form,
       status: statusOverride || form.status,
@@ -383,8 +387,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
       </Section>
 
       <Section
-        title="상세페이지"
-        desc={`자사몰 상세페이지처럼 세로로 긴 이미지를 올려 주세요. 위에서부터 순서대로 이어서 보여 줍니다(최대 ${MAX_DETAIL_IMAGES}장, 장당 5MB 이하). 인플루언서 상품 상세와 구매 페이지에 노출됩니다.`}
+        title="상세페이지 (필수)"
+        desc={`자사몰 상세페이지처럼 세로로 긴 이미지를 올려 주세요. 위에서부터 순서대로 이어서 보여 줍니다(최대 ${MAX_DETAIL_IMAGES}장, 장당 5MB 이하). 구매 페이지에는 이 이미지가 상품 설명으로 나가고, 인플루언서도 판매 신청 전에 같은 상세페이지를 봅니다. 판매중으로 두려면 1장 이상 필요합니다.`}
       >
         {form.detailImageUrls.length > 0 && (
           <div className="space-y-2">
@@ -428,7 +432,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <input ref={detailFileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => uploadDetailFiles(e.target.files)} />
       </Section>
 
-      <Section title="상세 설명" desc="소재 · 사이즈 · 사용법 · 셀링 포인트 등 인플루언서가 콘텐츠를 만들 때 참고할 내용을 적어 주세요.">
+      <Section title="상세 설명" desc="소재 · 사이즈 · 사용법 · 셀링 포인트 등 인플루언서가 콘텐츠를 만들 때 참고할 내용을 적어 주세요. 인플루언서에게만 보이고 구매 페이지에는 나가지 않습니다.">
         <textarea
           className="w-full min-h-[200px] p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
           value={form.description}

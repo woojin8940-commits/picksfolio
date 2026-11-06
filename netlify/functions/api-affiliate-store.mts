@@ -367,6 +367,9 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (!Number.isFinite(stock)) return err("재고 수량을 입력해 주세요.");
   if (productUrl && !isUrl(productUrl)) return err("상품 상세 주소는 https:// 로 시작하는 주소로 입력해 주세요.");
   if (status === "on_sale" && stock <= 0) return err("재고가 0개인 상품은 판매중으로 둘 수 없습니다.");
+  if (status === "on_sale" && Array.isArray(p.detailImageUrls) && detailImageUrls.length === 0) {
+    return err("판매중으로 두려면 상세페이지 이미지를 1장 이상 올려 주세요.");
+  }
 
   const imgs = JSON.stringify(imageUrls);
   const detailImgs = JSON.stringify(detailImageUrls);
