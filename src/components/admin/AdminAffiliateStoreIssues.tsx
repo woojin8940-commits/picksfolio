@@ -21,7 +21,7 @@ const ACTION_LABEL: Record<string, string> = {
 
 /**
  * 수수료율 설정. 바꾼 값은 다음에 생기는 주문부터 적용된다(주문에 그 시점 값을 고정 저장한다).
- * PG 수수료는 결제 금액 전체(배송비 포함), 플랫폼 수수료는 상품 금액 기준이다. 변경 이력이 남는다.
+ * PG 수수료는 결제 금액(배송비 포함), 플랫폼 수수료는 상품 금액 기준이다. 변경 이력이 남는다.
  */
 const FeeRateSettings: React.FC<{ token: string; rates: FeeRates; history: AdminIssues['feeHistory']; onSaved: () => void }> = ({ token, rates, history, onSaved }) => {
   const [form, setForm] = useState({ pgCard: String(rates.pgCard), pgKakaopay: String(rates.pgKakaopay) });
@@ -40,7 +40,7 @@ const FeeRateSettings: React.FC<{ token: string; rates: FeeRates; history: Admin
     <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
       <div>
         <p className="text-sm font-black text-slate-900">수수료율 설정</p>
-        <p className="text-[11px] text-slate-500 mt-0.5">브랜드 정산액 = 결제 금액(상품 + 배송비) − 인플루언서 수수료 − PG 수수료(결제 금액 전체 기준) − 플랫폼 수수료(상품 금액 기준). 주문 생성 시점 값이 주문에 고정됩니다.</p>
+        <p className="text-[11px] text-slate-500 mt-0.5">브랜드 정산액 = 결제 금액(상품 + 배송비) − 인플루언서 수수료 − 플랫폼 수수료(상품 금액 기준) − PG 수수료(결제 금액 기준, 배송비 포함). 반품 환불(상품 금액만 환불)된 주문은 남은 배송비에서 PG 수수료만 빼고 브랜드에 정산됩니다. 주문 생성 시점 값이 주문에 고정됩니다.</p>
       </div>
       <div className="grid grid-cols-3 gap-2">
         <div className="text-[11px] font-bold text-slate-500">

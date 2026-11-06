@@ -18,7 +18,8 @@ import {
  * 취소·반품 현황: 주문취소(구매자 · 판매자 · 운영자 · 자동)와 반품을 한곳에서 본다. 거절한 반품도 이력으로 남는다.
  *   반품: 승인(입력 없음) → 브랜드가 주문 배송지로 직접 회수 → "환불 처리", 또는 승인 전 거절(사유 선택).
  *   회수 방법 · 일정 연락은 브랜드가 진행한다. 승인 뒤에는 "환불 처리"만 있고 거절로 바꿀 수 없다.
- *   단순 변심 반품은 왕복 배송비를 빼고 부분 환불할 수 있다(불량 · 오배송은 전액 환불).
+ *   반품 환불은 사유와 관계없이 상품 금액(판매가 × 수량) 전액만 환불한다. 주문 배송비는 환불하지 않고
+ *   PG 수수료만 떼고 브랜드에 정산된다(왕복 배송비는 구매자와 직접 협의). 배송비가 0원이면 전액 취소와 같다.
  * 구매자 문의는 브랜드 자사몰(고객 문의 링크)로 연결되므로 이 화면에는 없다.
  */
 
@@ -117,11 +118,12 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const openDialog = (kind: 'ship' | 'approve' | 'reject' | 'cancel' | 'refund', order: StoreOrder) => {
     setDialog({ kind, order });
     setDialogError('');
-    setF1(kind === 'ship' ? order.trackingCompany || COURIERS[0] : kind === 'refund' ? '0' : '');
+    setF1(kind === 'ship' ? order.trackingCompany || COURIERS[0] : '');
     setF2(kind === 'ship' ? order.trackingNumber || '' : '');
   };
 
-  const deduction = dialog?.kind === 'refund' && dialog.order.returnRequest?.partialAllowed ? Math.max(0, Math.round(Number(f1.replace(/[^\d]/g, '')) || 0)) : 0;
+  // 반품 환불 금액 = 상품 금액(판매가 × 수량). 서버도 같은 값으로 다시 계산한다.
+  const productAmount = (o: StoreOrder) => Math.min(Number(o.totalAmount) || 0, (Number(o.unitPrice) || 0) * (Number(o.quantity) || 0));
 
   const submitDialog = async () => {
     if (!dialog) return;
@@ -131,7 +133,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
       approve: ['return_approve', { id }],
       reject: ['return_reject', { id, rejectReason: f1 }],
       cancel: ['cancel', { id, reason: f1 || '판매자 취소', memo: f2 }],
-      refund: ['return_refund', { id, shippingDeduction: deduction }],
+      refund: ['return_refund', { id }],
     };
     const [action, payload] = map[dialog.kind];
     const e = await act(action, payload, id);
@@ -202,13 +204,13 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     <>
       <div className="flex items-start justify-between gap-3 mb-4">
         {/* 정산 요약(표시만 · 지급/세금계산서는 별도). 취소 · 환불 주문은 정산 대상이 아니라 합계에서 빠진다.
-            정산 예정액 = 결제 금액(상품 + 배송비) − 인플루언서 수수료 − PG 수수료 − 플랫폼 수수료 */}
+            정산 예정액 = 결제 금액(상품 + 배송비) − 인플루언서 수수료 − PG 수수료(결제 금액 기준, 배송비 포함) − 플랫폼 수수료(상품 금액 기준) */}
         {view === 'orders' ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 flex-1">
             {[
               { label: '결제 금액', value: sum.payment, cls: 'text-slate-900' },
               { label: '인플루언서 수수료', value: -sum.commission, cls: 'text-blue-600' },
-              { label: 'PG 수수료', value: -sum.pgFee, cls: 'text-slate-600' },
+              { label: 'PG 수수료(결제 금액 기준, 배송비 포함)', value: -sum.pgFee, cls: 'text-slate-600' },
               { label: '플랫폼 수수료', value: -sum.platformFee, cls: 'text-slate-600' },
             ].map(c => (
               <div key={c.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
@@ -307,9 +309,9 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
                     <div className={`mt-3 grid grid-cols-2 md:grid-cols-5 gap-1.5 text-[11px] rounded-xl p-2.5 ${o.settlement.included ? 'bg-blue-50/50' : 'bg-slate-50 text-slate-400'}`}>
                       <div><p className="text-slate-400">결제 금액</p><p className="font-black">{won(o.settlement.payment)}</p><p className="text-[10px] text-slate-400">상품 {won(o.settlement.product)} + 배송 {won(o.settlement.shipping)}</p></div>
                       <div><p className="text-slate-400">인플루언서 수수료</p><p className="font-black">−{won(o.settlement.commission)}</p><p className="text-[10px] text-slate-400">상품 금액의 {o.commissionRate}%</p></div>
-                      <div><p className="text-slate-400">PG 수수료</p><p className="font-black">−{won(o.settlement.pgFee)}</p><p className="text-[10px] text-slate-400">{o.payMethod === 'KAKAOPAY' ? '카카오페이' : '카드'} {o.pgRate}% · 배송비 포함</p></div>
+                      <div><p className="text-slate-400">PG 수수료(결제 금액 기준, 배송비 포함)</p><p className="font-black">−{won(o.settlement.pgFee)}</p><p className="text-[10px] text-slate-400">{o.payMethod === 'KAKAOPAY' ? '카카오페이' : '카드'} {o.pgRate}% · 배송비 포함</p></div>
                       <div><p className="text-slate-400">플랫폼 수수료</p><p className="font-black">−{won(o.settlement.platformFee)}</p><p className="text-[10px] text-slate-400">상품 금액의 {o.platformRate}%</p></div>
-                      <div><p className="text-slate-400">정산 예정액</p><p className={`font-black ${o.settlement.included ? 'text-blue-700' : ''}`}>{won(o.settlement.amount)}</p><p className="text-[10px] text-slate-400">{!o.settlement.included ? '취소 · 환불로 정산 제외' : o.settlement.partialRefund ? `부분 환불 ${won(o.settlement.partialRefund)} 제외` : ''}</p></div>
+                      <div><p className="text-slate-400">정산 예정액</p><p className={`font-black ${o.settlement.included ? 'text-blue-700' : ''}`}>{won(o.settlement.amount)}</p><p className="text-[10px] text-slate-400">{!o.settlement.included ? '취소 · 환불로 정산 제외' : o.settlement.partialRefund ? `반품 환불 ${won(o.settlement.partialRefund)} 제외 · 남은 배송비 정산` : ''}</p></div>
                     </div>
                   )}
 
@@ -392,7 +394,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
                         <div className="flex gap-1.5">{ret.photoUrls.map(u => <a key={u} href={u} target="_blank" rel="noreferrer"><img src={u} alt="" className="w-14 h-14 rounded-lg object-cover" /></a>)}</div>
                       )}
                       {ret.status === 'approved' && <p className="text-slate-600">주문 배송지({o.recipientName} · {o.address1} {o.address2})로 상품을 회수한 뒤 "환불 처리"를 눌러 주세요.</p>}
-                      {ret.status === 'refunded' && <p className="text-slate-600">환불 {won(ret.refundAmount || o.refundAmount || 0)}{(ret.shippingDeduction || 0) > 0 ? ` · 왕복 배송비 ${won(ret.shippingDeduction || 0)} 차감` : ''} · {dt(ret.refundedAt)}</p>}
+                      {ret.status === 'refunded' && <p className="text-slate-600">환불 {won(ret.refundAmount || o.refundAmount || 0)}{(ret.shippingDeduction || 0) > 0 ? ` · 배송비 ${won(ret.shippingDeduction || 0)} 환불 안 함(PG 수수료 뺀 금액 정산)` : ''} · {dt(ret.refundedAt)}</p>}
                       {ret.status === 'rejected' && <p className="text-red-500">반품 거절{ret.rejectReason ? ` · 사유: ${ret.rejectReason}` : ''} · {dt(ret.decidedAt)}</p>}
                       {ret.status === 'approved' && <p className="text-[11px] text-slate-400">승인한 반품은 거절로 바꿀 수 없어요. 회수에 문제가 있으면 구매자에게 직접 연락하거나 픽스폴리오 고객센터로 문의해 주세요.</p>}
                     </div>
@@ -451,21 +453,12 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
             {dialog.kind === 'refund' && (
               <div className="mt-4 space-y-2 text-xs">
                 <p className="text-slate-600">반품 사유: <b>{dialog.order.returnRequest?.reason}</b></p>
-                {dialog.order.returnRequest?.partialAllowed ? (
-                  <>
-                    <label className="block">
-                      <span className="font-bold text-slate-700">차감할 왕복 배송비(원)</span>
-                      <input value={f1} onChange={e => setF1(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="0" className="mt-1 w-full h-11 px-3 rounded-xl border border-slate-200 text-sm" maxLength={6} />
-                    </label>
-                    <p className="text-[11px] text-slate-400">단순 변심 반품은 왕복 배송비를 빼고 환불할 수 있어요. 0원이면 전액 환불됩니다. 인플루언서 수수료는 상품 환불 비율대로 다시 계산돼요.</p>
-                  </>
-                ) : (
-                  <p className="text-[11px] text-slate-400">불량 · 오배송 등 판매자 사유 반품은 전액 환불됩니다.</p>
-                )}
+                <p className="text-sm text-slate-700 leading-relaxed">상품 금액 {won(productAmount(dialog.order))}을 환불해요. 배송비는 환불되지 않고 카드 수수료({dialog.order.pgRate ?? 4}%)를 뺀 금액이 정산돼요. 필요하면 구매자와 직접 협의해 주세요.</p>
                 <div className="rounded-xl bg-slate-50 p-3 flex justify-between font-black">
-                  <span>환불 금액</span>
-                  <span className={deduction >= dialog.order.totalAmount ? 'text-red-500' : 'text-slate-900'}>{won(Math.max(0, dialog.order.totalAmount - deduction))}</span>
+                  <span>환불 금액(상품 금액)</span>
+                  <span className="text-slate-900">{won(productAmount(dialog.order))}</span>
                 </div>
+                <p className="text-[11px] text-slate-400">인플루언서 수수료 · 이용료는 0원이 되고, 환불하지 않은 배송비에서 PG 수수료만 빼고 정산돼요.</p>
                 <p className="text-[11px] text-slate-400">상품 회수를 마친 뒤 눌러 주세요. 결제가 바로 취소(환불)되고 재고가 복구됩니다.</p>
               </div>
             )}
@@ -474,7 +467,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
               <button onClick={() => setDialog(null)} className="flex-1 h-11 rounded-xl bg-slate-100 text-sm font-bold text-slate-600">닫기</button>
               <button
                 onClick={submitDialog}
-                disabled={!!busy || (dialog.kind === 'ship' ? !f2.trim() : dialog.kind === 'cancel' ? !f1 : dialog.kind === 'refund' ? deduction >= dialog.order.totalAmount : false)}
+                disabled={!!busy || (dialog.kind === 'ship' ? !f2.trim() : dialog.kind === 'cancel' ? !f1 : dialog.kind === 'refund' ? productAmount(dialog.order) <= 0 : false)}
                 className="flex-1 h-11 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />}

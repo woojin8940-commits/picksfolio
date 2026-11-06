@@ -48,7 +48,8 @@ function parseRoute(path: string): Route {
 }
 
 /** 반품 진행 단계: 반품 신청 → 승인(판매자가 주문 배송지로 회수) → 환불 완료 (또는 거절). */
-const ReturnProgress: React.FC<{ ret: ReturnRequestInfo; totalAmount: number }> = ({ ret, totalAmount }) => {
+/** 반품 환불 금액 = 상품 금액(판매가 × 수량). 주문 배송비는 환불되지 않는다. */
+const ReturnProgress: React.FC<{ ret: ReturnRequestInfo; totalAmount: number; productAmount: number }> = ({ ret, totalAmount, productAmount }) => {
   const rejected = ret.status === 'rejected';
   const steps = [
     { key: 'requested', label: '반품 신청', at: ret.requestedAt },
@@ -80,18 +81,21 @@ const ReturnProgress: React.FC<{ ret: ReturnRequestInfo; totalAmount: number }> 
         <div className="flex gap-1.5">{ret.photoUrls.map(u => <img key={u} src={u} alt="" className="w-12 h-12 rounded-lg object-cover" />)}</div>
       )}
       {ret.status === 'requested' && <p className="text-slate-500">판매자가 요청을 확인하고 있어요. 승인되면 판매자가 주문하신 주소로 상품을 회수해요.</p>}
+      {(ret.status === 'requested' || ret.status === 'approved') && (
+        <p className="font-bold text-slate-700">상품 금액 {won(productAmount)}이 환불돼요. 배송비는 판매자와 협의해 주세요.</p>
+      )}
       {ret.status === 'approved' && (
         <div className="bg-white rounded-xl p-3 space-y-1">
           <p className="font-black text-slate-800">판매자가 주문하신 주소로 회수할 예정이에요</p>
           <p className="text-slate-400 pt-1">
-            회수 일정은 판매자가 따로 연락드려요. 회수가 끝나면 환불됩니다.{ret.reason === '단순 변심' ? ' 단순 변심 반품은 왕복 배송비가 환불 금액에서 빠질 수 있어요.' : ''}
+            회수 일정은 판매자가 따로 연락드려요. 회수가 끝나면 환불됩니다.
           </p>
         </div>
       )}
       {ret.status === 'refunded' && (
         <p className="font-bold text-slate-700">
-          환불 금액 {won(refund || totalAmount)}
-          {(ret.shippingDeduction || 0) > 0 && <span className="text-slate-500 font-normal"> (왕복 배송비 {won(ret.shippingDeduction || 0)} 차감)</span>}
+          환불 금액(상품 금액) {won(refund || Math.min(productAmount, totalAmount))}
+          {(ret.shippingDeduction || 0) > 0 && <span className="text-slate-500 font-normal"> · 배송비는 판매자와 협의해 주세요</span>}
         </p>
       )}
       {rejected && (
@@ -292,7 +296,7 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
       </div>
 
       {/* 반품 진행 */}
-      {ret && <ReturnProgress ret={ret} totalAmount={o.totalAmount} />}
+      {ret && <ReturnProgress ret={ret} totalAmount={o.totalAmount} productAmount={o.productAmount} />}
 
       {/* 문의하기: 모든 상태에서 보인다. 브랜드 자사몰 · 고객센터로 새 창 연결. */}
       <section className="rounded-2xl border border-slate-100 p-4">
@@ -307,7 +311,7 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
         <div className="flex justify-between"><span className="text-slate-500">배송비</span><span className="font-bold">{o.shippingFee ? won(o.shippingFee) : '무료'}</span></div>
         <div className="flex justify-between pt-2 border-t border-slate-100"><span className="font-black">결제 금액</span><span className="font-black">{won(o.totalAmount)}</span></div>
         {o.status === 'cancelled' && (
-          <div className="flex justify-between text-red-500"><span className="font-bold">환불 금액</span><span className="font-black">{won(o.refundAmount)}{o.refundAmount < o.totalAmount ? ' (부분 환불)' : ''}</span></div>
+          <div className="flex justify-between text-red-500"><span className="font-bold">환불 금액</span><span className="font-black">{won(o.refundAmount)}{o.refundAmount < o.totalAmount ? ' (상품 금액 · 배송비 제외)' : ''}</span></div>
         )}
       </section>
 
@@ -384,7 +388,7 @@ const OrderDetail: React.FC<{ id: string; go: (r: Route, path: string) => void }
                   </label>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 mt-3">단순 변심 반품은 왕복 배송비를 구매자가 부담하며, 판매자가 환불 금액에서 차감할 수 있어요. 상품 불량 · 오배송은 전액 환불됩니다.</p>
+              <p className="text-[11px] text-slate-400 mt-3">반품 시 상품 금액 {won(o.productAmount)}이 환불돼요. 배송비는 판매자와 협의해 주세요.</p>
             </>
           )}
           {modal === 'cancel' && <p className="text-[11px] text-slate-400 mt-3">확인을 누르면 결제가 즉시 전액 취소됩니다.</p>}

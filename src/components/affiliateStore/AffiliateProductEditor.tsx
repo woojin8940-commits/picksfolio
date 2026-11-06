@@ -50,7 +50,7 @@ const DELIVERY_GUIDE_PLACEHOLDER = `[배송비]
 [반품 안내]
 · 상품 수령 후 7일 이내에 마이페이지 주문 상세에서 요청해 주세요.
 · 반품이 승인되면 판매자가 주문하신 배송지로 회수합니다.
-· 단순 변심에 의한 반품은 왕복 배송비를 구매자가 부담합니다.
+· 반품 시 상품 금액이 환불되며, 배송비는 판매자와 협의합니다.
 
 [반품이 불가능한 경우]
 · 착용 흔적이 있거나 상품이 훼손·오염된 경우`;
@@ -255,13 +255,14 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
     ? Math.round((1 - form.salePrice / form.retailPrice) * 100)
     : 0;
   const commissionAmount = Math.floor((form.salePrice * (form.commissionRate || 0)) / 100);
-  // 1개 판매 시 예상 정산액(배송비 제외). PG 수수료는 결제 수단마다 다를 수 있어 높은 쪽으로 보수적으로 잡는다.
+  // 1개 판매 시 예상 정산액(결제 금액 = 판매가 + 배송비 기준). PG 수수료는 결제 수단마다 다를 수 있어 높은 쪽으로 보수적으로 잡는다.
   const pgRate = feeRates ? Math.max(feeRates.pgCard, feeRates.pgKakaopay) : 0;
   // 픽스폴리오 수수료는 5%(운영 설정값). 설정을 아직 못 읽었으면 5%로 안내한다.
   const platformRate = feeRates ? feeRates.platform : 5;
   const platformFee = Math.floor((form.salePrice * platformRate) / 100);
-  const pgFee = Math.floor((form.salePrice * pgRate) / 100);
-  const estimate = form.salePrice - commissionAmount - pgFee - platformFee;
+  const paymentAmount = form.salePrice + (Number(form.shippingFee) || 0);
+  const pgFee = Math.floor((paymentAmount * pgRate) / 100);
+  const estimate = paymentAmount - commissionAmount - pgFee - platformFee;
   const totalStock = useOptions ? form.options.reduce((s, o) => s + (Number(o.stock) || 0), 0) : form.stock;
 
   const [cropQueue, setCropQueue] = useState<CropJob[]>([]);
@@ -488,7 +489,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
               <p className="text-sm font-black text-slate-900">{feeRates ? `${pgRate}%` : '결제 수단별'} <span className="text-[10px] font-bold text-slate-400">별도</span></p>
             </div>
           </div>
-          <p className="text-[10px] text-slate-500 mt-2">인플루언서 수수료 · 픽스폴리오 수수료는 판매가(배송비 제외) 기준, 카드 결제 수수료는 결제 금액 기준입니다.</p>
+          <p className="text-[10px] text-slate-500 mt-2">인플루언서 수수료 · 픽스폴리오 수수료는 상품 금액(판매가 × 수량) 기준, PG 수수료(결제 금액 기준, 배송비 포함)는 결제 금액 기준입니다.</p>
         </div>
         <Row label="배송비" hint="0원이면 무료배송으로 표시됩니다.">
           <NumberInput value={form.shippingFee} onChange={n => set('shippingFee', n)} suffix="원" placeholder="0" />
@@ -496,11 +497,11 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         {form.salePrice > 0 && (
           <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 text-xs space-y-1">
             <p className="text-sm font-black text-slate-900">1개 판매 시 예상 정산액 <span className="text-blue-600">{won(Math.max(0, estimate))}</span></p>
-            <p className="text-slate-500">배송비 제외 기준 · 판매가 {won(form.salePrice)}</p>
+            <p className="text-slate-500">결제 금액 {won(paymentAmount)} 기준 · 판매가 {won(form.salePrice)} + 배송비 {won(Number(form.shippingFee) || 0)}</p>
             <div className="grid grid-cols-3 gap-2 pt-1 text-slate-600">
               <span>인플루언서 수수료 −{won(commissionAmount)}</span>
               <span>픽스폴리오 수수료({platformRate}%) −{won(platformFee)}</span>
-              <span>카드 결제 수수료{feeRates ? `(${pgRate}%)` : ''} −{won(pgFee)}</span>
+              <span>PG 수수료(결제 금액 기준, 배송비 포함){feeRates ? ` ${pgRate}%` : ''} −{won(pgFee)}</span>
             </div>
             <p className="text-[10px] text-slate-400 pt-1">실제 정산액은 주문 시점 수수료율과 결제 수단(카드 {feeRates?.pgCard ?? '-'}% · 카카오페이 {feeRates?.pgKakaopay ?? '-'}%)으로 계산되며, 배송비를 받은 주문은 배송비에도 PG 수수료가 붙습니다.</p>
           </div>

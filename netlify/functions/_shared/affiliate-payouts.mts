@@ -4,7 +4,8 @@ import { brandSettlement } from "./affiliate-store-orders.mts";
  * 어필리에이트 스토어 정산(지급 신청) 공통 로직.
  *
  *   지급 가능 금액 = (구매확정됐고 아직 어떤 신청에도 들어가지 않은 주문의 정산액 합계) − (아직 빼지 않은 차감액)
- *     브랜드     : 결제 금액 − 인플루언서 수수료 − PG 수수료 − 이용료(주문에 고정된 비율, brandSettlement)
+ *     브랜드     : 결제 금액 − 인플루언서 수수료 − 이용료(상품 금액 기준) − PG 수수료(결제 금액 기준, 배송비 포함)
+ *                  (주문에 고정된 비율, brandSettlement). 반품 환불된 주문은 남은 배송비 − PG 수수료
  *     인플루언서 : 구매확정된 수수료(commission_amount)
  *   지급 신청은 지급 가능 금액 전액을 한 건으로 만들고, 대상 주문과 금액을 신청 건에 고정 저장한다.
  *   같은 주문은 살아 있는(지급 대기 · 지급 완료) 신청 하나에만 들어간다(부분 고유 인덱스로 막는다).
@@ -49,7 +50,7 @@ export function scheduledDateFor(now = new Date()): string {
 
 // ─────────────────────────── 주문별 정산액 ───────────────────────────
 
-/** 브랜드 정산 대상 주문: 구매확정, 또는 반품 부분 환불로 끝난 주문(돌려주지 않은 금액만). */
+/** 브랜드 정산 대상 주문: 구매확정, 또는 반품 환불(상품 금액만 환불)로 끝나 배송비가 남은 주문(남은 배송비만). */
 export const isBrandSettled = (o: any) =>
   o.status === "confirmed"
   || (o.status === "cancelled" && Number(o.refund_amount) > 0 && Number(o.refund_amount) < Number(o.total_amount));
@@ -114,7 +115,7 @@ export async function syncDeductions(client: any, t: PartyType, party: string): 
     const diff = remaining - current;
     if (diff > 0) {
       const reason = r.status === "cancelled"
-        ? (Number(r.refund_amount) >= Number(r.total_amount) ? "지급 신청 뒤 전액 환불" : "지급 신청 뒤 부분 환불")
+        ? (Number(r.refund_amount) >= Number(r.total_amount) ? "지급 신청 뒤 전액 환불" : "지급 신청 뒤 반품 환불(배송비만 정산)")
         : "지급 신청 뒤 정산액 변경";
       await client.query(
         `INSERT INTO affiliate_payout_deductions (party_type, party, order_id, source_request_id, source_item_id, amount, reason)

@@ -7,6 +7,7 @@ import {
   DELIVER_MIN_HOURS_AFTER_SHIP,
   FEE_SETTING_KEYS,
   PARTIAL_REFUND_REASONS,
+  returnRefundPlan,
   PLATFORM_RATE,
   brandSettlement,
   currentFeeRates,
@@ -36,8 +37,9 @@ import {
  *   - 브랜드는 요청(requested)된 반품만 승인 · 거절한다(거절 사유는 선택). 승인 뒤에는 거절로 바꿀 수 없다
  *     (return_reject 는 approved 에서 막힌다). 승인 뒤 분쟁은 운영자 환불로 처리한다.
  *   - 거절하면 주문은 원래 단계(배송 중 · 배송 완료)로 돌아가고, 반품 기간 · 구매확정 기준일은 거절 시점부터 다시 센다.
- *   - 환불: 단순 변심이면 왕복 배송비를 뺀 부분 환불(포트원 부분 취소, 수수료는 상품 환불 비율대로 재계산),
- *     불량 · 오배송 등은 전액 환불.
+ *   - 환불: 반품 사유와 관계없이 상품 금액 전액(판매가 × 수량)만 환불한다(포트원 부분 취소).
+ *     주문 배송비는 환불하지 않고 PG 수수료(남은 배송비 × pg_rate)만 떼고 브랜드에 정산된다. 왕복 배송비는 브랜드와 구매자가 플랫폼 밖에서 협의.
+ *     인플루언서 수수료는 0원(취소). 배송비가 0원이면 전액 취소와 같다. 예전 shippingDeduction 값은 무시한다.
  *   - 운영자는 구매확정된 주문도 환불할 수 있고, 이때 수수료는 취소된다.
  *
  * 브랜드는 자기 브랜드 주문만, 운영자는 전체를 본다. 환불은 모두 cancelOrderFully
@@ -302,22 +304,21 @@ async function brandAction(db: any, brand: string, body: any) {
     if (ret[0].status === "requested") return err("반품을 먼저 승인하고, 상품 회수를 확인한 뒤 환불해 주세요.");
     if (ret[0].status !== "approved" && ret[0].status !== "refunded") return err("환불할 수 없는 반품 요청입니다.");
 
-    // 단순 변심이면 왕복 배송비를 빼고 부분 환불할 수 있다. 불량 · 오배송 등은 전액 환불.
-    const deduction = Math.max(0, Math.round(Number(body.shippingDeduction) || 0));
-    let partial: { refundAmount: number; deduction: number } | undefined;
-    if (deduction > 0) {
-      if (!PARTIAL_REFUND_REASONS.includes(ret[0].reason)) return err("단순 변심 반품만 왕복 배송비를 차감할 수 있어요. 불량 · 오배송은 전액 환불해 주세요.");
-      const o = ((await db.sql`SELECT total_amount FROM affiliate_store_orders WHERE id = ${id} AND business_username = ${brand}`) as any[])[0];
-      if (!o) return err("주문을 찾을 수 없습니다.", 404);
-      if (deduction >= Number(o.total_amount)) return err("차감할 배송비가 결제 금액보다 작아야 해요.");
-      if (deduction > 100_000) return err("왕복 배송비를 확인해 주세요.");
-      partial = { refundAmount: Number(o.total_amount) - deduction, deduction };
-    }
+    // 반품 환불 = 상품 금액 전액(사유 무관). 주문 배송비는 환불하지 않는다. 예전 shippingDeduction 값은 무시한다.
+    // 배송비가 0원이면 상품 금액 = 결제 금액이므로 전액 취소로 처리한다.
+    const o = ((await db.sql`SELECT product_name, unit_price, quantity, total_amount FROM affiliate_store_orders WHERE id = ${id} AND business_username = ${brand}`) as any[])[0];
+    if (!o) return err("주문을 찾을 수 없습니다.", 404);
+    const plan = returnRefundPlan(o);
+    if (plan.refundAmount <= 0) return err("환불 금액을 확인해 주세요.");
+    const partial = plan.full ? undefined : { refundAmount: plan.refundAmount, deduction: plan.keptShipping };
     const r = await cancelOrderFully(db, id, {
       actorType: "brand", actor: brand, reason: "반품 환불", allowed: ["return_requested"], businessUsername: brand, partial,
+      // 배송비 0원 주문(전액 취소)도 반품 환불 문구로 보낸다. 배송비가 있으면 공통 반품 문구(상품 금액 · 배송비 협의)를 쓴다.
+      ...(plan.full ? { buyerSms: `${o.product_name} 반품 환불(상품 금액) ${plan.refundAmount.toLocaleString("ko-KR")}원이 처리되었습니다.` } : {}),
       inTransaction: async (client, order) => {
         await client.query(
           `UPDATE affiliate_store_returns SET status = 'refunded', refunded_at = NOW(), refund_amount = $2, shipping_deduction = $3, updated_at = NOW() WHERE order_id = $1`,
+          // shipping_deduction 에는 환불하지 않은 주문 배송비(브랜드 정산분)를 남긴다.
           [id, Number(order.refund_amount) || 0, partial ? partial.deduction : 0],
         );
       },
@@ -326,7 +327,7 @@ async function brandAction(db: any, brand: string, body: any) {
     if (!r.alreadyCancelled) {
       const refunded = Number(r.order.refund_amount) || 0;
       await notifyBuyer(db, r.order.buyer_user_id, "refunded", "반품 환불이 완료되었어요",
-        `${r.order.product_name} · ${refunded.toLocaleString("ko-KR")}원${partial ? ` (왕복 배송비 ${partial.deduction.toLocaleString("ko-KR")}원 차감)` : ""}`, id);
+        `${r.order.product_name} · 상품 금액 ${refunded.toLocaleString("ko-KR")}원 환불${partial ? " · 배송비는 판매자와 협의해 주세요" : ""}`, id);
     }
     return Response.json({ ok: true });
   }
