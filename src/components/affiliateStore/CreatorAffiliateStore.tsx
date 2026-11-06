@@ -404,15 +404,24 @@ const ProductDetailPage: React.FC<DetailProps> = ({
           )}
 
           {[
-            { title: '상품 설명', body: detail.description },
-            { title: '사이즈 가이드', body: detail.sizeGuide },
-            { title: '배송 · 교환 · 반품 안내', body: detail.deliveryGuide },
-          ].filter(b => b.body?.trim()).map(b => (
+            { title: '상품 설명', body: detail.description || '', images: detail.descriptionImageUrls || [] },
+            { title: '사이즈 가이드', body: detail.sizeGuide || '', images: detail.sizeGuideImageUrls || [] },
+            { title: '배송 · 교환 · 반품 안내', body: detail.deliveryGuide || '', images: detail.deliveryGuideImageUrls || [] },
+          ].filter(b => b.body.trim() || b.images.length > 0).map(b => (
             <div key={b.title} className="py-5 border-b border-slate-100">
               <h3 className="text-sm font-black text-slate-900 mb-3">{b.title}</h3>
-              <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100">
-                <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8] break-words">{b.body}</p>
-              </div>
+              {b.body.trim() && (
+                <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100">
+                  <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8] break-words">{b.body}</p>
+                </div>
+              )}
+              {b.images.length > 0 && (
+                <div className={`-mx-4 md:mx-0 md:rounded-2xl overflow-hidden border-y md:border border-slate-100 bg-white ${b.body.trim() ? 'mt-3' : ''}`}>
+                  {b.images.map((u, i) => (
+                    <img key={u + i} src={u} alt={`${b.title} ${i + 1}`} className="block w-full h-auto" loading="lazy" />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 

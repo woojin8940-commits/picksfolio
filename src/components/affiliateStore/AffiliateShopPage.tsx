@@ -37,6 +37,9 @@ interface ShopProduct {
   detailImageUrls?: string[];
   sizeGuide?: string;
   deliveryGuide?: string;
+  descriptionImageUrls?: string[];
+  sizeGuideImageUrls?: string[];
+  deliveryGuideImageUrls?: string[];
   options: { name: string; soldOut: boolean }[];
   retailPrice: number;
   salePrice: number;
@@ -97,9 +100,9 @@ async function api<T>(method: 'GET' | 'POST', query: string, body?: unknown, aut
 
 const inputCls = 'w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-900';
 
-/** 상품 설명 · 사이즈 가이드 · 배송 안내를 접었다 펴는 칸. 내용이 없는 칸은 숨기고, 첫 칸은 펴 둔다. */
-const InfoAccordion: React.FC<{ items: { key: string; title: string; body: string }[] }> = ({ items }) => {
-  const shown = items.filter(i => i.body.trim());
+/** 상품 설명 · 사이즈 가이드 · 배송 안내를 접었다 펴는 칸. 글 아래에 이미지를 이어 붙인다. 내용이 없는 칸은 숨기고, 첫 칸은 펴 둔다. */
+const InfoAccordion: React.FC<{ items: { key: string; title: string; body: string; images?: string[] }[] }> = ({ items }) => {
+  const shown = items.filter(i => i.body.trim() || (i.images?.length || 0) > 0);
   const [open, setOpen] = useState<string[]>(() => (shown[0] ? [shown[0].key] : []));
   if (shown.length === 0) return null;
   const toggle = (k: string) => setOpen(o => (o.includes(k) ? o.filter(x => x !== k) : [...o, k]));
@@ -118,7 +121,18 @@ const InfoAccordion: React.FC<{ items: { key: string; title: string; body: strin
               {i.title}
               {isOpen ? <Minus className="w-4 h-4 text-slate-500" /> : <Plus className="w-4 h-4 text-slate-500" />}
             </button>
-            {isOpen && <p className="pb-5 text-[13px] text-slate-600 whitespace-pre-wrap leading-relaxed break-words">{i.body}</p>}
+            {isOpen && (
+              <div className="pb-5">
+                {i.body.trim() && <p className="text-[13px] text-slate-600 whitespace-pre-wrap leading-relaxed break-words">{i.body}</p>}
+                {(i.images?.length || 0) > 0 && (
+                  <div className={i.body.trim() ? 'mt-4' : ''}>
+                    {i.images!.map((u, n) => (
+                      <img key={u + n} src={u} alt={`${i.title} ${n + 1}`} className="block w-full h-auto" loading="lazy" />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
@@ -439,9 +453,9 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
 
             <InfoAccordion
               items={[
-                { key: 'description', title: 'DESCRIPTION', body: product.description },
-                { key: 'size', title: 'SIZE GUIDE', body: product.sizeGuide || '' },
-                { key: 'delivery', title: 'DELIVERY GUIDE', body: product.deliveryGuide || '' },
+                { key: 'description', title: 'DESCRIPTION', body: product.description, images: product.descriptionImageUrls },
+                { key: 'size', title: 'SIZE GUIDE', body: product.sizeGuide || '', images: product.sizeGuideImageUrls },
+                { key: 'delivery', title: 'DELIVERY GUIDE', body: product.deliveryGuide || '', images: product.deliveryGuideImageUrls },
               ]}
             />
 
