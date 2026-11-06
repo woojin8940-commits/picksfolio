@@ -22,6 +22,7 @@ import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminBrandDeckRequests from './admin/AdminBrandDeckRequests';
 import AdminAffiliateStoreApplications from './admin/AdminAffiliateStoreApplications';
 import AdminAffiliateStoreIssues from './admin/AdminAffiliateStoreIssues';
+import AdminAffiliatePayouts from './admin/AdminAffiliatePayouts';
 import AdminAffiliateSelections from './admin/AdminAffiliateSelections';
 import AdminCreatorApplications from './admin/AdminCreatorApplications';
 import AdminSalesLinks from './admin/AdminSalesLinks';
@@ -56,6 +57,7 @@ type OperatorTab =
   | 'brandleads'
   | 'affiliate-store'
   | 'affiliate-issues'
+  | 'affiliate-payouts'
   | 'affiliate-selections'
   | 'creator-applications'
   | 'saleslinks'
@@ -351,6 +353,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         // 브랜드가 선정한 판매 신청 — 담당자가 양쪽에 연락해 진행한다.
         { key: 'affiliate-selections', label: '어필리에이트 선정 · 링크' },
         { key: 'affiliate-issues', label: '미처리 취소·반품' },
+        // 어필리에이트 지급 신청 · 지급 완료 · 반려 · 이체 / 원천징수 파일.
+        { key: 'affiliate-payouts', label: '어필리에이트 정산' },
       ],
     },
     {
@@ -869,6 +873,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {/* 브랜드 신청자 (메타 광고 서비스 소개서 신청) */}
         {activeTab === 'affiliate-store' && adminToken && <AdminAffiliateStoreApplications token={adminToken} />}
         {activeTab === 'affiliate-issues' && adminToken && <AdminAffiliateStoreIssues token={adminToken} />}
+        {activeTab === 'affiliate-payouts' && adminToken && <AdminAffiliatePayouts token={adminToken} />}
         {activeTab === 'affiliate-selections' && adminToken && <AdminAffiliateSelections token={adminToken} />}
         {activeTab === 'creator-applications' && adminToken && <AdminCreatorApplications token={adminToken} />}
         {activeTab === 'brandleads' && (
