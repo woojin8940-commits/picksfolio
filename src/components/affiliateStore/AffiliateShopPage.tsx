@@ -46,7 +46,7 @@ interface ShopProduct {
   shippingFee: number;
   onSale: boolean;
   maxQuantity: number;
-  seller: { businessName: string; businessNumber: string; ceoName: string; phone: string; address: string };
+  seller: { businessName: string; businessNumber: string };
 }
 
 interface ShopOrder {
@@ -100,7 +100,7 @@ async function api<T>(method: 'GET' | 'POST', query: string, body?: unknown, aut
 
 const inputCls = 'w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-900';
 
-/** 상품 설명 · 사이즈 가이드 · 배송 안내를 접었다 펴는 칸. 글 아래에 이미지를 이어 붙인다. 내용이 없는 칸은 숨기고, 첫 칸은 펴 둔다. */
+/** 상품 설명 · 사이즈 가이드를 접었다 펴는 칸. 글 아래에 이미지를 이어 붙인다. 내용이 없는 칸은 숨기고, 첫 칸은 펴 둔다. */
 const InfoAccordion: React.FC<{ items: { key: string; title: string; body: string; images?: string[] }[] }> = ({ items }) => {
   const shown = items.filter(i => i.body.trim() || (i.images?.length || 0) > 0);
   const [open, setOpen] = useState<string[]>(() => (shown[0] ? [shown[0].key] : []));
@@ -455,7 +455,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               items={[
                 { key: 'description', title: 'DESCRIPTION', body: product.description, images: product.descriptionImageUrls },
                 { key: 'size', title: 'SIZE GUIDE', body: product.sizeGuide || '', images: product.sizeGuideImageUrls },
-                { key: 'delivery', title: 'DELIVERY GUIDE', body: product.deliveryGuide || '', images: product.deliveryGuideImageUrls },
               ]}
             />
 
@@ -467,15 +466,25 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               </section>
             )}
 
-            {/* 교환·반품 안내 */}
+            {/* 배송 · 교환 · 반품 안내: 브랜드가 상품 등록 때 적은 안내(글 · 이미지)를 그대로 보여 준다. */}
             <section className="px-5 mt-8 pt-6 border-t border-slate-100">
-              <h2 className="text-sm font-black mb-2">교환·반품 안내</h2>
-              <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4 leading-relaxed">
-                <li>배송 완료 후 7일 이내에 마이페이지에서 교환·반품을 요청할 수 있어요.</li>
-                <li>단순 변심에 의한 반품은 반품 배송비를 구매자가 부담합니다.</li>
-                <li>상품 불량 · 오배송은 판매자가 반품 배송비를 부담합니다.</li>
-                <li>송장 입력 전에는 마이페이지에서 바로 주문을 취소할 수 있어요.</li>
-              </ul>
+              <h2 className="text-sm font-black mb-2">배송 · 교환 · 반품 안내</h2>
+              {(product.deliveryGuide || '').trim() || (product.deliveryGuideImageUrls?.length || 0) > 0 ? (
+                <>
+                  {(product.deliveryGuide || '').trim() && (
+                    <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed break-words">{product.deliveryGuide}</p>
+                  )}
+                  {(product.deliveryGuideImageUrls?.length || 0) > 0 && (
+                    <div className={(product.deliveryGuide || '').trim() ? 'mt-4' : ''}>
+                      {product.deliveryGuideImageUrls!.map((u, n) => (
+                        <img key={u + n} src={u} alt={`배송 · 교환 · 반품 안내 ${n + 1}`} className="block w-full h-auto" loading="lazy" />
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-slate-500 leading-relaxed">판매자가 등록한 교환·반품 안내가 없습니다. 교환·반품은 배송 완료 후 마이페이지에서 요청할 수 있어요.</p>
+              )}
             </section>
 
             {/* 판매자 정보 */}
@@ -488,9 +497,6 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
                   {[
                     ['상호', product.seller.businessName],
                     ['사업자등록번호', bizNo(product.seller.businessNumber)],
-                    ['대표자', product.seller.ceoName],
-                    ['연락처', product.seller.phone],
-                    ['주소', product.seller.address],
                   ].map(([k, v]) => (
                     <div key={k} className="flex gap-3"><dt className="w-24 shrink-0 text-slate-400">{k}</dt><dd className="text-slate-700">{v || '-'}</dd></div>
                   ))}

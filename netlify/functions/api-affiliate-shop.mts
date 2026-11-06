@@ -68,13 +68,10 @@ function publicProduct(r: any) {
     shippingFee: Number(r.shipping_fee) || 0,
     onSale: r.status === "on_sale" && Number(r.stock) > 0,
     maxQuantity: Math.max(0, Math.min(99, Number(r.stock) || 0)),
-    // 상품 페이지 "판매자 정보 보기". 입점 신청서에 적은 정보를 그대로 쓴다.
+    // 상품 페이지 "판매자 정보 보기". 입점 신청서에 적은 상호 · 사업자등록번호만 보여 준다.
     seller: {
       businessName: r.business_name || "",
       businessNumber: r.business_number || "",
-      ceoName: r.ceo_name || "",
-      phone: r.cs_phone || r.contact_phone || "",
-      address: r.business_address || "",
     },
   };
 }
