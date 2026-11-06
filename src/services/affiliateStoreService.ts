@@ -150,6 +150,8 @@ export interface StoreRequest {
   clickCount: number;
   createdAt: string;
   updatedAt: string;
+  /** 브랜드 화면에서만 온다 — 지원한 인플루언서의 인스타 프로필 · 최근 릴스(캠페인 지원자와 같은 스냅샷). */
+  insights?: Record<string, any> | null;
 }
 
 export type OrderStatus = 'pending_payment' | 'paid' | 'preparing' | 'shipped' | 'delivered' | 'confirmed' | 'return_requested' | 'cancelled';

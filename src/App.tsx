@@ -1653,6 +1653,12 @@ const App: React.FC = () => {
       applySubView(params.get('from') === 'dm-automation' ? 'dm-automation' : 'campaigns');
       return;
     }
+    // 어필리에이트 지원하기에서 시작한 연동(?ig_affiliate)은 그 화면으로 되돌린다.
+    // 보던 상품의 지원하기 창은 CreatorAffiliateStore 가 되살린다.
+    if (params.get('ig_affiliate')) {
+      applySubView('affiliate-store');
+      return;
+    }
     // 인사이트 화면에서 시작한 연동(?ig_insights)은 그 화면으로 되돌린다. 아래
     // ig_connected 분기보다 먼저 봐야 한다 — 연동 성공 시 두 파라미터가 함께 붙는다.
     if (params.get('ig_insights')) {

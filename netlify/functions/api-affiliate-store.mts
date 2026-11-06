@@ -5,6 +5,7 @@ import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
 import { SALE_STATUSES, STORE_TESTERS, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
+import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 
 /**
  * 어필리에이트 스토어(ZVZO 방식) — 카페24 연동 없이 플랫폼 안에서 상품을 올리고
@@ -230,10 +231,17 @@ async function brandGet(db: any, username: string) {
       ORDER BY r.created_at DESC LIMIT 500
     ` as Promise<any[]>,
   ]);
+  // 지원한 인플루언서의 인스타 프로필 · 최근 릴스. 캠페인 지원자 목록과 같은 스냅샷을 쓴다.
+  // 브랜드에게는 인플루언서가 등록한 단가를 보내지 않는다(캠페인 지원자와 같은 규칙).
+  const snapshots = await buildSnapshots(db, requests.map((r) => r.influencer_username))
+    .catch((e) => { console.error("[affiliate-store] snapshot load failed", e); return new Map(); });
   return Response.json({
     application: shapeApplication(app),
     products: products.map((p) => shapeProduct(p)),
-    requests: requests.map(shapeRequest),
+    requests: requests.map((r) => ({
+      ...shapeRequest(r),
+      insights: withoutRegisteredPrices(snapshots.get(norm(r.influencer_username)) || null),
+    })),
     categories: CATEGORIES,
     taxonomy: TAXONOMY,
     // 상품 등록 화면의 "1개 판매 시 예상 정산액" 계산용(지금 설정값).
