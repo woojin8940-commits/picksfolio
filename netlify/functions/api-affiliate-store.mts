@@ -102,6 +102,9 @@ function shapeProduct(r: any, forCreator = false) {
     detailImageUrls: Array.isArray(r.detail_image_urls) ? r.detail_image_urls : [],
     sizeGuide: r.size_guide || "",
     deliveryGuide: r.delivery_guide || "",
+    descriptionImageUrls: Array.isArray(r.description_image_urls) ? r.description_image_urls : [],
+    sizeGuideImageUrls: Array.isArray(r.size_guide_image_urls) ? r.size_guide_image_urls : [],
+    deliveryGuideImageUrls: Array.isArray(r.delivery_guide_image_urls) ? r.delivery_guide_image_urls : [],
     options: Array.isArray(r.options) ? r.options : [],
     retailPrice: Number(r.retail_price) || 0,
     salePrice: Number(r.sale_price) || 0,
@@ -353,6 +356,16 @@ async function brandSaveProduct(db: any, username: string, body: any) {
     .map((u: unknown) => clip(u, 1000))
     .filter((u: string) => u.startsWith("/") || /^https:\/\//.test(u))
     .slice(0, 20);
+  // 상품 정보 칸마다 붙이는 이미지(칸당 최대 10장). 보내지 않은 칸은 기존 이미지를 그대로 둔다.
+  const guideImages = (v: unknown) => (Array.isArray(v) ? v : [])
+    .map((u: unknown) => clip(u, 1000))
+    .filter((u: string) => u.startsWith("/") || /^https:\/\//.test(u))
+    .slice(0, 10);
+  const keepGuideImages = !Array.isArray(p.descriptionImageUrls) && !Array.isArray(p.sizeGuideImageUrls) && !Array.isArray(p.deliveryGuideImageUrls);
+  const descriptionImageUrls = guideImages(p.descriptionImageUrls);
+  const descImgs = JSON.stringify(descriptionImageUrls);
+  const sizeImgs = JSON.stringify(guideImages(p.sizeGuideImageUrls));
+  const deliveryImgs = JSON.stringify(guideImages(p.deliveryGuideImageUrls));
   const options = (Array.isArray(p.options) ? p.options : [])
     .map((o: any) => ({ name: clip(o?.name, 80), stock: int(o?.stock, 0, 1_000_000) }))
     .filter((o: any) => o.name && Number.isFinite(o.stock))
@@ -373,8 +386,8 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (!Number.isFinite(stock)) return err("재고 수량을 입력해 주세요.");
   if (productUrl && !isUrl(productUrl)) return err("상품 상세 주소는 https:// 로 시작하는 주소로 입력해 주세요.");
   if (status === "on_sale" && stock <= 0) return err("재고가 0개인 상품은 판매중으로 둘 수 없습니다.");
-  if (status === "on_sale" && Array.isArray(p.detailImageUrls) && detailImageUrls.length === 0 && !description) {
-    return err("판매중으로 두려면 상품 설명을 적거나 상세페이지 이미지를 1장 이상 올려 주세요.");
+  if (status === "on_sale" && Array.isArray(p.detailImageUrls) && detailImageUrls.length === 0 && !description && (keepGuideImages || descriptionImageUrls.length === 0)) {
+    return err("판매중으로 두려면 상품 설명(글 또는 이미지)을 넣거나 상세페이지 이미지를 1장 이상 올려 주세요.");
   }
 
   const imgs = JSON.stringify(imageUrls);
@@ -392,6 +405,9 @@ async function brandSaveProduct(db: any, username: string, body: any) {
         commission_rate = ${commissionRate}, stock = ${stock}, shipping_fee = ${shippingFee},
         size_guide = CASE WHEN ${keepGuides}::boolean THEN size_guide ELSE ${sizeGuide} END,
         delivery_guide = CASE WHEN ${keepGuides}::boolean THEN delivery_guide ELSE ${deliveryGuide} END,
+        description_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN description_image_urls ELSE ${descImgs}::jsonb END,
+        size_guide_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN size_guide_image_urls ELSE ${sizeImgs}::jsonb END,
+        delivery_guide_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN delivery_guide_image_urls ELSE ${deliveryImgs}::jsonb END,
         product_url = ${productUrl}, status = ${status}, updated_at = NOW()
       WHERE id = ${id} AND business_username = ${username} AND deleted_at IS NULL
       RETURNING *
@@ -401,10 +417,12 @@ async function brandSaveProduct(db: any, username: string, body: any) {
     rows = (await db.sql`
       INSERT INTO affiliate_store_products
         (id, business_username, name, category, subcategory, summary, description, image_urls, detail_image_urls, options,
-         retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status, size_guide, delivery_guide)
+         retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status, size_guide, delivery_guide,
+         description_image_urls, size_guide_image_urls, delivery_guide_image_urls)
       VALUES
         (${newId("asp")}, ${username}, ${name}, ${category}, ${subcategory}, ${summary}, ${description}, ${imgs}::jsonb, ${detailImgs}::jsonb, ${opts}::jsonb,
-         ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status}, ${sizeGuide}, ${deliveryGuide})
+         ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status}, ${sizeGuide}, ${deliveryGuide},
+         ${descImgs}::jsonb, ${sizeImgs}::jsonb, ${deliveryImgs}::jsonb)
       RETURNING *
     `) as any[];
   }

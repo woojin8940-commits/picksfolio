@@ -121,6 +121,10 @@ export interface StoreProduct {
   sizeGuide: string;
   /** 배송 · 교환 · 반품 안내(글). 구매 페이지 DELIVERY GUIDE 칸에 나간다. */
   deliveryGuide: string;
+  /** 상품 정보 칸마다 글 아래에 이어 붙여 보여 주는 이미지. */
+  descriptionImageUrls: string[];
+  sizeGuideImageUrls: string[];
+  deliveryGuideImageUrls: string[];
   options: ProductOption[];
   retailPrice: number;
   salePrice: number;

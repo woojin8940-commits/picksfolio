@@ -71,6 +71,9 @@ const toInput = (p: StoreProduct | null, defaultDeliveryGuide = ''): ProductInpu
   detailImageUrls: p?.detailImageUrls || [],
   sizeGuide: p?.sizeGuide || '',
   deliveryGuide: p ? p.deliveryGuide || '' : defaultDeliveryGuide,
+  descriptionImageUrls: p?.descriptionImageUrls || [],
+  sizeGuideImageUrls: p?.sizeGuideImageUrls || [],
+  deliveryGuideImageUrls: p?.deliveryGuideImageUrls || [],
   options: p?.options || [],
   retailPrice: p?.retailPrice || 0,
   salePrice: p?.salePrice || 0,
@@ -85,6 +88,12 @@ const toInput = (p: StoreProduct | null, defaultDeliveryGuide = ''): ProductInpu
 const inputCls =
   'w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600';
 
+const MAX_GUIDE_IMAGES = 10;
+
+/**
+ * 상품 정보 한 칸(글 + 이미지). 사이즈표 · 배송 안내처럼 이미지로 이미 만들어 둔 자료가 있으면
+ * 글 대신(또는 글과 함께) 올린다. 이미지는 자르지 않고 원본 그대로 글 아래에 이어서 보여 준다.
+ */
 const GuideField: React.FC<{
   label: string;
   hint: string;
@@ -92,21 +101,87 @@ const GuideField: React.FC<{
   onChange: (v: string) => void;
   placeholder: string;
   rows: number;
-}> = ({ label, hint, value, onChange, placeholder, rows }) => (
-  <div>
-    <p className="text-xs font-black text-slate-800">{label}</p>
-    <p className="text-[11px] text-slate-500 mt-0.5 mb-2">{hint}</p>
-    <textarea
-      className="w-full p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 leading-relaxed placeholder:text-slate-300 focus:outline-none focus:border-blue-600"
-      rows={rows}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      maxLength={5000}
-      placeholder={placeholder}
-    />
-    <p className="text-[10px] text-slate-400 text-right">{value.length}/5000</p>
-  </div>
-);
+  images: string[];
+  onImagesChange: (update: (prev: string[]) => string[]) => void;
+  uploadImage: (f: File) => Promise<string | null>;
+  onUploadingChange: (delta: 1 | -1) => void;
+  onError: (msg: string) => void;
+}> = ({ label, hint, value, onChange, placeholder, rows, images, onImagesChange, uploadImage, onUploadingChange, onError }) => {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const pick = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const picked = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, Math.max(0, MAX_GUIDE_IMAGES - images.length));
+    if (ref.current) ref.current.value = '';
+    if (picked.length === 0) return;
+    setBusy(true);
+    onUploadingChange(1);
+    const urls: string[] = [];
+    for (const f of picked) {
+      const url = await uploadImage(f);
+      if (url) urls.push(url);
+    }
+    setBusy(false);
+    onUploadingChange(-1);
+    if (urls.length < picked.length) onError(`${label} 이미지 일부를 올리지 못했습니다. 5MB 이하 이미지로 다시 시도해 주세요.`);
+    onImagesChange(prev => [...prev, ...urls].slice(0, MAX_GUIDE_IMAGES));
+  };
+  const move = (i: number, dir: -1 | 1) =>
+    onImagesChange(prev => {
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  return (
+    <div>
+      <p className="text-xs font-black text-slate-800">{label}</p>
+      <p className="text-[11px] text-slate-500 mt-0.5 mb-2">{hint}</p>
+      <textarea
+        className="w-full p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 leading-relaxed placeholder:text-slate-300 focus:outline-none focus:border-blue-600"
+        rows={rows}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        maxLength={5000}
+        placeholder={placeholder}
+      />
+      <p className="text-[10px] text-slate-400 text-right">{value.length}/5000</p>
+      <div className="flex flex-wrap gap-2 mt-1">
+        {images.map((u, i) => (
+          <div key={u + i} className="relative w-20 h-28 rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+            <img src={u} alt="" className="w-full h-full object-cover object-top" />
+            <button
+              type="button"
+              onClick={() => onImagesChange(prev => prev.filter((_, j) => j !== i))}
+              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+              aria-label={`${label} 이미지 삭제`}
+            >
+              <X className="w-3 h-3" />
+            </button>
+            <div className="absolute bottom-1 inset-x-1 flex justify-between">
+              <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="w-5 h-5 rounded bg-white/90 text-[11px] font-black disabled:opacity-30" aria-label="앞으로">‹</button>
+              <button type="button" onClick={() => move(i, 1)} disabled={i === images.length - 1} className="w-5 h-5 rounded bg-white/90 text-[11px] font-black disabled:opacity-30" aria-label="뒤로">›</button>
+            </div>
+          </div>
+        ))}
+        {images.length < MAX_GUIDE_IMAGES && (
+          <button
+            type="button"
+            onClick={() => ref.current?.click()}
+            disabled={busy}
+            className="w-20 h-28 rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500 flex flex-col items-center justify-center gap-1 text-[10px] font-bold"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
+            {busy ? '올리는 중' : '이미지 추가'}
+          </button>
+        )}
+      </div>
+      <p className="text-[10px] text-slate-400 mt-1">글 대신 또는 글과 함께 이미지를 올릴 수 있어요. 글 아래에 순서대로 보입니다(최대 {MAX_GUIDE_IMAGES}장, 장당 5MB 이하).</p>
+      <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={e => pick(e.target.files)} />
+    </div>
+  );
+};
 
 const Section: React.FC<{ title: string; desc?: string; children: React.ReactNode }> = ({ title, desc, children }) => (
   <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-7 mb-4">
@@ -158,12 +233,22 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
   const [uploadCount, setUploadCount] = useState(0);
   const uploading = uploadCount > 0;
   const [detailUploading, setDetailUploading] = useState(false);
+  const [guideUploadCount, setGuideUploadCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const detailFileRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof ProductInput>(k: K, v: ProductInput[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  type GuideImageKey = 'descriptionImageUrls' | 'sizeGuideImageUrls' | 'deliveryGuideImageUrls';
+  const guideImageProps = (k: GuideImageKey) => ({
+    images: form[k],
+    onImagesChange: (update: (prev: string[]) => string[]) => setForm(f => ({ ...f, [k]: update(f[k]) })),
+    uploadImage: (f: File) => apiService.uploadImage(businessUsername, f, f.name),
+    onUploadingChange: (d: 1 | -1) => setGuideUploadCount(n => n + d),
+    onError: (msg: string) => setError(msg),
+  });
 
   const discount = form.retailPrice > 0 && form.salePrice > 0 && form.retailPrice > form.salePrice
     ? Math.round((1 - form.salePrice / form.retailPrice) * 100)
@@ -266,8 +351,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
 
   const save = async (statusOverride?: ProductStatus) => {
     setError('');
-    if ((statusOverride || form.status) === 'on_sale' && form.detailImageUrls.length === 0 && !form.description.trim()) {
-      setError('판매중으로 두려면 상품 설명을 적거나 상세페이지 이미지를 1장 이상 올려 주세요. 구매자와 인플루언서가 보는 상품 정보입니다.');
+    if ((statusOverride || form.status) === 'on_sale' && form.detailImageUrls.length === 0 && !form.description.trim() && form.descriptionImageUrls.length === 0) {
+      setError('판매중으로 두려면 상품 설명(글 또는 이미지)을 넣거나 상세페이지 이미지를 1장 이상 올려 주세요. 구매자와 인플루언서가 보는 상품 정보입니다.');
       return;
     }
     const payload: ProductInput = {
@@ -530,15 +615,16 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
 
       <Section
         title="상품 정보"
-        desc="구매 페이지에서 DESCRIPTION · SIZE GUIDE · DELIVERY GUIDE 칸으로 나뉘어 보입니다. 인플루언서도 판매 신청 전에 같은 내용을 봅니다. 비워 둔 칸은 보이지 않습니다."
+        desc="구매 페이지에서 DESCRIPTION · SIZE GUIDE · DELIVERY GUIDE 칸으로 나뉘어 보입니다. 칸마다 글을 적거나 이미지(사이즈표 · 배송 안내 이미지 등)를 올릴 수 있어요. 인플루언서도 판매 신청 전에 같은 내용을 봅니다. 비워 둔 칸은 보이지 않습니다."
       >
         <GuideField
           label="상품 설명"
-          hint="소재 · 핏 · 사용법 · 셀링 포인트 등. 상세페이지 이미지가 없으면 판매중으로 두려면 꼭 적어 주세요."
+          hint="소재 · 핏 · 사용법 · 셀링 포인트 등. 상세페이지 이미지가 없으면 판매중으로 두려면 글이나 이미지를 꼭 넣어 주세요."
           value={form.description}
           onChange={v => set('description', v)}
           placeholder="상품 설명을 입력해 주세요."
           rows={8}
+          {...guideImageProps('descriptionImageUrls')}
         />
         <GuideField
           label="사이즈 가이드"
@@ -547,6 +633,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
           onChange={v => set('sizeGuide', v)}
           placeholder={SIZE_GUIDE_PLACEHOLDER}
           rows={6}
+          {...guideImageProps('sizeGuideImageUrls')}
         />
         <GuideField
           label="배송 · 교환 · 반품 안내"
@@ -555,6 +642,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
           onChange={v => set('deliveryGuide', v)}
           placeholder={DELIVERY_GUIDE_PLACEHOLDER}
           rows={10}
+          {...guideImageProps('deliveryGuideImageUrls')}
         />
       </Section>
 
@@ -579,7 +667,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <button onClick={onClose} className="h-11 px-5 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-600">취소</button>
         <button
           onClick={() => save()}
-          disabled={saving || uploading || detailUploading}
+          disabled={saving || uploading || detailUploading || guideUploadCount > 0}
           className="h-11 px-6 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center gap-2"
         >
           {saving && <Loader2 className="w-4 h-4 animate-spin" />}

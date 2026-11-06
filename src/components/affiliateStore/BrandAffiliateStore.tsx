@@ -181,9 +181,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
 
   const toggleSale = async (p: StoreProduct) => {
     setBusyId(p.id);
-    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl } = p;
+    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, descriptionImageUrls, sizeGuideImageUrls, deliveryGuideImageUrls, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl } = p;
     const res = await affiliateStoreService.saveProduct(businessUsername, {
-      id, name, category, subcategory, summary, description, imageUrls, detailImageUrls: detailImageUrls || [], sizeGuide: sizeGuide || '', deliveryGuide: deliveryGuide || '', options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl,
+      id, name, category, subcategory, summary, description, imageUrls, detailImageUrls: detailImageUrls || [], sizeGuide: sizeGuide || '', deliveryGuide: deliveryGuide || '', descriptionImageUrls: descriptionImageUrls || [], sizeGuideImageUrls: sizeGuideImageUrls || [], deliveryGuideImageUrls: deliveryGuideImageUrls || [], options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl,
       status: p.status === 'on_sale' ? 'paused' : 'on_sale',
     });
     setBusyId('');
