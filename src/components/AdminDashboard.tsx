@@ -273,10 +273,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               onClick={onNavigateAffiliateStore}
             />
           )}
-          {/* 어필리에이트 스토어에서 구매한 주문. 구매자 마이페이지(/my/orders)로 간다. */}
-          {onNavigateAffiliateStore && (
-            <NavItem icon="🧾" label={t('nav.myOrders', '내 주문 내역', 'My Orders')} active={false} onClick={() => { window.location.href = '/my/orders'; }} />
-          )}
           <NavItem
             icon="📨"
             label={t('nav.inbox', '비즈니스 수신함', 'Inbox')}
@@ -389,9 +385,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🤝" label={t('nav.myCollabs', '협업 캠페인', 'Collab Campaigns')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               {onNavigateAffiliateStore && (
                 <NavItem icon="🏬" label={t('nav.affiliateStore', '어필리에이트', 'Affiliate')} active={currentSubView === 'affiliate-store'} onClick={() => { onNavigateAffiliateStore(); setIsMobileMenuOpen(false); }} />
-              )}
-              {onNavigateAffiliateStore && (
-                <NavItem icon="🧾" label={t('nav.myOrders', '내 주문 내역', 'My Orders')} active={false} onClick={() => { window.location.href = '/my/orders'; }} />
               )}
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />

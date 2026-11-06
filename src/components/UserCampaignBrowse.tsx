@@ -242,7 +242,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const rewardFilters = [
     { value: '', label: isEn ? 'All' : '전체' },
     { value: 'ad_collab', label: isEn ? 'Product Sponsorship' : '제품 협찬' },
-    { value: 'group_buy', label: isEn ? 'Commerce' : '커머스' },
   ];
 
   /* 칩 줄은 한 줄로 두고 가로로 넘긴다 — 손가락은 그대로, 마우스는 끌어서. */
@@ -1018,7 +1017,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">{isEn ? 'Campaigns' : '캠페인'}</h2>
         <p className="text-sm text-slate-400 font-medium">
-          {(isEn ? 'Apply directly to product sponsorship & commerce campaigns to find collaboration opportunities' : '제품 협찬 · 커머스 캠페인에 직접 지원하고 협업 기회를 잡아보세요')}
+          {(isEn ? 'Apply directly to product sponsorship campaigns to find collaboration opportunities' : '제품 협찬 캠페인에 직접 지원하고 협업 기회를 잡아보세요')}
         </p>
       </div>
 
