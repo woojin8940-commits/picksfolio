@@ -57,6 +57,8 @@ function publicProduct(r: any) {
     description: r.description,
     imageUrls: Array.isArray(r.image_urls) ? r.image_urls : [],
     detailImageUrls: Array.isArray(r.detail_image_urls) ? r.detail_image_urls : [],
+    sizeGuide: r.size_guide || "",
+    deliveryGuide: r.delivery_guide || "",
     options: (Array.isArray(r.options) ? r.options : []).map((o: any) => ({ name: String(o.name), soldOut: !(Number(o.stock) > 0) })),
     retailPrice: Number(r.retail_price) || 0,
     salePrice: Number(r.sale_price) || 0,

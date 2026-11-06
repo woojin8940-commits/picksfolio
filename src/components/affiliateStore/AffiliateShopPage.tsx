@@ -35,6 +35,8 @@ interface ShopProduct {
   description: string;
   imageUrls: string[];
   detailImageUrls?: string[];
+  sizeGuide?: string;
+  deliveryGuide?: string;
   options: { name: string; soldOut: boolean }[];
   retailPrice: number;
   salePrice: number;
@@ -94,6 +96,35 @@ async function api<T>(method: 'GET' | 'POST', query: string, body?: unknown, aut
 }
 
 const inputCls = 'w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-900';
+
+/** 상품 설명 · 사이즈 가이드 · 배송 안내를 접었다 펴는 칸. 내용이 없는 칸은 숨기고, 첫 칸은 펴 둔다. */
+const InfoAccordion: React.FC<{ items: { key: string; title: string; body: string }[] }> = ({ items }) => {
+  const shown = items.filter(i => i.body.trim());
+  const [open, setOpen] = useState<string[]>(() => (shown[0] ? [shown[0].key] : []));
+  if (shown.length === 0) return null;
+  const toggle = (k: string) => setOpen(o => (o.includes(k) ? o.filter(x => x !== k) : [...o, k]));
+  return (
+    <section className="px-5 mt-6 border-t border-slate-200">
+      {shown.map(i => {
+        const isOpen = open.includes(i.key);
+        return (
+          <div key={i.key} className="border-b border-slate-200">
+            <button
+              type="button"
+              onClick={() => toggle(i.key)}
+              aria-expanded={isOpen}
+              className="w-full h-12 flex items-center justify-between text-[12px] font-bold tracking-wider text-slate-700"
+            >
+              {i.title}
+              {isOpen ? <Minus className="w-4 h-4 text-slate-500" /> : <Plus className="w-4 h-4 text-slate-500" />}
+            </button>
+            {isOpen && <p className="pb-5 text-[13px] text-slate-600 whitespace-pre-wrap leading-relaxed break-words">{i.body}</p>}
+          </div>
+        );
+      })}
+    </section>
+  );
+};
 
 const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
   const [product, setProduct] = useState<ShopProduct | null>(null);
@@ -405,6 +436,14 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               </div>
               <p className="text-xs text-slate-500 mt-2">배송비 {product.shippingFee ? won(product.shippingFee) : '무료'}</p>
             </section>
+
+            <InfoAccordion
+              items={[
+                { key: 'description', title: 'DESCRIPTION', body: product.description },
+                { key: 'size', title: 'SIZE GUIDE', body: product.sizeGuide || '' },
+                { key: 'delivery', title: 'DELIVERY GUIDE', body: product.deliveryGuide || '' },
+              ]}
+            />
 
             {(product.detailImageUrls?.length || 0) > 0 && (
               <section className="mt-8 pt-6 border-t border-slate-100">

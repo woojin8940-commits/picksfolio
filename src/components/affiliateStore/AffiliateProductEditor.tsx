@@ -24,6 +24,8 @@ interface Props {
   /** 지금 설정된 수수료율. 1개 판매 시 예상 정산액을 보여 줄 때 쓴다. */
   feeRates?: FeeRates | null;
   product: StoreProduct | null;
+  /** 새 상품을 등록할 때 미리 채워 둘 배송 안내(브랜드가 마지막으로 적은 안내). */
+  defaultDeliveryGuide?: string;
   onClose: () => void;
   onSaved: (p: StoreProduct) => void;
 }
@@ -39,7 +41,26 @@ const MAX_DETAIL_IMAGES = 20;
  */
 type CropJob = { src: string; name: string; revoke: boolean; replaceIndex?: number };
 
-const toInput = (p: StoreProduct | null): ProductInput => ({
+const DELIVERY_GUIDE_PLACEHOLDER = `[배송비]
+50,000원 이상 구매 시 무료 배송
+
+[배송 기간]
+· 결제 완료 후 2~5일(주말·공휴일 제외)
+
+[교환/반품 안내]
+· 상품 수령 후 7일 이내에 요청해 주세요.
+· 단순 변심에 의한 교환/반품은 왕복 배송비를 구매자가 부담합니다.
+
+[교환/반품이 불가능한 경우]
+· 착용 흔적이 있거나 상품이 훼손·오염된 경우`;
+
+const SIZE_GUIDE_PLACEHOLDER = `예) 단위: cm
+S — 총장 66 / 어깨 50 / 가슴 56 / 소매 60
+M — 총장 68 / 어깨 52 / 가슴 58 / 소매 61
+
+모델: 178cm / 65kg, M 사이즈 착용`;
+
+const toInput = (p: StoreProduct | null, defaultDeliveryGuide = ''): ProductInput => ({
   id: p?.id,
   name: p?.name || '',
   category: p?.category || '',
@@ -48,6 +69,8 @@ const toInput = (p: StoreProduct | null): ProductInput => ({
   description: p?.description || '',
   imageUrls: p?.imageUrls || [],
   detailImageUrls: p?.detailImageUrls || [],
+  sizeGuide: p?.sizeGuide || '',
+  deliveryGuide: p ? p.deliveryGuide || '' : defaultDeliveryGuide,
   options: p?.options || [],
   retailPrice: p?.retailPrice || 0,
   salePrice: p?.salePrice || 0,
@@ -61,6 +84,29 @@ const toInput = (p: StoreProduct | null): ProductInput => ({
 
 const inputCls =
   'w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600';
+
+const GuideField: React.FC<{
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  rows: number;
+}> = ({ label, hint, value, onChange, placeholder, rows }) => (
+  <div>
+    <p className="text-xs font-black text-slate-800">{label}</p>
+    <p className="text-[11px] text-slate-500 mt-0.5 mb-2">{hint}</p>
+    <textarea
+      className="w-full p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 leading-relaxed placeholder:text-slate-300 focus:outline-none focus:border-blue-600"
+      rows={rows}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      maxLength={5000}
+      placeholder={placeholder}
+    />
+    <p className="text-[10px] text-slate-400 text-right">{value.length}/5000</p>
+  </div>
+);
 
 const Section: React.FC<{ title: string; desc?: string; children: React.ReactNode }> = ({ title, desc, children }) => (
   <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-7 mb-4">
@@ -106,8 +152,8 @@ const STATUS_CHOICES: { value: ProductStatus; label: string; desc: string }[] = 
   { value: 'draft', label: '임시저장', desc: '등록만 해 두고 노출하지 않습니다.' },
 ];
 
-const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, feeRates, product, onClose, onSaved }) => {
-  const [form, setForm] = useState<ProductInput>(() => toInput(product));
+const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, feeRates, product, defaultDeliveryGuide, onClose, onSaved }) => {
+  const [form, setForm] = useState<ProductInput>(() => toInput(product, defaultDeliveryGuide));
   const [useOptions, setUseOptions] = useState((product?.options?.length || 0) > 0);
   const [uploadCount, setUploadCount] = useState(0);
   const uploading = uploadCount > 0;
@@ -220,8 +266,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
 
   const save = async (statusOverride?: ProductStatus) => {
     setError('');
-    if ((statusOverride || form.status) === 'on_sale' && form.detailImageUrls.length === 0) {
-      setError('판매중으로 두려면 상세페이지 이미지를 1장 이상 올려 주세요. 구매자와 인플루언서가 보는 상품 설명입니다.');
+    if ((statusOverride || form.status) === 'on_sale' && form.detailImageUrls.length === 0 && !form.description.trim()) {
+      setError('판매중으로 두려면 상품 설명을 적거나 상세페이지 이미지를 1장 이상 올려 주세요. 구매자와 인플루언서가 보는 상품 정보입니다.');
       return;
     }
     const payload: ProductInput = {
@@ -437,8 +483,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
       </Section>
 
       <Section
-        title="상세페이지 (필수)"
-        desc={`자사몰 상세페이지처럼 세로로 긴 이미지를 올려 주세요. 위에서부터 순서대로 이어서 보여 줍니다(최대 ${MAX_DETAIL_IMAGES}장, 장당 5MB 이하). 구매 페이지에는 이 이미지가 상품 설명으로 나가고, 인플루언서도 판매 신청 전에 같은 상세페이지를 봅니다. 판매중으로 두려면 1장 이상 필요합니다.`}
+        title="상세페이지 이미지 (선택)"
+        desc={`자사몰 상세페이지처럼 세로로 긴 이미지가 있다면 올려 주세요. 위에서부터 순서대로 이어서 보여 줍니다(최대 ${MAX_DETAIL_IMAGES}장, 장당 5MB 이하). 없으면 아래 상품 설명 · 사이즈 가이드 · 배송 안내만으로도 판매할 수 있습니다.`}
       >
         {form.detailImageUrls.length > 0 && (
           <div className="space-y-2">
@@ -482,15 +528,34 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <input ref={detailFileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => uploadDetailFiles(e.target.files)} />
       </Section>
 
-      <Section title="상세 설명" desc="소재 · 사이즈 · 사용법 · 셀링 포인트 등 인플루언서가 콘텐츠를 만들 때 참고할 내용을 적어 주세요. 인플루언서에게만 보이고 구매 페이지에는 나가지 않습니다.">
-        <textarea
-          className="w-full min-h-[200px] p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
+      <Section
+        title="상품 정보"
+        desc="구매 페이지에서 DESCRIPTION · SIZE GUIDE · DELIVERY GUIDE 칸으로 나뉘어 보입니다. 인플루언서도 판매 신청 전에 같은 내용을 봅니다. 비워 둔 칸은 보이지 않습니다."
+      >
+        <GuideField
+          label="상품 설명"
+          hint="소재 · 핏 · 사용법 · 셀링 포인트 등. 상세페이지 이미지가 없으면 판매중으로 두려면 꼭 적어 주세요."
           value={form.description}
-          onChange={e => set('description', e.target.value)}
-          maxLength={5000}
-          placeholder="상품 상세 설명을 입력해 주세요."
+          onChange={v => set('description', v)}
+          placeholder="상품 설명을 입력해 주세요."
+          rows={8}
         />
-        <p className="text-[10px] text-slate-400 text-right -mt-3">{form.description.length}/5000</p>
+        <GuideField
+          label="사이즈 가이드"
+          hint="사이즈별 실측 · 모델 착용 정보 등"
+          value={form.sizeGuide}
+          onChange={v => set('sizeGuide', v)}
+          placeholder={SIZE_GUIDE_PLACEHOLDER}
+          rows={6}
+        />
+        <GuideField
+          label="배송 · 교환 · 반품 안내"
+          hint="배송비 · 배송 기간 · 교환/반품 방법 등. 새 상품을 등록할 때는 마지막으로 적은 안내가 미리 채워집니다."
+          value={form.deliveryGuide}
+          onChange={v => set('deliveryGuide', v)}
+          placeholder={DELIVERY_GUIDE_PLACEHOLDER}
+          rows={10}
+        />
       </Section>
 
       <Section title="판매 상태">

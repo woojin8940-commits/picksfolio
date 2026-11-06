@@ -100,6 +100,8 @@ function shapeProduct(r: any, forCreator = false) {
     description: r.description,
     imageUrls: Array.isArray(r.image_urls) ? r.image_urls : [],
     detailImageUrls: Array.isArray(r.detail_image_urls) ? r.detail_image_urls : [],
+    sizeGuide: r.size_guide || "",
+    deliveryGuide: r.delivery_guide || "",
     options: Array.isArray(r.options) ? r.options : [],
     retailPrice: Number(r.retail_price) || 0,
     salePrice: Number(r.sale_price) || 0,
@@ -338,6 +340,10 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (!subcategory) return err("하위 카테고리를 선택해 주세요.");
   const summary = clip(p.summary, 200);
   const description = clip(p.description, 5000);
+  // 예전 화면처럼 칸을 보내지 않은 저장은 기존 값을 그대로 둔다.
+  const keepGuides = typeof p.sizeGuide !== "string" && typeof p.deliveryGuide !== "string";
+  const sizeGuide = clip(p.sizeGuide, 5000);
+  const deliveryGuide = clip(p.deliveryGuide, 5000);
   const imageUrls = (Array.isArray(p.imageUrls) ? p.imageUrls : [])
     .map((u: unknown) => clip(u, 1000))
     .filter((u: string) => u.startsWith("/") || /^https:\/\//.test(u))
@@ -367,8 +373,8 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (!Number.isFinite(stock)) return err("재고 수량을 입력해 주세요.");
   if (productUrl && !isUrl(productUrl)) return err("상품 상세 주소는 https:// 로 시작하는 주소로 입력해 주세요.");
   if (status === "on_sale" && stock <= 0) return err("재고가 0개인 상품은 판매중으로 둘 수 없습니다.");
-  if (status === "on_sale" && Array.isArray(p.detailImageUrls) && detailImageUrls.length === 0) {
-    return err("판매중으로 두려면 상세페이지 이미지를 1장 이상 올려 주세요.");
+  if (status === "on_sale" && Array.isArray(p.detailImageUrls) && detailImageUrls.length === 0 && !description) {
+    return err("판매중으로 두려면 상품 설명을 적거나 상세페이지 이미지를 1장 이상 올려 주세요.");
   }
 
   const imgs = JSON.stringify(imageUrls);
@@ -384,6 +390,8 @@ async function brandSaveProduct(db: any, username: string, body: any) {
         name = ${name}, category = ${category}, subcategory = ${subcategory}, summary = ${summary}, description = ${description},
         image_urls = ${imgs}::jsonb, detail_image_urls = CASE WHEN ${keepDetail}::boolean THEN detail_image_urls ELSE ${detailImgs}::jsonb END, options = ${opts}::jsonb, retail_price = ${retailPrice}, sale_price = ${salePrice},
         commission_rate = ${commissionRate}, stock = ${stock}, shipping_fee = ${shippingFee},
+        size_guide = CASE WHEN ${keepGuides}::boolean THEN size_guide ELSE ${sizeGuide} END,
+        delivery_guide = CASE WHEN ${keepGuides}::boolean THEN delivery_guide ELSE ${deliveryGuide} END,
         product_url = ${productUrl}, status = ${status}, updated_at = NOW()
       WHERE id = ${id} AND business_username = ${username} AND deleted_at IS NULL
       RETURNING *
@@ -393,10 +401,10 @@ async function brandSaveProduct(db: any, username: string, body: any) {
     rows = (await db.sql`
       INSERT INTO affiliate_store_products
         (id, business_username, name, category, subcategory, summary, description, image_urls, detail_image_urls, options,
-         retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status)
+         retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status, size_guide, delivery_guide)
       VALUES
         (${newId("asp")}, ${username}, ${name}, ${category}, ${subcategory}, ${summary}, ${description}, ${imgs}::jsonb, ${detailImgs}::jsonb, ${opts}::jsonb,
-         ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status})
+         ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status}, ${sizeGuide}, ${deliveryGuide})
       RETURNING *
     `) as any[];
   }

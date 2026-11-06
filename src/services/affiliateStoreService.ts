@@ -117,6 +117,10 @@ export interface StoreProduct {
   imageUrls: string[];
   /** 상세페이지 이미지(위에서 아래로 이어 붙여 보여 준다). */
   detailImageUrls: string[];
+  /** 사이즈 가이드(글). 구매 페이지 SIZE GUIDE 칸에 나간다. */
+  sizeGuide: string;
+  /** 배송 · 교환 · 반품 안내(글). 구매 페이지 DELIVERY GUIDE 칸에 나간다. */
+  deliveryGuide: string;
   options: ProductOption[];
   retailPrice: number;
   salePrice: number;

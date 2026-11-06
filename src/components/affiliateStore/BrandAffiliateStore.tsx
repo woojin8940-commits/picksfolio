@@ -155,6 +155,11 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
           taxonomy={taxonomy}
           feeRates={feeRates}
           product={editing === 'new' ? null : editing}
+          defaultDeliveryGuide={
+            [...products]
+              .filter(p => p.deliveryGuide?.trim())
+              .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]?.deliveryGuide || ''
+          }
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
         />
@@ -176,9 +181,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
 
   const toggleSale = async (p: StoreProduct) => {
     setBusyId(p.id);
-    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl } = p;
+    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl } = p;
     const res = await affiliateStoreService.saveProduct(businessUsername, {
-      id, name, category, subcategory, summary, description, imageUrls, detailImageUrls: detailImageUrls || [], options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl,
+      id, name, category, subcategory, summary, description, imageUrls, detailImageUrls: detailImageUrls || [], sizeGuide: sizeGuide || '', deliveryGuide: deliveryGuide || '', options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl,
       status: p.status === 'on_sale' ? 'paused' : 'on_sale',
     });
     setBusyId('');
