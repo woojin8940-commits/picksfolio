@@ -58,6 +58,38 @@ async function compressImage(file: File): Promise<string> {
 const inputCls = 'w-full h-11 px-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500';
 const labelCls = 'block text-[11px] font-black text-slate-500 mb-1';
 
+// 주민등록번호 입력칸: 생년월일 6자리 + 뒷자리 첫 숫자까지(7자리)는 보이고, 나머지 6자리는 * 로 가린다.
+// value 는 숫자만(최대 13자리) 담는다.
+const RRN_VISIBLE = 7;
+const formatRrn = (digits: string) => {
+  const shown = digits.slice(0, RRN_VISIBLE) + '*'.repeat(Math.max(0, digits.length - RRN_VISIBLE));
+  return shown.length > 6 ? `${shown.slice(0, 6)}-${shown.slice(6)}` : shown;
+};
+// 화면 문자열 위치 → 숫자 위치 (6번 자리의 '-' 를 건너뛴다)
+const rrnIndex = (displayIdx: number, hasDash: boolean) => (hasDash && displayIdx > 6 ? displayIdx - 1 : displayIdx);
+
+const RrnInput: React.FC<{ value: string; onChange: (digits: string) => void; className?: string }> = ({ value, onChange, className }) => {
+  const display = formatRrn(value);
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value;
+    // 이전 화면 값과 비교해 바뀐 구간만 찾아서, 실제 숫자에 반영한다(가려진 * 는 원래 숫자를 유지).
+    let p = 0;
+    while (p < display.length && p < next.length && display[p] === next[p]) p++;
+    let s = 0;
+    while (s < display.length - p && s < next.length - p && display[display.length - 1 - s] === next[next.length - 1 - s]) s++;
+    const hasDash = display.length > 6;
+    const inserted = next.slice(p, next.length - s).replace(/\D/g, '');
+    const start = rrnIndex(p, hasDash);
+    const end = Math.max(start, rrnIndex(display.length - s, hasDash));
+    onChange((value.slice(0, start) + inserted + value.slice(end)).slice(0, 13));
+  };
+  return (
+    <input value={display} onChange={handleChange} className={`${className || ''} font-mono tracking-wider`}
+      inputMode="numeric" type="text" autoComplete="off" autoCorrect="off" spellCheck={false} data-lpignore="true" data-1p-ignore
+      placeholder="예: 900101-1******" maxLength={14} />
+  );
+};
+
 // ─────────────────────────── 정산 정보 폼 ───────────────────────────
 
 const InfluencerAccountForm: React.FC<{ banks: string[]; current: InfluencerPayoutAccount | null; onSaved: () => void; onCancel?: () => void }> = ({ banks, current, onSaved, onCancel }) => {
@@ -91,8 +123,7 @@ const InfluencerAccountForm: React.FC<{ banks: string[]; current: InfluencerPayo
         <label><span className={labelCls}>실명</span><input value={form.legalName} onChange={set('legalName')} className={inputCls} maxLength={30} autoComplete="name" /></label>
         <label>
           <span className={labelCls}>주민등록번호{current ? ` (등록됨: ${current.rrnMasked} · 바꿀 때만 입력)` : ''}</span>
-          <input value={form.rrn} onChange={e => setForm(f => ({ ...f, rrn: e.target.value.replace(/[^\d-]/g, '').slice(0, 14) }))} className={inputCls}
-            inputMode="numeric" type="password" autoComplete="off" placeholder="13자리 숫자" />
+          <RrnInput value={form.rrn} onChange={rrn => setForm(f => ({ ...f, rrn }))} className={inputCls} />
         </label>
         <label>
           <span className={labelCls}>은행</span>
