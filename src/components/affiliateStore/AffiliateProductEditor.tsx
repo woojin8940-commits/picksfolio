@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowUp, ImagePlus, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Crop, ImagePlus, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { apiService } from '../../services/apiService';
+import ImageCropper from '../ImageCropper';
 import {
   affiliateStoreService,
   won,
@@ -29,6 +30,14 @@ interface Props {
 
 const MAX_IMAGES = 10;
 const MAX_DETAIL_IMAGES = 20;
+
+/**
+ * 상품 이미지는 목록 · 상세 · 구매 화면 어디서나 정사각형으로 잘려 보인다.
+ * 그래서 올리기 전에 브랜드가 정사각형으로 노출될 영역을 직접 고르게 한다.
+ * 여러 장을 한 번에 고르면 한 장씩 차례로 영역을 고른다.
+ * replaceIndex 가 있으면 이미 올린 이미지의 노출 영역을 다시 고르는 것이다.
+ */
+type CropJob = { src: string; name: string; revoke: boolean; replaceIndex?: number };
 
 const toInput = (p: StoreProduct | null): ProductInput => ({
   id: p?.id,
@@ -100,7 +109,8 @@ const STATUS_CHOICES: { value: ProductStatus; label: string; desc: string }[] = 
 const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, feeRates, product, onClose, onSaved }) => {
   const [form, setForm] = useState<ProductInput>(() => toInput(product));
   const [useOptions, setUseOptions] = useState((product?.options?.length || 0) > 0);
-  const [uploading, setUploading] = useState(false);
+  const [uploadCount, setUploadCount] = useState(0);
+  const uploading = uploadCount > 0;
   const [detailUploading, setDetailUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -122,25 +132,58 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
   const estimate = form.salePrice - commissionAmount - pgFee - platformFee;
   const totalStock = useOptions ? form.options.reduce((s, o) => s + (Number(o.stock) || 0), 0) : form.stock;
 
-  const uploadFiles = async (files: FileList | null) => {
+  const [cropQueue, setCropQueue] = useState<CropJob[]>([]);
+  const cropJob = cropQueue[0] || null;
+
+  const uploadFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setError('');
-    const room = MAX_IMAGES - form.imageUrls.length;
-    const picked = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, room);
-    if (picked.length === 0) return;
-    setUploading(true);
-    const urls: string[] = [];
-    for (const f of picked) {
-      const url = await apiService.uploadImage(businessUsername, f, f.name);
-      if (url) urls.push(url);
-    }
-    setUploading(false);
-    if (urls.length < picked.length) setError('일부 이미지를 올리지 못했습니다. 5MB 이하 이미지로 다시 시도해 주세요.');
-    setForm(f => ({ ...f, imageUrls: [...f.imageUrls, ...urls].slice(0, MAX_IMAGES) }));
+    const room = MAX_IMAGES - form.imageUrls.length - cropQueue.filter(j => j.replaceIndex === undefined).length;
+    const picked = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, Math.max(0, room));
     if (fileRef.current) fileRef.current.value = '';
+    if (picked.length === 0) return;
+    setCropQueue(q => [...q, ...picked.map(f => ({ src: URL.createObjectURL(f), name: f.name, revoke: true }))]);
   };
 
-  /** 상세페이지 이미지. 고른 순서대로 아래에 이어 붙는다. */
+  const recropImage = (i: number) => {
+    const url = form.imageUrls[i];
+    if (!url) return;
+    setError('');
+    setCropQueue(q => [...q, { src: url, name: `product-${i + 1}.webp`, revoke: false, replaceIndex: i }]);
+  };
+
+  const finishCropJob = () => {
+    setCropQueue(q => {
+      const [done, ...rest] = q;
+      if (done?.revoke) URL.revokeObjectURL(done.src);
+      return rest;
+    });
+  };
+
+  const handleCropConfirm = async (blob: Blob) => {
+    const job = cropJob;
+    if (!job) return;
+    finishCropJob();
+    setUploadCount(n => n + 1);
+    const base = job.name.replace(/\.[^.]+$/, '') || 'product';
+    const ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+    const url = await apiService.uploadImage(businessUsername, blob, `${base}.${ext}`);
+    setUploadCount(n => n - 1);
+    if (!url) {
+      setError('이미지를 올리지 못했습니다. 5MB 이하 이미지로 다시 시도해 주세요.');
+      return;
+    }
+    setForm(f => {
+      if (job.replaceIndex !== undefined && f.imageUrls[job.replaceIndex] === job.src) {
+        const next = [...f.imageUrls];
+        next[job.replaceIndex] = url;
+        return { ...f, imageUrls: next };
+      }
+      if (job.replaceIndex !== undefined) return f;
+      return { ...f, imageUrls: [...f.imageUrls, url].slice(0, MAX_IMAGES) };
+    });
+  };
+
   const uploadDetailFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setError('');
@@ -239,7 +282,11 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         </Row>
       </Section>
 
-      <Section title="상품 이미지" desc={`첫 번째 이미지가 대표 이미지입니다. 최대 ${MAX_IMAGES}장까지 올릴 수 있어요.`}>
+      {cropJob && (
+        <ImageCropper key={`${cropJob.src}-${cropJob.replaceIndex ?? "new"}`} src={cropJob.src} onCrop={handleCropConfirm} onCancel={finishCropJob} aspectRatio={1} />
+      )}
+
+      <Section title="상품 이미지" desc={`첫 번째 이미지가 대표 이미지입니다. 이미지를 고르면 정사각형으로 노출될 영역을 직접 선택할 수 있어요. 최대 ${MAX_IMAGES}장까지 올릴 수 있어요.`}>
         <div className="grid grid-cols-3 md:grid-cols-5 gap-2.5">
           {form.imageUrls.map((u, i) => (
             <div key={u + i} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-50 group">
@@ -253,8 +300,11 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
               >
                 <X className="w-3.5 h-3.5" />
               </button>
-              <div className="absolute bottom-1.5 inset-x-1.5 flex justify-between opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-1.5 inset-x-1.5 flex justify-between md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                 <button type="button" onClick={() => moveImage(i, -1)} className="w-6 h-6 rounded bg-white/90 text-xs font-black">‹</button>
+                <button type="button" onClick={() => recropImage(i)} className="h-6 px-1.5 rounded bg-white/90 text-[10px] font-black flex items-center gap-0.5" aria-label="노출 영역 선택">
+                  <Crop className="w-3 h-3" />영역
+                </button>
                 <button type="button" onClick={() => moveImage(i, 1)} className="w-6 h-6 rounded bg-white/90 text-xs font-black">›</button>
               </div>
             </div>
