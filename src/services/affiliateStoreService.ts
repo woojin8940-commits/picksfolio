@@ -123,7 +123,36 @@ export interface StoreBrand {
 
 export interface BrandInfo { username: string; brandName: string; channelUrl: string; categories: string[] }
 
-export interface ProductQuery { category?: string; sub?: string; q?: string; brand?: string; page?: number }
+export interface ProductQuery { category?: string; sub?: string; q?: string; brand?: string }
+
+/** 목록 커서(최신순). 서버 응답의 nextCursor 를 그대로 다음 요청에 넘긴다. */
+export interface ListCursor { cursorAt: string; cursorId: string }
+
+const withCursor = (p: URLSearchParams, cursor?: ListCursor | null) => {
+  if (cursor) {
+    p.set('cursorAt', cursor.cursorAt);
+    p.set('cursorId', cursor.cursorId);
+  }
+  return p;
+};
+
+export interface BrandCounts {
+  productTotal: number;
+  onSaleTotal: number;
+  requestTotal: number;
+  pendingRequestCount: number;
+  opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
+}
+
+export interface BrandOpsSummary {
+  orderCounts: { new: number; preparing: number; shipped: number; delivered: number; all: number };
+  claimCounts: { all: number; cancel: number; return: number; action: number };
+  opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
+  settlement: { payment: number; commission: number; pgFee: number; platformFee: number; amount: number; confirmedAmount: number };
+}
+
+export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all';
+export type BrandClaimFilter = 'all' | 'cancel' | 'return' | 'action';
 
 export interface StoreProduct {
   id: string;
@@ -328,14 +357,27 @@ const CREATOR_URL = '/api/creator-application';
 
 export const affiliateStoreService = {
   // 브랜드
-  getBrand(account: string, page = 1) {
-    return call<{ application: StoreApplication | null; products: StoreProduct[]; requests: StoreRequest[]; productPage: number; productHasMore: boolean; productTotal: number; onSaleTotal: number; requestTotal: number; pendingRequestCount: number; opsCounts: { newOrders: number; claimsNeedAction: number; unread: number }; categories: string[]; taxonomy: CategoryNode[]; feeRates?: FeeRates }>(
-      'GET', `${URL_BASE}?scope=brand&page=${page}`, undefined, { account },
-    );
+  /** 브랜드 첫 화면(커서 없음: 신청서 · 숫자 · 상품 첫 페이지) 또는 상품 "더 보기"(커서: 상품만). */
+  getBrand(account: string, cursor?: ListCursor | null) {
+    const p = withCursor(new URLSearchParams({ scope: 'brand' }), cursor);
+    return call<Partial<BrandCounts> & {
+      application?: StoreApplication | null;
+      products: StoreProduct[];
+      productHasMore: boolean;
+      productNextCursor: ListCursor | null;
+      categories?: string[];
+      taxonomy?: CategoryNode[];
+      feeRates?: FeeRates;
+    }>('GET', `${URL_BASE}?${p.toString()}`, undefined, { account });
   },
-  getBrandRequests(account: string, page = 1) {
-    return call<{ requests: StoreRequest[]; requestPage: number; requestHasMore: boolean; requestTotal: number; pendingRequestCount: number }>(
-      'GET', `${URL_BASE}?scope=brand&section=requests&page=${page}`, undefined, { account },
+  /** 상단 숫자 · 탭 배지만 새로 받는다(상품 삭제 · 판매 상태 변경 뒤). */
+  getBrandCounts(account: string) {
+    return call<BrandCounts>('GET', `${URL_BASE}?scope=brand&section=counts`, undefined, { account });
+  },
+  getBrandRequests(account: string, cursor?: ListCursor | null) {
+    const p = withCursor(new URLSearchParams({ scope: 'brand', section: 'requests' }), cursor);
+    return call<{ requests: StoreRequest[]; requestHasMore: boolean; requestNextCursor: ListCursor | null; requestTotal?: number; pendingRequestCount?: number }>(
+      'GET', `${URL_BASE}?${p.toString()}`, undefined, { account },
     );
   },
   apply(account: string, input: ApplicationInput) {
@@ -356,24 +398,29 @@ export const affiliateStoreService = {
   },
 
   // 브랜드 주문 운영(/api/affiliate-store-ops)
-  brandOps(account: string, view: 'orders' | 'claims' = 'orders', cursor?: { cursorAt: string; cursorId: string }, orderId?: string) {
-    const p = new URLSearchParams({ scope: 'brand', view });
-    if (cursor) {
-      p.set('cursorAt', cursor.cursorAt);
-      p.set('cursorId', cursor.cursorId);
-    }
-    if (orderId) p.set('orderId', orderId);
+  /**
+   * 브랜드 주문 운영(/api/affiliate-store-ops). 필터는 서버에서 거른다.
+   * summary: false 면 숫자 · 정산 합계 · 알림 없이 목록만 받는다(필터만 바꿀 때). 커서가 있으면 항상 목록만.
+   */
+  brandOps(account: string, opt: {
+    view?: 'orders' | 'claims';
+    filter?: BrandOrderFilter;
+    claim?: BrandClaimFilter;
+    cursor?: ListCursor | null;
+    orderId?: string;
+    summary?: boolean;
+  } = {}) {
+    const p = withCursor(new URLSearchParams({ scope: 'brand', view: opt.view || 'orders' }), opt.cursor);
+    if (opt.filter) p.set('filter', opt.filter);
+    if (opt.claim) p.set('claim', opt.claim);
+    if (opt.orderId) p.set('orderId', opt.orderId);
+    if (opt.summary === false) p.set('summary', '0');
     return call<{
       orders: StoreOrder[];
       notifications?: StoreNotification[];
       hasMore: boolean;
-      nextCursor: { cursorAt: string; cursorId: string } | null;
-      summary?: {
-        orderCounts: { new: number; preparing: number; shipped: number; delivered: number; all: number };
-        claimCounts: { all: number; cancel: number; return: number; action: number };
-        opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
-        settlement: { payment: number; commission: number; pgFee: number; platformFee: number; amount: number; confirmedAmount: number };
-      };
+      nextCursor: ListCursor | null;
+      summary?: BrandOpsSummary;
     }>('GET', `${OPS}?${p.toString()}`, undefined, { account });
   },
   orderAction(account: string, action: string, payload: Record<string, unknown>) {
@@ -394,20 +441,17 @@ export const affiliateStoreService = {
       'GET', `${URL_BASE}?scope=my-affiliate`,
     );
   },
-  myAffiliateOrders(cursor?: { cursorAt: string; cursorId: string }) {
-    const p = new URLSearchParams({ scope: 'my-affiliate-orders' });
-    if (cursor) {
-      p.set('cursorAt', cursor.cursorAt);
-      p.set('cursorId', cursor.cursorId);
-    }
-    return call<{ orders: StoreOrder[]; hasMore: boolean; nextCursor: { cursorAt: string; cursorId: string } | null }>(
+  myAffiliateOrders(cursor?: ListCursor | null) {
+    const p = withCursor(new URLSearchParams({ scope: 'my-affiliate-orders' }), cursor);
+    return call<{ orders: StoreOrder[]; hasMore: boolean; nextCursor: ListCursor | null }>(
       'GET', `${URL_BASE}?${p.toString()}`,
     );
   },
-  listProducts(query: ProductQuery = {}) {
-    const p = new URLSearchParams({ scope: 'creator' });
+  /** 상품 둘러보기. 첫 페이지(커서 없음)에만 total 이 온다. */
+  listProducts(query: ProductQuery = {}, cursor?: ListCursor | null) {
+    const p = withCursor(new URLSearchParams({ scope: 'creator' }), cursor);
     for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== '' && v !== null) p.set(k, String(v));
-    return call<{ products: StoreProduct[]; total: number; page: number; hasMore: boolean; brand: BrandInfo | null; taxonomy: CategoryNode[] }>(
+    return call<{ products: StoreProduct[]; total?: number; hasMore: boolean; nextCursor: ListCursor | null; brand: BrandInfo | null; taxonomy: CategoryNode[] }>(
       'GET', `${URL_BASE}?${p.toString()}`,
     );
   },
@@ -420,11 +464,15 @@ export const affiliateStoreService = {
     if (q) p.set('q', q);
     return call<{ brands: StoreBrand[]; total: number; page: number; hasMore: boolean }>('GET', `${URL_BASE}?${p.toString()}`);
   },
-  myRequestStatuses() {
-    return call<{ requests: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>[] }>('GET', `${URL_BASE}?scope=my-request-status`);
+  /** "내 신청" 전체 건수 + 지정한 상품(최대 100개)의 신청 상태. */
+  myRequestStatuses(productIds: string[] = []) {
+    const p = new URLSearchParams({ scope: 'my-request-status' });
+    if (productIds.length) p.set('ids', productIds.slice(0, 100).join(','));
+    return call<{ total: number; requests: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>[] }>('GET', `${URL_BASE}?${p.toString()}`);
   },
-  myRequests(page = 1) {
-    return call<{ requests: StoreRequest[]; page: number; total: number; hasMore: boolean }>('GET', `${URL_BASE}?scope=my-requests&page=${page}`);
+  myRequests(cursor?: ListCursor | null) {
+    const p = withCursor(new URLSearchParams({ scope: 'my-requests' }), cursor);
+    return call<{ requests: StoreRequest[]; hasMore: boolean; nextCursor: ListCursor | null }>('GET', `${URL_BASE}?${p.toString()}`);
   },
   request(productId: string, message: string, channelUrl: string) {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'request', productId, message, channelUrl });

@@ -9,7 +9,9 @@ import {
   MANAGER_STATUS_STYLE,
   sellerInfoMissing,
   type CategoryNode,
+  type BrandCounts,
   type FeeRates,
+  type ListCursor,
   type StoreApplication,
   type StoreProduct,
   type StoreRequest,
@@ -27,6 +29,9 @@ import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
  *   신청서 없음 · 반려 → 입점 신청서
  *   검토 중            → 대기 안내
  *   승인               → 상품 관리 · 판매 신청 관리
+ *
+ * 상품 · 받은 신청은 30개씩(커서) 받는다. 상품 삭제 · 판매 상태 변경 · 수정 · 신청 선정/반려는
+ * 바뀐 한 건만 고치고 숫자만 새로 받는다(펼쳐 둔 목록은 그대로). "더 보기"가 실패하면 목록 아래에만 오류가 나온다.
  */
 
 interface Props {
@@ -60,14 +65,16 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [onSaleTotal, setOnSaleTotal] = useState(0);
   const [requestTotal, setRequestTotal] = useState(0);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
-  const [productPage, setProductPage] = useState(1);
+  const [productCursor, setProductCursor] = useState<ListCursor | null>(null);
   const [productHasMore, setProductHasMore] = useState(false);
   const [productsMoreLoading, setProductsMoreLoading] = useState(false);
-  const [requestsPage, setRequestsPage] = useState(1);
+  const [productsMoreError, setProductsMoreError] = useState('');
+  const [requestsCursor, setRequestsCursor] = useState<ListCursor | null>(null);
   const [requestsHasMore, setRequestsHasMore] = useState(false);
   const [requestsLoaded, setRequestsLoaded] = useState(false);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [requestsError, setRequestsError] = useState('');
+  const [requestsMoreError, setRequestsMoreError] = useState('');
   const [categories, setCategories] = useState<string[]>([]);
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
   const [feeRates, setFeeRates] = useState<FeeRates | null>(null);
@@ -78,60 +85,101 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [reapply, setReapply] = useState(false);
   const [busyId, setBusyId] = useState('');
 
-  const load = useCallback(async (page = 1, append = false) => {
+  const applyCounts = useCallback((c: Partial<BrandCounts>) => {
+    if (c.productTotal !== undefined) setProductTotal(c.productTotal);
+    if (c.onSaleTotal !== undefined) setOnSaleTotal(c.onSaleTotal);
+    if (c.requestTotal !== undefined) setRequestTotal(c.requestTotal);
+    if (c.pendingRequestCount !== undefined) setPendingRequestCount(c.pendingRequestCount);
+    if (c.opsCounts) setOpsCounts(c.opsCounts);
+  }, []);
+
+  /** 첫 화면: 신청서 · 숫자 · 상품 첫 페이지. */
+  const load = useCallback(async () => {
     setError('');
-    const res = await affiliateStoreService.getBrand(businessUsername, page);
+    const res = await affiliateStoreService.getBrand(businessUsername);
     if (res.error) setError(res.error);
     else {
-      setApplication(res.application);
-      setProducts(prev => append ? [...prev, ...(res.products || [])] : (res.products || []));
-      setProductPage(page);
-      setProductHasMore(res.productHasMore);
-      setProductTotal(res.productTotal);
-      setOnSaleTotal(res.onSaleTotal);
-      setRequestTotal(res.requestTotal);
-      setPendingRequestCount(res.pendingRequestCount);
-      setOpsCounts(res.opsCounts);
+      setApplication(res.application ?? null);
+      setProducts(res.products || []);
+      setProductCursor(res.productNextCursor || null);
+      setProductHasMore(!!res.productHasMore);
+      setProductsMoreError('');
+      applyCounts(res);
       setCategories(res.categories || []);
       setTaxonomy(res.taxonomy || []);
       setFeeRates(res.feeRates || null);
     }
     setLoading(false);
-  }, [businessUsername]);
+  }, [businessUsername, applyCounts]);
 
   useEffect(() => { load(); }, [load]);
 
-  const loadRequests = useCallback(async (page = 1, append = false) => {
+  /** 숫자만 새로 받는다(실패해도 목록은 그대로 둔다). */
+  const refreshCounts = useCallback(async () => {
+    const res = await affiliateStoreService.getBrandCounts(businessUsername);
+    if (!res.error) applyCounts(res);
+  }, [businessUsername, applyCounts]);
+
+  const loadRequests = useCallback(async (cursor?: ListCursor | null) => {
+    const append = !!cursor;
     setRequestsLoading(true);
-    setRequestsError('');
-    const res = await affiliateStoreService.getBrandRequests(businessUsername, page);
+    if (append) setRequestsMoreError(''); else setRequestsError('');
+    const res = await affiliateStoreService.getBrandRequests(businessUsername, cursor);
     setRequestsLoading(false);
-    if (res.error) { setRequestsError(res.error); return; }
-    setRequests(prev => append ? [...prev, ...(res.requests || [])] : (res.requests || []));
-    setRequestsPage(page);
-    setRequestsHasMore(res.requestHasMore);
-    setRequestTotal(res.requestTotal);
-    setPendingRequestCount(res.pendingRequestCount);
+    if (res.error) {
+      if (append) setRequestsMoreError(res.error); else setRequestsError(res.error);
+      return;
+    }
+    setRequests(prev => {
+      if (!append) return res.requests || [];
+      const seen = new Set(prev.map(r => r.id));
+      return [...prev, ...(res.requests || []).filter(r => !seen.has(r.id))];
+    });
+    setRequestsCursor(res.requestNextCursor || null);
+    setRequestsHasMore(!!res.requestHasMore);
+    applyCounts(res);
     setRequestsLoaded(true);
-  }, [businessUsername]);
+  }, [businessUsername, applyCounts]);
 
   useEffect(() => {
     setRequests([]);
     setRequestsLoaded(false);
     setRequestsError('');
+    setRequestsMoreError('');
   }, [businessUsername]);
 
   useEffect(() => {
-    if (tab === 'requests' && !requestsLoaded && !requestsLoading && !requestsError) void loadRequests(1);
+    if (tab === 'requests' && !requestsLoaded && !requestsLoading && !requestsError) void loadRequests();
   }, [tab, requestsLoaded, requestsLoading, requestsError, loadRequests]);
 
+  /** 상품 "더 보기": 목록만 받아 뒤에 붙인다. 실패하면 목록은 두고 아래에 오류만 보여 준다. */
   const loadMoreProducts = async () => {
+    if (!productCursor) return;
     setProductsMoreLoading(true);
-    await load(productPage + 1, true);
+    setProductsMoreError('');
+    const res = await affiliateStoreService.getBrand(businessUsername, productCursor);
     setProductsMoreLoading(false);
+    if (res.error) { setProductsMoreError(res.error); return; }
+    setProducts(prev => {
+      const seen = new Set(prev.map(p => p.id));
+      return [...prev, ...(res.products || []).filter(p => !seen.has(p.id))];
+    });
+    setProductCursor(res.productNextCursor || null);
+    setProductHasMore(!!res.productHasMore);
   };
 
-  const loadMoreRequests = () => { void loadRequests(requestsPage + 1, true); };
+  const loadMoreRequests = () => { void loadRequests(requestsCursor); };
+
+  /** 저장된 상품 한 건을 목록에 반영한다(신청 수는 저장 응답에 없어 기존 값을 둔다). */
+  const upsertProduct = (saved: StoreProduct) => {
+    setProducts(prev => {
+      const i = prev.findIndex(p => p.id === saved.id);
+      if (i < 0) return [saved, ...prev];
+      const next = [...prev];
+      next[i] = { ...saved, requestCounts: prev[i].requestCounts };
+      return next;
+    });
+  };
 
   if (loading) {
     return (
@@ -213,7 +261,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]?.deliveryGuide || ''
           }
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load(); }}
+          onSaved={saved => { setEditing(null); upsertProduct(saved); void refreshCounts(); }}
         />
       </main>
     );
@@ -230,7 +278,10 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     const res = await affiliateStoreService.deleteProduct(businessUsername, p.id);
     setBusyId('');
     if (res.error) window.alert(res.error);
-    else await load();
+    else {
+      setProducts(prev => prev.filter(x => x.id !== p.id));
+      void refreshCounts();
+    }
   };
 
   const toggleSale = async (p: StoreProduct) => {
@@ -242,7 +293,10 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     });
     setBusyId('');
     if (res.error) window.alert(res.error);
-    else await load();
+    else {
+      upsertProduct(res.product);
+      void refreshCounts();
+    }
   };
 
   const review = async (r: StoreRequest, decision: 'approve' | 'reject') => {
@@ -258,7 +312,14 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     const res = await affiliateStoreService.reviewRequest(businessUsername, r.id, decision, note);
     setBusyId('');
     if (res.error) window.alert(res.error);
-    else await loadRequests(1);
+    else {
+      // 응답에는 상품 이름 · 인스타 정보가 없어 기존 카드 값에 상태만 덮는다.
+      setRequests(prev => prev.map(x => x.id === r.id ? {
+        ...x, status: res.request.status, brandNote: res.request.brandNote, managerStatus: res.request.managerStatus,
+        linkCode: res.request.linkCode, updatedAt: res.request.updatedAt,
+      } : x));
+      void refreshCounts();
+    }
   };
 
   return (
@@ -384,10 +445,11 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       )}
 
       {tab === 'products' && productHasMore && (
-        <div className="flex justify-center mt-5">
+        <div className="flex flex-col items-center gap-2 mt-5">
+          {productsMoreError && <p className="text-xs font-bold text-red-500">{productsMoreError}</p>}
           <button disabled={productsMoreLoading} onClick={loadMoreProducts} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
             {productsMoreLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            상품 더 보기 ({products.length}/{productTotal})
+            {productsMoreError ? '다시 시도' : `상품 더 보기 (${products.length}/${productTotal})`}
           </button>
         </div>
       )}
@@ -410,7 +472,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : requestsError ? (
           <div className="py-6 text-center">
             <p className="text-sm font-bold text-red-500 mb-3">{requestsError}</p>
-            <button onClick={() => { void loadRequests(1); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+            <button onClick={() => { void loadRequests(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
           </div>
         ) : requests.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
@@ -459,10 +521,11 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
             ))}
             </div>
             {requestsHasMore && (
-              <div className="flex justify-center mt-5">
+              <div className="flex flex-col items-center gap-2 mt-5">
+                {requestsMoreError && <p className="text-xs font-bold text-red-500">{requestsMoreError}</p>}
                 <button disabled={requestsLoading} onClick={loadMoreRequests} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
                   {requestsLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  신청 더 보기 ({requests.length}/{requestTotal})
+                  {requestsMoreError ? '다시 시도' : `신청 더 보기 (${requests.length}/${requestTotal})`}
                 </button>
               </div>
             )}

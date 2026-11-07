@@ -7,7 +7,8 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:affiliate": "node --import tsx --import ./tests/affiliate-e2e/register.mjs --test tests/affiliate-e2e/*.test.mts"
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.8",
@@ -29,6 +30,7 @@
     "@picks/netlify-database": "npm:@netlify/database@1.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.16",
     "@tailwindcss/postcss": "^4.2.1",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",

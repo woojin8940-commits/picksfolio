@@ -32,9 +32,12 @@ import {
  *
  *   GET  ?as=brand|influencer                    내 정산 정보(가린 값) · 지급 가능 금액 등 · 신청 내역
  *   GET  ?as=brand&scope=bankbook                 브랜드: 내가 올린 통장 사본 이미지
+ *   GET  ?as=…&scope=available-details&kind=orders|deductions   신청에 들어갈 주문 · 차감 내역(40건씩 커서)
+ *   GET  ?as=…&scope=request-details&id=&kind=items|deductions  내 지급 신청의 포함 주문 · 차감 내역(40건씩)
  *   POST { as, action: save_account | request | cancel, ... }
  *
  *   GET  ?scope=admin[&partyType&status&scheduledDate]   운영자: 지급 신청 목록 · 설정
+ *   GET  ?scope=admin-request-details&id=&kind=items|deductions 운영자: 지급 신청의 포함 주문 · 차감 내역(40건씩)
  *   GET  ?scope=admin-transfer-csv&scheduledDate=YYYY-MM-DD 이체용 CSV(계좌번호 전체 · 열람 기록)
  *   GET  ?scope=admin-withholding-csv&month=YYYY-MM          원천징수 신고용 CSV(주민등록번호 · 열람 기록)
  *   GET  ?scope=admin-bankbook&party=<브랜드>               통장 사본 보기(열람 기록)

@@ -1,4 +1,11 @@
-import { brandSettlement } from "./affiliate-store-orders.mts";
+import { brandSettlement, brandSettlementSql } from "./affiliate-store-orders.mts";
+
+const BRAND_SQL = brandSettlementSql("o");
+const INFLUENCER_ELIGIBLE_SQL = "(o.commission_status = 'confirmed' AND o.commission_amount > 0)";
+/** 지급 신청에 넣을 수 있는 주문 조건(SQL). 금액 계산은 brandSettlementSql 한 곳에서 한다. */
+const eligibleSql = (t: PartyType) => (t === "brand" ? BRAND_SQL.eligible : INFLUENCER_ELIGIBLE_SQL);
+/** 지급 신청에 들어갈 주문 한 건의 금액(SQL). JS 의 entitled() 와 같은 값이다. */
+const entitledSql = (t: PartyType) => (t === "brand" ? BRAND_SQL.entitled : "GREATEST(0, o.commission_amount)::numeric");
 
 /**
  * 어필리에이트 스토어 정산(지급 신청) 공통 로직.
@@ -74,6 +81,16 @@ const PENDING_STATUSES = ["paid", "preparing", "shipped", "delivered", "return_r
 
 // ─────────────────────────── 트랜잭션 ───────────────────────────
 
+/** SQL 조각을 끼워 넣어야 하는 조회(태그 템플릿으로는 식을 끼울 수 없다). */
+export async function queryRows(db: any, text: string, params: unknown[]): Promise<any[]> {
+  const client = await db.pool.connect();
+  try {
+    return (await client.query(text, params)).rows;
+  } finally {
+    client.release();
+  }
+}
+
 export async function withTx<T>(db: any, fn: (client: any) => Promise<T>): Promise<T> {
   const client = await db.pool.connect();
   try {
@@ -141,9 +158,7 @@ export interface AvailableSnapshot {
 /** 지금 신청하면 들어갈 주문 · 차감 내역과 금액. syncDeductions 뒤에 부른다. */
 export async function availableSnapshot(client: any, t: PartyType, party: string): Promise<AvailableSnapshot> {
   const col = partyColumn(t);
-  const where = t === "brand"
-    ? `(o.status = 'confirmed' OR (o.status = 'cancelled' AND o.refund_amount > 0 AND o.refund_amount < o.total_amount))`
-    : `o.commission_status = 'confirmed' AND o.commission_amount > 0`;
+  const where = eligibleSql(t);
   const orderRows = (await client.query(
     `SELECT o.* FROM affiliate_store_orders o
       WHERE o.${col} = $1 AND ${where}
@@ -176,23 +191,10 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
     await lockParty(client, t, party);
     await syncDeductions(client, t, party);
     const col = partyColumn(t);
-    const eligible = t === "brand"
-      ? "(o.status = 'confirmed' OR (o.status = 'cancelled' AND o.refund_amount > 0 AND o.refund_amount < o.total_amount))"
-      : "(o.commission_status = 'confirmed' AND o.commission_amount > 0)";
-    const brandAmount = `CASE WHEN o.status = 'cancelled' THEN
-        (COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision) - COALESCE(o.refund_amount, 0)::double precision)
-        - CASE WHEN o.commission_status = 'cancelled' THEN 0 ELSE COALESCE(o.commission_amount, 0)::double precision END
-        - FLOOR((COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision) - COALESCE(o.refund_amount, 0)::double precision) * COALESCE(o.pg_rate, 0)::double precision / 100.0::double precision)
-        - FLOOR(GREATEST(0.0::double precision, o.unit_price::double precision * o.quantity::double precision - COALESCE(o.refund_amount, 0)::double precision) * COALESCE(o.platform_rate, 0)::double precision / 100.0::double precision)
-      ELSE
-        COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision)
-        - COALESCE(o.commission_amount, 0)::double precision
-        - FLOOR(COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision) * COALESCE(o.pg_rate, 0)::double precision / 100.0::double precision)
-        - FLOOR(o.unit_price::double precision * o.quantity::double precision * COALESCE(o.platform_rate, 0)::double precision / 100.0::double precision)
-      END`;
-    const availableAmount = t === "brand" ? `GREATEST(0, FLOOR(${brandAmount}))` : "GREATEST(0, o.commission_amount)::numeric";
+    const eligible = eligibleSql(t);
+    const availableAmount = entitledSql(t);
     const pendingCondition = `o.status = ANY($2::text[])${t === "influencer" ? " AND o.commission_status = 'pending'" : ""}`;
-    const pendingAmount = t === "brand" ? `GREATEST(0, ${brandAmount})` : "COALESCE(o.commission_amount, 0)::numeric";
+    const pendingAmount = t === "brand" ? `GREATEST(0::numeric, ${BRAND_SQL.amount})` : "COALESCE(o.commission_amount, 0)::numeric";
     const orderAgg = (await client.query(
       `SELECT COUNT(*) FILTER (WHERE available_amount > 0)::int AS available_count,
               COALESCE(SUM(available_amount) FILTER (WHERE available_amount > 0), 0)::numeric AS available_amount,
@@ -262,24 +264,16 @@ export async function availableDetails(db: any, t: PartyType, party: string, kin
   }
   const hasCursor = !!cursorAt && Number.isFinite(Date.parse(cursorAt)) && !!cursorId;
   const cursor = hasCursor ? new Date(cursorAt).toISOString() : "1970-01-01T00:00:00.000Z";
-  const rows = t === "brand" ? await db.sql`
-    SELECT o.* FROM affiliate_store_orders o
-     WHERE o.business_username = ${party}
-       AND (o.status = 'confirmed' OR (o.status = 'cancelled' AND o.refund_amount > 0 AND o.refund_amount < o.total_amount))
-       AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = ${t} AND i.order_id = o.id AND i.active)
-       AND (NOT ${hasCursor} OR COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) > ${cursor}::timestamptz
-         OR (COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) = ${cursor}::timestamptz AND o.id > ${cursorId}))
-     ORDER BY COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at), o.id
-     LIMIT ${limit + 1}
-  ` : await db.sql`
-    SELECT o.* FROM affiliate_store_orders o
-     WHERE o.influencer_username = ${party} AND o.commission_status = 'confirmed' AND o.commission_amount > 0
-       AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = ${t} AND i.order_id = o.id AND i.active)
-       AND (NOT ${hasCursor} OR COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) > ${cursor}::timestamptz
-         OR (COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) = ${cursor}::timestamptz AND o.id > ${cursorId}))
-     ORDER BY COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at), o.id
-     LIMIT ${limit + 1}
-  ` as any[];
+  const col = partyColumn(t);
+  const orderKey = "COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at)";
+  const rows = await queryRows(db,
+    `SELECT o.* FROM affiliate_store_orders o
+      WHERE o.${col} = $1 AND ${eligibleSql(t)} AND ${entitledSql(t)} > 0
+        AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = $2 AND i.order_id = o.id AND i.active)
+        AND (NOT $3::boolean OR ${orderKey} > $4::timestamptz OR (${orderKey} = $4::timestamptz AND o.id > $5))
+      ORDER BY ${orderKey}, o.id
+      LIMIT $6`,
+    [party, t, hasCursor, cursor, cursorId, limit + 1]);
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {

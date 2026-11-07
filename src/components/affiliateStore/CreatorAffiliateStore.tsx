@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Instagram, Loader2, Search, ShoppingBag, Store, X } from 'lucide-react';
 import {
   affiliateStoreService,
@@ -8,6 +8,7 @@ import {
   REQUEST_STATUS_LABEL,
   type BrandInfo,
   type CategoryNode,
+  type ListCursor,
   type StoreBrand,
   type StoreProduct,
   type StoreRequest,
@@ -76,11 +77,11 @@ const Empty: React.FC<{ title: string; desc?: string; icon?: React.ReactNode }> 
   </div>
 );
 
-const MoreButton: React.FC<{ loading: boolean; onClick: () => void }> = ({ loading, onClick }) => (
+const MoreButton: React.FC<{ loading: boolean; onClick: () => void; label?: string }> = ({ loading, onClick, label }) => (
   <div className="flex justify-center mt-6">
     <button onClick={onClick} disabled={loading} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2">
       {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-      더 보기
+      {label || '더 보기'}
     </button>
   </div>
 );
@@ -95,38 +96,52 @@ interface ProductListProps {
   /** 이 브랜드의 상품만 본다(브랜드 페이지). */
   brand?: string;
   onBrandInfo?: (b: BrandInfo | null) => void;
+  /** 새로 불러온 상품들 — 이 상품들의 내 신청 상태만 따로 조회한다. */
+  onProductsLoaded?: (ids: string[]) => void;
 }
 
-const ProductList: React.FC<ProductListProps> = ({ taxonomy, onTaxonomy, requestByProduct, onOpen, brand, onBrandInfo }) => {
+const ProductList: React.FC<ProductListProps> = ({ taxonomy, onTaxonomy, requestByProduct, onOpen, brand, onBrandInfo, onProductsLoaded }) => {
   const [category, setCategory] = useState('');
   const [sub, setSub] = useState('');
   const [query, setQuery] = useState('');
   const q = useDebounced(query.trim());
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  const [cursor, setCursor] = useState<ListCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [moreError, setMoreError] = useState('');
   const seq = useRef(0);
 
-  const load = useCallback(async (nextPage: number) => {
+  /** next 가 없으면 첫 페이지(조건이 바뀌었을 때), 있으면 "더 보기". */
+  const load = useCallback(async (next?: ListCursor | null) => {
     const my = ++seq.current;
+    const append = !!next;
     setLoading(true);
-    const res = await affiliateStoreService.listProducts({ category, sub, q, brand, page: nextPage });
+    if (append) setMoreError(''); else setError('');
+    const res = await affiliateStoreService.listProducts({ category, sub, q, brand }, next);
     if (my !== seq.current) return; // 그사이 조건이 바뀌었다
     setLoading(false);
-    if (res.error) { setError(res.error); return; }
-    setError('');
-    setProducts(prev => (nextPage === 1 ? res.products : [...prev, ...res.products]));
-    setTotal(res.total);
-    setPage(nextPage);
+    if (res.error) {
+      // "더 보기" 실패는 보던 목록을 두고 아래에만 알린다.
+      if (append) setMoreError(res.error); else setError(res.error);
+      return;
+    }
+    setProducts(prev => {
+      if (!append) return res.products;
+      const seen = new Set(prev.map(p => p.id));
+      return [...prev, ...res.products.filter(p => !seen.has(p.id))];
+    });
+    if (res.total !== undefined) setTotal(res.total);
+    setCursor(res.nextCursor || null);
     setHasMore(res.hasMore);
     if (res.taxonomy?.length) onTaxonomy(res.taxonomy);
-    onBrandInfo?.(res.brand);
-  }, [category, sub, q, brand, onTaxonomy, onBrandInfo]);
+    if (!append) onBrandInfo?.(res.brand);
+    onProductsLoaded?.(res.products.map(p => p.id));
+  }, [category, sub, q, brand, onTaxonomy, onBrandInfo, onProductsLoaded]);
 
-  useEffect(() => { load(1); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const subs = taxonomy.find(t => t.name === category)?.subs || [];
 
@@ -205,7 +220,8 @@ const ProductList: React.FC<ProductListProps> = ({ taxonomy, onTaxonomy, request
               );
             })}
           </div>
-          {hasMore && <MoreButton loading={loading} onClick={() => load(page + 1)} />}
+          {moreError && <p className="text-sm font-bold text-red-500 text-center pt-4">{moreError}</p>}
+          {hasMore && <MoreButton loading={loading} label={moreError ? '다시 시도' : undefined} onClick={() => load(cursor)} />}
         </>
       )}
     </>
@@ -723,9 +739,11 @@ const CreatorAffiliateStore: React.FC<{ userName: string }> = ({ userName }) => 
 const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
   const [tab, setTab] = useState<'products' | 'brands' | 'my' | 'mine' | 'payouts'>('products');
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
-  const [requestStatuses, setRequestStatuses] = useState<Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>[]>([]);
+  // 화면에 나온 상품의 내 신청 상태(상품 id → 상태)와 "내 신청" 전체 건수(서버가 센 값).
+  const [requestStatusMap, setRequestStatusMap] = useState<Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>>>(new Map());
+  const [requestTotal, setRequestTotal] = useState(0);
   const [mineRequests, setMineRequests] = useState<StoreRequest[]>([]);
-  const [minePage, setMinePage] = useState(1);
+  const [mineCursor, setMineCursor] = useState<ListCursor | null>(null);
   const [mineHasMore, setMineHasMore] = useState(false);
   const [mineLoaded, setMineLoaded] = useState(false);
   const [mineLoading, setMineLoading] = useState(false);
@@ -771,39 +789,58 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
   }, []);
 
-  const loadRequestStatuses = useCallback(async () => {
-    const res = await affiliateStoreService.myRequestStatuses();
-    if (!res.error) setRequestStatuses(res.requests || []);
+  /** 지정한 상품들의 내 신청 상태 + 전체 건수를 받아 합친다(한 번에 최대 100개씩). */
+  const loadRequestStatuses = useCallback(async (productIds: string[] = []) => {
+    const chunks: string[][] = [];
+    for (let i = 0; i < productIds.length; i += 100) chunks.push(productIds.slice(i, i + 100));
+    if (chunks.length === 0) chunks.push([]);
+    for (const ids of chunks) {
+      const res = await affiliateStoreService.myRequestStatuses(ids);
+      if (res.error) continue;
+      setRequestTotal(res.total);
+      if (ids.length === 0) continue;
+      setRequestStatusMap(prev => {
+        const next = new Map(prev);
+        for (const id of ids) next.delete(id);
+        for (const r of res.requests || []) next.set(r.productId, r);
+        return next;
+      });
+    }
   }, []);
   useEffect(() => {
-    setRequestStatuses([]);
+    setRequestStatusMap(new Map());
+    setRequestTotal(0);
     setMineRequests([]);
     setMineLoaded(false);
     setMineError('');
     void loadRequestStatuses();
   }, [loadRequestStatuses, userName]);
 
-  const loadMineRequests = useCallback(async (page = 1, append = false) => {
+  const loadMineRequests = useCallback(async (cursor?: ListCursor | null) => {
+    const append = !!cursor;
     setMineLoading(true);
     setMineError('');
-    const res = await affiliateStoreService.myRequests(page);
+    const res = await affiliateStoreService.myRequests(cursor);
     setMineLoading(false);
     if (res.error) { setMineError(res.error); return; }
-    setMineRequests(prev => append ? [...prev, ...(res.requests || [])] : (res.requests || []));
-    setMinePage(page);
+    setMineRequests(prev => {
+      if (!append) return res.requests || [];
+      const seen = new Set(prev.map(r => r.id));
+      return [...prev, ...(res.requests || []).filter(r => !seen.has(r.id))];
+    });
+    setMineCursor(res.nextCursor || null);
     setMineHasMore(res.hasMore);
     setMineLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (tab === 'mine' && !mineLoaded && !mineLoading && !mineError) void loadMineRequests(1);
+    if (tab === 'mine' && !mineLoaded && !mineLoading && !mineError) void loadMineRequests();
   }, [tab, mineLoaded, mineLoading, mineError, loadMineRequests]);
 
-  const requestByProduct = useMemo(() => {
-    const m = new Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>>();
-    for (const r of requestStatuses) m.set(r.productId, r);
-    return m;
-  }, [requestStatuses]);
+  const requestByProduct = requestStatusMap;
+  // 상세를 열면(인스타 연동 뒤 돌아온 경우 포함) 그 상품의 신청 상태를 확인한다.
+  const detailId = detail?.id || '';
+  useEffect(() => { if (detailId) void loadRequestStatuses([detailId]); }, [detailId, loadRequestStatuses]);
 
   const openDetail = async (p: StoreProduct) => {
     const seq = ++detailLoadSeq.current;
@@ -831,8 +868,8 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     if (res.error) { setSendError(res.error); return; }
     setApplyOpen(false);
     setApplyNotice('');
-    await loadRequestStatuses();
-    if (mineLoaded) await loadMineRequests(1);
+    await loadRequestStatuses([detail.id]);
+    if (mineLoaded) await loadMineRequests();
   };
   const openApply = () => { setSendError(''); setApplyNotice(''); setApplyOpen(true); };
   const closeApply = () => setApplyOpen(false);
@@ -842,8 +879,9 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     const res = await affiliateStoreService.cancelRequest(r.id);
     if (res.error) window.alert(res.error);
     else {
-      await loadRequestStatuses();
-      await loadMineRequests(1);
+      // 취소한 신청만 목록에서 빼고, 그 상품의 상태와 건수만 새로 받는다.
+      setMineRequests(prev => prev.filter(x => x.id !== r.id));
+      await loadRequestStatuses([r.productId]);
     }
   };
 
@@ -889,7 +927,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
           { key: 'products', label: '상품' },
           { key: 'brands', label: '브랜드' },
           { key: 'my', label: 'MY 어필리에이트' },
-          { key: 'mine', label: `내 신청 ${requestStatuses.length}` },
+          { key: 'mine', label: `내 신청 ${requestTotal.toLocaleString('ko-KR')}` },
           { key: 'payouts', label: '정산' },
         ] as const).map(t => (
           <button key={t.key} onClick={() => switchTab(t.key)} className={`h-9 px-4 rounded-lg text-xs font-black whitespace-nowrap ${tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
@@ -899,7 +937,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
       </div>
 
       {tab === 'products' && (
-        <ProductList taxonomy={taxonomy} onTaxonomy={setTaxonomy} requestByProduct={requestByProduct} onOpen={openDetail} />
+        <ProductList taxonomy={taxonomy} onTaxonomy={setTaxonomy} requestByProduct={requestByProduct} onOpen={openDetail} onProductsLoaded={loadRequestStatuses} />
       )}
 
       {tab === 'brands' && !brandPage && <BrandList onOpen={setBrandPage} />}
@@ -931,6 +969,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
             onOpen={openDetail}
             brand={brandPage.username}
             onBrandInfo={setBrandInfo}
+            onProductsLoaded={loadRequestStatuses}
           />
         </>
       )}
@@ -944,7 +983,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
         ) : mineError && mineRequests.length === 0 ? (
           <div className="py-6 text-center">
             <p className="text-sm font-bold text-red-500 mb-3">{mineError}</p>
-            <button onClick={() => { void loadMineRequests(1); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+            <button onClick={() => { void loadMineRequests(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
           </div>
         ) : mineRequests.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
@@ -976,7 +1015,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
               </div>
             ))}
             {mineError && <p className="text-sm font-bold text-red-500 text-center py-2">{mineError}</p>}
-            {mineHasMore && <MoreButton loading={mineLoading} onClick={() => { void loadMineRequests(minePage + 1, true); }} />}
+            {mineHasMore && <MoreButton loading={mineLoading} label={mineError ? '다시 시도' : undefined} onClick={() => { void loadMineRequests(mineCursor); }} />}
           </div>
         )
       )}
