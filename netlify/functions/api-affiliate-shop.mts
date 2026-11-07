@@ -104,6 +104,11 @@ async function createOrder(db: any, body: any, buyer: { userId: string; username
   const link = await loadLink(db, clip(body.code, 40));
   if (!link) return err("판매가 끝났거나 없는 링크입니다.", 404);
   if (link.status !== "on_sale") return err("지금은 판매하지 않는 상품입니다.");
+  // 인플루언서가 자기 링크로 사면 수수료가 그대로 본인에게 돌아간다(브랜드 부담 할인). 막는다.
+  const self = buyer.username.replace(/^biz\//, "");
+  if (self && self === String(link.influencer_username || "").toLowerCase()) {
+    return err("내 링크로는 구매할 수 없어요. 다른 판매 경로를 이용해 주세요.", 403);
+  }
 
   const quantity = Math.round(Number(body.quantity));
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) return err(`수량은 1~${MAX_QUANTITY}개로 선택해 주세요.`);
@@ -189,6 +194,13 @@ async function completeOrder(db: any, body: any, buyerUserId: string) {
   const r = await finalizePaidOrder(db, orderId, { buyerUserId, source: "buyer" });
   if (r.ok === false) {
     return r.code ? Response.json({ error: r.error, code: r.code }, { status: r.status }) : err(r.error, r.status);
+  }
+  // 품절로 자동 환불됐거나 이미 취소된 주문이면 완료 화면 대신 안내를 보여 준다.
+  if (r.order?.status === "cancelled") {
+    return err("주문이 취소되어 결제 금액이 환불되었어요. 품절 등으로 주문을 진행할 수 없었어요.", 409);
+  }
+  if (r.order?.status === "expired" || r.order?.status === "pending_payment") {
+    return err("결제를 확인하지 못했습니다.", 409);
   }
   return Response.json({ order: publicOrder(r.order) });
 }

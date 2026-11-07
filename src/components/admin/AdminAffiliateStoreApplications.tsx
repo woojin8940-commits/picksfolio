@@ -105,7 +105,7 @@ const AdminAffiliateStoreApplications: React.FC<{ token: string }> = ({ token })
                   {r.status !== 'approved' && (
                     <button disabled={busy === r.id} onClick={() => review(r, 'approve')} className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black disabled:opacity-50">승인</button>
                   )}
-                  {r.status !== 'rejected' && (
+                  {r.status === 'pending' && (
                     <button disabled={busy === r.id} onClick={() => review(r, 'reject')} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black disabled:opacity-50">반려</button>
                   )}
                 </div>

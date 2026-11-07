@@ -16,8 +16,10 @@ import {
   loadRequests,
   payoutSettings,
   payoutSummary,
+  lockParty,
   releasePayoutRequest,
   scheduledDateFor,
+  syncDeductions,
   withTx,
   withholding,
   type PartyType,
@@ -321,6 +323,20 @@ async function adminMarkPaid(db: any, operator: string, body: any) {
   const cur = ((await db.sql`SELECT * FROM affiliate_payout_requests WHERE id = ${id}`) as any[])[0];
   if (!cur) return err("지급 신청을 찾을 수 없어요.", 404);
   if (cur.status !== "requested") return err(cur.status === "paid" ? "이미 지급 완료된 신청이에요." : "지급 대기 중인 신청만 처리할 수 있어요.", 409);
+
+  // 신청 뒤 그 안의 주문이 환불되면 신청 금액이 실제 정산액보다 크다. 그대로 지급하면 더 준 돈을
+  // 다음 신청에서 차감할 때까지(다음 정산이 없으면 영영) 돌려받지 못하니 지급을 막는다.
+  const changed = await withTx(db, async (client) => {
+    await lockParty(client, cur.party_type as PartyType, cur.party);
+    await syncDeductions(client, cur.party_type as PartyType, cur.party);
+    const r = (await client.query(
+      `SELECT COUNT(*)::int AS n FROM affiliate_payout_deductions WHERE source_request_id = $1`, [id],
+    )).rows[0];
+    return Number(r?.n) > 0;
+  });
+  if (changed) {
+    return err("신청 뒤 환불된 주문이 있어 신청 금액이 실제 정산액과 달라요. 이 신청을 반려하면 금액이 다시 계산되니, 다시 신청하도록 안내해 주세요.", 409);
+  }
 
   // 송금 실행(지금은 수동 이체 기록만). 자동 송금 방식으로 바꾸면 여기서 실제 송금이 일어난다.
   const exec = await executePayout({

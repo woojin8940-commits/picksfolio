@@ -468,6 +468,7 @@ async function brandReviewRequest(db: any, username: string, body: any) {
   const id = clip(body.id, 60);
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
+  if (!(await requireApproved(db, username))) return err("입점 승인 후 인플루언서를 선정할 수 있습니다.", 403);
   const note = clip(body.note, 500);
   // 선정하면 담당자 연락 없이 바로 진행 확정(done)이 되고 인플루언서 전용 링크가 열린다.
   // 반려하면 신청 상태가 'rejected' 라 링크는 닫힌다(다시 선정하면 같은 링크가 살아난다).
@@ -715,6 +716,14 @@ async function adminReview(db: any, operator: string, body: any) {
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
   const reason = decision === "rejected" ? clip(body.reason, 500) : "";
+  // 이미 승인한 브랜드를 반려하면 주문 처리 · 반품 · 정산 화면이 모두 막혀, 결제된 주문이 자동 취소되고
+  // 정산금도 찾지 못한다. 승인 뒤에는 반려하지 않는다(판매 중단은 상품 판매 중지로 한다).
+  if (decision === "rejected") {
+    const cur = (await db.sql`SELECT status FROM affiliate_store_applications WHERE id = ${id}`) as any[];
+    if (cur[0]?.status === "approved") {
+      return err("이미 승인한 브랜드는 반려할 수 없어요. 진행 중인 주문과 정산이 막히기 때문이에요.", 409);
+    }
+  }
   const rows = (await db.sql`
     UPDATE affiliate_store_applications
     SET status = ${decision}, reject_reason = ${reason}, reviewed_by = ${operator}, reviewed_at = NOW(), updated_at = NOW()
