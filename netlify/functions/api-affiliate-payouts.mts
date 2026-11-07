@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
-import { STORE_TESTERS } from "./_shared/store-testers.mts";
+import { canUseStore } from "./_shared/store-testers.mts";
 import { sendPushToUser } from "./_shared/push.mts";
 import { PiiCryptoError, decryptPii, encryptPii, formatRrn, maskAccount, maskRrn, piiKeyConfigured } from "./_shared/pii-crypto.mts";
 import { executePayout } from "./_shared/affiliate-payout-provider.mts";
@@ -16,8 +16,10 @@ import {
   loadRequests,
   payoutSettings,
   payoutSummary,
+  lockParty,
   releasePayoutRequest,
   scheduledDateFor,
+  syncDeductions,
   withTx,
   withholding,
   type PartyType,
@@ -322,6 +324,20 @@ async function adminMarkPaid(db: any, operator: string, body: any) {
   if (!cur) return err("지급 신청을 찾을 수 없어요.", 404);
   if (cur.status !== "requested") return err(cur.status === "paid" ? "이미 지급 완료된 신청이에요." : "지급 대기 중인 신청만 처리할 수 있어요.", 409);
 
+  // 신청 뒤 그 안의 주문이 환불되면 신청 금액이 실제 정산액보다 크다. 그대로 지급하면 더 준 돈을
+  // 다음 신청에서 차감할 때까지(다음 정산이 없으면 영영) 돌려받지 못하니 지급을 막는다.
+  const changed = await withTx(db, async (client) => {
+    await lockParty(client, cur.party_type as PartyType, cur.party);
+    await syncDeductions(client, cur.party_type as PartyType, cur.party);
+    const r = (await client.query(
+      `SELECT COUNT(*)::int AS n FROM affiliate_payout_deductions WHERE source_request_id = $1`, [id],
+    )).rows[0];
+    return Number(r?.n) > 0;
+  });
+  if (changed) {
+    return err("신청 뒤 환불된 주문이 있어 신청 금액이 실제 정산액과 달라요. 이 신청을 반려하면 금액이 다시 계산되니, 다시 신청하도록 안내해 주세요.", 409);
+  }
+
   // 송금 실행(지금은 수동 이체 기록만). 자동 송금 방식으로 바꾸면 여기서 실제 송금이 일어난다.
   const exec = await executePayout({
     id, partyType: cur.party_type, party: cur.party, netAmount: Number(cur.net_amount) || 0,
@@ -493,7 +509,7 @@ export default async (req: Request) => {
     if (caller.ok === false) return caller.response;
     const username = norm(caller.username);
     if (!username) return err("로그인이 필요합니다.", 401);
-    if (!STORE_TESTERS.has(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
+    if (!canUseStore(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
 
     const as = (req.method === "GET" ? url.searchParams.get("as") : body.as) === "brand" ? "brand" : "influencer";
     if (as === "brand") {

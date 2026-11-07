@@ -31,7 +31,7 @@ interface AdminDashboardProps {
   onNavigateCampaigns: () => void;
   /** 이미 시작한 협업만 보는 화면. 캠페인 찾기와 자리를 나눠 둔다. */
   onNavigateMyCollabs: () => void;
-  /** 어필리에이트 스토어. 오픈 전에는 테스트 계정에만 넘어온다(없으면 메뉴를 숨긴다). */
+  /** 어필리에이트 스토어. 볼 수 없는 계정이면 넘어오지 않는다(없으면 메뉴를 숨긴다). */
   onNavigateAffiliateStore?: () => void;
   children?: React.ReactNode;
 }

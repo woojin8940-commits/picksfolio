@@ -31,7 +31,7 @@ const BusinessAdStatus = lazyWithRetry(() => import('./BusinessAdStatus'));
 // 화면을 브랜드 모드로 연다. 태그된 인플루언서 콘텐츠는 캠페인 이력 · 광고 현황에서 본다.
 const CreatorInsights = lazyWithRetry(() => import('./CreatorInsights'));
 import { canSeeAffiliateStore } from '../utils/featureFlags';
-// 어필리에이트 스토어(ZVZO 방식) — 입점 신청 → 운영자 승인 → 상품 등록. 오픈 전에는 테스트 계정에만 보인다.
+// 어필리에이트 스토어(ZVZO 방식) — 입점 신청 → 운영자 승인 → 상품 등록. 공개 여부는 utils/featureFlags.ts 에서 정한다.
 const BrandAffiliateStore = lazyWithRetry(() => import('./affiliateStore/BrandAffiliateStore'));
 
 interface BusinessEnterpriseDashboardProps {
@@ -67,7 +67,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
   const showAffiliateStore = canSeeAffiliateStore(cleanUsername);
-  // 테스트 계정이 아니면 예전에 저장된 탭으로도 들어가지 못하게 한다.
+  // 볼 수 없는 계정이면 예전에 저장된 탭으로도 들어가지 못하게 한다.
   useEffect(() => {
     if (currentSubView === 'affiliate-store' && !showAffiliateStore) setCurrentSubView('dashboard');
   }, [currentSubView, showAffiliateStore]);

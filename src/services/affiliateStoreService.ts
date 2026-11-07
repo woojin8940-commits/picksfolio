@@ -222,7 +222,6 @@ export interface AdminIssues {
   returns: { orderId: string; brand: string; brandName: string; productName: string; totalAmount: number; buyerName: string; status: string; reason: string; memo: string; requestedAt: string; decidedAt: string | null; businessDays: number }[];
   inquiries: { id: string; brand: string; brandName: string; productName: string; orderId: string; body: string; createdAt: string; businessDays: number }[];
   operatorActions: { order_id: string; actor: string; action: string; note: string; created_at: string }[];
-  checkoutOpen: boolean;
   feeRates: FeeRates;
   feeHistory: { key: string; oldValue: string; newValue: string; changedBy: string; changedAt: string }[];
 }
@@ -368,8 +367,8 @@ export const affiliateStoreService = {
   adminIssues(token: string) {
     return call<AdminIssues>('GET', `${OPS}?scope=admin-issues`, undefined, { token });
   },
-  adminAction(token: string, action: 'admin_refund' | 'admin_remind' | 'admin_return_reject' | 'set_checkout_open' | 'set_fee_rates', payload: Record<string, unknown>) {
-    return call<{ ok: true; checkoutOpen?: boolean; feeRates?: FeeRates }>('POST', OPS, { action, ...payload }, { token });
+  adminAction(token: string, action: 'admin_refund' | 'admin_remind' | 'admin_return_reject' | 'set_fee_rates', payload: Record<string, unknown>) {
+    return call<{ ok: true; feeRates?: FeeRates }>('POST', OPS, { action, ...payload }, { token });
   },
 
   // 인플루언서

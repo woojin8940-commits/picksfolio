@@ -5,7 +5,7 @@ import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
 import { SALE_STATUSES, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
-import { STORE_TESTERS } from "./_shared/store-testers.mts";
+import { canUseStore } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 
 /**
@@ -30,11 +30,10 @@ import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-list
  * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 링크가 열렸다.)
  * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
  *
- * 정식 오픈 전이라 브랜드 · 인플루언서 쪽은 테스트 계정만 쓸 수 있다. 명단은 _shared/store-testers.mts
+ * 공개 여부(전체 공개 · 테스트 계정 전용)는 _shared/store-testers.mts
  * 한 곳(화면은 src/utils/featureFlags.ts)에서 관리한다.
  */
 
-const TESTERS = STORE_TESTERS;
 
 const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}${randomBytes(5).toString("hex")}`;
 const norm = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
@@ -469,6 +468,7 @@ async function brandReviewRequest(db: any, username: string, body: any) {
   const id = clip(body.id, 60);
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
+  if (!(await requireApproved(db, username))) return err("입점 승인 후 인플루언서를 선정할 수 있습니다.", 403);
   const note = clip(body.note, 500);
   // 선정하면 담당자 연락 없이 바로 진행 확정(done)이 되고 인플루언서 전용 링크가 열린다.
   // 반려하면 신청 상태가 'rejected' 라 링크는 닫힌다(다시 선정하면 같은 링크가 살아난다).
@@ -716,6 +716,14 @@ async function adminReview(db: any, operator: string, body: any) {
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
   const reason = decision === "rejected" ? clip(body.reason, 500) : "";
+  // 이미 승인한 브랜드를 반려하면 주문 처리 · 반품 · 정산 화면이 모두 막혀, 결제된 주문이 자동 취소되고
+  // 정산금도 찾지 못한다. 승인 뒤에는 반려하지 않는다(판매 중단은 상품 판매 중지로 한다).
+  if (decision === "rejected") {
+    const cur = (await db.sql`SELECT status FROM affiliate_store_applications WHERE id = ${id}`) as any[];
+    if (cur[0]?.status === "approved") {
+      return err("이미 승인한 브랜드는 반려할 수 없어요. 진행 중인 주문과 정산이 막히기 때문이에요.", 409);
+    }
+  }
   const rows = (await db.sql`
     UPDATE affiliate_store_applications
     SET status = ${decision}, reject_reason = ${reason}, reviewed_by = ${operator}, reviewed_at = NOW(), updated_at = NOW()
@@ -812,7 +820,7 @@ export default async (req: Request) => {
   if (!caller.ok) return caller.response;
   const username = norm(caller.username);
   if (!username) return err("로그인이 필요합니다.", 401);
-  if (!TESTERS.has(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
+  if (!canUseStore(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
 
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
   const creatorScope = ["creator", "brands", "my-requests", "my-affiliate"].includes(String(scope || ""))

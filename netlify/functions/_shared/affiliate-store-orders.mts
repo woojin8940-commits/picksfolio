@@ -1,12 +1,10 @@
 import { SolapiMessageService } from "solapi";
 import { sendPushToUser } from "./push.mts";
 import { verifyPortOnePayment } from "./portone-payment.mts";
-import { STORE_TESTERS } from "./store-testers.mts";
 
 /**
  * 어필리에이트 스토어 주문 공통 로직.
  *
- *   - 결제 가드(affiliate_store_checkout_open)와 테스트 계정
  *   - 결제 확인(구매자 화면 · 포트원 웹훅 · 시간별 점검이 같은 함수): 검증 → 재고 차감 → 수수료 예정 (멱등)
  *   - 주문 취소: 포트원 취소(발송 전 취소 = 전액 · 반품 = 상품 금액만 부분 취소) → 재고 복구 → 인플루언서 수수료 취소 (멱등)
  *   - 주문 처리 내역(이벤트) · 화면 알림 + 푸시
@@ -14,9 +12,6 @@ import { STORE_TESTERS } from "./store-testers.mts";
  * 로그 규칙: 구매자 개인정보, 결제 키 · 토큰, 포트원 응답 원문은 남기지 않는다.
  * 실패 로그에는 주문번호와 HTTP 상태 · 오류 코드만 남긴다.
  */
-
-// 테스트 계정 명단은 store-testers.mts 한 곳에서 관리한다(여기서는 다시 내보내기만).
-export { STORE_TESTERS };
 
 /** 구매자에게 보이는 주문 상태(결제 대기는 목록에서 뺀다). */
 export const LIVE_ORDER_STATUSES = ["paid", "preparing", "shipped", "delivered", "confirmed", "return_requested", "cancelled"];
@@ -65,16 +60,6 @@ export const returnWindowStart = (o: { return_window_from?: string | Date | null
 };
 
 export const CANCEL_FAILED_MESSAGE = "취소 처리에 실패했습니다. 고객센터로 문의해 주세요.";
-
-/** 결제 가드. 'true' 가 아니면 테스트 계정만 결제할 수 있다. */
-export async function checkoutOpen(db: any): Promise<boolean> {
-  try {
-    const rows = (await db.sql`SELECT value FROM platform_settings WHERE key = 'affiliate_store_checkout_open'`) as any[];
-    return String(rows[0]?.value || "").trim().toLowerCase() === "true";
-  } catch {
-    return false; // 확인하지 못하면 닫힌 것으로 본다
-  }
-}
 
 export async function logEvent(
   q: { query?: any; sql?: any } | any,

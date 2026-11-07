@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { affiliateStoreService, won, FEE_KEY_LABEL, type AdminIssues, type FeeRates } from '../../services/affiliateStoreService';
-import { AFFILIATE_STORE_TESTERS } from '../../utils/featureFlags';
 
 /**
  * 어필리에이트 스토어 미처리 취소 · 반품.
@@ -10,7 +9,6 @@ import { AFFILIATE_STORE_TESTERS } from '../../utils/featureFlags';
  * 운영자는 직접 전액 환불(포트원 취소 → 재고 복구 → 수수료 취소)하거나 브랜드에 재알림을 보낸다.
  * 승인 뒤 분쟁은 운영자만 처리한다(승인된 반품 거절 · 전액 환불). 구매확정된 주문도 주문번호로 환불할 수 있다.
  * 운영자 처리는 누가 · 언제 · 무엇을 했는지 기록되어 아래 "처리 기록"에 남는다.
- * 결제 가드(affiliate_store_checkout_open)도 여기서 켜고 끈다 — 꺼져 있으면 테스트 계정만 결제한다.
  */
 
 const dt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '');
@@ -85,7 +83,7 @@ const AdminAffiliateStoreIssues: React.FC<{ token: string }> = ({ token }) => {
   const [refundId, setRefundId] = useState('');
   const [refundReason, setRefundReason] = useState('');
 
-  const run = async (key: string, action: 'admin_refund' | 'admin_remind' | 'admin_return_reject' | 'set_checkout_open', payload: Record<string, unknown>, confirmText?: string) => {
+  const run = async (key: string, action: 'admin_refund' | 'admin_remind' | 'admin_return_reject', payload: Record<string, unknown>, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
     setBusy(key);
     const res = await affiliateStoreService.adminAction(token, action, payload);
@@ -99,22 +97,6 @@ const AdminAffiliateStoreIssues: React.FC<{ token: string }> = ({ token }) => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl border border-slate-100 p-5 flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-sm font-black text-slate-900">결제 가드</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            {data.checkoutOpen ? '열림 — 누구나 결제할 수 있어요.' : `닫힘 — 테스트 계정(${AFFILIATE_STORE_TESTERS.join(', ')})만 결제할 수 있어요.`}
-          </p>
-        </div>
-        <button
-          disabled={busy === 'guard'}
-          onClick={() => run('guard', 'set_checkout_open', { open: !data.checkoutOpen }, data.checkoutOpen ? '결제를 닫을까요? 테스트 계정만 결제할 수 있게 됩니다.' : '모든 구매자에게 결제를 열까요?')}
-          className={`px-4 py-2 rounded-xl text-xs font-black ${data.checkoutOpen ? 'bg-slate-100 text-slate-600' : 'bg-blue-600 text-white'}`}
-        >
-          {data.checkoutOpen ? '결제 닫기' : '결제 열기'}
-        </button>
-      </div>
-
       {data.feeRates && <FeeRateSettings key={JSON.stringify(data.feeRates)} token={token} rates={data.feeRates} history={data.feeHistory || []} onSaved={load} />}
 
       <section className="space-y-3">

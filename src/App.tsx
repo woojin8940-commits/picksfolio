@@ -41,7 +41,7 @@ const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalend
 const OpenScheduleManagement = lazyWithRetry(() => import('./components/OpenScheduleManagement'));
 const UserCampaignBrowse = lazyWithRetry(() => import('./components/UserCampaignBrowse'));
 const CreatorCampaignCollabs = lazyWithRetry(() => import('./components/CreatorCampaignCollabs'));
-// 어필리에이트 스토어(ZVZO 방식) 인플루언서 화면. 오픈 전에는 테스트 계정에만 보인다.
+// 어필리에이트 스토어(ZVZO 방식) 인플루언서 화면. 공개 여부는 utils/featureFlags.ts 에서 정한다.
 import { canSeeAffiliateStore } from './utils/featureFlags';
 const CreatorAffiliateStore = lazyWithRetry(() => import('./components/affiliateStore/CreatorAffiliateStore'));
 const MembershipPlan = lazyWithRetry(() => import('./components/MembershipPlan'));
