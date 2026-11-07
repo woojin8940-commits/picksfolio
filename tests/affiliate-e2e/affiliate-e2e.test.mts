@@ -380,6 +380,27 @@ describe("C. 구매 · 결제", () => {
     assert.equal(orders.body.hasMore, false);
     assert.equal("buyerPhone" in orders.body.orders[0], false, "인플루언서에게 구매자 연락처를 보내지 않는다");
   });
+
+  test("인플루언서 본인 링크 구매 → 정상 주문 · 수수료 pending", async () => {
+    const shop = (await import("../../netlify/functions/api-affiliate-shop.mts")).default as any;
+    const order = await call(shop, INF2, "POST", "/api/affiliate-shop", {
+      action: "create_order", code, quantity: 2, buyerName: "본인", buyerPhone: "010-0000-0000",
+      address1: "서울시", agreeTerms: true, agreeProvide: true, payMethod: "CARD",
+    });
+    assert.equal(order.status, 201, JSON.stringify(order.body));
+    const done = await call(shop, INF2, "POST", "/api/affiliate-shop", { action: "complete", orderId: order.body.orderId });
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    const row = (await pg.query(
+      `SELECT status, influencer_username, commission_amount, commission_status FROM affiliate_store_orders WHERE id = $1`,
+      [order.body.orderId],
+    )).rows[0];
+    assert.equal(row.status, "paid");
+    assert.equal(row.influencer_username, INF2, "본인 링크 판매로 잡힌다");
+    assert.equal(row.commission_amount, 3000, "15,000원 × 2개 × 10%");
+    assert.equal(row.commission_status, "pending");
+    const mine = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    assert.equal(mine.body.orderCount, 2);
+  });
 });
 
 // ─────────────────────────── D. 브랜드 주문 운영 ───────────────────────────
@@ -393,8 +414,8 @@ describe("D. 주문 관리 · 취소·반품", () => {
     for (let i = 0; i < 50; i++) await insertOrder({ brand: BRAND, status: i % 2 ? "shipped" : "delivered", minutesAgo: 100 + i });
     const r = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=new`);
     assert.equal(r.status, 200);
-    assert.equal(r.body.summary.orderCounts.new, 6, "C 의 결제 1건 + 오래된 5건");
-    assert.equal(r.body.orders.length, 6);
+    assert.equal(r.body.summary.orderCounts.new, 7, "C 의 결제 2건(일반 구매 · 본인 구매) + 오래된 5건");
+    assert.equal(r.body.orders.length, 7);
     assert.ok(r.body.orders.every((o: any) => o.status === "paid"));
     const shipped = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=shipped&summary=0`);
     assert.equal(shipped.body.orders.length, 25);

@@ -104,11 +104,7 @@ async function createOrder(db: any, body: any, buyer: { userId: string; username
   const link = await loadLink(db, clip(body.code, 40));
   if (!link) return err("판매가 끝났거나 없는 링크입니다.", 404);
   if (link.status !== "on_sale") return err("지금은 판매하지 않는 상품입니다.");
-  // 인플루언서가 자기 링크로 사면 수수료가 그대로 본인에게 돌아간다(브랜드 부담 할인). 막는다.
-  const self = buyer.username.replace(/^biz\//, "");
-  if (self && self === String(link.influencer_username || "").toLowerCase()) {
-    return err("내 링크로는 구매할 수 없어요. 다른 판매 경로를 이용해 주세요.", 403);
-  }
+  // 본인 구매 허용(정책): 인플루언서가 자기 전용 링크로 사도 정상 주문이고, 수수료도 다른 주문과 똑같이 잡힌다.
 
   const quantity = Math.round(Number(body.quantity));
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) return err(`수량은 1~${MAX_QUANTITY}개로 선택해 주세요.`);
