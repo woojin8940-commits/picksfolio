@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bell, Loader2, RotateCcw, Truck } from 'lucide-react';
 import {
   affiliateStoreService,
@@ -6,6 +6,8 @@ import {
   ORDER_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
   COMMISSION_STATUS_STYLE,
+  type BrandOpsSummary,
+  type ListCursor,
   type StoreNotification,
   type StoreOrder,
 } from '../../services/affiliateStoreService';
@@ -21,6 +23,9 @@ import {
  *   반품 환불은 사유와 관계없이 상품 금액(판매가 × 수량) 전액만 환불한다. 주문 배송비는 환불하지 않고
  *   PG 수수료만 떼고 브랜드에 정산된다(왕복 배송비는 구매자와 직접 협의). 배송비가 0원이면 전액 취소와 같다.
  * 구매자 문의는 브랜드 자사몰(고객 문의 링크)로 연결되므로 이 화면에는 없다.
+ *
+ * 목록은 고른 필터로 서버에서 걸러 40건씩(커서) 받는다. 필터 숫자 · 정산 합계는 서버가 브랜드 전체 주문으로 센다.
+ * 필터를 바꾸면 목록만 다시 받고, 주문을 처리하면 그 주문 한 줄과 숫자만 새로 받는다.
  */
 
 const STYLE: Record<string, string> = {
@@ -77,6 +82,11 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const [notifications, setNotifications] = useState<StoreNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [summary, setSummary] = useState<BrandOpsSummary | null>(null);
+  const [nextCursor, setNextCursor] = useState<ListCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [failedRequest, setFailedRequest] = useState<{ cursor?: ListCursor; append: boolean } | null>(null);
   const [filter, setFilter] = useState<Filter>('new');
   const [claimFilter, setClaimFilter] = useState<ClaimFilter>('all');
   const [busy, setBusy] = useState('');
@@ -85,28 +95,65 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const [f2, setF2] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [notiOpen, setNotiOpen] = useState(false);
+  // 숫자 · 정산 합계는 처음 한 번(과 주문 처리 뒤)만 받는다. 필터를 바꿀 때는 목록만.
+  const summaryLoaded = useRef(false);
+  // 필터를 빠르게 바꿀 때 늦게 도착한 예전 응답이 목록을 덮지 않게 한다.
+  const loadSeq = useRef(0);
 
-  const load = useCallback(async () => {
-    const res = await affiliateStoreService.brandOps(businessUsername);
-    setLoading(false);
-    if (res.error) { setLoadError(res.error); return; }
+  const applySummary = useCallback((next?: BrandOpsSummary, notis?: StoreNotification[]) => {
+    if (notis) setNotifications(notis);
+    if (!next) return;
+    summaryLoaded.current = true;
+    setSummary(next);
+    onCounts?.(next.opsCounts);
+  }, [onCounts]);
+
+  const load = useCallback(async (cursor?: ListCursor, append = false) => {
+    const seq = ++loadSeq.current;
+    if (append) setMoreLoading(true);
+    else { setLoading(true); setOrders([]); setHasMore(false); setNextCursor(null); }
     setLoadError('');
-    setOrders(res.orders || []);
-    setNotifications(res.notifications || []);
-    onCounts?.({
-      newOrders: (res.orders || []).filter(o => o.status === 'paid').length,
-      claimsNeedAction: (res.orders || []).filter(claimNeedsAction).length,
-      unread: (res.notifications || []).filter(n => !n.read_at).length,
+    setFailedRequest(null);
+    const res = await affiliateStoreService.brandOps(businessUsername, {
+      view,
+      filter: view === 'orders' ? filter : undefined,
+      claim: view === 'claims' ? claimFilter : undefined,
+      cursor,
+      summary: !summaryLoaded.current,
     });
-  }, [businessUsername, onCounts]);
+    if (seq !== loadSeq.current) return;
+    setLoading(false);
+    setMoreLoading(false);
+    if (res.error) { setLoadError(res.error); setFailedRequest({ cursor, append }); return; }
+    setOrders(prev => {
+      if (!append) return res.orders || [];
+      const seen = new Set(prev.map(o => o.id));
+      return [...prev, ...(res.orders || []).filter(o => !seen.has(o.id))];
+    });
+    applySummary(res.summary, res.notifications);
+    setNextCursor(res.nextCursor || null);
+    setHasMore(!!res.hasMore);
+  }, [businessUsername, view, filter, claimFilter, applySummary]);
   useEffect(() => { load(); }, [load]);
+
+  /** 처리한 주문 한 줄만 새로 받는다. 지금 필터에 더는 맞지 않으면 목록에서 뺀다. 숫자도 함께 새로 받는다. */
+  const refreshOrder = async (id: string) => {
+    const refreshed = await affiliateStoreService.brandOps(businessUsername, { view, orderId: id, summary: true });
+    if (refreshed.error) { await load(); return; }
+    const row = refreshed.orders?.[0];
+    const stillMatches = !!row && (view === 'orders'
+      ? FILTERS.find(f => f.key === filter)!.match(row)
+      : isClaim(row) && CLAIM_FILTERS.find(f => f.key === claimFilter)!.match(row));
+    setOrders(prev => stillMatches && row ? prev.map(o => o.id === row.id ? row : o) : prev.filter(o => o.id !== id));
+    applySummary(refreshed.summary, refreshed.notifications);
+  };
 
   const act = async (action: string, payload: Record<string, unknown>, key: string) => {
     setBusy(key);
     const res = await affiliateStoreService.orderAction(businessUsername, action, payload);
     setBusy('');
     if (res.error) return res.error;
-    await load();
+    await refreshOrder(String(payload.id || ''));
     return '';
   };
 
@@ -144,28 +191,31 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const openNotis = async () => {
     setNotiOpen(o => !o);
     if (notifications.some(n => !n.read_at)) {
-      await affiliateStoreService.orderAction(businessUsername, 'read_notifications', {});
-      load();
+      const res = await affiliateStoreService.orderAction(businessUsername, 'read_notifications', {});
+      if (!res.error) {
+        const readAt = new Date().toISOString();
+        setNotifications(prev => prev.map(n => n.read_at ? n : { ...n, read_at: readAt }));
+        if (summary) applySummary({ ...summary, opsCounts: { ...summary.opsCounts, unread: 0 } });
+      }
     }
   };
 
-  if (loading) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
-  if (loadError) return <p className="text-sm font-bold text-red-500 py-6">{loadError}</p>;
+  if (!summary && loading) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
+  if (!summary && loadError) return (
+    <div className="py-6 text-center">
+      <p className="text-sm font-bold text-red-500 mb-3">{loadError}</p>
+      <button onClick={() => { void load(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+    </div>
+  );
 
-  const unread = notifications.filter(n => !n.read_at).length;
-  const visible = orders.filter(FILTERS.find(f => f.key === filter)!.match);
-  const claims = orders.filter(isClaim).sort((a, b) => String(claimDate(b)).localeCompare(String(claimDate(a))));
-  const visibleClaims = claims.filter(CLAIM_FILTERS.find(f => f.key === claimFilter)!.match);
-  // 정산 대상(취소 · 환불 제외) 합계. 주문마다 고정된 수수료율로 서버가 계산한 값을 더한다.
-  const sum = orders.reduce((t, o) => {
-    const st = o.settlement;
-    if (!st || !st.included) return t;
-    return {
-      payment: t.payment + st.payment, commission: t.commission + st.commission, pgFee: t.pgFee + st.pgFee,
-      platformFee: t.platformFee + st.platformFee, amount: t.amount + st.amount,
-      confirmedAmount: t.confirmedAmount + (o.commissionStatus === 'confirmed' ? st.amount : 0),
-    };
-  }, { payment: 0, commission: 0, pgFee: 0, platformFee: 0, amount: 0, confirmedAmount: 0 });
+  const unread = summary?.opsCounts.unread ?? notifications.filter(n => !n.read_at).length;
+  // 목록은 서버가 고른 필터로 걸러서 준다.
+  const visible = orders;
+  const visibleClaims = orders;
+  const listSpinner = <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
+  const sum = summary?.settlement || { payment: 0, commission: 0, pgFee: 0, platformFee: 0, amount: 0, confirmedAmount: 0 };
+  const orderCounts = summary?.orderCounts || { new: 0, preparing: 0, shipped: 0, delivered: 0, all: 0 };
+  const claimCounts = summary?.claimCounts || { all: 0, cancel: 0, return: 0, action: 0 };
 
   const now = Date.now();
   const actions = (o: StoreOrder) => {
@@ -227,7 +277,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
         ) : (
           <div className="flex gap-1.5 flex-wrap flex-1">
             {CLAIM_FILTERS.map(f => {
-              const n = claims.filter(f.match).length;
+              const n = claimCounts[f.key];
               return (
                 <button key={f.key} onClick={() => setClaimFilter(f.key)} className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${claimFilter === f.key ? 'bg-slate-900 text-white' : f.key === 'action' && n > 0 ? 'bg-orange-50 border border-orange-200 text-orange-600' : 'bg-white border border-slate-200 text-slate-500'}`}>
                   {f.label} {n}
@@ -259,7 +309,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
         <>
           <div className="flex gap-1.5 flex-wrap mb-3">
             {FILTERS.map(f => {
-              const n = orders.filter(f.match).length;
+              const n = orderCounts[f.key];
               return (
                 <button key={f.key} onClick={() => setFilter(f.key)} className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${filter === f.key ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}>
                   {f.label} {n}
@@ -268,11 +318,13 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
             })}
           </div>
 
-          {visible.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
-              <Truck className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-              <p className="text-sm font-black text-slate-700">해당하는 주문이 없어요</p>
-            </div>
+          {loading ? listSpinner : visible.length === 0 ? (
+            !loadError && (
+              <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
+                <Truck className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-black text-slate-700">해당하는 주문이 없어요</p>
+              </div>
+            )
           ) : (
             <div className="space-y-2.5">
               {visible.map(o => (
@@ -341,11 +393,13 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
       )}
 
       {view === 'claims' && (
-        visibleClaims.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
-            <RotateCcw className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm font-black text-slate-700">해당하는 취소 · 반품이 없어요</p>
-          </div>
+        loading ? listSpinner : visibleClaims.length === 0 ? (
+          !loadError && (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
+              <RotateCcw className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+              <p className="text-sm font-black text-slate-700">해당하는 취소 · 반품이 없어요</p>
+            </div>
+          )
         ) : (
           <div className="space-y-2.5">
             {visibleClaims.map(o => {
@@ -409,6 +463,28 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
             })}
           </div>
         )
+      )}
+
+      {(hasMore || loadError) && (
+        <div className="flex flex-col items-center gap-2 pt-4">
+          {loadError && <p className="text-xs font-bold text-red-500">{loadError}</p>}
+          {loadError ? (
+            <button
+              disabled={moreLoading || loading}
+              onClick={() => { void load(failedRequest?.cursor, failedRequest?.append ?? false); }}
+              className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50"
+            >다시 시도</button>
+          ) : hasMore && (
+            <button
+              disabled={moreLoading}
+              onClick={() => { void load(nextCursor || undefined, true); }}
+              className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2"
+            >
+              {moreLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              더 보기
+            </button>
+          )}
+        </div>
       )}
 
       {dialog && (

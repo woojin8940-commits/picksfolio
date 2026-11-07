@@ -78,6 +78,8 @@ export interface PayoutSummary {
   available: number;
   availableOrderAmount: number;
   availableDeductionAmount: number;
+  availableOrdersCount: number;
+  availableDeductionsCount: number;
   availableOrders: { id: string; productName: string; amount: number; confirmedAt: string | null }[];
   availableDeductions: { id: number; orderId: string; amount: number; reason: string; createdAt: string }[];
   pending: number;
@@ -99,6 +101,12 @@ export interface PartyPayoutData {
   nextScheduledDate: string;
   banks: string[];
   brandNames: { businessName: string; ceoName: string } | null;
+}
+
+export interface PayoutDetailsPage {
+  items?: PayoutRequest['items'];
+  deductions?: PayoutRequest['deductions'];
+  nextCursor: string | null;
 }
 
 export interface AdminPayoutData {
@@ -175,6 +183,20 @@ export const affiliatePayoutService = {
   get(as: PayoutParty, account?: string) {
     return call<PartyPayoutData>('GET', `${URL_BASE}?as=${as}`, undefined, { account });
   },
+  availableDetails(as: PayoutParty, kind: 'orders' | 'deductions', cursor?: { cursorAt?: string; cursorId?: string }, account?: string) {
+    const p = new URLSearchParams({ as, scope: 'available-details', kind });
+    if (cursor?.cursorAt) p.set('cursorAt', cursor.cursorAt);
+    if (cursor?.cursorId) p.set('cursorId', cursor.cursorId);
+    return call<{
+      items: { id: string | number; productName?: string; amount: number; confirmedAt?: string | null; orderId?: string; reason?: string; createdAt?: string }[];
+      nextCursor: { cursorAt?: string; cursorId?: string } | null;
+    }>('GET', `${URL_BASE}?${p.toString()}`, undefined, { account });
+  },
+  requestDetails(as: PayoutParty, id: string, kind: 'items' | 'deductions', cursorId?: string, account?: string) {
+    const p = new URLSearchParams({ as, scope: 'request-details', id, kind });
+    if (cursorId) p.set('cursorId', cursorId);
+    return call<PayoutDetailsPage>('GET', `${URL_BASE}?${p.toString()}`, undefined, { account });
+  },
   saveInfluencerAccount(input: { legalName: string; rrn: string; bankName: string; accountNumber: string; accountHolder: string; privacyConsent: boolean }) {
     return call<{ account: InfluencerPayoutAccount }>('POST', URL_BASE, { as: 'influencer', action: 'save_account', ...input });
   },
@@ -196,6 +218,11 @@ export const affiliatePayoutService = {
     const p = new URLSearchParams({ scope: 'admin' });
     for (const [k, v] of Object.entries(filter)) if (v) p.set(k, String(v));
     return call<AdminPayoutData>('GET', `${URL_BASE}?${p.toString()}`, undefined, { token });
+  },
+  adminRequestDetails(token: string, id: string, kind: 'items' | 'deductions', cursorId?: string) {
+    const p = new URLSearchParams({ scope: 'admin-request-details', id, kind });
+    if (cursorId) p.set('cursorId', cursorId);
+    return call<PayoutDetailsPage>('GET', `${URL_BASE}?${p.toString()}`, undefined, { token });
   },
   adminAction(token: string, action: 'admin_mark_paid' | 'admin_reject' | 'admin_set_settings', payload: Record<string, unknown>) {
     return call<{ ok?: true; settings?: AdminPayoutData['settings'] }>('POST', URL_BASE, { action, ...payload }, { token });

@@ -1,4 +1,11 @@
-import { brandSettlement } from "./affiliate-store-orders.mts";
+import { brandSettlement, brandSettlementSql } from "./affiliate-store-orders.mts";
+
+const BRAND_SQL = brandSettlementSql("o");
+const INFLUENCER_ELIGIBLE_SQL = "(o.commission_status = 'confirmed' AND o.commission_amount > 0)";
+/** 지급 신청에 넣을 수 있는 주문 조건(SQL). 금액 계산은 brandSettlementSql 한 곳에서 한다. */
+const eligibleSql = (t: PartyType) => (t === "brand" ? BRAND_SQL.eligible : INFLUENCER_ELIGIBLE_SQL);
+/** 지급 신청에 들어갈 주문 한 건의 금액(SQL). JS 의 entitled() 와 같은 값이다. */
+const entitledSql = (t: PartyType) => (t === "brand" ? BRAND_SQL.entitled : "GREATEST(0, o.commission_amount)::numeric");
 
 /**
  * 어필리에이트 스토어 정산(지급 신청) 공통 로직.
@@ -74,6 +81,16 @@ const PENDING_STATUSES = ["paid", "preparing", "shipped", "delivered", "return_r
 
 // ─────────────────────────── 트랜잭션 ───────────────────────────
 
+/** SQL 조각을 끼워 넣어야 하는 조회(태그 템플릿으로는 식을 끼울 수 없다). */
+export async function queryRows(db: any, text: string, params: unknown[]): Promise<any[]> {
+  const client = await db.pool.connect();
+  try {
+    return (await client.query(text, params)).rows;
+  } finally {
+    client.release();
+  }
+}
+
 export async function withTx<T>(db: any, fn: (client: any) => Promise<T>): Promise<T> {
   const client = await db.pool.connect();
   try {
@@ -141,9 +158,7 @@ export interface AvailableSnapshot {
 /** 지금 신청하면 들어갈 주문 · 차감 내역과 금액. syncDeductions 뒤에 부른다. */
 export async function availableSnapshot(client: any, t: PartyType, party: string): Promise<AvailableSnapshot> {
   const col = partyColumn(t);
-  const where = t === "brand"
-    ? `(o.status = 'confirmed' OR (o.status = 'cancelled' AND o.refund_amount > 0 AND o.refund_amount < o.total_amount))`
-    : `o.commission_status = 'confirmed' AND o.commission_amount > 0`;
+  const where = eligibleSql(t);
   const orderRows = (await client.query(
     `SELECT o.* FROM affiliate_store_orders o
       WHERE o.${col} = $1 AND ${where}
@@ -175,15 +190,32 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
   return withTx(db, async (client) => {
     await lockParty(client, t, party);
     await syncDeductions(client, t, party);
-    const snap = await availableSnapshot(client, t, party);
     const col = partyColumn(t);
-    const pendingRows = (await client.query(
-      `SELECT * FROM affiliate_store_orders o WHERE o.${col} = $1 AND o.status = ANY($2::text[])
-         ${t === "influencer" ? "AND o.commission_status = 'pending'" : ""}`,
-      [party, PENDING_STATUSES],
-    )).rows;
-    const pending = pendingRows.reduce((s: number, o: any) =>
-      s + (t === "brand" ? Math.max(0, brandSettlement(o).amount) : Number(o.commission_amount) || 0), 0);
+    const eligible = eligibleSql(t);
+    const availableAmount = entitledSql(t);
+    const pendingCondition = `o.status = ANY($2::text[])${t === "influencer" ? " AND o.commission_status = 'pending'" : ""}`;
+    const pendingAmount = t === "brand" ? `GREATEST(0::numeric, ${BRAND_SQL.amount})` : "COALESCE(o.commission_amount, 0)::numeric";
+    const orderAgg = (await client.query(
+      `SELECT COUNT(*) FILTER (WHERE available_amount > 0)::int AS available_count,
+              COALESCE(SUM(available_amount) FILTER (WHERE available_amount > 0), 0)::numeric AS available_amount,
+              COUNT(*) FILTER (WHERE is_pending)::int AS pending_count,
+              COALESCE(SUM(pending_amount) FILTER (WHERE is_pending), 0)::numeric AS pending_amount
+         FROM (
+           SELECT CASE WHEN ${eligible}
+                         AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = $3 AND i.order_id = o.id AND i.active)
+                       THEN ${availableAmount} ELSE 0 END AS available_amount,
+                  (${pendingCondition}) AS is_pending,
+                  CASE WHEN ${pendingCondition} THEN ${pendingAmount} ELSE 0 END AS pending_amount
+             FROM affiliate_store_orders o
+            WHERE o.${col} = $1 AND (${eligible} OR o.status = ANY($2::text[]))
+         ) AS amounts`,
+      [party, PENDING_STATUSES, t],
+    )).rows[0] || {};
+    const deductionAgg = (await client.query(
+      `SELECT COUNT(*)::int AS deduction_count, COALESCE(SUM(amount), 0)::numeric AS deduction_amount
+         FROM affiliate_payout_deductions WHERE party_type = $1 AND party = $2 AND applied_request_id IS NULL`,
+      [t, party],
+    )).rows[0] || {};
     const agg = (await client.query(
       `SELECT
          COALESCE(SUM(gross_amount) FILTER (WHERE status = 'requested'), 0)::bigint AS requested_gross,
@@ -194,14 +226,18 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
        FROM affiliate_payout_requests WHERE party_type = $1 AND party = $2`,
       [t, party],
     )).rows[0];
+    const availableOrderAmount = Number(orderAgg.available_amount) || 0;
+    const availableDeductionAmount = Number(deductionAgg.deduction_amount) || 0;
     return {
-      available: snap.available,
-      availableOrderAmount: snap.orderAmount,
-      availableDeductionAmount: snap.deductionAmount,
-      availableOrders: snap.orders,
-      availableDeductions: snap.deductions,
-      pending,
-      pendingCount: pendingRows.length,
+      available: availableOrderAmount - availableDeductionAmount,
+      availableOrderAmount,
+      availableDeductionAmount,
+      availableOrdersCount: Number(orderAgg.available_count) || 0,
+      availableDeductionsCount: Number(deductionAgg.deduction_count) || 0,
+      availableOrders: [],
+      availableDeductions: [],
+      pending: Number(orderAgg.pending_amount) || 0,
+      pendingCount: Number(orderAgg.pending_count) || 0,
       requested: Number(agg.requested_gross) || 0,
       requestedNet: Number(agg.requested_net) || 0,
       requestedCount: Number(agg.requested_count) || 0,
@@ -209,6 +245,49 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
       paid: Number(agg.paid_net) || 0,
     };
   });
+}
+
+export async function availableDetails(db: any, t: PartyType, party: string, kind: "orders" | "deductions", cursorAt = "", cursorId = "") {
+  const limit = 40;
+  if (kind === "deductions") {
+    const afterId = /^\d+$/.test(cursorId) ? Number(cursorId) : 0;
+    const rows = (await db.sql`
+      SELECT id, order_id, amount, reason, created_at FROM affiliate_payout_deductions
+       WHERE party_type = ${t} AND party = ${party} AND applied_request_id IS NULL AND id > ${afterId}
+       ORDER BY id LIMIT ${limit + 1}
+    `) as any[];
+    const page = rows.slice(0, limit);
+    return {
+      items: page.map((d) => ({ id: Number(d.id), orderId: d.order_id, amount: Number(d.amount) || 0, reason: d.reason, createdAt: d.created_at })),
+      nextCursor: rows.length > limit && page.length ? { cursorId: String(page[page.length - 1].id) } : null,
+    };
+  }
+  const hasCursor = !!cursorAt && Number.isFinite(Date.parse(cursorAt)) && !!cursorId;
+  const cursor = hasCursor ? new Date(cursorAt).toISOString() : "1970-01-01T00:00:00.000Z";
+  const col = partyColumn(t);
+  const orderKey = "COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at)";
+  const rows = await queryRows(db,
+    `SELECT o.* FROM affiliate_store_orders o
+      WHERE o.${col} = $1 AND ${eligibleSql(t)} AND ${entitledSql(t)} > 0
+        AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = $2 AND i.order_id = o.id AND i.active)
+        AND (NOT $3::boolean OR ${orderKey} > $4::timestamptz OR (${orderKey} = $4::timestamptz AND o.id > $5))
+      ORDER BY ${orderKey}, o.id
+      LIMIT $6`,
+    [party, t, hasCursor, cursor, cursorId, limit + 1]);
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    items: page.map((o) => ({
+      id: String(o.id),
+      productName: `${o.product_name}${o.option_name ? ` · ${o.option_name}` : ""}`,
+      amount: entitled(t, o),
+      confirmedAt: o.commission_confirmed_at || o.confirmed_at || o.cancelled_at || null,
+    })).filter((o) => o.amount > 0),
+    nextCursor: rows.length > limit && last ? {
+      cursorAt: new Date(last.commission_confirmed_at || last.confirmed_at || last.cancelled_at || last.created_at).toISOString(),
+      cursorId: String(last.id),
+    } : null,
+  };
 }
 
 // ─────────────────────────── 신청 · 취소 · 반려 ───────────────────────────
@@ -359,7 +438,7 @@ export function shapePayoutRequest(r: any, items: any[] = [], deductions: any[] 
 }
 
 /** 신청 목록 + 포함 주문 + 이 신청에서 뺀 차감 내역. */
-export async function loadRequests(db: any, where: { partyType?: PartyType; party?: string; status?: string; scheduledDate?: string }, limit = 200) {
+export async function loadRequests(db: any, where: { partyType?: PartyType; party?: string; status?: string; scheduledDate?: string }, limit = 200, includeDetails = true) {
   const t = where.partyType || "";
   const p = where.party || "";
   const st = where.status || "";
@@ -371,6 +450,7 @@ export async function loadRequests(db: any, where: { partyType?: PartyType; part
     ORDER BY requested_at DESC LIMIT ${limit}
   `) as any[];
   if (!rows.length) return [];
+  if (!includeDetails) return rows.map((r) => shapePayoutRequest(r));
   const ids = rows.map((r) => r.id);
   const [items, deds] = await Promise.all([
     db.sql`SELECT * FROM affiliate_payout_items WHERE request_id = ANY(${ids}::text[]) ORDER BY id` as Promise<any[]>,
@@ -381,6 +461,37 @@ export async function loadRequests(db: any, where: { partyType?: PartyType; part
     items.filter((i) => i.request_id === r.id),
     deds.filter((d) => d.applied_request_id === r.id),
   ));
+}
+
+export async function payoutRequestDetails(db: any, id: string, kind: "items" | "deductions", cursorId = "", where: { partyType?: PartyType; party?: string } = {}) {
+  const request = (await db.sql`
+    SELECT id FROM affiliate_payout_requests
+     WHERE id = ${id} AND (${where.partyType || ""} = '' OR party_type = ${where.partyType || ""})
+       AND (${where.party || ""} = '' OR party = ${where.party || ""})
+     LIMIT 1
+  `) as any[];
+  if (!request.length) return null;
+  const afterId = /^\d+$/.test(cursorId) ? Number(cursorId) : 0;
+  if (kind === "items") {
+    const rows = (await db.sql`
+      SELECT id, order_id, product_name, amount, confirmed_at FROM affiliate_payout_items
+       WHERE request_id = ${id} AND id > ${afterId} ORDER BY id LIMIT 41
+    `) as any[];
+    const page = rows.slice(0, 40);
+    return {
+      items: page.map((i) => ({ orderId: i.order_id, productName: i.product_name, amount: Number(i.amount) || 0, confirmedAt: i.confirmed_at })),
+      nextCursor: rows.length > 40 && page.length ? String(page[page.length - 1].id) : null,
+    };
+  }
+  const rows = (await db.sql`
+    SELECT id, order_id, amount, reason, created_at FROM affiliate_payout_deductions
+     WHERE applied_request_id = ${id} AND id > ${afterId} ORDER BY id LIMIT 41
+  `) as any[];
+  const page = rows.slice(0, 40);
+  return {
+    deductions: page.map((d) => ({ orderId: d.order_id, amount: Number(d.amount) || 0, reason: d.reason, createdAt: d.created_at })),
+    nextCursor: rows.length > 40 && page.length ? String(page[page.length - 1].id) : null,
+  };
 }
 
 // ─────────────────────────── 설정 ───────────────────────────

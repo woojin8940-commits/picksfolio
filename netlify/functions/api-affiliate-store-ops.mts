@@ -10,6 +10,7 @@ import {
   returnRefundPlan,
   PLATFORM_RATE,
   brandSettlement,
+  brandSettlementSql,
   currentFeeRates,
   businessDaysSince,
   inquiriesLink,
@@ -20,11 +21,16 @@ import {
   notify,
   trackingUrl,
 } from "./_shared/affiliate-store-orders.mts";
+import { queryRows } from "./_shared/affiliate-payouts.mts";
+import { pageOf, readCursor } from "./_shared/list-cursor.mts";
 
 /**
  * 어필리에이트 스토어 주문 운영 — 브랜드 주문 관리 · 취소 · 반품, 운영자 미처리 목록.
  *
- *   GET  ?scope=brand          브랜드: 내 주문(취소 · 반품 이력 포함) · 알림
+ *   GET  ?scope=brand          브랜드: 주문 · 취소·반품 목록(서버에서 필터 · 40건씩 커서) + 숫자 · 정산 합계 · 알림
+ *                              &view=orders&filter=new|preparing|shipped|delivered|all
+ *                              &view=claims&claim=all|cancel|return|action
+ *                              &cursorAt&cursorId(다음 페이지 · 목록만) &orderId(한 건) &summary=0(목록만)
  *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 + 처리 기록
  *   POST { action, ... }
  *     브랜드  prepare · ship · deliver · cancel · return_approve · return_reject · return_refund
@@ -48,6 +54,7 @@ import {
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const OVERDUE_BUSINESS_DAYS = 3;
+const BRAND_ORDER_PAGE_SIZE = 40;
 
 const BRAND_LINK = "/business-admin?tab=affiliate";
 
@@ -125,34 +132,147 @@ function shapeBrandOrder(o: any) {
 
 // ─────────────────────────── 브랜드 ───────────────────────────
 
-async function brandGet(db: any, brand: string) {
-  const [orders, inquiries, notifications] = await Promise.all([
-    db.sql`
-      SELECT o.*, r.status AS ret_status, r.reason AS ret_reason, r.memo AS ret_memo, r.photo_urls AS ret_photos,
-             r.return_address AS ret_address, r.pickup_message AS ret_pickup, r.reject_reason AS ret_reject,
-             r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at,
-             r.refund_amount AS ret_refund_amount, r.shipping_deduction AS ret_shipping_deduction
-      FROM affiliate_store_orders o
-      LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
-      WHERE o.business_username = ${brand} AND o.status NOT IN ('pending_payment', 'expired')
-      ORDER BY o.created_at DESC LIMIT 1000
-    ` as Promise<any[]>,
-    db.sql`
-      SELECT * FROM affiliate_store_inquiries WHERE business_username = ${brand}
-      ORDER BY (answered_at IS NULL) DESC, created_at DESC LIMIT 500
-    ` as Promise<any[]>,
-    db.sql`
+/** 주문 관리 필터(화면의 필터 버튼과 같은 이름). null = 전체. */
+const ORDER_FILTERS: Record<string, string[] | null> = {
+  new: ["paid"],
+  preparing: ["preparing"],
+  shipped: ["shipped"],
+  delivered: ["delivered", "confirmed"],
+  all: null,
+};
+/** 취소·반품 필터: all 전체 · cancel 주문취소(반품 없음) · return 반품 · action 처리 필요. */
+const CLAIM_FILTERS = ["all", "cancel", "return", "action"] as const;
+
+const BRAND_ORDER_SELECT = `
+  SELECT o.*, r.status AS ret_status, r.reason AS ret_reason, r.memo AS ret_memo, r.photo_urls AS ret_photos,
+         r.return_address AS ret_address, r.pickup_message AS ret_pickup, r.reject_reason AS ret_reject,
+         r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at,
+         r.refund_amount AS ret_refund_amount, r.shipping_deduction AS ret_shipping_deduction
+    FROM affiliate_store_orders o
+    LEFT JOIN affiliate_store_returns r ON r.order_id = o.id`;
+/** 취소·반품 목록의 정렬 기준 시각(반품 요청 시각 → 취소 시각 → 주문 시각). */
+const CLAIM_AT = "COALESCE(r.requested_at, o.cancelled_at, o.created_at)";
+
+const SETTLE = brandSettlementSql("o");
+
+/**
+ * 브랜드 주문 관리 · 취소·반품.
+ *   ?view=orders&filter=new|preparing|shipped|delivered|all   주문(상태로 서버에서 거른다)
+ *   ?view=claims&claim=all|cancel|return|action               취소 · 반품(서버에서 거른다)
+ *   &cursorAt&cursorId   다음 페이지(목록만 준다)
+ *   &orderId             주문 한 건(처리 직후 그 줄만 새로 고칠 때 · 필터와 상관없이 준다)
+ *   &summary=0           숫자 · 정산 합계 · 알림을 빼고 목록만(필터만 바꿀 때)
+ * 숫자 · 정산 합계는 브랜드 전체 주문 기준이다. 정산 계산은 brandSettlementSql 한 곳을 쓴다.
+ */
+async function brandGet(db: any, brand: string, url: URL) {
+  const view = url.searchParams.get("view") === "claims" ? "claims" : "orders";
+  const orderId = clip(url.searchParams.get("orderId"), 120);
+  const filterKey = String(url.searchParams.get("filter") || "all");
+  const statuses = filterKey in ORDER_FILTERS ? ORDER_FILTERS[filterKey] : null;
+  const claimParam = String(url.searchParams.get("claim") || "all");
+  const claim = (CLAIM_FILTERS as readonly string[]).includes(claimParam) ? claimParam : "all";
+  const { hasCursor, cursorAt, cursorId } = readCursor(url);
+  const withSummary = !hasCursor && url.searchParams.get("summary") !== "0";
+
+  const params: unknown[] = [brand];
+  const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
+  const where = [`o.business_username = $1`, `o.status NOT IN ('pending_payment', 'expired')`];
+  let order: string;
+  if (orderId) {
+    where.push(`o.id = ${p(orderId)}`);
+    order = "o.id";
+  } else if (view === "claims") {
+    where.push(`(o.status = 'cancelled' OR r.order_id IS NOT NULL)`);
+    if (claim === "cancel") where.push(`r.order_id IS NULL`);
+    if (claim === "return") where.push(`r.order_id IS NOT NULL`);
+    if (claim === "action") where.push(`(r.status = 'requested' OR (r.status = 'approved' AND o.status = 'return_requested'))`);
+    if (hasCursor) {
+      const at = p(cursorAt);
+      where.push(`(${CLAIM_AT} < ${at}::timestamptz OR (${CLAIM_AT} = ${at}::timestamptz AND o.id < ${p(cursorId)}))`);
+    }
+    order = `${CLAIM_AT} DESC, o.id DESC`;
+  } else {
+    if (statuses) where.push(`o.status = ANY(${p(statuses)}::text[])`);
+    if (hasCursor) {
+      const at = p(cursorAt);
+      where.push(`(o.created_at < ${at}::timestamptz OR (o.created_at = ${at}::timestamptz AND o.id < ${p(cursorId)}))`);
+    }
+    order = "o.created_at DESC, o.id DESC";
+  }
+
+  const [orders, metrics, notifications] = await Promise.all([
+    queryRows(db, `${BRAND_ORDER_SELECT} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ${orderId ? 1 : BRAND_ORDER_PAGE_SIZE + 1}`, params),
+    withSummary ? queryRows(db, `
+      WITH base AS (
+        SELECT o.status, o.commission_status, r.order_id AS return_order_id, r.status AS ret_status,
+               ${SETTLE.included} AS included, ${SETTLE.payment} AS payment, ${SETTLE.commission} AS commission,
+               ${SETTLE.pgFee} AS pg_fee, ${SETTLE.platformFee} AS platform_fee, ${SETTLE.amount} AS amount
+        FROM affiliate_store_orders o
+        LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
+        WHERE o.business_username = $1 AND o.status NOT IN ('pending_payment', 'expired')
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'paid')::int AS new_orders,
+        COUNT(*) FILTER (WHERE status = 'preparing')::int AS preparing_orders,
+        COUNT(*) FILTER (WHERE status = 'shipped')::int AS shipped_orders,
+        COUNT(*) FILTER (WHERE status IN ('delivered', 'confirmed'))::int AS delivered_orders,
+        COUNT(*)::int AS all_orders,
+        COUNT(*) FILTER (WHERE status = 'cancelled' OR return_order_id IS NOT NULL)::int AS claims_all,
+        COUNT(*) FILTER (WHERE status = 'cancelled' AND return_order_id IS NULL)::int AS claims_cancel,
+        COUNT(*) FILTER (WHERE return_order_id IS NOT NULL)::int AS claims_return,
+        COUNT(*) FILTER (WHERE ret_status = 'requested' OR (ret_status = 'approved' AND status = 'return_requested'))::int AS claims_action,
+        (SELECT COUNT(*)::int FROM affiliate_store_notifications
+         WHERE recipient_type = 'brand' AND recipient = $1 AND read_at IS NULL) AS unread,
+        COALESCE(SUM(payment) FILTER (WHERE included), 0)::bigint AS settlement_payment,
+        COALESCE(SUM(commission) FILTER (WHERE included), 0)::bigint AS settlement_commission,
+        COALESCE(SUM(pg_fee) FILTER (WHERE included), 0)::bigint AS settlement_pg_fee,
+        COALESCE(SUM(platform_fee) FILTER (WHERE included), 0)::bigint AS settlement_platform_fee,
+        COALESCE(SUM(amount) FILTER (WHERE included), 0)::bigint AS settlement_amount,
+        COALESCE(SUM(amount) FILTER (WHERE included AND commission_status = 'confirmed'), 0)::bigint AS settlement_confirmed_amount
+      FROM base
+    `, [brand]) : Promise.resolve([]),
+    withSummary ? db.sql`
       SELECT id, kind, title, body, read_at, created_at FROM affiliate_store_notifications
       WHERE recipient_type = 'brand' AND recipient = ${brand} ORDER BY created_at DESC LIMIT 50
-    ` as Promise<any[]>,
+    ` as Promise<any[]> : Promise.resolve([]),
   ]);
+  const { page: pageOrders, hasMore, nextCursor } = orderId
+    ? { page: orders, hasMore: false, nextCursor: null }
+    : pageOf(orders, BRAND_ORDER_PAGE_SIZE, (o: any) => view === "claims" ? o.ret_requested_at || o.cancelled_at || o.created_at : o.created_at);
+  const m = metrics[0] || {};
+  const summary = {
+    orderCounts: {
+      new: Number(m.new_orders) || 0,
+      preparing: Number(m.preparing_orders) || 0,
+      shipped: Number(m.shipped_orders) || 0,
+      delivered: Number(m.delivered_orders) || 0,
+      all: Number(m.all_orders) || 0,
+    },
+    claimCounts: {
+      all: Number(m.claims_all) || 0,
+      cancel: Number(m.claims_cancel) || 0,
+      return: Number(m.claims_return) || 0,
+      action: Number(m.claims_action) || 0,
+    },
+    opsCounts: {
+      newOrders: Number(m.new_orders) || 0,
+      claimsNeedAction: Number(m.claims_action) || 0,
+      unread: Number(m.unread) || 0,
+    },
+    settlement: {
+      payment: Number(m.settlement_payment) || 0,
+      commission: Number(m.settlement_commission) || 0,
+      pgFee: Number(m.settlement_pg_fee) || 0,
+      platformFee: Number(m.settlement_platform_fee) || 0,
+      amount: Number(m.settlement_amount) || 0,
+      confirmedAmount: Number(m.settlement_confirmed_amount) || 0,
+    },
+  };
   return Response.json({
-    orders: orders.map(shapeBrandOrder),
-    inquiries: inquiries.map((q) => ({
-      id: q.id, buyerName: q.buyer_name, productName: q.product_name, orderId: q.order_id, body: q.body,
-      answer: q.answer, answeredAt: q.answered_at, createdAt: q.created_at,
-    })),
-    notifications,
+    orders: pageOrders.map(shapeBrandOrder),
+    hasMore,
+    nextCursor,
+    ...(withSummary ? { summary, notifications } : {}),
   });
 }
 
@@ -550,7 +670,7 @@ export default async (req: Request) => {
     const app = (await db.sql`SELECT status FROM affiliate_store_applications WHERE business_username = ${brand}`) as any[];
     if (app[0]?.status !== "approved") return err("입점 승인 후 이용할 수 있어요.", 403);
 
-    if (scope === "brand") return await brandGet(db, brand);
+    if (scope === "brand") return await brandGet(db, brand, url);
     if (req.method === "POST") return await brandAction(db, brand, body);
     return err("알 수 없는 요청입니다.");
   } catch (e: any) {

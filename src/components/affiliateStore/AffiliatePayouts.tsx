@@ -253,9 +253,56 @@ const BrandAccountForm: React.FC<{
 
 // ─────────────────────────── 신청 내역 한 줄 ───────────────────────────
 
-export const PayoutRequestCard: React.FC<{ r: PayoutRequest; actions?: React.ReactNode; showParty?: boolean }> = ({ r, actions, showParty }) => {
+export const PayoutRequestCard: React.FC<{
+  r: PayoutRequest;
+  actions?: React.ReactNode;
+  showParty?: boolean;
+  loadDetails?: (id: string, kind: 'items' | 'deductions', cursorId?: string) => Promise<{
+    items?: PayoutRequest['items'];
+    deductions?: PayoutRequest['deductions'];
+    nextCursor: string | null;
+    error?: string;
+  }>;
+}> = ({ r, actions, showParty, loadDetails }) => {
   const [open, setOpen] = useState(false);
+  const [items, setItems] = useState(r.items);
+  const [deductions, setDeductions] = useState(r.deductions);
+  const [itemCursor, setItemCursor] = useState<string | null>(null);
+  const [deductionCursor, setDeductionCursor] = useState<string | null>(null);
+  const [itemsLoaded, setItemsLoaded] = useState(!loadDetails);
+  const [deductionsLoaded, setDeductionsLoaded] = useState(!loadDetails);
+  const [itemsHasMore, setItemsHasMore] = useState(false);
+  const [deductionsHasMore, setDeductionsHasMore] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState({ items: false, deductions: false });
+  const [detailsError, setDetailsError] = useState('');
   const isInf = r.partyType === 'influencer';
+  const fetchDetails = async (kind: 'items' | 'deductions', cursorId?: string) => {
+    if (!loadDetails || detailsLoading[kind]) return;
+    setDetailsLoading(current => ({ ...current, [kind]: true }));
+    setDetailsError('');
+    const result = await loadDetails(r.id, kind, cursorId);
+    setDetailsLoading(current => ({ ...current, [kind]: false }));
+    if (result.error) { setDetailsError(result.error); return; }
+    if (kind === 'items') {
+      setItems(current => [...current, ...(result.items || [])]);
+      setItemCursor(result.nextCursor);
+      setItemsHasMore(!!result.nextCursor);
+      setItemsLoaded(true);
+    } else {
+      setDeductions(current => [...current, ...(result.deductions || [])]);
+      setDeductionCursor(result.nextCursor);
+      setDeductionsHasMore(!!result.nextCursor);
+      setDeductionsLoaded(true);
+    }
+  };
+  const toggleDetails = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && loadDetails) {
+      if (!itemsLoaded) void fetchDetails('items');
+      if (!deductionsLoaded) void fetchDetails('deductions');
+    }
+  };
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -284,21 +331,21 @@ export const PayoutRequestCard: React.FC<{ r: PayoutRequest; actions?: React.Rea
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
-        <button onClick={() => setOpen(o => !o)} className="text-[11px] font-black text-slate-500 flex items-center gap-1">
-          포함 주문 {r.items.length}건{r.deductions.length > 0 ? ` · 차감 ${r.deductions.length}건` : ''}
+        <button onClick={toggleDetails} className="text-[11px] font-black text-slate-500 flex items-center gap-1">
+          {loadDetails ? '포함 주문·차감 내역' : `포함 주문 ${r.items.length}건${r.deductions.length > 0 ? ` · 차감 ${r.deductions.length}건` : ''}`}
           {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
         {actions && <div className="flex gap-1.5">{actions}</div>}
       </div>
       {open && (
-        <div className="mt-2 rounded-xl bg-slate-50 p-3 text-[11px] space-y-1">
-          {r.items.map(i => (
+        <div className="mt-2 rounded-xl bg-slate-50 p-3 text-[11px] space-y-1 max-h-72 overflow-y-auto">
+          {items.map(i => (
             <div key={i.orderId} className="flex justify-between gap-3">
               <span className="text-slate-600 truncate">{i.productName} <span className="text-slate-400">· {i.orderId}</span></span>
               <span className="font-bold text-slate-800 shrink-0">{won(i.amount)}</span>
             </div>
           ))}
-          {r.deductions.map((d, idx) => (
+          {deductions.map((d, idx) => (
             <div key={`d${idx}`} className="flex justify-between gap-3 text-red-500">
               <span className="truncate">{d.amount < 0 ? '환원' : '차감'} · {d.reason} <span className="text-red-300">· {d.orderId}</span></span>
               <span className="font-bold shrink-0">{d.amount < 0 ? '+' : '−'}{won(Math.abs(d.amount))}</span>
@@ -311,6 +358,10 @@ export const PayoutRequestCard: React.FC<{ r: PayoutRequest; actions?: React.Rea
           {isInf && (
             <div className="text-slate-500">소득세(3%) {won(r.incomeTax)} · 지방소득세(소득세의 10%) {won(r.localTax)} · 실지급액 {won(r.netAmount)}</div>
           )}
+          {detailsError && <p className="text-red-500 font-bold">{detailsError}</p>}
+          {Object.values(detailsLoading).some(Boolean) && <p className="text-slate-400">내역을 불러오는 중이에요.</p>}
+          {itemsHasMore && <button onClick={() => void fetchDetails('items', itemCursor || undefined)} disabled={detailsLoading.items} className="text-blue-600 font-bold disabled:opacity-50">주문 더 보기</button>}
+          {deductionsHasMore && <button onClick={() => void fetchDetails('deductions', deductionCursor || undefined)} disabled={detailsLoading.deductions} className="text-blue-600 font-bold disabled:opacity-50">차감 더 보기</button>}
         </div>
       )}
     </div>
@@ -326,13 +377,60 @@ const AffiliatePayouts: React.FC<{ as: PayoutParty; account?: string }> = ({ as,
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<{ scheduledDate: string } | null>(null);
   const [showOrders, setShowOrders] = useState(false);
+  const [availableOrders, setAvailableOrders] = useState<PartyPayoutData['summary']['availableOrders']>([]);
+  const [availableDeductions, setAvailableDeductions] = useState<PartyPayoutData['summary']['availableDeductions']>([]);
+  const [orderCursor, setOrderCursor] = useState<{ cursorAt?: string; cursorId?: string } | null>(null);
+  const [deductionCursor, setDeductionCursor] = useState<{ cursorAt?: string; cursorId?: string } | null>(null);
+  const [orderHasMore, setOrderHasMore] = useState(false);
+  const [deductionHasMore, setDeductionHasMore] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [deductionsLoaded, setDeductionsLoaded] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState({ orders: false, deductions: false });
+  const [detailsError, setDetailsError] = useState('');
 
   const load = useCallback(async () => {
     const res = await affiliatePayoutService.get(as, account);
     if (res.error) setError(res.error);
-    else { setError(''); setData(res); }
+    else {
+      setError('');
+      setData(res);
+      setAvailableOrders([]);
+      setAvailableDeductions([]);
+      setOrderCursor(null);
+      setDeductionCursor(null);
+      setOrderHasMore(false);
+      setDeductionHasMore(false);
+      setOrdersLoaded(false);
+      setDeductionsLoaded(false);
+      setShowOrders(false);
+    }
   }, [as, account]);
   useEffect(() => { load(); }, [load]);
+
+  const loadAvailableDetails = async (kind: 'orders' | 'deductions') => {
+    if (detailsLoading[kind]) return;
+    setDetailsLoading(current => ({ ...current, [kind]: true }));
+    setDetailsError('');
+    const cursor = kind === 'orders' ? orderCursor : deductionCursor;
+    const res = await affiliatePayoutService.availableDetails(as, kind, cursor || undefined, account);
+    setDetailsLoading(current => ({ ...current, [kind]: false }));
+    if (res.error) { setDetailsError(res.error); return; }
+    if (kind === 'orders') {
+      setAvailableOrders(current => [...current, ...res.items.map(item => ({
+        id: String(item.id), productName: item.productName || '', amount: Number(item.amount) || 0, confirmedAt: item.confirmedAt || null,
+      }))]);
+      setOrderCursor(res.nextCursor);
+      setOrderHasMore(!!res.nextCursor);
+      setOrdersLoaded(true);
+    } else {
+      setAvailableDeductions(current => [...current, ...res.items.map(item => ({
+        id: Number(item.id), orderId: item.orderId || '', amount: Number(item.amount) || 0, reason: item.reason || '', createdAt: item.createdAt || '',
+      }))]);
+      setDeductionCursor(res.nextCursor);
+      setDeductionHasMore(!!res.nextCursor);
+      setDeductionsLoaded(true);
+    }
+  };
 
   if (error && !data) return <p className="text-xs font-bold text-red-500 py-10 text-center">{error}</p>;
   if (!data) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
@@ -407,26 +505,39 @@ const AffiliatePayouts: React.FC<{ as: PayoutParty; account?: string }> = ({ as,
           </div>
         )}
 
-        {(s.availableOrders.length > 0 || s.availableDeductions.length > 0) && (
+        {(s.availableOrdersCount > 0 || s.availableDeductionsCount > 0) && (
           <div>
-            <button onClick={() => setShowOrders(o => !o)} className="text-[11px] font-black text-slate-500 flex items-center gap-1">
-              신청에 들어갈 주문 {s.availableOrders.length}건{s.availableDeductions.length ? ` · 차감 ${s.availableDeductions.length}건` : ''}
+            <button onClick={() => {
+              const open = !showOrders;
+              setShowOrders(open);
+              if (open) {
+                if (!ordersLoaded && s.availableOrdersCount > 0) void loadAvailableDetails('orders');
+                if (!deductionsLoaded && s.availableDeductionsCount > 0) void loadAvailableDetails('deductions');
+              }
+            }} className="text-[11px] font-black text-slate-500 flex items-center gap-1">
+              신청에 들어갈 주문 {s.availableOrdersCount}건{s.availableDeductionsCount ? ` · 차감 ${s.availableDeductionsCount}건` : ''}
               {showOrders ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {showOrders && (
               <div className="mt-2 rounded-xl bg-slate-50 p-3 text-[11px] space-y-1 max-h-64 overflow-y-auto">
-                {s.availableOrders.map(o => (
+                {availableOrders.map(o => (
                   <div key={o.id} className="flex justify-between gap-3">
                     <span className="text-slate-600 truncate">{o.productName} <span className="text-slate-400">· {dateText(o.confirmedAt)} 확정</span></span>
                     <span className="font-bold text-slate-800 shrink-0">{won(o.amount)}</span>
                   </div>
                 ))}
-                {s.availableDeductions.map(d => (
+                {availableDeductions.map(d => (
                   <div key={d.id} className="flex justify-between gap-3 text-red-500">
                     <span className="truncate">{d.amount < 0 ? '환원' : '차감'} · {d.reason} · {d.orderId}</span>
                     <span className="font-bold shrink-0">{d.amount < 0 ? '+' : '−'}{won(Math.abs(d.amount))}</span>
                   </div>
                 ))}
+                {detailsError && <p className="text-red-500 font-bold">{detailsError}</p>}
+                {Object.values(detailsLoading).some(Boolean) && <p className="text-slate-400">내역을 불러오는 중이에요.</p>}
+                {!detailsLoading.orders && !detailsError && !ordersLoaded && s.availableOrdersCount > 0 && <button onClick={() => void loadAvailableDetails('orders')} className="text-blue-600 font-bold">주문 내역 불러오기</button>}
+                {!detailsLoading.deductions && !detailsError && !deductionsLoaded && s.availableDeductionsCount > 0 && <button onClick={() => void loadAvailableDetails('deductions')} className="text-blue-600 font-bold">차감 내역 불러오기</button>}
+                {orderHasMore && <button onClick={() => void loadAvailableDetails('orders')} disabled={detailsLoading.orders} className="text-blue-600 font-bold disabled:opacity-50">주문 더 보기</button>}
+                {deductionHasMore && <button onClick={() => void loadAvailableDetails('deductions')} disabled={detailsLoading.deductions} className="text-blue-600 font-bold disabled:opacity-50">차감 더 보기</button>}
               </div>
             )}
           </div>
@@ -504,7 +615,7 @@ const AffiliatePayouts: React.FC<{ as: PayoutParty; account?: string }> = ({ as,
         {data.requests.length === 0 ? (
           <p className="text-xs text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center">아직 지급 신청 내역이 없어요.</p>
         ) : data.requests.map(r => (
-          <PayoutRequestCard key={r.id} r={r} actions={r.status === 'requested' ? (
+          <PayoutRequestCard key={r.id} r={r} loadDetails={(id, kind, cursorId) => affiliatePayoutService.requestDetails(as, id, kind, cursorId, account)} actions={r.status === 'requested' ? (
             <button disabled={busy === r.id} onClick={() => cancel(r)} className="h-8 px-3 rounded-lg border border-slate-200 text-[11px] font-black text-slate-600 disabled:opacity-50">신청 취소</button>
           ) : undefined} />
         ))}

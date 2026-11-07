@@ -443,17 +443,55 @@ export function brandSettlement(o: {
     }
     const productKept = Math.max(0, product - refund);
     const commission = o.commission_status === "cancelled" ? 0 : Number(o.commission_amount) || 0;
-    const platformFee = Math.floor((productKept * (Number(o.platform_rate) || 0)) / 100);
-    const pgFee = Math.floor((kept * (Number(o.pg_rate) || 0)) / 100);
+    const platformFee = feeOf(productKept, o.platform_rate);
+    const pgFee = feeOf(kept, o.pg_rate);
     return {
       payment: kept, product: productKept, shipping: kept - productKept, commission, pgFee, platformFee,
       amount: kept - commission - pgFee - platformFee, included: true, partialRefund: refund,
     };
   }
   const commission = Number(o.commission_amount) || 0;
-  const platformFee = Math.floor((product * (Number(o.platform_rate) || 0)) / 100);
-  const pgFee = Math.floor((payment * (Number(o.pg_rate) || 0)) / 100);
+  const platformFee = feeOf(product, o.platform_rate);
+  const pgFee = feeOf(payment, o.pg_rate);
   return { payment, product, shipping, commission, pgFee, platformFee, amount: payment - commission - pgFee - platformFee, included: true };
+}
+
+/**
+ * 수수료 = 금액 × 비율(%) 의 원 미만 절사. 비율은 소수 둘째 자리까지(NUMERIC(5,2))라
+ * 1/100 % 단위 정수로 바꿔 정수로만 계산한다(부동소수 오차로 1원씩 어긋나지 않게).
+ * SQL 쪽(brandSettlementSql)의 FLOOR(금액 × 비율 / 100) 과 같은 값이 나온다.
+ */
+export function feeOf(base: number, rate: number | string | undefined): number {
+  const bp = Math.round((Number(rate) || 0) * 100);
+  return Math.floor((Number(base) * bp) / 10000);
+}
+
+/**
+ * brandSettlement 와 같은 계산을 SQL 로 쓴 조각. 주문 테이블 별칭(o)을 받아 식을 돌려준다.
+ * 브랜드 정산 금액은 이 조각(SQL 합계)과 brandSettlement(주문 한 건) 두 곳에서만 계산하고,
+ * 두 결과가 같은지는 tests/affiliate-e2e 에서 확인한다. 모두 정수(numeric) 계산이다.
+ *
+ *   included : 정산 대상인지(전액 취소 · 환불은 아님)
+ *   payment  : 정산 기준 결제 금액(반품 환불 뒤에는 남은 금액)
+ *   amount   : 정산액 = payment − commission − pgFee − platformFee
+ *   eligible : 지급 신청에 넣을 수 있는 주문(구매확정, 또는 반품 환불 뒤 배송비가 남은 주문)
+ *   entitled : 지급 신청에 들어갈 금액(eligible 이고 included 일 때 max(0, amount), 아니면 0)
+ */
+export function brandSettlementSql(o = "o") {
+  const product = `(${o}.unit_price::numeric * ${o}.quantity::numeric)`;
+  const payment = `COALESCE(NULLIF(${o}.total_amount, 0)::numeric, ${product} + COALESCE(${o}.shipping_fee, 0)::numeric)`;
+  const refund = `COALESCE(${o}.refund_amount, 0)::numeric`;
+  const cancelled = `(${o}.status = 'cancelled')`;
+  const kept = `(CASE WHEN ${cancelled} THEN ${payment} - ${refund} ELSE ${payment} END)`;
+  const keptProduct = `(CASE WHEN ${cancelled} THEN GREATEST(0::numeric, ${product} - ${refund}) ELSE ${product} END)`;
+  const included = `(NOT ${cancelled} OR (${refund} > 0 AND ${payment} - ${refund} > 0))`;
+  const commission = `(CASE WHEN ${cancelled} AND ${o}.commission_status = 'cancelled' THEN 0::numeric ELSE COALESCE(${o}.commission_amount, 0)::numeric END)`;
+  const pgFee = `FLOOR(${kept} * COALESCE(${o}.pg_rate, 0)::numeric / 100)`;
+  const platformFee = `FLOOR(${keptProduct} * COALESCE(${o}.platform_rate, 0)::numeric / 100)`;
+  const amount = `(${kept} - ${commission} - ${pgFee} - ${platformFee})`;
+  const eligible = `(${o}.status = 'confirmed' OR (${cancelled} AND ${o}.refund_amount > 0 AND ${o}.refund_amount < ${o}.total_amount))`;
+  const entitled = `(CASE WHEN ${eligible} AND ${included} THEN GREATEST(0::numeric, ${amount}) ELSE 0::numeric END)`;
+  return { included, payment: kept, commission, pgFee, platformFee, amount, eligible, entitled };
 }
 
 // ─────────────────────────── 결제 확인(공용) ───────────────────────────
