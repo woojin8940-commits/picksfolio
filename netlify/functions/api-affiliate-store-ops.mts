@@ -2,8 +2,8 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireOperator } from "./_shared/manager-auth.mts";
+import { canUseStore } from "./_shared/store-testers.mts";
 import {
-  STORE_TESTERS,
   DELIVER_MIN_HOURS_AFTER_SHIP,
   FEE_SETTING_KEYS,
   PARTIAL_REFUND_REASONS,
@@ -16,7 +16,6 @@ import {
   orderLink,
   sendBuyerSms,
   cancelOrderFully,
-  checkoutOpen,
   logEvent,
   notify,
   trackingUrl,
@@ -26,11 +25,11 @@ import {
  * 어필리에이트 스토어 주문 운영 — 브랜드 주문 관리 · 취소 · 반품, 운영자 미처리 목록.
  *
  *   GET  ?scope=brand          브랜드: 내 주문(취소 · 반품 이력 포함) · 알림
- *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 + 결제 가드 + 처리 기록
+ *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 + 처리 기록
  *   POST { action, ... }
  *     브랜드  prepare · ship · deliver · cancel · return_approve · return_reject · return_refund
  *             · answer_inquiry(예전 문의 답변 · 화면에서는 숨김) · read_notifications · mark_seen
- *     운영자  admin_refund · admin_return_reject · admin_remind · set_checkout_open · set_fee_rates
+ *     운영자  admin_refund · admin_return_reject · admin_remind · set_fee_rates
  *
  * 반품 규칙(구매자 신청 → 브랜드 승인 · 거절 → 승인 시 브랜드가 주문 배송지로 직접 회수 → 브랜드 "환불 처리")
  *   - 승인은 입력 없이 바로 된다. 회수 방법 · 일정 연락은 브랜드가 진행하고 플랫폼은 관여하지 않는다.
@@ -371,7 +370,7 @@ async function brandAction(db: any, brand: string, body: any) {
 // ─────────────────────────── 운영자 ───────────────────────────
 
 async function adminIssues(db: any) {
-  const [returns, inquiries, actions, open, feeRates, feeHistory] = await Promise.all([
+  const [returns, inquiries, actions, feeRates, feeHistory] = await Promise.all([
     db.sql`
       SELECT r.*, o.product_name, o.total_amount, o.status AS order_status, o.buyer_name, a.brand_name
       FROM affiliate_store_returns r
@@ -390,7 +389,6 @@ async function adminIssues(db: any) {
       SELECT order_id, actor, action, note, created_at FROM affiliate_store_order_events
       WHERE actor_type = 'operator' ORDER BY created_at DESC LIMIT 100
     ` as Promise<any[]>,
-    checkoutOpen(db),
     currentFeeRates(db),
     db.sql`
       SELECT key, old_value, new_value, changed_by, changed_at FROM platform_setting_history
@@ -414,7 +412,7 @@ async function adminIssues(db: any) {
       orderId: q.order_id, body: q.body, createdAt: q.created_at, businessDays: businessDaysSince(q.created_at),
     }));
   return Response.json({
-    returns: overdueReturns, inquiries: overdueInquiries, operatorActions: actions, checkoutOpen: open,
+    returns: overdueReturns, inquiries: overdueInquiries, operatorActions: actions,
     feeRates, feeHistory: feeHistory.map((h) => ({ key: h.key, oldValue: h.old_value, newValue: h.new_value, changedBy: h.changed_by, changedAt: h.changed_at })),
   });
 }
@@ -467,15 +465,6 @@ async function setFeeRates(db: any, operator: string, body: any) {
 async function adminAction(db: any, operator: string, body: any) {
   const action = String(body.action || "");
   if (action === "set_fee_rates") return await setFeeRates(db, operator, body);
-  if (action === "set_checkout_open") {
-    const open = body.open === true ? "true" : "false";
-    await db.sql`
-      INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ('affiliate_store_checkout_open', ${open}, ${operator}, NOW())
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()
-    `;
-    await logEvent(db, "settings", "operator", operator, "checkout_open", open);
-    return Response.json({ ok: true, checkoutOpen: open === "true" });
-  }
 
   if (action === "admin_refund") {
     const id = clip(body.orderId, 120);
@@ -546,7 +535,7 @@ export default async (req: Request) => {
   const action = String(body?.action || "");
 
   try {
-    if (scope === "admin-issues" || action.startsWith("admin_") || action === "set_checkout_open" || action === "set_fee_rates") {
+    if (scope === "admin-issues" || action.startsWith("admin_") || action === "set_fee_rates") {
       const op = await requireOperator(req);
       if (op.ok === false) return op.response;
       if (scope === "admin-issues") return await adminIssues(db);
@@ -557,7 +546,7 @@ export default async (req: Request) => {
     if (caller.ok === false) return caller.response;
     const brand = String(caller.username || "").toLowerCase().replace(/^biz\//, "");
     if (!brand) return err("브랜드 계정으로 로그인해 주세요.", 403);
-    if (!STORE_TESTERS.has(brand) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
+    if (!canUseStore(brand) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
     const app = (await db.sql`SELECT status FROM affiliate_store_applications WHERE business_username = ${brand}`) as any[];
     if (app[0]?.status !== "approved") return err("입점 승인 후 이용할 수 있어요.", 403);
 

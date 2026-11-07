@@ -5,7 +5,7 @@ import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
 import { SALE_STATUSES, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
-import { STORE_TESTERS } from "./_shared/store-testers.mts";
+import { canUseStore } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 
 /**
@@ -30,11 +30,10 @@ import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-list
  * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 링크가 열렸다.)
  * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
  *
- * 정식 오픈 전이라 브랜드 · 인플루언서 쪽은 테스트 계정만 쓸 수 있다. 명단은 _shared/store-testers.mts
+ * 공개 여부(전체 공개 · 테스트 계정 전용)는 _shared/store-testers.mts
  * 한 곳(화면은 src/utils/featureFlags.ts)에서 관리한다.
  */
 
-const TESTERS = STORE_TESTERS;
 
 const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}${randomBytes(5).toString("hex")}`;
 const norm = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
@@ -812,7 +811,7 @@ export default async (req: Request) => {
   if (!caller.ok) return caller.response;
   const username = norm(caller.username);
   if (!username) return err("로그인이 필요합니다.", 401);
-  if (!TESTERS.has(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
+  if (!canUseStore(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
 
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
   const creatorScope = ["creator", "brands", "my-requests", "my-affiliate"].includes(String(scope || ""))

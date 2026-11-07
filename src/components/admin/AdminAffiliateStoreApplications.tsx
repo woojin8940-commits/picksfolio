@@ -66,7 +66,7 @@ const AdminAffiliateStoreApplications: React.FC<{ token: string }> = ({ token })
       <div className="flex items-end justify-between gap-2 flex-wrap">
         <div>
           <h3 className="text-sm font-black text-slate-900">어필리에이트 입점 신청</h3>
-          <p className="text-[10px] font-bold text-slate-400 mt-0.5">승인한 브랜드는 어필리에이트 메뉴에서 상품을 등록할 수 있습니다. (오픈 전 · 테스트 계정 전용)</p>
+          <p className="text-[10px] font-bold text-slate-400 mt-0.5">승인한 브랜드는 어필리에이트 메뉴에서 상품을 등록할 수 있습니다.</p>
         </div>
         <button onClick={load} className="px-3 py-1.5 rounded-lg bg-slate-100 text-[11px] font-black text-slate-600 hover:bg-slate-200">새로고침</button>
       </div>

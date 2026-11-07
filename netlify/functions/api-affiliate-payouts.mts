@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
-import { STORE_TESTERS } from "./_shared/store-testers.mts";
+import { canUseStore } from "./_shared/store-testers.mts";
 import { sendPushToUser } from "./_shared/push.mts";
 import { PiiCryptoError, decryptPii, encryptPii, formatRrn, maskAccount, maskRrn, piiKeyConfigured } from "./_shared/pii-crypto.mts";
 import { executePayout } from "./_shared/affiliate-payout-provider.mts";
@@ -493,7 +493,7 @@ export default async (req: Request) => {
     if (caller.ok === false) return caller.response;
     const username = norm(caller.username);
     if (!username) return err("로그인이 필요합니다.", 401);
-    if (!STORE_TESTERS.has(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
+    if (!canUseStore(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
 
     const as = (req.method === "GET" ? url.searchParams.get("as") : body.as) === "brand" ? "brand" : "influencer";
     if (as === "brand") {

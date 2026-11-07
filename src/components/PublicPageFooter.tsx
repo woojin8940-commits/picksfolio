@@ -25,7 +25,7 @@ interface PublicPageFooterProps {
   shareUrl: string;
   /**
    * 이 페이지 주인의 아이디. 어필리에이트 스토어 "주문 내역 확인" 링크를 보일지 정한다
-   * (지금은 테스트 계정 페이지에만 보인다).
+   * (스토어가 전체 공개면 모든 페이지에 보인다).
    */
   ownerUsername?: string;
 }

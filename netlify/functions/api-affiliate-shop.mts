@@ -3,7 +3,7 @@ import type { Config } from "@netlify/functions";
 import { randomBytes } from "node:crypto";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
-import { STORE_TESTERS, checkoutOpen, finalizePaidOrder, pgRateFor, platformRate } from "./_shared/affiliate-store-orders.mts";
+import { finalizePaidOrder, pgRateFor, platformRate } from "./_shared/affiliate-store-orders.mts";
 
 /**
  * 어필리에이트 공개 상품 페이지(/shop/<코드>)의 주문 · 결제. 로그인 없이 쓴다.
@@ -18,7 +18,7 @@ import { STORE_TESTERS, checkoutOpen, finalizePaidOrder, pgRateFor, platformRate
  * 같은 함수(finalizePaidOrder)로 한다 — 구매자가 결제 후 창을 닫아도 주문이 빠지지 않는다.
  *
  * 상품 페이지는 로그인 없이 보지만, 주문은 카카오 로그인한 구매자 계정(Supabase user id)에
- * 묶어 저장한다. 결제 가드(affiliate_store_checkout_open)가 꺼져 있으면 테스트 계정만 결제한다.
+ * 묶어 저장한다. 로그인한 구매자는 누구나 결제할 수 있다.
  *
  * 주문번호가 곧 포트원 paymentId 다. 금액은 서버가 계산해 저장하고, 결제 검증 때 포트원에
  * 실제로 결제된 금액이 그 값과 같아야만 결제완료로 바꾼다 — 화면이 보낸 금액은 믿지 않는다.
@@ -101,10 +101,6 @@ function publicOrder(o: any) {
 }
 
 async function createOrder(db: any, body: any, buyer: { userId: string; username: string }) {
-  // 결제 가드: 열리기 전에는 테스트 계정만 결제할 수 있다.
-  if (!(await checkoutOpen(db)) && !STORE_TESTERS.has(buyer.username)) {
-    return err("아직 결제를 열지 않은 상품이에요. 정식 오픈 후 구매할 수 있어요.", 403);
-  }
   const link = await loadLink(db, clip(body.code, 40));
   if (!link) return err("판매가 끝났거나 없는 링크입니다.", 404);
   if (link.status !== "on_sale") return err("지금은 판매하지 않는 상품입니다.");
