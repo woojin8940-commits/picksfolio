@@ -56,6 +56,18 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [application, setApplication] = useState<StoreApplication | null>(null);
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [requests, setRequests] = useState<StoreRequest[]>([]);
+  const [productTotal, setProductTotal] = useState(0);
+  const [onSaleTotal, setOnSaleTotal] = useState(0);
+  const [requestTotal, setRequestTotal] = useState(0);
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [productPage, setProductPage] = useState(1);
+  const [productHasMore, setProductHasMore] = useState(false);
+  const [productsMoreLoading, setProductsMoreLoading] = useState(false);
+  const [requestsPage, setRequestsPage] = useState(1);
+  const [requestsHasMore, setRequestsHasMore] = useState(false);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsError, setRequestsError] = useState('');
   const [categories, setCategories] = useState<string[]>([]);
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
   const [feeRates, setFeeRates] = useState<FeeRates | null>(null);
@@ -66,14 +78,20 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [reapply, setReapply] = useState(false);
   const [busyId, setBusyId] = useState('');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (page = 1, append = false) => {
     setError('');
-    const res = await affiliateStoreService.getBrand(businessUsername);
+    const res = await affiliateStoreService.getBrand(businessUsername, page);
     if (res.error) setError(res.error);
     else {
       setApplication(res.application);
-      setProducts(res.products || []);
-      setRequests(res.requests || []);
+      setProducts(prev => append ? [...prev, ...(res.products || [])] : (res.products || []));
+      setProductPage(page);
+      setProductHasMore(res.productHasMore);
+      setProductTotal(res.productTotal);
+      setOnSaleTotal(res.onSaleTotal);
+      setRequestTotal(res.requestTotal);
+      setPendingRequestCount(res.pendingRequestCount);
+      setOpsCounts(res.opsCounts);
       setCategories(res.categories || []);
       setTaxonomy(res.taxonomy || []);
       setFeeRates(res.feeRates || null);
@@ -82,6 +100,38 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   }, [businessUsername]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadRequests = useCallback(async (page = 1, append = false) => {
+    setRequestsLoading(true);
+    setRequestsError('');
+    const res = await affiliateStoreService.getBrandRequests(businessUsername, page);
+    setRequestsLoading(false);
+    if (res.error) { setRequestsError(res.error); return; }
+    setRequests(prev => append ? [...prev, ...(res.requests || [])] : (res.requests || []));
+    setRequestsPage(page);
+    setRequestsHasMore(res.requestHasMore);
+    setRequestTotal(res.requestTotal);
+    setPendingRequestCount(res.pendingRequestCount);
+    setRequestsLoaded(true);
+  }, [businessUsername]);
+
+  useEffect(() => {
+    setRequests([]);
+    setRequestsLoaded(false);
+    setRequestsError('');
+  }, [businessUsername]);
+
+  useEffect(() => {
+    if (tab === 'requests' && !requestsLoaded && !requestsLoading && !requestsError) void loadRequests(1);
+  }, [tab, requestsLoaded, requestsLoading, requestsError, loadRequests]);
+
+  const loadMoreProducts = async () => {
+    setProductsMoreLoading(true);
+    await load(productPage + 1, true);
+    setProductsMoreLoading(false);
+  };
+
+  const loadMoreRequests = () => { void loadRequests(requestsPage + 1, true); };
 
   if (loading) {
     return (
@@ -169,10 +219,10 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     );
   }
 
-  const pendingRequests = requests.filter(r => r.status === 'pending').length;
+  const pendingRequests = pendingRequestCount;
   // 이미 승인된 브랜드는 고객 문의 링크 · 판매자 정보(통신판매업 신고번호 등)가 비어 있을 수 있다 → 상단 배너로 등록 요청.
   const sellerMissing = sellerInfoMissing(application);
-  const onSale = products.filter(p => p.status === 'on_sale').length;
+  const onSale = onSaleTotal;
 
   const removeProduct = async (p: StoreProduct) => {
     if (!window.confirm(`'${p.name}' 상품을 삭제할까요? 인플루언서 목록에서도 사라집니다.`)) return;
@@ -180,7 +230,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     const res = await affiliateStoreService.deleteProduct(businessUsername, p.id);
     setBusyId('');
     if (res.error) window.alert(res.error);
-    else load();
+    else await load();
   };
 
   const toggleSale = async (p: StoreProduct) => {
@@ -192,7 +242,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     });
     setBusyId('');
     if (res.error) window.alert(res.error);
-    else load();
+    else await load();
   };
 
   const review = async (r: StoreRequest, decision: 'approve' | 'reject') => {
@@ -208,7 +258,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     const res = await affiliateStoreService.reviewRequest(businessUsername, r.id, decision, note);
     setBusyId('');
     if (res.error) window.alert(res.error);
-    else load();
+    else await loadRequests(1);
   };
 
   return (
@@ -247,7 +297,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
 
       <div className="grid grid-cols-3 gap-2.5 md:gap-4 mb-6">
         {[
-          { label: '등록 상품', value: products.length },
+          { label: '등록 상품', value: productTotal },
           { label: '판매중', value: onSale },
           { label: '검토 대기 신청', value: pendingRequests },
         ].map(s => (
@@ -333,12 +383,17 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         )
       )}
 
+      {tab === 'products' && productHasMore && (
+        <div className="flex justify-center mt-5">
+          <button disabled={productsMoreLoading} onClick={loadMoreProducts} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
+            {productsMoreLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            상품 더 보기 ({products.length}/{productTotal})
+          </button>
+        </div>
+      )}
+
       {(tab === 'orders' || tab === 'claims') && (
         <BrandAffiliateOrders key={tab} businessUsername={businessUsername} view={tab} onCounts={onOpsCounts} />
-      )}
-      {/* 주문 관리 탭을 열기 전에도 배지가 보이도록 숨겨서 한 번 읽는다. */}
-      {tab !== 'orders' && tab !== 'claims' && (
-        <div className="hidden"><BrandAffiliateOrders businessUsername={businessUsername} view="orders" onCounts={onOpsCounts} /></div>
       )}
       {tab === 'payouts' && <AffiliatePayouts as="brand" account={businessUsername} />}
       {tab === 'seller' && (
@@ -350,7 +405,14 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       )}
 
       {tab === 'requests' && (
-        requests.length === 0 ? (
+        requestsLoading && requests.length === 0 ? (
+          <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+        ) : requestsError ? (
+          <div className="py-6 text-center">
+            <p className="text-sm font-bold text-red-500 mb-3">{requestsError}</p>
+            <button onClick={() => { void loadRequests(1); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+          </div>
+        ) : requests.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
             <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
             <p className="text-sm font-black text-slate-700">아직 받은 판매 신청이 없어요</p>
@@ -396,6 +458,14 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               </InfluencerCandidateCard>
             ))}
             </div>
+            {requestsHasMore && (
+              <div className="flex justify-center mt-5">
+                <button disabled={requestsLoading} onClick={loadMoreRequests} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
+                  {requestsLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  신청 더 보기 ({requests.length}/{requestTotal})
+                </button>
+              </div>
+            )}
           </div>
         )
       )}

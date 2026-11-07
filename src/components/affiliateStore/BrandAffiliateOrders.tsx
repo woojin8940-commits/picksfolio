@@ -72,11 +72,24 @@ interface Props {
   onCounts?: (c: { newOrders: number; claimsNeedAction: number; unread: number }) => void;
 }
 
+type BrandOpsCursor = { cursorAt: string; cursorId: string };
+type BrandOpsSummary = {
+  orderCounts: { new: number; preparing: number; shipped: number; delivered: number; all: number };
+  claimCounts: { all: number; cancel: number; return: number; action: number };
+  opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
+  settlement: { payment: number; commission: number; pgFee: number; platformFee: number; amount: number; confirmedAmount: number };
+};
+
 const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCounts }) => {
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [notifications, setNotifications] = useState<StoreNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [summary, setSummary] = useState<BrandOpsSummary | null>(null);
+  const [nextCursor, setNextCursor] = useState<BrandOpsCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [failedRequest, setFailedRequest] = useState<{ cursor?: BrandOpsCursor; append: boolean } | null>(null);
   const [filter, setFilter] = useState<Filter>('new');
   const [claimFilter, setClaimFilter] = useState<ClaimFilter>('all');
   const [busy, setBusy] = useState('');
@@ -86,19 +99,30 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const [dialogError, setDialogError] = useState('');
   const [notiOpen, setNotiOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    const res = await affiliateStoreService.brandOps(businessUsername);
-    setLoading(false);
-    if (res.error) { setLoadError(res.error); return; }
+  const load = useCallback(async (cursor?: BrandOpsCursor, append = false) => {
+    if (append) setMoreLoading(true);
+    else setLoading(true);
     setLoadError('');
-    setOrders(res.orders || []);
-    setNotifications(res.notifications || []);
-    onCounts?.({
-      newOrders: (res.orders || []).filter(o => o.status === 'paid').length,
-      claimsNeedAction: (res.orders || []).filter(claimNeedsAction).length,
-      unread: (res.notifications || []).filter(n => !n.read_at).length,
+    setFailedRequest(null);
+    const res = await affiliateStoreService.brandOps(businessUsername, view, cursor);
+    setLoading(false);
+    setMoreLoading(false);
+    if (res.error) { setLoadError(res.error); setFailedRequest({ cursor, append }); return; }
+    setLoadError('');
+    setFailedRequest(null);
+    setOrders(prev => {
+      if (!append) return res.orders || [];
+      const seen = new Set(prev.map(o => o.id));
+      return [...prev, ...(res.orders || []).filter(o => !seen.has(o.id))];
     });
-  }, [businessUsername, onCounts]);
+    if (res.notifications) setNotifications(res.notifications);
+    if (res.summary) {
+      setSummary(res.summary);
+      onCounts?.(res.summary.opsCounts);
+    }
+    setNextCursor(res.nextCursor || null);
+    setHasMore(!!res.hasMore);
+  }, [businessUsername, view, onCounts]);
   useEffect(() => { load(); }, [load]);
 
   const act = async (action: string, payload: Record<string, unknown>, key: string) => {
@@ -106,7 +130,17 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     const res = await affiliateStoreService.orderAction(businessUsername, action, payload);
     setBusy('');
     if (res.error) return res.error;
-    await load();
+    const refreshed = await affiliateStoreService.brandOps(businessUsername, view, undefined, String(payload.id || ''));
+    if (refreshed.error) await load();
+    else {
+      const row = refreshed.orders?.[0];
+      setOrders(prev => row ? prev.map(o => o.id === row.id ? row : o) : prev.filter(o => o.id !== String(payload.id || '')));
+      if (refreshed.summary) {
+        setSummary(refreshed.summary);
+        onCounts?.(refreshed.summary.opsCounts);
+      }
+      if (refreshed.notifications) setNotifications(refreshed.notifications);
+    }
     return '';
   };
 
@@ -149,23 +183,21 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     }
   };
 
-  if (loading) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
-  if (loadError) return <p className="text-sm font-bold text-red-500 py-6">{loadError}</p>;
+  if (loading && orders.length === 0) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
+  if (loadError && orders.length === 0) return (
+    <div className="py-6 text-center">
+      <p className="text-sm font-bold text-red-500 mb-3">{loadError}</p>
+      <button onClick={() => { void load(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+    </div>
+  );
 
-  const unread = notifications.filter(n => !n.read_at).length;
+  const unread = summary?.opsCounts.unread ?? notifications.filter(n => !n.read_at).length;
   const visible = orders.filter(FILTERS.find(f => f.key === filter)!.match);
-  const claims = orders.filter(isClaim).sort((a, b) => String(claimDate(b)).localeCompare(String(claimDate(a))));
+  const claims = orders.filter(isClaim);
   const visibleClaims = claims.filter(CLAIM_FILTERS.find(f => f.key === claimFilter)!.match);
-  // 정산 대상(취소 · 환불 제외) 합계. 주문마다 고정된 수수료율로 서버가 계산한 값을 더한다.
-  const sum = orders.reduce((t, o) => {
-    const st = o.settlement;
-    if (!st || !st.included) return t;
-    return {
-      payment: t.payment + st.payment, commission: t.commission + st.commission, pgFee: t.pgFee + st.pgFee,
-      platformFee: t.platformFee + st.platformFee, amount: t.amount + st.amount,
-      confirmedAmount: t.confirmedAmount + (o.commissionStatus === 'confirmed' ? st.amount : 0),
-    };
-  }, { payment: 0, commission: 0, pgFee: 0, platformFee: 0, amount: 0, confirmedAmount: 0 });
+  const sum = summary?.settlement || { payment: 0, commission: 0, pgFee: 0, platformFee: 0, amount: 0, confirmedAmount: 0 };
+  const orderCounts = summary?.orderCounts || { new: 0, preparing: 0, shipped: 0, delivered: 0, all: 0 };
+  const claimCounts = summary?.claimCounts || { all: 0, cancel: 0, return: 0, action: 0 };
 
   const now = Date.now();
   const actions = (o: StoreOrder) => {
@@ -227,7 +259,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
         ) : (
           <div className="flex gap-1.5 flex-wrap flex-1">
             {CLAIM_FILTERS.map(f => {
-              const n = claims.filter(f.match).length;
+              const n = claimCounts[f.key];
               return (
                 <button key={f.key} onClick={() => setClaimFilter(f.key)} className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${claimFilter === f.key ? 'bg-slate-900 text-white' : f.key === 'action' && n > 0 ? 'bg-orange-50 border border-orange-200 text-orange-600' : 'bg-white border border-slate-200 text-slate-500'}`}>
                   {f.label} {n}
@@ -259,7 +291,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
         <>
           <div className="flex gap-1.5 flex-wrap mb-3">
             {FILTERS.map(f => {
-              const n = orders.filter(f.match).length;
+              const n = orderCounts[f.key];
               return (
                 <button key={f.key} onClick={() => setFilter(f.key)} className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${filter === f.key ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}>
                   {f.label} {n}
@@ -271,7 +303,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
           {visible.length === 0 ? (
             <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
               <Truck className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-              <p className="text-sm font-black text-slate-700">해당하는 주문이 없어요</p>
+              <p className="text-sm font-black text-slate-700">{hasMore ? '아직 불러오지 않은 주문이 있을 수 있어요' : '해당하는 주문이 없어요'}</p>
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -344,7 +376,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
         visibleClaims.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
             <RotateCcw className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm font-black text-slate-700">해당하는 취소 · 반품이 없어요</p>
+            <p className="text-sm font-black text-slate-700">{hasMore ? '아직 불러오지 않은 취소 · 반품이 있을 수 있어요' : '해당하는 취소 · 반품이 없어요'}</p>
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -409,6 +441,28 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
             })}
           </div>
         )
+      )}
+
+      {(hasMore || loadError) && (
+        <div className="flex flex-col items-center gap-2 pt-4">
+          {loadError && <p className="text-xs font-bold text-red-500">{loadError}</p>}
+          {loadError ? (
+            <button
+              disabled={moreLoading || loading}
+              onClick={() => { void load(failedRequest?.cursor, failedRequest?.append ?? false); }}
+              className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50"
+            >다시 시도</button>
+          ) : hasMore && (
+            <button
+              disabled={moreLoading}
+              onClick={() => { void load(nextCursor || undefined, true); }}
+              className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2"
+            >
+              {moreLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              더 보기
+            </button>
+          )}
+        </div>
       )}
 
       {dialog && (

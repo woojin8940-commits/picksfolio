@@ -90,7 +90,7 @@ const MoreButton: React.FC<{ loading: boolean; onClick: () => void }> = ({ loadi
 interface ProductListProps {
   taxonomy: CategoryNode[];
   onTaxonomy: (t: CategoryNode[]) => void;
-  requestByProduct: Map<string, StoreRequest>;
+  requestByProduct: Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>>;
   onOpen: (p: StoreProduct) => void;
   /** 이 브랜드의 상품만 본다(브랜드 페이지). */
   brand?: string;
@@ -290,18 +290,40 @@ const FLOW_STEPS = [
 
 interface DetailProps {
   product: StoreProduct;
-  request?: StoreRequest;
+  request?: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>;
   onBack: () => void;
   onApply: () => void;
   onMine: () => void;
+  loading: boolean;
+  loadError: string;
+  onRetry: () => void;
 }
 
 const ProductDetailPage: React.FC<DetailProps> = ({
-  product: detail, request, onBack, onApply, onMine,
+  product: detail, request, onBack, onApply, onMine, loading, loadError, onRetry,
 }) => {
   const [imageIndex, setImageIndex] = useState(0);
   const images = detail.imageUrls;
   const discount = detail.retailPrice > detail.salePrice ? Math.round((1 - detail.salePrice / detail.retailPrice) * 100) : 0;
+
+  if (loading || loadError) {
+    return (
+      <div className="w-full min-h-[60vh]">
+        <div className="sticky top-0 z-20 bg-white/85 backdrop-blur-lg border-b border-slate-100 rounded-2xl">
+          <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+            <button onClick={onBack} className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-slate-100 transition-colors" aria-label="목록으로">
+              <ArrowLeft className="w-5 h-5 text-slate-700" />
+            </button>
+            <h3 className="text-sm font-black text-slate-900 truncate flex-1">{detail.name}</h3>
+          </div>
+        </div>
+        <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3 text-center">
+          {loading ? <Loader2 className="w-6 h-6 animate-spin text-slate-400" /> : <p className="text-sm font-bold text-red-500">{loadError}</p>}
+          {loadError && <button onClick={onRetry} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full animate-in fade-in duration-300">
@@ -701,10 +723,19 @@ const CreatorAffiliateStore: React.FC<{ userName: string }> = ({ userName }) => 
 const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
   const [tab, setTab] = useState<'products' | 'brands' | 'my' | 'mine' | 'payouts'>('products');
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
-  const [requests, setRequests] = useState<StoreRequest[]>([]);
+  const [requestStatuses, setRequestStatuses] = useState<Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>[]>([]);
+  const [mineRequests, setMineRequests] = useState<StoreRequest[]>([]);
+  const [minePage, setMinePage] = useState(1);
+  const [mineHasMore, setMineHasMore] = useState(false);
+  const [mineLoaded, setMineLoaded] = useState(false);
+  const [mineLoading, setMineLoading] = useState(false);
+  const [mineError, setMineError] = useState('');
   const [brandPage, setBrandPage] = useState<StoreBrand | null>(null);
   const [brandInfo, setBrandInfo] = useState<BrandInfo | null>(null);
   const [detail, setDetail] = useState<StoreProduct | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const detailLoadSeq = useRef(0);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [applyOpen, setApplyOpen] = useState(false);
@@ -740,24 +771,56 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
   }, []);
 
-  const loadRequests = useCallback(async () => {
-    const res = await affiliateStoreService.myRequests();
-    if (!res.error) setRequests(res.requests || []);
+  const loadRequestStatuses = useCallback(async () => {
+    const res = await affiliateStoreService.myRequestStatuses();
+    if (!res.error) setRequestStatuses(res.requests || []);
   }, []);
-  useEffect(() => { loadRequests(); }, [loadRequests, userName]);
+  useEffect(() => {
+    setRequestStatuses([]);
+    setMineRequests([]);
+    setMineLoaded(false);
+    setMineError('');
+    void loadRequestStatuses();
+  }, [loadRequestStatuses, userName]);
+
+  const loadMineRequests = useCallback(async (page = 1, append = false) => {
+    setMineLoading(true);
+    setMineError('');
+    const res = await affiliateStoreService.myRequests(page);
+    setMineLoading(false);
+    if (res.error) { setMineError(res.error); return; }
+    setMineRequests(prev => append ? [...prev, ...(res.requests || [])] : (res.requests || []));
+    setMinePage(page);
+    setMineHasMore(res.hasMore);
+    setMineLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'mine' && !mineLoaded && !mineLoading && !mineError) void loadMineRequests(1);
+  }, [tab, mineLoaded, mineLoading, mineError, loadMineRequests]);
 
   const requestByProduct = useMemo(() => {
-    const m = new Map<string, StoreRequest>();
-    for (const r of requests) if (r.status !== 'cancelled') m.set(r.productId, r);
+    const m = new Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>>();
+    for (const r of requestStatuses) m.set(r.productId, r);
     return m;
-  }, [requests]);
-  const activeRequests = requests.filter(r => r.status !== 'cancelled');
+  }, [requestStatuses]);
 
-  const openDetail = (p: StoreProduct) => {
-    setDetail(p); setSendError(''); setApplyOpen(false); setApplyNotice(''); setReturnedHandle('');
+  const openDetail = async (p: StoreProduct) => {
+    const seq = ++detailLoadSeq.current;
+    setDetail(p); setDetailLoading(true); setDetailError(''); setSendError(''); setApplyOpen(false); setApplyNotice(''); setReturnedHandle('');
     window.scrollTo({ top: 0 });
+    const res = await affiliateStoreService.productDetail(p.id);
+    if (seq !== detailLoadSeq.current) return;
+    setDetailLoading(false);
+    if (res.error || !res.product) { setDetailError(res.error || '상품 정보를 불러오지 못했습니다.'); return; }
+    setDetail(res.product);
   };
-  const closeDetail = () => setDetail(null);
+  const closeDetail = () => {
+    detailLoadSeq.current += 1;
+    setDetail(null);
+    setDetailLoading(false);
+    setDetailError('');
+  };
 
   const send = async (channelUrl: string) => {
     if (!detail) return;
@@ -768,7 +831,8 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     if (res.error) { setSendError(res.error); return; }
     setApplyOpen(false);
     setApplyNotice('');
-    await loadRequests();
+    await loadRequestStatuses();
+    if (mineLoaded) await loadMineRequests(1);
   };
   const openApply = () => { setSendError(''); setApplyNotice(''); setApplyOpen(true); };
   const closeApply = () => setApplyOpen(false);
@@ -777,7 +841,10 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     if (!window.confirm('이 판매 신청을 취소할까요?')) return;
     const res = await affiliateStoreService.cancelRequest(r.id);
     if (res.error) window.alert(res.error);
-    else loadRequests();
+    else {
+      await loadRequestStatuses();
+      await loadMineRequests(1);
+    }
   };
 
   const switchTab = (t: typeof tab) => { setTab(t); setBrandPage(null); setBrandInfo(null); };
@@ -789,6 +856,9 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
         <ProductDetailPage
           product={detail}
           request={detailRequest}
+          loading={detailLoading}
+          loadError={detailError}
+          onRetry={() => { void openDetail(detail); }}
           onBack={closeDetail}
           onApply={openApply}
           onMine={() => { closeDetail(); switchTab('mine'); }}
@@ -819,7 +889,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
           { key: 'products', label: '상품' },
           { key: 'brands', label: '브랜드' },
           { key: 'my', label: 'MY 어필리에이트' },
-          { key: 'mine', label: `내 신청 ${activeRequests.length}` },
+          { key: 'mine', label: `내 신청 ${requestStatuses.length}` },
           { key: 'payouts', label: '정산' },
         ] as const).map(t => (
           <button key={t.key} onClick={() => switchTab(t.key)} className={`h-9 px-4 rounded-lg text-xs font-black whitespace-nowrap ${tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
@@ -869,14 +939,21 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
       {tab === 'payouts' && <AffiliatePayouts as="influencer" />}
 
       {tab === 'mine' && (
-        activeRequests.length === 0 ? (
+        mineLoading && mineRequests.length === 0 ? (
+          <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+        ) : mineError && mineRequests.length === 0 ? (
+          <div className="py-6 text-center">
+            <p className="text-sm font-bold text-red-500 mb-3">{mineError}</p>
+            <button onClick={() => { void loadMineRequests(1); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+          </div>
+        ) : mineRequests.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
             <p className="text-sm font-black text-slate-700">아직 신청한 상품이 없어요</p>
             <button onClick={() => switchTab('products')} className="mt-4 h-10 px-5 rounded-xl bg-slate-900 text-white text-xs font-black">상품 둘러보기</button>
           </div>
         ) : (
           <div className="space-y-2.5">
-            {activeRequests.map(r => (
+            {mineRequests.map(r => (
               <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
                 {r.productImage && <img src={r.productImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0" />}
                 <div className="flex-1 min-w-0">
@@ -898,6 +975,8 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
                 </div>
               </div>
             ))}
+            {mineError && <p className="text-sm font-bold text-red-500 text-center py-2">{mineError}</p>}
+            {mineHasMore && <MoreButton loading={mineLoading} onClick={() => { void loadMineRequests(minePage + 1, true); }} />}
           </div>
         )
       )}

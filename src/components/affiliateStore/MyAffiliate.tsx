@@ -47,9 +47,15 @@ async function copyText(text: string): Promise<boolean> {
 const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const [items, setItems] = useState<MyAffiliateItem[]>([]);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
+  const [orderCount, setOrderCount] = useState(0);
   const [totals, setTotals] = useState({ clicks: 0, orders: 0, sales: 0, commission: 0, pending: 0, confirmed: 0, cancelled: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [ordersHasMore, setOrdersHasMore] = useState(false);
+  const [ordersCursor, setOrdersCursor] = useState<{ cursorAt: string; cursorId: string } | null>(null);
   const [copied, setCopied] = useState('');
   const [view, setView] = useState<'products' | 'orders'>('products');
 
@@ -59,10 +65,31 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     if (res.error) { setError(res.error); return; }
     setError('');
     setItems(res.items || []);
-    setOrders(res.orders || []);
+    setOrderCount(res.orderCount || 0);
     setTotals(res.totals);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const loadOrders = useCallback(async (cursor?: { cursorAt: string; cursorId: string }, append = false) => {
+    setOrdersLoading(true);
+    setOrdersError('');
+    const res = await affiliateStoreService.myAffiliateOrders(cursor);
+    setOrdersLoading(false);
+    if (res.error) { setOrdersError(res.error); return; }
+    setOrders(prev => {
+      if (!append) return res.orders || [];
+      const seen = new Set(prev.map(o => o.id));
+      return [...prev, ...(res.orders || []).filter(o => !seen.has(o.id))];
+    });
+    setOrdersCursor(res.nextCursor || null);
+    setOrdersHasMore(!!res.hasMore);
+    setOrdersLoaded(true);
+  }, []);
+
+  const selectView = (next: 'products' | 'orders') => {
+    setView(next);
+    if (next === 'orders' && !ordersLoaded && !ordersLoading) void loadOrders();
+  };
 
   const copy = async (code: string) => {
     if (await copyText(shopLink(code))) {
@@ -122,8 +149,8 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
       </div>
 
       <div className="flex gap-4 border-b border-slate-200 mb-4">
-        {([['products', `진행 상품 ${items.length}`], ['orders', `판매 내역 ${orders.length}`]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
+        {([['products', `진행 상품 ${items.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
+          <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
         ))}
       </div>
 
@@ -177,6 +204,13 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
             </div>
           ))}
         </div>
+      ) : ordersLoading && orders.length === 0 ? (
+        <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+      ) : ordersError && orders.length === 0 ? (
+        <div className="py-6 text-center">
+          <p className="text-sm font-bold text-red-500 mb-3">{ordersError}</p>
+          <button onClick={() => { void loadOrders(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+        </div>
       ) : orders.length === 0 ? (
         <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
           <p className="text-sm font-black text-slate-700">아직 판매 내역이 없어요</p>
@@ -197,6 +231,19 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {view === 'orders' && (ordersHasMore || ordersError) && (
+        <div className="flex flex-col items-center gap-2 pt-4">
+          {ordersError && <p className="text-xs font-bold text-red-500">{ordersError}</p>}
+          {ordersError ? (
+            <button disabled={ordersLoading} onClick={() => { void loadOrders(ordersCursor || undefined, !!ordersCursor); }} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50">다시 시도</button>
+          ) : (
+            <button disabled={ordersLoading} onClick={() => { void loadOrders(ordersCursor || undefined, true); }} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
+              {ordersLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              더 보기
+            </button>
+          )}
         </div>
       )}
     </>

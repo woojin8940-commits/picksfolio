@@ -175,15 +175,45 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
   return withTx(db, async (client) => {
     await lockParty(client, t, party);
     await syncDeductions(client, t, party);
-    const snap = await availableSnapshot(client, t, party);
     const col = partyColumn(t);
-    const pendingRows = (await client.query(
-      `SELECT * FROM affiliate_store_orders o WHERE o.${col} = $1 AND o.status = ANY($2::text[])
-         ${t === "influencer" ? "AND o.commission_status = 'pending'" : ""}`,
-      [party, PENDING_STATUSES],
-    )).rows;
-    const pending = pendingRows.reduce((s: number, o: any) =>
-      s + (t === "brand" ? Math.max(0, brandSettlement(o).amount) : Number(o.commission_amount) || 0), 0);
+    const eligible = t === "brand"
+      ? "(o.status = 'confirmed' OR (o.status = 'cancelled' AND o.refund_amount > 0 AND o.refund_amount < o.total_amount))"
+      : "(o.commission_status = 'confirmed' AND o.commission_amount > 0)";
+    const brandAmount = `CASE WHEN o.status = 'cancelled' THEN
+        (COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision) - COALESCE(o.refund_amount, 0)::double precision)
+        - CASE WHEN o.commission_status = 'cancelled' THEN 0 ELSE COALESCE(o.commission_amount, 0)::double precision END
+        - FLOOR((COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision) - COALESCE(o.refund_amount, 0)::double precision) * COALESCE(o.pg_rate, 0)::double precision / 100.0::double precision)
+        - FLOOR(GREATEST(0.0::double precision, o.unit_price::double precision * o.quantity::double precision - COALESCE(o.refund_amount, 0)::double precision) * COALESCE(o.platform_rate, 0)::double precision / 100.0::double precision)
+      ELSE
+        COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision)
+        - COALESCE(o.commission_amount, 0)::double precision
+        - FLOOR(COALESCE(NULLIF(o.total_amount, 0)::double precision, o.unit_price::double precision * o.quantity::double precision + COALESCE(o.shipping_fee, 0)::double precision) * COALESCE(o.pg_rate, 0)::double precision / 100.0::double precision)
+        - FLOOR(o.unit_price::double precision * o.quantity::double precision * COALESCE(o.platform_rate, 0)::double precision / 100.0::double precision)
+      END`;
+    const availableAmount = t === "brand" ? `GREATEST(0, FLOOR(${brandAmount}))` : "GREATEST(0, o.commission_amount)::numeric";
+    const pendingCondition = `o.status = ANY($2::text[])${t === "influencer" ? " AND o.commission_status = 'pending'" : ""}`;
+    const pendingAmount = t === "brand" ? `GREATEST(0, ${brandAmount})` : "COALESCE(o.commission_amount, 0)::numeric";
+    const orderAgg = (await client.query(
+      `SELECT COUNT(*) FILTER (WHERE available_amount > 0)::int AS available_count,
+              COALESCE(SUM(available_amount) FILTER (WHERE available_amount > 0), 0)::numeric AS available_amount,
+              COUNT(*) FILTER (WHERE is_pending)::int AS pending_count,
+              COALESCE(SUM(pending_amount) FILTER (WHERE is_pending), 0)::numeric AS pending_amount
+         FROM (
+           SELECT CASE WHEN ${eligible}
+                         AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = $3 AND i.order_id = o.id AND i.active)
+                       THEN ${availableAmount} ELSE 0 END AS available_amount,
+                  (${pendingCondition}) AS is_pending,
+                  CASE WHEN ${pendingCondition} THEN ${pendingAmount} ELSE 0 END AS pending_amount
+             FROM affiliate_store_orders o
+            WHERE o.${col} = $1 AND (${eligible} OR o.status = ANY($2::text[]))
+         ) AS amounts`,
+      [party, PENDING_STATUSES, t],
+    )).rows[0] || {};
+    const deductionAgg = (await client.query(
+      `SELECT COUNT(*)::int AS deduction_count, COALESCE(SUM(amount), 0)::numeric AS deduction_amount
+         FROM affiliate_payout_deductions WHERE party_type = $1 AND party = $2 AND applied_request_id IS NULL`,
+      [t, party],
+    )).rows[0] || {};
     const agg = (await client.query(
       `SELECT
          COALESCE(SUM(gross_amount) FILTER (WHERE status = 'requested'), 0)::bigint AS requested_gross,
@@ -194,14 +224,18 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
        FROM affiliate_payout_requests WHERE party_type = $1 AND party = $2`,
       [t, party],
     )).rows[0];
+    const availableOrderAmount = Number(orderAgg.available_amount) || 0;
+    const availableDeductionAmount = Number(deductionAgg.deduction_amount) || 0;
     return {
-      available: snap.available,
-      availableOrderAmount: snap.orderAmount,
-      availableDeductionAmount: snap.deductionAmount,
-      availableOrders: snap.orders,
-      availableDeductions: snap.deductions,
-      pending,
-      pendingCount: pendingRows.length,
+      available: availableOrderAmount - availableDeductionAmount,
+      availableOrderAmount,
+      availableDeductionAmount,
+      availableOrdersCount: Number(orderAgg.available_count) || 0,
+      availableDeductionsCount: Number(deductionAgg.deduction_count) || 0,
+      availableOrders: [],
+      availableDeductions: [],
+      pending: Number(orderAgg.pending_amount) || 0,
+      pendingCount: Number(orderAgg.pending_count) || 0,
       requested: Number(agg.requested_gross) || 0,
       requestedNet: Number(agg.requested_net) || 0,
       requestedCount: Number(agg.requested_count) || 0,
@@ -209,6 +243,57 @@ export async function payoutSummary(db: any, t: PartyType, party: string) {
       paid: Number(agg.paid_net) || 0,
     };
   });
+}
+
+export async function availableDetails(db: any, t: PartyType, party: string, kind: "orders" | "deductions", cursorAt = "", cursorId = "") {
+  const limit = 40;
+  if (kind === "deductions") {
+    const afterId = /^\d+$/.test(cursorId) ? Number(cursorId) : 0;
+    const rows = (await db.sql`
+      SELECT id, order_id, amount, reason, created_at FROM affiliate_payout_deductions
+       WHERE party_type = ${t} AND party = ${party} AND applied_request_id IS NULL AND id > ${afterId}
+       ORDER BY id LIMIT ${limit + 1}
+    `) as any[];
+    const page = rows.slice(0, limit);
+    return {
+      items: page.map((d) => ({ id: Number(d.id), orderId: d.order_id, amount: Number(d.amount) || 0, reason: d.reason, createdAt: d.created_at })),
+      nextCursor: rows.length > limit && page.length ? { cursorId: String(page[page.length - 1].id) } : null,
+    };
+  }
+  const hasCursor = !!cursorAt && Number.isFinite(Date.parse(cursorAt)) && !!cursorId;
+  const cursor = hasCursor ? new Date(cursorAt).toISOString() : "1970-01-01T00:00:00.000Z";
+  const rows = t === "brand" ? await db.sql`
+    SELECT o.* FROM affiliate_store_orders o
+     WHERE o.business_username = ${party}
+       AND (o.status = 'confirmed' OR (o.status = 'cancelled' AND o.refund_amount > 0 AND o.refund_amount < o.total_amount))
+       AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = ${t} AND i.order_id = o.id AND i.active)
+       AND (NOT ${hasCursor} OR COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) > ${cursor}::timestamptz
+         OR (COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) = ${cursor}::timestamptz AND o.id > ${cursorId}))
+     ORDER BY COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at), o.id
+     LIMIT ${limit + 1}
+  ` : await db.sql`
+    SELECT o.* FROM affiliate_store_orders o
+     WHERE o.influencer_username = ${party} AND o.commission_status = 'confirmed' AND o.commission_amount > 0
+       AND NOT EXISTS (SELECT 1 FROM affiliate_payout_items i WHERE i.party_type = ${t} AND i.order_id = o.id AND i.active)
+       AND (NOT ${hasCursor} OR COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) > ${cursor}::timestamptz
+         OR (COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at) = ${cursor}::timestamptz AND o.id > ${cursorId}))
+     ORDER BY COALESCE(o.commission_confirmed_at, o.confirmed_at, o.cancelled_at, o.created_at), o.id
+     LIMIT ${limit + 1}
+  ` as any[];
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    items: page.map((o) => ({
+      id: String(o.id),
+      productName: `${o.product_name}${o.option_name ? ` · ${o.option_name}` : ""}`,
+      amount: entitled(t, o),
+      confirmedAt: o.commission_confirmed_at || o.confirmed_at || o.cancelled_at || null,
+    })).filter((o) => o.amount > 0),
+    nextCursor: rows.length > limit && last ? {
+      cursorAt: new Date(last.commission_confirmed_at || last.confirmed_at || last.cancelled_at || last.created_at).toISOString(),
+      cursorId: String(last.id),
+    } : null,
+  };
 }
 
 // ─────────────────────────── 신청 · 취소 · 반려 ───────────────────────────
@@ -359,7 +444,7 @@ export function shapePayoutRequest(r: any, items: any[] = [], deductions: any[] 
 }
 
 /** 신청 목록 + 포함 주문 + 이 신청에서 뺀 차감 내역. */
-export async function loadRequests(db: any, where: { partyType?: PartyType; party?: string; status?: string; scheduledDate?: string }, limit = 200) {
+export async function loadRequests(db: any, where: { partyType?: PartyType; party?: string; status?: string; scheduledDate?: string }, limit = 200, includeDetails = true) {
   const t = where.partyType || "";
   const p = where.party || "";
   const st = where.status || "";
@@ -371,6 +456,7 @@ export async function loadRequests(db: any, where: { partyType?: PartyType; part
     ORDER BY requested_at DESC LIMIT ${limit}
   `) as any[];
   if (!rows.length) return [];
+  if (!includeDetails) return rows.map((r) => shapePayoutRequest(r));
   const ids = rows.map((r) => r.id);
   const [items, deds] = await Promise.all([
     db.sql`SELECT * FROM affiliate_payout_items WHERE request_id = ANY(${ids}::text[]) ORDER BY id` as Promise<any[]>,
@@ -381,6 +467,37 @@ export async function loadRequests(db: any, where: { partyType?: PartyType; part
     items.filter((i) => i.request_id === r.id),
     deds.filter((d) => d.applied_request_id === r.id),
   ));
+}
+
+export async function payoutRequestDetails(db: any, id: string, kind: "items" | "deductions", cursorId = "", where: { partyType?: PartyType; party?: string } = {}) {
+  const request = (await db.sql`
+    SELECT id FROM affiliate_payout_requests
+     WHERE id = ${id} AND (${where.partyType || ""} = '' OR party_type = ${where.partyType || ""})
+       AND (${where.party || ""} = '' OR party = ${where.party || ""})
+     LIMIT 1
+  `) as any[];
+  if (!request.length) return null;
+  const afterId = /^\d+$/.test(cursorId) ? Number(cursorId) : 0;
+  if (kind === "items") {
+    const rows = (await db.sql`
+      SELECT id, order_id, product_name, amount, confirmed_at FROM affiliate_payout_items
+       WHERE request_id = ${id} AND id > ${afterId} ORDER BY id LIMIT 41
+    `) as any[];
+    const page = rows.slice(0, 40);
+    return {
+      items: page.map((i) => ({ orderId: i.order_id, productName: i.product_name, amount: Number(i.amount) || 0, confirmedAt: i.confirmed_at })),
+      nextCursor: rows.length > 40 && page.length ? String(page[page.length - 1].id) : null,
+    };
+  }
+  const rows = (await db.sql`
+    SELECT id, order_id, amount, reason, created_at FROM affiliate_payout_deductions
+     WHERE applied_request_id = ${id} AND id > ${afterId} ORDER BY id LIMIT 41
+  `) as any[];
+  const page = rows.slice(0, 40);
+  return {
+    deductions: page.map((d) => ({ orderId: d.order_id, amount: Number(d.amount) || 0, reason: d.reason, createdAt: d.created_at })),
+    nextCursor: rows.length > 40 && page.length ? String(page[page.length - 1].id) : null,
+  };
 }
 
 // ─────────────────────────── 설정 ───────────────────────────

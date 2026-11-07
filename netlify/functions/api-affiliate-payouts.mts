@@ -11,9 +11,11 @@ import { PiiCryptoError, decryptPii, encryptPii, formatRrn, maskAccount, maskRrn
 import { executePayout } from "./_shared/affiliate-payout-provider.mts";
 import {
   PAYOUT_SETTING_KEYS,
+  availableDetails,
   createPayoutRequest,
   kstToday,
   loadRequests,
+  payoutRequestDetails,
   payoutSettings,
   payoutSummary,
   lockParty,
@@ -246,7 +248,7 @@ async function partyGet(db: any, t: PartyType, party: string) {
   const [account, summary, requests, settings, app] = await Promise.all([
     t === "brand" ? loadBrandAccount(db, party) : loadInfluencerAccount(db, party),
     payoutSummary(db, t, party),
-    loadRequests(db, { partyType: t, party }),
+    loadRequests(db, { partyType: t, party }, 200, false),
     payoutSettings(db),
     t === "brand" ? loadApplication(db, party) : Promise.resolve(null),
   ]);
@@ -277,7 +279,7 @@ async function partyRequest(db: any, t: PartyType, party: string) {
     holderMismatch: t === "brand" ? !!acc.holder_mismatch : false,
   }, { id: newId(), minAmount: t === "brand" ? settings.minBrand : settings.minInfluencer });
   if (r.ok === false) return err(r.error, r.status, { code: r.code });
-  const [request] = await loadRequests(db, { partyType: t, party }, 1);
+  const [request] = await loadRequests(db, { partyType: t, party }, 1, false);
   const note = `${t === "brand" ? "브랜드" : "인플루언서"} ${party} · ${(request?.grossAmount || 0).toLocaleString("ko-KR")}원`;
   try {
     await db.sql`
@@ -301,7 +303,7 @@ async function adminGet(db: any, url: URL) {
   const status = ["requested", "paid", "rejected", "cancelled"].includes(String(url.searchParams.get("status"))) ? String(url.searchParams.get("status")) : "";
   const scheduledDate = /^\d{4}-\d{2}-\d{2}$/.test(String(url.searchParams.get("scheduledDate"))) ? String(url.searchParams.get("scheduledDate")) : "";
   const [requests, settings, brands, counts, schedules] = await Promise.all([
-    loadRequests(db, { partyType, status, scheduledDate }, 500),
+    loadRequests(db, { partyType, status, scheduledDate }, 500, false),
     payoutSettings(db),
     db.sql`SELECT business_username, brand_name, business_name FROM affiliate_store_applications` as Promise<any[]>,
     db.sql`SELECT party_type, COUNT(*)::int AS n FROM affiliate_payout_requests WHERE status = 'requested' GROUP BY party_type` as Promise<any[]>,
@@ -491,6 +493,12 @@ export default async (req: Request) => {
       if (op.ok === false) return op.response;
       const operator = op.username || "operator";
       if (scope === "admin") return await adminGet(db, url);
+      if (scope === "admin-request-details") {
+        const id = clip(url.searchParams.get("id"), 80);
+        const kind = url.searchParams.get("kind") === "deductions" ? "deductions" : "items";
+        const result = await payoutRequestDetails(db, id, kind, String(url.searchParams.get("cursorId") || ""));
+        return result ? ok(result) : err("지급 신청 내역을 찾을 수 없어요.", 404);
+      }
       if (scope === "admin-transfer-csv") return await adminTransferCsv(db, operator, url);
       if (scope === "admin-withholding-csv") return await adminWithholdingCsv(db, operator, url);
       if (scope === "admin-bankbook") {
@@ -523,6 +531,16 @@ export default async (req: Request) => {
 
     if (req.method === "GET") {
       if (scope === "bankbook" && as === "brand") return await serveBankbook(db, username);
+      if (scope === "request-details") {
+        const id = clip(url.searchParams.get("id"), 80);
+        const kind = url.searchParams.get("kind") === "deductions" ? "deductions" : "items";
+        const result = await payoutRequestDetails(db, id, kind, String(url.searchParams.get("cursorId") || ""), { partyType: as, party: username });
+        return result ? ok(result) : err("지급 신청 내역을 찾을 수 없어요.", 404);
+      }
+      if (scope === "available-details") {
+        const kind = url.searchParams.get("kind") === "deductions" ? "deductions" : "orders";
+        return ok(await availableDetails(db, as, username, kind, String(url.searchParams.get("cursorAt") || ""), String(url.searchParams.get("cursorId") || "")));
+      }
       return await partyGet(db, as, username);
     }
     switch (action) {

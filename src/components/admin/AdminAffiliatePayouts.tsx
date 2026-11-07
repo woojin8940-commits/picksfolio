@@ -191,7 +191,7 @@ const AdminAffiliatePayouts: React.FC<{ token: string }> = ({ token }) => {
         <div className="space-y-2.5">
           {data.requests.map(r => (
             <div key={r.id}>
-              <PayoutRequestCard r={r} showParty actions={
+              <PayoutRequestCard r={r} showParty loadDetails={(id, kind, cursorId) => affiliatePayoutService.adminRequestDetails(token, id, kind, cursorId)} actions={
                 <>
                   {r.partyType === 'influencer' && (
                     <button disabled={busy === `rrn:${r.id}`} onClick={() => viewRrn(r)} className="h-8 px-3 rounded-lg border border-slate-200 text-[11px] font-black text-slate-600 disabled:opacity-50">

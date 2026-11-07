@@ -98,8 +98,8 @@ function shapeProduct(r: any, forCreator = false) {
     name: r.name,
     category: r.category,
     subcategory: r.subcategory || "",
-    summary: r.summary,
-    description: r.description,
+    summary: r.summary || "",
+    description: r.description || "",
     imageUrls: Array.isArray(r.image_urls) ? r.image_urls : [],
     detailImageUrls: Array.isArray(r.detail_image_urls) ? r.detail_image_urls : [],
     sizeGuide: r.size_guide || "",
@@ -113,7 +113,7 @@ function shapeProduct(r: any, forCreator = false) {
     commissionRate: Number(r.commission_rate) || 0,
     stock: Number(r.stock) || 0,
     shippingFee: Number(r.shipping_fee) || 0,
-    productUrl: r.product_url,
+    productUrl: r.product_url || "",
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -218,42 +218,110 @@ async function loadApplication(db: any, username: string) {
 
 // ─────────────────────────── 브랜드 ───────────────────────────
 
-async function brandGet(db: any, username: string) {
+async function brandGet(db: any, username: string, url: URL) {
   const app = await loadApplication(db, username);
   if (!app || app.status !== "approved") {
-    return Response.json({ application: shapeApplication(app), products: [], requests: [], categories: CATEGORIES, taxonomy: TAXONOMY });
+    return Response.json({ application: shapeApplication(app), products: [], requests: [], productTotal: 0, onSaleTotal: 0, pendingRequestCount: 0, requestTotal: 0, opsCounts: { newOrders: 0, claimsNeedAction: 0, unread: 0 }, categories: CATEGORIES, taxonomy: TAXONOMY });
   }
-  const [products, requests] = await Promise.all([
+
+  const section = url.searchParams.get("section") || "products";
+  if (section === "requests") {
+    const page = Math.max(1, int(url.searchParams.get("page") || 1, 1, 10_000) || 1);
+    const pageSize = 30;
+    const offset = (page - 1) * pageSize;
+    const [requests, counts] = await Promise.all([
+      db.sql`
+        SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
+               r.brand_note, r.manager_status, r.link_code, r.click_count, r.created_at, r.updated_at,
+               p.name AS product_name, p.image_urls, a.brand_name, COUNT(*) OVER()::int AS total_count
+        FROM affiliate_store_requests r
+        JOIN affiliate_store_products p ON p.id = r.product_id
+        LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
+        WHERE r.business_username = ${username} AND r.status <> 'cancelled'
+        ORDER BY r.created_at DESC, r.id DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      ` as Promise<any[]>,
+      db.sql`
+        SELECT COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
+               COUNT(*) FILTER (WHERE status <> 'cancelled')::int AS request_total
+        FROM affiliate_store_requests WHERE business_username = ${username}
+      ` as Promise<any[]>,
+    ]);
+    const total = Number(requests[0]?.total_count || counts[0]?.request_total || 0);
+    const snapshots = await buildSnapshots(db, requests.map((r) => r.influencer_username))
+      .catch((e) => { console.error("[affiliate-store] snapshot load failed", e); return new Map(); });
+    return Response.json({
+      requests: requests.map((r) => ({
+        ...shapeRequest(r),
+        insights: withoutRegisteredPrices(snapshots.get(norm(r.influencer_username)) || null),
+      })),
+      requestPage: page,
+      requestHasMore: offset + requests.length < total,
+      requestTotal: total,
+      pendingRequestCount: Number(counts[0]?.pending_count || 0),
+    });
+  }
+
+  const page = Math.max(1, int(url.searchParams.get("page") || 1, 1, 10_000) || 1);
+  const pageSize = 30;
+  const offset = (page - 1) * pageSize;
+  const [products, counts, feeRates, ops] = await Promise.all([
     db.sql`
-      SELECT p.*,
-        (SELECT COUNT(*) FROM affiliate_store_requests r WHERE r.product_id = p.id AND r.status = 'pending')::int AS pending_count,
-        (SELECT COUNT(*) FROM affiliate_store_requests r WHERE r.product_id = p.id AND r.status = 'approved')::int AS approved_count
+      WITH request_counts AS (
+        SELECT product_id,
+               COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
+               COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count
+        FROM affiliate_store_requests
+        WHERE business_username = ${username} AND status IN ('pending', 'approved')
+        GROUP BY product_id
+      )
+      SELECT p.*, COALESCE(rc.pending_count, 0)::int AS pending_count,
+             COALESCE(rc.approved_count, 0)::int AS approved_count
       FROM affiliate_store_products p
+      LEFT JOIN request_counts rc ON rc.product_id = p.id
       WHERE p.business_username = ${username} AND p.deleted_at IS NULL
-      ORDER BY p.created_at DESC
+      ORDER BY p.created_at DESC, p.id DESC
+      LIMIT ${pageSize} OFFSET ${offset}
     ` as Promise<any[]>,
     db.sql`
-      SELECT r.*, p.name AS product_name, p.image_urls
-      FROM affiliate_store_requests r JOIN affiliate_store_products p ON p.id = r.product_id
-      WHERE r.business_username = ${username} AND r.status <> 'cancelled'
-      ORDER BY r.created_at DESC LIMIT 500
+      SELECT COUNT(*)::int AS product_total,
+             COUNT(*) FILTER (WHERE status = 'on_sale')::int AS on_sale_total,
+             (SELECT COUNT(*)::int FROM affiliate_store_requests WHERE business_username = ${username} AND status <> 'cancelled') AS request_total,
+             (SELECT COUNT(*)::int FROM affiliate_store_requests WHERE business_username = ${username} AND status = 'pending') AS pending_request_count
+      FROM affiliate_store_products WHERE business_username = ${username} AND deleted_at IS NULL
+    ` as Promise<any[]>,
+    currentFeeRates(db),
+    db.sql`
+      SELECT COUNT(*) FILTER (WHERE o.status = 'paid')::int AS new_orders,
+             COUNT(*) FILTER (
+               WHERE r.status = 'requested' OR (r.status = 'approved' AND o.status = 'return_requested')
+             )::int AS claims_need_action,
+             (SELECT COUNT(*)::int FROM affiliate_store_notifications
+              WHERE recipient_type = 'brand' AND recipient = ${username} AND read_at IS NULL) AS unread
+      FROM affiliate_store_orders o
+      LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
+      WHERE o.business_username = ${username} AND o.status NOT IN ('pending_payment', 'expired')
     ` as Promise<any[]>,
   ]);
-  // 지원한 인플루언서의 인스타 프로필 · 최근 릴스. 캠페인 지원자 목록과 같은 스냅샷을 쓴다.
-  // 브랜드에게는 인플루언서가 등록한 단가를 보내지 않는다(캠페인 지원자와 같은 규칙).
-  const snapshots = await buildSnapshots(db, requests.map((r) => r.influencer_username))
-    .catch((e) => { console.error("[affiliate-store] snapshot load failed", e); return new Map(); });
+  const productTotal = Number(counts[0]?.product_total || 0);
   return Response.json({
     application: shapeApplication(app),
     products: products.map((p) => shapeProduct(p)),
-    requests: requests.map((r) => ({
-      ...shapeRequest(r),
-      insights: withoutRegisteredPrices(snapshots.get(norm(r.influencer_username)) || null),
-    })),
+    requests: [],
+    productPage: page,
+    productHasMore: offset + products.length < productTotal,
+    productTotal,
+    onSaleTotal: Number(counts[0]?.on_sale_total || 0),
+    requestTotal: Number(counts[0]?.request_total || 0),
+    pendingRequestCount: Number(counts[0]?.pending_request_count || 0),
+    opsCounts: {
+      newOrders: Number(ops[0]?.new_orders || 0),
+      claimsNeedAction: Number(ops[0]?.claims_need_action || 0),
+      unread: Number(ops[0]?.unread || 0),
+    },
     categories: CATEGORIES,
     taxonomy: TAXONOMY,
-    // 상품 등록 화면의 "1개 판매 시 예상 정산액" 계산용(지금 설정값).
-    feeRates: await currentFeeRates(db),
+    feeRates,
   });
 }
 
@@ -522,10 +590,9 @@ async function creatorMyAffiliate(db: any, username: string) {
     SELECT COALESCE(SUM(commission_amount), 0)::bigint AS n FROM affiliate_store_orders
     WHERE influencer_username = ${username} AND commission_status = 'cancelled' AND status NOT IN ('pending_payment', 'expired')
   `) as any[];
-  const orders = (await db.sql`
-    SELECT * FROM affiliate_store_orders
+  const orderCountRows = (await db.sql`
+    SELECT COUNT(*)::int AS n FROM affiliate_store_orders
     WHERE influencer_username = ${username} AND status NOT IN ('pending_payment', 'expired')
-    ORDER BY created_at DESC LIMIT 300
   `) as any[];
 
   const items = rows.map((r) => {
@@ -557,11 +624,38 @@ async function creatorMyAffiliate(db: any, username: string) {
     }),
     { clicks: 0, orders: 0, sales: 0, commission: 0, pending: 0, confirmed: 0, cancelled: Number(cancelledRows[0]?.n || 0) },
   );
-  return Response.json({ items, totals, orders: orders.map((o) => shapeOrder(o, false)) });
+  return Response.json({ items, totals, orderCount: Number(orderCountRows[0]?.n) || 0 });
 }
 
 const PAGE_SIZE = 40;
+const CREATOR_ORDER_PAGE_SIZE = 40;
 const BRAND_PAGE_SIZE = 30;
+
+async function creatorMyAffiliateOrders(db: any, username: string, url: URL) {
+  const cursorId = clip(url.searchParams.get("cursorId"), 120);
+  const cursorTimeRaw = clip(url.searchParams.get("cursorAt"), 60);
+  const cursorTimeValue = Date.parse(cursorTimeRaw);
+  const hasCursor = !!cursorId && Number.isFinite(cursorTimeValue);
+  const cursorAt = hasCursor ? new Date(cursorTimeValue).toISOString() : "1970-01-01T00:00:00.000Z";
+  const rows = (await db.sql`
+    SELECT * FROM affiliate_store_orders
+    WHERE influencer_username = ${username} AND status NOT IN ('pending_payment', 'expired')
+      AND (NOT ${hasCursor} OR created_at < ${cursorAt}::timestamptz OR
+        (created_at = ${cursorAt}::timestamptz AND id < ${cursorId}))
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${CREATOR_ORDER_PAGE_SIZE + 1}
+  `) as any[];
+  const orders = rows.slice(0, CREATOR_ORDER_PAGE_SIZE);
+  const lastOrder = orders[orders.length - 1];
+  return Response.json({
+    orders: orders.map((o) => shapeOrder(o, false)),
+    hasMore: rows.length > CREATOR_ORDER_PAGE_SIZE,
+    nextCursor: rows.length > CREATOR_ORDER_PAGE_SIZE && lastOrder ? {
+      cursorAt: new Date(lastOrder.created_at).toISOString(),
+      cursorId: String(lastOrder.id),
+    } : null,
+  });
+}
 
 /** LIKE 패턴 안에서 %, _ 를 글자 그대로 찾게 한다. */
 const likeOf = (q: string) => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -580,7 +674,10 @@ async function creatorProducts(db: any, url: URL) {
   const offset = (page - 1) * PAGE_SIZE;
 
   const rows = (await db.sql`
-    SELECT p.*, a.brand_name, COUNT(*) OVER()::int AS total_count
+    SELECT p.id, p.business_username, p.name, p.category, p.subcategory, p.summary,
+      CASE WHEN p.image_urls->0 IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(p.image_urls->0) END AS image_urls,
+      p.retail_price, p.sale_price, p.commission_rate, p.status, p.created_at,
+      a.brand_name, COUNT(*) OVER()::int AS total_count
     FROM affiliate_store_products p
     JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
     WHERE p.deleted_at IS NULL AND p.status = 'on_sale'
@@ -588,7 +685,7 @@ async function creatorProducts(db: any, url: URL) {
       AND (${sub} = '' OR p.subcategory = ${sub})
       AND (${brand} = '' OR p.business_username = ${brand})
       AND (${like} = '' OR p.name ILIKE ${like} OR a.brand_name ILIKE ${like})
-    ORDER BY p.created_at DESC
+      ORDER BY p.created_at DESC, p.id DESC
     LIMIT ${PAGE_SIZE} OFFSET ${offset}
   `) as any[];
   const total = rows[0]?.total_count ?? 0;
@@ -609,6 +706,20 @@ async function creatorProducts(db: any, url: URL) {
     brand: brandInfo,
     taxonomy: TAXONOMY,
   });
+}
+
+async function creatorProductDetail(db: any, url: URL) {
+  const id = clip(url.searchParams.get("id"), 100);
+  if (!id) return err("상품을 찾을 수 없습니다.", 404);
+  const rows = (await db.sql`
+    SELECT p.*, a.brand_name
+    FROM affiliate_store_products p
+    JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
+    WHERE p.id = ${id} AND p.deleted_at IS NULL AND p.status = 'on_sale'
+    LIMIT 1
+  `) as any[];
+  if (!rows[0]) return err("판매 중인 상품을 찾을 수 없습니다.", 404);
+  return Response.json({ product: shapeProduct(rows[0], true) });
 }
 
 /** 입점(승인)된 브랜드 전체. 수천 개가 될 것이라 검색 + 페이지로 내려보낸다. */
@@ -647,16 +758,41 @@ async function creatorBrands(db: any, url: URL) {
 }
 
 /** 내 판매 신청. */
-async function creatorRequests(db: any, username: string) {
+async function creatorRequestStatuses(db: any, username: string) {
   const requests = (await db.sql`
-    SELECT r.*, p.name AS product_name, p.image_urls, a.brand_name
+    SELECT product_id, status, manager_status
+    FROM affiliate_store_requests
+    WHERE influencer_username = ${username} AND status <> 'cancelled'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 500
+  `) as any[];
+  return Response.json({
+    requests: requests.map((r) => ({ productId: r.product_id, status: r.status, managerStatus: r.manager_status || "" })),
+  });
+}
+
+async function creatorRequests(db: any, username: string, url: URL) {
+  const page = Math.max(1, int(url.searchParams.get("page") || 1, 1, 10_000) || 1);
+  const pageSize = 30;
+  const offset = (page - 1) * pageSize;
+  const requests = (await db.sql`
+    SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
+           r.brand_note, r.manager_status, r.link_code, r.click_count, r.created_at, r.updated_at,
+           p.name AS product_name, p.image_urls, a.brand_name, COUNT(*) OVER()::int AS total_count
     FROM affiliate_store_requests r
     JOIN affiliate_store_products p ON p.id = r.product_id
     LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
-    WHERE r.influencer_username = ${username}
-    ORDER BY r.created_at DESC LIMIT 500
+    WHERE r.influencer_username = ${username} AND r.status <> 'cancelled'
+    ORDER BY r.created_at DESC, r.id DESC
+    LIMIT ${pageSize} OFFSET ${offset}
   `) as any[];
-  return Response.json({ requests: requests.map(shapeRequest) });
+  const total = Number(requests[0]?.total_count || 0);
+  return Response.json({
+    requests: requests.map(shapeRequest),
+    page,
+    total,
+    hasMore: offset + requests.length < total,
+  });
 }
 
 async function creatorRequest(db: any, username: string, body: any) {
@@ -823,7 +959,7 @@ export default async (req: Request) => {
   if (!canUseStore(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
 
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
-  const creatorScope = ["creator", "brands", "my-requests", "my-affiliate"].includes(String(scope || ""))
+  const creatorScope = ["creator", "product-detail", "brands", "my-request-status", "my-requests", "my-affiliate", "my-affiliate-orders"].includes(String(scope || ""))
     || action === "request" || action === "cancel_request";
   if (creatorScope && !caller.isAdmin) {
     const creator = await readCreatorAccess(username);
@@ -838,11 +974,14 @@ export default async (req: Request) => {
 
   try {
     if (req.method === "GET") {
-      if (scope === "brand") return await brandGet(db, username);
+      if (scope === "brand") return await brandGet(db, username, url);
       if (scope === "creator") return await creatorProducts(db, url);
+      if (scope === "product-detail") return await creatorProductDetail(db, url);
       if (scope === "brands") return await creatorBrands(db, url);
-      if (scope === "my-requests") return await creatorRequests(db, username);
+      if (scope === "my-request-status") return await creatorRequestStatuses(db, username);
+      if (scope === "my-requests") return await creatorRequests(db, username, url);
       if (scope === "my-affiliate") return await creatorMyAffiliate(db, username);
+      if (scope === "my-affiliate-orders") return await creatorMyAffiliateOrders(db, username, url);
       return err("알 수 없는 요청입니다.");
     }
     switch (action) {

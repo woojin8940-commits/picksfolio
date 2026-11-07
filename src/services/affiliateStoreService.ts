@@ -211,11 +211,6 @@ export interface OrderReturn {
   partialAllowed?: boolean;
 }
 
-export interface BrandInquiry {
-  id: string; buyerName: string; productName: string; orderId: string; body: string;
-  answer: string; answeredAt: string | null; createdAt: string;
-}
-
 export interface StoreNotification { id: number; kind: string; title: string; body: string; read_at: string | null; created_at: string }
 
 export interface AdminIssues {
@@ -333,9 +328,14 @@ const CREATOR_URL = '/api/creator-application';
 
 export const affiliateStoreService = {
   // 브랜드
-  getBrand(account: string) {
-    return call<{ application: StoreApplication | null; products: StoreProduct[]; requests: StoreRequest[]; orders?: StoreOrder[]; categories: string[]; taxonomy: CategoryNode[]; feeRates?: FeeRates }>(
-      'GET', `${URL_BASE}?scope=brand`, undefined, { account },
+  getBrand(account: string, page = 1) {
+    return call<{ application: StoreApplication | null; products: StoreProduct[]; requests: StoreRequest[]; productPage: number; productHasMore: boolean; productTotal: number; onSaleTotal: number; requestTotal: number; pendingRequestCount: number; opsCounts: { newOrders: number; claimsNeedAction: number; unread: number }; categories: string[]; taxonomy: CategoryNode[]; feeRates?: FeeRates }>(
+      'GET', `${URL_BASE}?scope=brand&page=${page}`, undefined, { account },
+    );
+  },
+  getBrandRequests(account: string, page = 1) {
+    return call<{ requests: StoreRequest[]; requestPage: number; requestHasMore: boolean; requestTotal: number; pendingRequestCount: number }>(
+      'GET', `${URL_BASE}?scope=brand&section=requests&page=${page}`, undefined, { account },
     );
   },
   apply(account: string, input: ApplicationInput) {
@@ -356,8 +356,25 @@ export const affiliateStoreService = {
   },
 
   // 브랜드 주문 운영(/api/affiliate-store-ops)
-  brandOps(account: string) {
-    return call<{ orders: StoreOrder[]; inquiries: BrandInquiry[]; notifications: StoreNotification[] }>('GET', `${OPS}?scope=brand`, undefined, { account });
+  brandOps(account: string, view: 'orders' | 'claims' = 'orders', cursor?: { cursorAt: string; cursorId: string }, orderId?: string) {
+    const p = new URLSearchParams({ scope: 'brand', view });
+    if (cursor) {
+      p.set('cursorAt', cursor.cursorAt);
+      p.set('cursorId', cursor.cursorId);
+    }
+    if (orderId) p.set('orderId', orderId);
+    return call<{
+      orders: StoreOrder[];
+      notifications?: StoreNotification[];
+      hasMore: boolean;
+      nextCursor: { cursorAt: string; cursorId: string } | null;
+      summary?: {
+        orderCounts: { new: number; preparing: number; shipped: number; delivered: number; all: number };
+        claimCounts: { all: number; cancel: number; return: number; action: number };
+        opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
+        settlement: { payment: number; commission: number; pgFee: number; platformFee: number; amount: number; confirmedAmount: number };
+      };
+    }>('GET', `${OPS}?${p.toString()}`, undefined, { account });
   },
   orderAction(account: string, action: string, payload: Record<string, unknown>) {
     return call<{ ok: true }>('POST', OPS, { action, ...payload }, { account });
@@ -373,8 +390,18 @@ export const affiliateStoreService = {
 
   // 인플루언서
   myAffiliate() {
-    return call<{ items: MyAffiliateItem[]; totals: { clicks: number; orders: number; sales: number; commission: number; pending: number; confirmed: number; cancelled: number }; orders: StoreOrder[] }>(
+    return call<{ items: MyAffiliateItem[]; totals: { clicks: number; orders: number; sales: number; commission: number; pending: number; confirmed: number; cancelled: number }; orderCount: number }>(
       'GET', `${URL_BASE}?scope=my-affiliate`,
+    );
+  },
+  myAffiliateOrders(cursor?: { cursorAt: string; cursorId: string }) {
+    const p = new URLSearchParams({ scope: 'my-affiliate-orders' });
+    if (cursor) {
+      p.set('cursorAt', cursor.cursorAt);
+      p.set('cursorId', cursor.cursorId);
+    }
+    return call<{ orders: StoreOrder[]; hasMore: boolean; nextCursor: { cursorAt: string; cursorId: string } | null }>(
+      'GET', `${URL_BASE}?${p.toString()}`,
     );
   },
   listProducts(query: ProductQuery = {}) {
@@ -384,13 +411,20 @@ export const affiliateStoreService = {
       'GET', `${URL_BASE}?${p.toString()}`,
     );
   },
+  productDetail(id: string) {
+    const p = new URLSearchParams({ scope: 'product-detail', id });
+    return call<{ product: StoreProduct }>('GET', `${URL_BASE}?${p.toString()}`);
+  },
   listBrands(q = '', page = 1) {
     const p = new URLSearchParams({ scope: 'brands', page: String(page) });
     if (q) p.set('q', q);
     return call<{ brands: StoreBrand[]; total: number; page: number; hasMore: boolean }>('GET', `${URL_BASE}?${p.toString()}`);
   },
-  myRequests() {
-    return call<{ requests: StoreRequest[] }>('GET', `${URL_BASE}?scope=my-requests`);
+  myRequestStatuses() {
+    return call<{ requests: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>[] }>('GET', `${URL_BASE}?scope=my-request-status`);
+  },
+  myRequests(page = 1) {
+    return call<{ requests: StoreRequest[]; page: number; total: number; hasMore: boolean }>('GET', `${URL_BASE}?scope=my-requests&page=${page}`);
   },
   request(productId: string, message: string, channelUrl: string) {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'request', productId, message, channelUrl });

@@ -48,6 +48,7 @@ import {
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const OVERDUE_BUSINESS_DAYS = 3;
+const BRAND_ORDER_PAGE_SIZE = 40;
 
 const BRAND_LINK = "/business-admin?tab=affiliate";
 
@@ -125,9 +126,26 @@ function shapeBrandOrder(o: any) {
 
 // ─────────────────────────── 브랜드 ───────────────────────────
 
-async function brandGet(db: any, brand: string) {
-  const [orders, inquiries, notifications] = await Promise.all([
-    db.sql`
+async function brandGet(db: any, brand: string, url: URL) {
+  const view = url.searchParams.get("view") === "claims" ? "claims" : "orders";
+  const orderId = clip(url.searchParams.get("orderId"), 120);
+  const cursorId = clip(url.searchParams.get("cursorId"), 120);
+  const cursorTimeRaw = clip(url.searchParams.get("cursorAt"), 60);
+  const cursorTimeValue = Date.parse(cursorTimeRaw);
+  const hasCursor = !!cursorId && Number.isFinite(cursorTimeValue);
+  const cursorAt = hasCursor ? new Date(cursorTimeValue).toISOString() : "1970-01-01T00:00:00.000Z";
+  const ordersQuery = orderId ? db.sql`
+      SELECT o.*, r.status AS ret_status, r.reason AS ret_reason, r.memo AS ret_memo, r.photo_urls AS ret_photos,
+             r.return_address AS ret_address, r.pickup_message AS ret_pickup, r.reject_reason AS ret_reject,
+             r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at,
+             r.refund_amount AS ret_refund_amount, r.shipping_deduction AS ret_shipping_deduction
+      FROM affiliate_store_orders o
+      LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
+      WHERE o.business_username = ${brand} AND o.id = ${orderId}
+        AND o.status NOT IN ('pending_payment', 'expired')
+        AND (${view === "orders"} OR o.status = 'cancelled' OR r.order_id IS NOT NULL)
+      LIMIT 1
+    ` as Promise<any[]> : view === "claims" ? db.sql`
       SELECT o.*, r.status AS ret_status, r.reason AS ret_reason, r.memo AS ret_memo, r.photo_urls AS ret_photos,
              r.return_address AS ret_address, r.pickup_message AS ret_pickup, r.reject_reason AS ret_reject,
              r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at,
@@ -135,24 +153,120 @@ async function brandGet(db: any, brand: string) {
       FROM affiliate_store_orders o
       LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
       WHERE o.business_username = ${brand} AND o.status NOT IN ('pending_payment', 'expired')
-      ORDER BY o.created_at DESC LIMIT 1000
-    ` as Promise<any[]>,
-    db.sql`
-      SELECT * FROM affiliate_store_inquiries WHERE business_username = ${brand}
-      ORDER BY (answered_at IS NULL) DESC, created_at DESC LIMIT 500
-    ` as Promise<any[]>,
-    db.sql`
+        AND (o.status = 'cancelled' OR r.order_id IS NOT NULL)
+        AND (NOT ${hasCursor} OR
+          (COALESCE(r.requested_at, o.cancelled_at, o.created_at) < ${cursorAt}::timestamptz OR
+           (COALESCE(r.requested_at, o.cancelled_at, o.created_at) = ${cursorAt}::timestamptz AND o.id < ${cursorId})))
+      ORDER BY COALESCE(r.requested_at, o.cancelled_at, o.created_at) DESC, o.id DESC
+      LIMIT ${BRAND_ORDER_PAGE_SIZE + 1}
+    ` as Promise<any[]> : db.sql`
+      SELECT o.*, r.status AS ret_status, r.reason AS ret_reason, r.memo AS ret_memo, r.photo_urls AS ret_photos,
+             r.return_address AS ret_address, r.pickup_message AS ret_pickup, r.reject_reason AS ret_reject,
+             r.requested_at AS ret_requested_at, r.decided_at AS ret_decided_at, r.refunded_at AS ret_refunded_at,
+             r.refund_amount AS ret_refund_amount, r.shipping_deduction AS ret_shipping_deduction
+      FROM affiliate_store_orders o
+      LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
+      WHERE o.business_username = ${brand} AND o.status NOT IN ('pending_payment', 'expired')
+        AND (NOT ${hasCursor} OR o.created_at < ${cursorAt}::timestamptz OR
+          (o.created_at = ${cursorAt}::timestamptz AND o.id < ${cursorId}))
+      ORDER BY o.created_at DESC, o.id DESC
+      LIMIT ${BRAND_ORDER_PAGE_SIZE + 1}
+    ` as Promise<any[]>;
+  const [orders, metrics, notifications] = await Promise.all([
+    ordersQuery,
+    !hasCursor ? db.sql`
+      WITH base AS (
+        SELECT o.status, o.commission_status, o.commission_amount, o.platform_rate, o.pg_rate,
+               o.unit_price::numeric * o.quantity::numeric AS product,
+               COALESCE(NULLIF(o.total_amount, 0)::numeric,
+                 o.unit_price::numeric * o.quantity::numeric + o.shipping_fee::numeric) AS payment,
+               COALESCE(o.refund_amount, 0)::numeric AS refund,
+               r.order_id AS return_order_id, r.status AS ret_status
+        FROM affiliate_store_orders o
+        LEFT JOIN affiliate_store_returns r ON r.order_id = o.id
+        WHERE o.business_username = ${brand} AND o.status NOT IN ('pending_payment', 'expired')
+      ), calc AS (
+        SELECT *,
+               CASE WHEN status = 'cancelled' THEN payment - refund ELSE payment END AS kept_payment,
+               CASE WHEN status = 'cancelled' THEN GREATEST(0, product - refund) ELSE product END AS kept_product,
+               CASE WHEN status <> 'cancelled' THEN TRUE ELSE refund > 0 AND payment - refund > 0 END AS included
+        FROM base
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'paid')::int AS new_orders,
+        COUNT(*) FILTER (WHERE status = 'preparing')::int AS preparing_orders,
+        COUNT(*) FILTER (WHERE status = 'shipped')::int AS shipped_orders,
+        COUNT(*) FILTER (WHERE status IN ('delivered', 'confirmed'))::int AS delivered_orders,
+        COUNT(*)::int AS all_orders,
+        COUNT(*) FILTER (WHERE status = 'cancelled' OR return_order_id IS NOT NULL)::int AS claims_all,
+        COUNT(*) FILTER (WHERE status = 'cancelled' AND return_order_id IS NULL)::int AS claims_cancel,
+        COUNT(*) FILTER (WHERE return_order_id IS NOT NULL)::int AS claims_return,
+        COUNT(*) FILTER (WHERE ret_status = 'requested' OR (ret_status = 'approved' AND status = 'return_requested'))::int AS claims_action,
+        (SELECT COUNT(*)::int FROM affiliate_store_notifications
+         WHERE recipient_type = 'brand' AND recipient = ${brand} AND read_at IS NULL) AS unread,
+        COALESCE(SUM(CASE WHEN included THEN kept_payment ELSE 0 END), 0)::bigint AS settlement_payment,
+        COALESCE(SUM(CASE WHEN included THEN
+          CASE WHEN status = 'cancelled' AND commission_status = 'cancelled' THEN 0 ELSE commission_amount END
+          ELSE 0 END), 0)::bigint AS settlement_commission,
+        COALESCE(SUM(CASE WHEN included THEN FLOOR(kept_payment * pg_rate / 100) ELSE 0 END), 0)::bigint AS settlement_pg_fee,
+        COALESCE(SUM(CASE WHEN included THEN FLOOR(kept_product * platform_rate / 100) ELSE 0 END), 0)::bigint AS settlement_platform_fee,
+        COALESCE(SUM(CASE WHEN included THEN kept_payment
+          - CASE WHEN status = 'cancelled' AND commission_status = 'cancelled' THEN 0 ELSE commission_amount END
+          - FLOOR(kept_payment * pg_rate / 100)
+          - FLOOR(kept_product * platform_rate / 100)
+          ELSE 0 END), 0)::bigint AS settlement_amount,
+        COALESCE(SUM(CASE WHEN included AND commission_status = 'confirmed' THEN kept_payment
+          - CASE WHEN status = 'cancelled' AND commission_status = 'cancelled' THEN 0 ELSE commission_amount END
+          - FLOOR(kept_payment * pg_rate / 100)
+          - FLOOR(kept_product * platform_rate / 100)
+          ELSE 0 END), 0)::bigint AS settlement_confirmed_amount
+      FROM calc
+    ` as Promise<any[]> : Promise.resolve([]),
+    !hasCursor ? db.sql`
       SELECT id, kind, title, body, read_at, created_at FROM affiliate_store_notifications
       WHERE recipient_type = 'brand' AND recipient = ${brand} ORDER BY created_at DESC LIMIT 50
-    ` as Promise<any[]>,
+    ` as Promise<any[]> : Promise.resolve([]),
   ]);
+  const pageOrders = orders.slice(0, BRAND_ORDER_PAGE_SIZE);
+  const lastOrder = pageOrders[pageOrders.length - 1];
+  const nextCursor = orders.length > BRAND_ORDER_PAGE_SIZE && lastOrder ? {
+    cursorAt: new Date(view === "claims" ? lastOrder.ret_requested_at || lastOrder.cancelled_at || lastOrder.created_at : lastOrder.created_at).toISOString(),
+    cursorId: String(lastOrder.id),
+  } : null;
+  const m = metrics[0] || {};
+  const summary = {
+    orderCounts: {
+      new: Number(m.new_orders) || 0,
+      preparing: Number(m.preparing_orders) || 0,
+      shipped: Number(m.shipped_orders) || 0,
+      delivered: Number(m.delivered_orders) || 0,
+      all: Number(m.all_orders) || 0,
+    },
+    claimCounts: {
+      all: Number(m.claims_all) || 0,
+      cancel: Number(m.claims_cancel) || 0,
+      return: Number(m.claims_return) || 0,
+      action: Number(m.claims_action) || 0,
+    },
+    opsCounts: {
+      newOrders: Number(m.new_orders) || 0,
+      claimsNeedAction: Number(m.claims_action) || 0,
+      unread: Number(m.unread) || 0,
+    },
+    settlement: {
+      payment: Number(m.settlement_payment) || 0,
+      commission: Number(m.settlement_commission) || 0,
+      pgFee: Number(m.settlement_pg_fee) || 0,
+      platformFee: Number(m.settlement_platform_fee) || 0,
+      amount: Number(m.settlement_amount) || 0,
+      confirmedAmount: Number(m.settlement_confirmed_amount) || 0,
+    },
+  };
   return Response.json({
-    orders: orders.map(shapeBrandOrder),
-    inquiries: inquiries.map((q) => ({
-      id: q.id, buyerName: q.buyer_name, productName: q.product_name, orderId: q.order_id, body: q.body,
-      answer: q.answer, answeredAt: q.answered_at, createdAt: q.created_at,
-    })),
-    notifications,
+    orders: pageOrders.map(shapeBrandOrder),
+    hasMore: orders.length > BRAND_ORDER_PAGE_SIZE,
+    nextCursor,
+    ...(hasCursor ? {} : { summary, notifications }),
   });
 }
 
@@ -550,7 +664,7 @@ export default async (req: Request) => {
     const app = (await db.sql`SELECT status FROM affiliate_store_applications WHERE business_username = ${brand}`) as any[];
     if (app[0]?.status !== "approved") return err("입점 승인 후 이용할 수 있어요.", 403);
 
-    if (scope === "brand") return await brandGet(db, brand);
+      if (scope === "brand") return await brandGet(db, brand, url);
     if (req.method === "POST") return await brandAction(db, brand, body);
     return err("알 수 없는 요청입니다.");
   } catch (e: any) {
