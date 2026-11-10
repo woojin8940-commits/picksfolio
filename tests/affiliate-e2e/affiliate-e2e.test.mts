@@ -43,7 +43,7 @@ const productInput = (name: string, extra: Record<string, unknown> = {}) => ({
   detailImageUrls: ["https://example.com/detail.jpg"], sizeGuide: "사이즈", deliveryGuide: "배송 안내",
   descriptionImageUrls: [], sizeGuideImageUrls: [], deliveryGuideImageUrls: [],
   options: [], retailPrice: 20000, salePrice: 15000, commissionRate: 10, stock: 100, shippingFee: 3000,
-  productUrl: "", status: "on_sale", ...extra,
+  productUrl: "https://example.com/product", status: "on_sale", ...extra,
 });
 
 async function approvedBrand(username: string, brandName: string) {
