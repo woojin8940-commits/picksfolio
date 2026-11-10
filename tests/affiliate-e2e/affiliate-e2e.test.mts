@@ -616,3 +616,80 @@ describe("F. 지급 신청 · 상세 펼치기", () => {
     assert.equal(r.body.summary.availableOrderAmount, expected);
   });
 });
+
+// ─────────────────────────── G. 상품별 판매 신청 · 판매기간 · 판매중지 ───────────────────────────
+
+describe("G. 상품별 판매 신청 · 판매기간 · 판매중지", () => {
+  const BRAND3 = "brand3";
+  const day = (offset: number) => new Date(Date.now() + 9 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
+  let pA: any;
+  let pB: any;
+
+  test("판매 신청은 상품별로 묶이고, 새 신청 알림은 신청자 목록을 열면 꺼진다", async () => {
+    await approvedBrand(BRAND3, "브랜드쓰리");
+    pA = await saveProduct(BRAND3, "묶음 상품 A");
+    pB = await saveProduct(BRAND3, "묶음 상품 B");
+    for (const [inf, p] of [[INF, pA], [INF2, pA], [INF, pB]] as const) {
+      const r = await call(h.store, inf, "POST", "/api/affiliate-store", { action: "request", productId: p.id, message: "", channelUrl: "" });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+    }
+    const counts = await call(h.store, BRAND3, "GET", "/api/affiliate-store?scope=brand&section=counts");
+    assert.equal(counts.body.newRequestCount, 3);
+
+    const grouped = await call(h.store, BRAND3, "GET", "/api/affiliate-store?scope=brand&section=request-products");
+    assert.equal(grouped.status, 200);
+    const byId = new Map(grouped.body.products.map((p: any) => [p.id, p]));
+    assert.deepEqual((byId.get(pA.id) as any).requestCounts, { pending: 2, approved: 0, rejected: 0, unseen: 2 });
+    assert.equal((byId.get(pB.id) as any).requestCounts.unseen, 1);
+
+    const onlyA = await call(h.store, BRAND3, "GET", `/api/affiliate-store?scope=brand&section=requests&productId=${pA.id}`);
+    assert.equal(onlyA.body.requests.length, 2);
+    assert.ok(onlyA.body.requests.every((r: any) => r.productId === pA.id && r.unseen === true));
+
+    const seen = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "mark_requests_seen", productId: pA.id });
+    assert.equal(seen.status, 200);
+    assert.equal(seen.body.newRequestCount, 1);
+
+    // 선정하면 상태 칸으로 거른 목록에 나온다.
+    const approve = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "review_request", id: onlyA.body.requests[0].id, decision: "approve" });
+    assert.equal(approve.status, 200);
+    const approved = await call(h.store, BRAND3, "GET", `/api/affiliate-store?scope=brand&section=requests&productId=${pA.id}&status=approved`);
+    assert.equal(approved.body.requests.length, 1);
+  });
+
+  test("판매중지한 상품은 신청한 인플루언서에게 '판매 중지'로 보이고, 새 신청은 막힌다", async () => {
+    const paused = await saveProduct(BRAND3, "묶음 상품 A", { ...pA, status: "paused" });
+    assert.equal(paused.saleState, "paused");
+    const mine = await call(h.store, INF, "GET", "/api/affiliate-store?scope=my-requests");
+    const req = mine.body.requests.find((r: any) => r.productId === pA.id);
+    assert.equal(req.productState, "paused");
+    const detail = await call(h.store, INF, "GET", `/api/affiliate-store?scope=product-detail&id=${pA.id}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.product.saleState, "paused");
+    // 신청하지 않은 인플루언서에게는 보이지 않는다.
+    const other = await call(h.store, INF2, "GET", `/api/affiliate-store?scope=product-detail&id=${pB.id}`);
+    assert.equal(other.status, 200, "판매중 상품은 누구나 본다");
+    const list = await call(h.store, INF2, "GET", `/api/affiliate-store?scope=creator&brand=${BRAND3}`);
+    assert.deepEqual(list.body.products.map((p: any) => p.id), [pB.id]);
+  });
+
+  test("판매기간: 기간 밖이면 목록 · 신청에서 빠지고, 지난 종료일로 판매를 시작할 수 없다", async () => {
+    const later = await saveProduct(BRAND3, "판매 예정 상품", { saleStartDate: day(3), saleEndDate: day(10) });
+    assert.equal(later.saleState, "scheduled");
+    assert.equal(later.saleStartDate, day(3));
+    const list = await call(h.store, INF2, "GET", `/api/affiliate-store?scope=creator&brand=${BRAND3}`);
+    assert.ok(!list.body.products.some((p: any) => p.id === later.id));
+    const req = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "request", productId: later.id, message: "", channelUrl: "" });
+    assert.equal(req.status, 400);
+
+    const bad = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "save_product", product: productInput("끝난 기간", { saleStartDate: day(-10), saleEndDate: day(-1) }) });
+    assert.equal(bad.status, 400);
+    const reversed = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "save_product", product: productInput("거꾸로", { saleStartDate: day(5), saleEndDate: day(1) }) });
+    assert.equal(reversed.status, 400);
+
+    // 기간을 보내지 않은 예전 화면의 저장은 기존 기간을 그대로 둔다.
+    const { saleStartDate: _s, saleEndDate: _e, ...rest } = later;
+    const kept = await saveProduct(BRAND3, "판매 예정 상품", { ...rest, summary: "수정" });
+    assert.equal(kept.saleEndDate, day(10));
+  });
+});

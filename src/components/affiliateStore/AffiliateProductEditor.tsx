@@ -82,6 +82,8 @@ const toInput = (p: StoreProduct | null, defaultDeliveryGuide = ''): ProductInpu
   stock: p?.stock || 0,
   shippingFee: p?.shippingFee || 0,
   productUrl: p?.productUrl || '',
+  saleStartDate: p?.saleStartDate || '',
+  saleEndDate: p?.saleEndDate || '',
   // 새 상품은 등록하자마자 인플루언서에게 보이도록 기본값을 '판매중'으로 둔다.
   status: p?.status || 'on_sale',
 });
@@ -222,6 +224,9 @@ const NumberInput: React.FC<{ value: number; onChange: (n: number) => void; suff
   </div>
 );
 
+/** 오늘 한국 날짜 'YYYY-MM-DD'(판매기간 기본값 · 지난 날짜 확인용). */
+const kstToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+
 const STATUS_CHOICES: { value: ProductStatus; label: string; desc: string }[] = [
   { value: 'on_sale', label: '판매중', desc: '인플루언서에게 노출되고 판매 신청을 받습니다.' },
   { value: 'paused', label: '판매중지', desc: '노출을 잠시 멈춥니다. 이미 승인된 인플루언서는 유지됩니다.' },
@@ -237,6 +242,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
   const [guideUploadCount, setGuideUploadCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [periodMode, setPeriodMode] = useState(!!(product?.saleStartDate || product?.saleEndDate));
   const fileRef = useRef<HTMLInputElement>(null);
   const detailFileRef = useRef<HTMLInputElement>(null);
 
@@ -368,6 +374,15 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
     }
     if (!/^https?:\/\//i.test(form.productUrl.trim())) {
       setError('상품 링크는 https:// 로 시작하는 주소로 입력해 주세요.');
+      return;
+    }
+    if (form.saleStartDate && form.saleEndDate && form.saleEndDate < form.saleStartDate) {
+      setError('판매 종료일은 시작일과 같거나 뒤여야 합니다.');
+      return;
+    }
+    const nextStatus = statusOverride || form.status;
+    if (nextStatus === 'on_sale' && form.saleEndDate && form.saleEndDate < kstToday() && form.saleEndDate !== (product?.saleEndDate || '')) {
+      setError('판매 종료일이 이미 지났어요. 판매기간을 오늘 이후로 바꿔 주세요.');
       return;
     }
     const payload: ProductInput = {
@@ -659,6 +674,42 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
           rows={10}
           {...guideImageProps('deliveryGuideImageUrls')}
         />
+      </Section>
+
+      <Section title="판매기간" desc="정한 기간에만 인플루언서에게 노출되고 판매 신청 · 구매를 받습니다. 기간이 끝나면 자동으로 판매가 멈춰요.">
+        <p className="rounded-xl bg-amber-50 border border-amber-100 px-3.5 py-2.5 text-xs font-bold text-amber-700">
+          판매기간은 최소 3개월 이상으로 설정해 주세요.
+        </p>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+          {([
+            { key: 'always', label: '상시 판매' },
+            { key: 'period', label: '기간 지정' },
+          ] as const).map(o => {
+            const active = o.key === 'period' ? !!(form.saleStartDate || form.saleEndDate) || periodMode : !(form.saleStartDate || form.saleEndDate) && !periodMode;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => {
+                  if (o.key === 'always') { setPeriodMode(false); set('saleStartDate', ''); set('saleEndDate', ''); }
+                  else { setPeriodMode(true); if (!form.saleStartDate) set('saleStartDate', kstToday()); }
+                }}
+                className={`h-9 px-4 rounded-lg text-xs font-black ${active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+        {(periodMode || form.saleStartDate || form.saleEndDate) && (
+          <Row label="판매기간" hint="시작일 · 종료일 모두 포함(한국 시간). 종료일을 비워 두면 판매중지할 때까지 계속 판매합니다.">
+            <div className="flex items-center gap-2 flex-wrap">
+              <input type="date" className={`${inputCls} w-auto min-w-[150px]`} value={form.saleStartDate} onChange={e => set('saleStartDate', e.target.value)} />
+              <span className="text-slate-400 text-sm font-bold">~</span>
+              <input type="date" className={`${inputCls} w-auto min-w-[150px]`} value={form.saleEndDate} min={form.saleStartDate || undefined} onChange={e => set('saleEndDate', e.target.value)} />
+            </div>
+          </Row>
+        )}
       </Section>
 
       <Section title="판매 상태">

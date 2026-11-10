@@ -45,6 +45,8 @@ interface ShopProduct {
   salePrice: number;
   shippingFee: number;
   onSale: boolean;
+  /** 판매 예정 · 판매기간 종료 · 품절 · 판매중지 등 지금 상태. */
+  saleState?: string;
   /** 고정 상한(10). 재고 부족은 주문서 · 결제 단계에서 서버가 알려 준다. */
   maxQuantity: number;
   seller: { businessName: string; businessNumber: string; ceoName?: string; address?: string; phone?: string; mailOrderNumber?: string };
@@ -628,7 +630,9 @@ const AffiliateShopPage: React.FC<{ code: string }> = ({ code }) => {
               <span className="text-[9px] font-black">마이페이지</span>
             </button>
             {!product.onSale ? (
-              <button disabled className="flex-1 h-14 rounded-2xl bg-slate-200 text-slate-500 text-base font-black">품절 · 판매 중지</button>
+              <button disabled className="flex-1 h-14 rounded-2xl bg-slate-200 text-slate-500 text-base font-black">
+                {product.saleState === 'scheduled' ? '판매 예정' : product.saleState === 'ended' ? '판매 기간 종료' : product.saleState === 'sold_out' ? '품절' : product.saleState === 'paused' ? '판매 중지' : '품절 · 판매 중지'}
+              </button>
             ) : !checkout ? (
               <button
                 disabled={needsOption && !option}

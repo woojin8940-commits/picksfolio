@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Clock, Loader2, Package, Plus, RefreshCw, RotateCcw, Store, Truck, Users, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bell, CalendarDays, ChevronRight, Clock, Loader2, Package, Plus, RefreshCw, RotateCcw, Store, Truck, Users, Wallet } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -7,6 +7,9 @@ import {
   REQUEST_STATUS_LABEL,
   MANAGER_STATUS_LABEL,
   MANAGER_STATUS_STYLE,
+  SALE_STATE_LABEL,
+  SALE_STATE_STYLE,
+  salePeriodText,
   sellerInfoMissing,
   type CategoryNode,
   type BrandCounts,
@@ -29,6 +32,10 @@ import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
  *   신청서 없음 · 반려 → 입점 신청서
  *   검토 중            → 대기 안내
  *   승인               → 상품 관리 · 판매 신청 관리
+ *
+ * 판매 신청은 상품별로 묶어 본다. 상품마다 대기 · 선정 · 반려 수와 "새 신청"(아직 확인 안 함) 알림을 보여 주고,
+ * 상품을 누르면 광고비 지급형 캠페인 지원자처럼 인플루언서 카드(인스타 프로필 · 팔로워 · 최근 릴스)로 신청자를 본다.
+ * 신청자 목록을 열면 그 상품의 새 신청 알림이 꺼진다.
  *
  * 상품 · 받은 신청은 30개씩(커서) 받는다. 상품 삭제 · 판매 상태 변경 · 수정 · 신청 선정/반려는
  * 바뀐 한 건만 고치고 숫자만 새로 받는다(펼쳐 둔 목록은 그대로). "더 보기"가 실패하면 목록 아래에만 오류가 나온다.
@@ -63,8 +70,15 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [requests, setRequests] = useState<StoreRequest[]>([]);
   const [productTotal, setProductTotal] = useState(0);
   const [onSaleTotal, setOnSaleTotal] = useState(0);
-  const [requestTotal, setRequestTotal] = useState(0);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [newRequestCount, setNewRequestCount] = useState(0);
+  // 판매 신청 — 상품별 묶음 · 고른 상품의 신청자
+  const [requestProducts, setRequestProducts] = useState<StoreProduct[]>([]);
+  const [requestProductsLoaded, setRequestProductsLoaded] = useState(false);
+  const [requestProductsLoading, setRequestProductsLoading] = useState(false);
+  const [requestProductsError, setRequestProductsError] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState<StoreProduct | null>(null);
+  const [requestFilter, setRequestFilter] = useState<'' | 'pending' | 'approved' | 'rejected'>('');
   const [productCursor, setProductCursor] = useState<ListCursor | null>(null);
   const [productHasMore, setProductHasMore] = useState(false);
   const [productsMoreLoading, setProductsMoreLoading] = useState(false);
@@ -88,8 +102,8 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const applyCounts = useCallback((c: Partial<BrandCounts>) => {
     if (c.productTotal !== undefined) setProductTotal(c.productTotal);
     if (c.onSaleTotal !== undefined) setOnSaleTotal(c.onSaleTotal);
-    if (c.requestTotal !== undefined) setRequestTotal(c.requestTotal);
     if (c.pendingRequestCount !== undefined) setPendingRequestCount(c.pendingRequestCount);
+    if (c.newRequestCount !== undefined) setNewRequestCount(c.newRequestCount);
     if (c.opsCounts) setOpsCounts(c.opsCounts);
   }, []);
 
@@ -120,11 +134,25 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     if (!res.error) applyCounts(res);
   }, [businessUsername, applyCounts]);
 
-  const loadRequests = useCallback(async (cursor?: ListCursor | null) => {
+  const loadRequestProducts = useCallback(async () => {
+    setRequestProductsLoading(true);
+    setRequestProductsError('');
+    const res = await affiliateStoreService.getBrandRequestProducts(businessUsername);
+    setRequestProductsLoading(false);
+    if (res.error) { setRequestProductsError(res.error); return; }
+    setRequestProducts(res.products || []);
+    setRequestProductsLoaded(true);
+  }, [businessUsername]);
+
+  /** 고른 상품의 신청자(상태 칸으로 거른다). 늦게 온 이전 응답은 버린다. */
+  const requestsSeq = React.useRef(0);
+  const loadRequests = useCallback(async (cursor: ListCursor | null, productId: string, status: '' | 'pending' | 'approved' | 'rejected') => {
     const append = !!cursor;
+    const seq = append ? requestsSeq.current : ++requestsSeq.current;
     setRequestsLoading(true);
     if (append) setRequestsMoreError(''); else setRequestsError('');
-    const res = await affiliateStoreService.getBrandRequests(businessUsername, cursor);
+    const res = await affiliateStoreService.getBrandRequests(businessUsername, cursor, { productId, status });
+    if (seq !== requestsSeq.current) return;
     setRequestsLoading(false);
     if (res.error) {
       if (append) setRequestsMoreError(res.error); else setRequestsError(res.error);
@@ -137,20 +165,59 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     });
     setRequestsCursor(res.requestNextCursor || null);
     setRequestsHasMore(!!res.requestHasMore);
-    applyCounts(res);
     setRequestsLoaded(true);
-  }, [businessUsername, applyCounts]);
+  }, [businessUsername]);
 
   useEffect(() => {
     setRequests([]);
     setRequestsLoaded(false);
     setRequestsError('');
     setRequestsMoreError('');
+    setRequestProducts([]);
+    setRequestProductsLoaded(false);
+    setRequestProductsError('');
+    setSelectedProduct(null);
   }, [businessUsername]);
 
   useEffect(() => {
-    if (tab === 'requests' && !requestsLoaded && !requestsLoading && !requestsError) void loadRequests();
-  }, [tab, requestsLoaded, requestsLoading, requestsError, loadRequests]);
+    if (tab === 'requests' && !selectedProduct && !requestProductsLoaded && !requestProductsLoading && !requestProductsError) void loadRequestProducts();
+  }, [tab, selectedProduct, requestProductsLoaded, requestProductsLoading, requestProductsError, loadRequestProducts]);
+
+  /** 상품의 신청자 보기 — 목록을 받고, 그 상품의 새 신청 알림을 끈다. */
+  const openProductRequests = (p: StoreProduct) => {
+    setTab('requests');
+    setSelectedProduct(p);
+    setRequestFilter('');
+    setRequests([]);
+    setRequestsLoaded(false);
+    setRequestsHasMore(false);
+    setRequestsCursor(null);
+    void loadRequests(null, p.id, '');
+    window.scrollTo({ top: 0 });
+    if ((p.requestCounts?.unseen || 0) > 0) {
+      const clearUnseen = (x: StoreProduct) => x.id === p.id && x.requestCounts ? { ...x, requestCounts: { ...x.requestCounts, unseen: 0 } } : x;
+      setRequestProducts(prev => prev.map(clearUnseen));
+      setProducts(prev => prev.map(clearUnseen));
+      void affiliateStoreService.markRequestsSeen(businessUsername, p.id).then(res => { if (!res.error) applyCounts(res); });
+    }
+  };
+  const closeProductRequests = () => {
+    requestsSeq.current += 1;
+    setSelectedProduct(null);
+    setRequests([]);
+    setRequestsLoaded(false);
+    setRequestsLoading(false);
+    setRequestsError('');
+    // 선정 · 반려한 결과가 상품별 숫자에 반영되도록 다시 받는다.
+    setRequestProductsLoaded(false);
+  };
+  const changeRequestFilter = (f: typeof requestFilter) => {
+    if (!selectedProduct) return;
+    setRequestFilter(f);
+    setRequests([]);
+    setRequestsHasMore(false);
+    void loadRequests(null, selectedProduct.id, f);
+  };
 
   /** 상품 "더 보기": 목록만 받아 뒤에 붙인다. 실패하면 목록은 두고 아래에 오류만 보여 준다. */
   const loadMoreProducts = async () => {
@@ -168,7 +235,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     setProductHasMore(!!res.productHasMore);
   };
 
-  const loadMoreRequests = () => { void loadRequests(requestsCursor); };
+  const loadMoreRequests = () => { if (selectedProduct) void loadRequests(requestsCursor, selectedProduct.id, requestFilter); };
 
   /** 저장된 상품 한 건을 목록에 반영한다(신청 수는 저장 응답에 없어 기존 값을 둔다). */
   const upsertProduct = (saved: StoreProduct) => {
@@ -286,9 +353,10 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
 
   const toggleSale = async (p: StoreProduct) => {
     setBusyId(p.id);
-    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, descriptionImageUrls, sizeGuideImageUrls, deliveryGuideImageUrls, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl } = p;
+    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, descriptionImageUrls, sizeGuideImageUrls, deliveryGuideImageUrls, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl, saleStartDate, saleEndDate } = p;
     const res = await affiliateStoreService.saveProduct(businessUsername, {
       id, name, category, subcategory, summary, description, imageUrls, detailImageUrls: detailImageUrls || [], sizeGuide: sizeGuide || '', deliveryGuide: deliveryGuide || '', descriptionImageUrls: descriptionImageUrls || [], sizeGuideImageUrls: sizeGuideImageUrls || [], deliveryGuideImageUrls: deliveryGuideImageUrls || [], options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl,
+      saleStartDate: saleStartDate || '', saleEndDate: saleEndDate || '',
       status: p.status === 'on_sale' ? 'paused' : 'on_sale',
     });
     setBusyId('');
@@ -316,8 +384,18 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       // 응답에는 상품 이름 · 인스타 정보가 없어 기존 카드 값에 상태만 덮는다.
       setRequests(prev => prev.map(x => x.id === r.id ? {
         ...x, status: res.request.status, brandNote: res.request.brandNote, managerStatus: res.request.managerStatus,
-        linkCode: res.request.linkCode, updatedAt: res.request.updatedAt,
+        linkCode: res.request.linkCode, updatedAt: res.request.updatedAt, unseen: false,
       } : x));
+      // 고른 상품 머리의 숫자도 바로 고친다.
+      setSelectedProduct(prev => {
+        if (!prev?.requestCounts) return prev;
+        const c = { ...prev.requestCounts };
+        const dec = (k: 'pending' | 'approved' | 'rejected') => { c[k] = Math.max(0, (c[k] || 0) - 1); };
+        const inc = (k: 'pending' | 'approved' | 'rejected') => { c[k] = (c[k] || 0) + 1; };
+        if (r.status === 'pending' || r.status === 'approved' || r.status === 'rejected') dec(r.status);
+        inc(res.request.status === 'approved' ? 'approved' : 'rejected');
+        return { ...prev, requestCounts: c as typeof prev.requestCounts };
+      });
       void refreshCounts();
     }
   };
@@ -337,6 +415,23 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
           <Plus className="w-4 h-4" /> 상품 등록
         </button>
       </header>
+
+      {newRequestCount > 0 && !(tab === 'requests' && !selectedProduct) && (
+        <button
+          onClick={() => { setTab('requests'); setSelectedProduct(null); setRequestProductsLoaded(false); }}
+          className="w-full text-left mb-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center gap-3"
+        >
+          <span className="relative shrink-0">
+            <Bell className="w-5 h-5 text-blue-600" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-blue-50" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-black text-blue-800">새 판매 신청이 {newRequestCount.toLocaleString('ko-KR')}건 도착했어요</span>
+            <span className="block text-xs text-blue-700 mt-0.5">상품별로 신청한 인플루언서를 확인하고 선정해 주세요.</span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-blue-500 shrink-0" />
+        </button>
+      )}
 
       {sellerMissing.length > 0 && (
         <button
@@ -372,7 +467,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
         {([
           { key: 'products', label: '상품 관리', icon: Package },
-          { key: 'requests', label: '판매 신청', icon: Users, badge: pendingRequests },
+          { key: 'requests', label: '판매 신청', icon: Users, badge: newRequestCount },
           { key: 'orders', label: '주문 관리', icon: Truck, badge: opsCounts.newOrders },
           { key: 'claims', label: '취소·반품 현황', icon: RotateCcw, badge: opsCounts.claimsNeedAction },
           { key: 'seller', label: '판매자 정보', icon: Store, badge: sellerMissing.length > 0 ? 1 : 0 },
@@ -380,7 +475,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ] as const).map(t => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => { setTab(t.key); if (t.key === 'requests' && selectedProduct) closeProductRequests(); }}
             className={`h-9 px-4 rounded-lg text-xs font-black whitespace-nowrap flex items-center gap-1.5 ${tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
           >
             <t.icon className="w-3.5 h-3.5" />
@@ -410,6 +505,12 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                   <div className="min-w-0">
                     <p className="text-sm font-black text-slate-900 truncate">{p.name}</p>
                     <p className="text-[11px] text-slate-400 truncate">{p.category}{p.subcategory ? ` > ${p.subcategory}` : ''}{p.summary ? ` · ${p.summary}` : ''}</p>
+                    <p className="text-[10px] text-slate-500 font-bold flex items-center gap-1 mt-0.5">
+                      <CalendarDays className="w-3 h-3 text-slate-400" /> {salePeriodText(p.saleStartDate, p.saleEndDate)}
+                      {p.status === 'on_sale' && p.saleState && p.saleState !== 'on_sale' && (
+                        <span className={`ml-1 px-1.5 py-0.5 rounded font-black text-[9px] ${SALE_STATE_STYLE[p.saleState]}`}>{SALE_STATE_LABEL[p.saleState]}</span>
+                      )}
+                    </p>
                     <div className="md:hidden flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-[11px]">
                       <span className="font-black text-slate-800">{won(p.salePrice)}</span>
                       <span className="text-blue-600 font-bold">수수료 {p.commissionRate}%</span>
@@ -427,11 +528,23 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                 <div className="hidden md:flex justify-center">
                   <span className={`px-2 py-1 rounded-md text-[10px] font-black ${PRODUCT_STATUS_STYLE[p.status]}`}>{PRODUCT_STATUS_LABEL[p.status]}</span>
                 </div>
-                <p className="hidden md:block text-center text-xs font-bold text-slate-500">
-                  {p.requestCounts?.approved || 0}명
-                  {(p.requestCounts?.pending || 0) > 0 && <span className="text-amber-600"> · 대기 {p.requestCounts?.pending}</span>}
-                </p>
+                <button
+                  type="button"
+                  onClick={() => openProductRequests(p)}
+                  className="hidden md:flex flex-col items-center text-xs font-bold text-slate-500 hover:text-blue-600"
+                >
+                  <span>
+                    {p.requestCounts?.approved || 0}명
+                    {(p.requestCounts?.pending || 0) > 0 && <span className="text-amber-600"> · 대기 {p.requestCounts?.pending}</span>}
+                  </span>
+                  {(p.requestCounts?.unseen || 0) > 0 && (
+                    <span className="mt-0.5 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-black">새 신청 {p.requestCounts?.unseen}</span>
+                  )}
+                </button>
                 <div className="flex gap-1.5 justify-end">
+                  {(p.requestCounts?.unseen || 0) > 0 && (
+                    <button onClick={() => openProductRequests(p)} className="md:hidden h-8 px-2.5 rounded-lg bg-red-500 text-[11px] font-black text-white mr-auto">새 신청 {p.requestCounts?.unseen}</button>
+                  )}
                   <button disabled={busyId === p.id} onClick={() => toggleSale(p)} className="h-8 px-2.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
                     {p.status === 'on_sale' ? '판매중지' : '판매시작'}
                   </button>
@@ -466,15 +579,15 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         />
       )}
 
-      {tab === 'requests' && (
-        requestsLoading && requests.length === 0 ? (
+      {tab === 'requests' && !selectedProduct && (
+        requestProductsLoading && requestProducts.length === 0 ? (
           <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
-        ) : requestsError ? (
+        ) : requestProductsError ? (
           <div className="py-6 text-center">
-            <p className="text-sm font-bold text-red-500 mb-3">{requestsError}</p>
-            <button onClick={() => { void loadRequests(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+            <p className="text-sm font-bold text-red-500 mb-3">{requestProductsError}</p>
+            <button onClick={() => { void loadRequestProducts(); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
           </div>
-        ) : requests.length === 0 ? (
+        ) : requestProducts.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
             <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
             <p className="text-sm font-black text-slate-700">아직 받은 판매 신청이 없어요</p>
@@ -483,54 +596,139 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : (
           <div className="space-y-2.5">
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
-              함께할 인플루언서를 선정하면 바로 인플루언서의 전용 판매 링크가 열려 판매를 시작할 수 있습니다.
+              상품을 누르면 판매를 신청한 인플루언서를 볼 수 있어요. 선정하면 바로 인플루언서의 전용 판매 링크가 열립니다.
             </div>
-            {/* 지원자는 캠페인 지원자와 같은 카드로 본다 — 인스타 프로필 · 팔로워 · 최근 릴스 3편. */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
-            {requests.map(r => (
-              <InfluencerCandidateCard
-                key={r.id}
-                data={{
-                  ...(r.insights || {}),
-                  username: r.influencerUsername,
-                  instagramUrl: r.insights?.instagramUrl || r.channelUrl || '',
-                }}
-                mediaMode="reels"
-                hidePrice
-                badges={
-                  <>
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
-                    {r.status === 'approved' && r.managerStatus && (
-                      <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {requestProducts.map(p => {
+                const c = p.requestCounts || { pending: 0, approved: 0, rejected: 0, unseen: 0 };
+                const unseen = c.unseen || 0;
+                const state = p.saleState || (p.status === 'on_sale' ? 'on_sale' : 'paused');
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => openProductRequests(p)}
+                    className={`relative text-left bg-white rounded-2xl border shadow-sm p-4 flex items-center gap-3 hover:border-blue-300 transition-colors ${unseen > 0 ? 'border-red-200' : 'border-slate-100'}`}
+                  >
+                    {unseen > 0 && (
+                      <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center shadow">{unseen}</span>
                     )}
-                    <span className="text-[11px] text-slate-300 font-bold">{dateText(r.createdAt)}</span>
-                  </>
-                }
-              >
-                <div className="flex items-center gap-2 pt-1">
-                  {r.productImage && <img src={r.productImage} alt="" className="w-9 h-9 rounded-lg object-cover bg-slate-100 shrink-0" />}
-                  <p className="text-xs font-bold text-slate-600 truncate flex-1 min-w-0">{r.productName}</p>
-                  {r.status !== 'approved' && (
-                    <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black disabled:opacity-50 shrink-0">선정</button>
-                  )}
-                  {r.status !== 'rejected' && (
-                    <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-8 px-3 rounded-lg border border-slate-200 text-slate-600 text-[11px] font-black disabled:opacity-50 shrink-0">반려</button>
-                  )}
-                </div>
-              </InfluencerCandidateCard>
-            ))}
+                    <img src={p.imageUrls[0]} alt="" className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${SALE_STATE_STYLE[state]}`}>{SALE_STATE_LABEL[state]}</span>
+                        {unseen > 0 && <span className="text-[10px] font-black text-red-500 flex items-center gap-0.5"><Bell className="w-3 h-3" /> 새 신청 {unseen}명</span>}
+                      </div>
+                      <p className="text-sm font-black text-slate-900 truncate">{p.name}</p>
+                      <p className="text-[10px] text-slate-400 font-bold truncate">{salePeriodText(p.saleStartDate, p.saleEndDate)} · 수수료 {p.commissionRate}%</p>
+                      <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1 text-[11px] font-bold">
+                        <span className="text-amber-600">검토 대기 {c.pending || 0}</span>
+                        <span className="text-emerald-600">선정 {c.approved || 0}</span>
+                        <span className="text-slate-400">반려 {c.rejected || 0}</span>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                  </button>
+                );
+              })}
             </div>
-            {requestsHasMore && (
-              <div className="flex flex-col items-center gap-2 mt-5">
-                {requestsMoreError && <p className="text-xs font-bold text-red-500">{requestsMoreError}</p>}
-                <button disabled={requestsLoading} onClick={loadMoreRequests} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
-                  {requestsLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {requestsMoreError ? '다시 시도' : `신청 더 보기 (${requests.length}/${requestTotal})`}
-                </button>
-              </div>
-            )}
           </div>
         )
+      )}
+
+      {tab === 'requests' && selectedProduct && (
+        <div className="space-y-3">
+          <button onClick={closeProductRequests} className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900">
+            <ArrowLeft className="w-4 h-4" /> 상품별 판매 신청
+          </button>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5 flex items-center gap-4">
+            <img src={selectedProduct.imageUrls[0]} alt="" className="w-16 h-16 md:w-20 md:h-20 rounded-xl object-cover bg-slate-100 shrink-0" />
+            <div className="flex-1 min-w-0">
+              {selectedProduct.saleState && (
+                <span className={`inline-block mb-1 px-1.5 py-0.5 rounded text-[9px] font-black ${SALE_STATE_STYLE[selectedProduct.saleState]}`}>{SALE_STATE_LABEL[selectedProduct.saleState]}</span>
+              )}
+              <p className="text-base md:text-lg font-black text-slate-900 truncate">{selectedProduct.name}</p>
+              <p className="text-[11px] text-slate-500 font-bold">
+                {won(selectedProduct.salePrice)} · 수수료 <span className="text-blue-600">{selectedProduct.commissionRate}%</span> · {salePeriodText(selectedProduct.saleStartDate, selectedProduct.saleEndDate)}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
+            {([
+              { key: '', label: '전체', n: (selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0) },
+              { key: 'pending', label: '검토 대기', n: selectedProduct.requestCounts?.pending || 0 },
+              { key: 'approved', label: '선정', n: selectedProduct.requestCounts?.approved || 0 },
+              { key: 'rejected', label: '반려', n: selectedProduct.requestCounts?.rejected || 0 },
+            ] as const).map(f => (
+              <button
+                key={f.key}
+                onClick={() => changeRequestFilter(f.key)}
+                className={`h-8 px-3.5 rounded-lg text-xs font-black whitespace-nowrap ${requestFilter === f.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              >
+                {f.label} {f.n}
+              </button>
+            ))}
+          </div>
+          {requestsLoading && requests.length === 0 ? (
+            <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+          ) : requestsError ? (
+            <div className="py-6 text-center">
+              <p className="text-sm font-bold text-red-500 mb-3">{requestsError}</p>
+              <button onClick={() => { void loadRequests(null, selectedProduct.id, requestFilter); }} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-xs font-black">다시 시도</button>
+            </div>
+          ) : requestsLoaded && requests.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
+              <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+              <p className="text-sm font-black text-slate-700">이 조건의 신청자가 없어요</p>
+            </div>
+          ) : (
+            <>
+              {/* 지원자는 광고비 지급형 캠페인 지원자와 같은 카드로 본다 — 인스타 프로필 · 팔로워 · 최근 릴스 3편. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
+              {requests.map(r => (
+                <InfluencerCandidateCard
+                  key={r.id}
+                  data={{
+                    ...(r.insights || {}),
+                    username: r.influencerUsername,
+                    instagramUrl: r.insights?.instagramUrl || r.channelUrl || '',
+                  }}
+                  mediaMode="reels"
+                  hidePrice
+                  badges={
+                    <>
+                      {r.unseen && <span className="px-2 py-1 rounded-md text-[10px] font-black bg-red-500 text-white">NEW</span>}
+                      <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
+                      {r.status === 'approved' && r.managerStatus && (
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
+                      )}
+                      <span className="text-[11px] text-slate-300 font-bold">{dateText(r.createdAt)}</span>
+                    </>
+                  }
+                >
+                  <div className="flex items-center gap-2 pt-1 justify-end">
+                    {r.status !== 'approved' && (
+                      <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-9 flex-1 px-3 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-50">선정</button>
+                    )}
+                    {r.status !== 'rejected' && (
+                      <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-9 flex-1 px-3 rounded-lg border border-slate-200 text-slate-600 text-xs font-black disabled:opacity-50">반려</button>
+                    )}
+                  </div>
+                </InfluencerCandidateCard>
+              ))}
+              </div>
+              {requestsHasMore && (
+                <div className="flex flex-col items-center gap-2 mt-5">
+                  {requestsMoreError && <p className="text-xs font-bold text-red-500">{requestsMoreError}</p>}
+                  <button disabled={requestsLoading} onClick={loadMoreRequests} className="h-10 px-6 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 disabled:opacity-50 flex items-center gap-2">
+                    {requestsLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    {requestsMoreError ? '다시 시도' : `신청자 더 보기 (${requests.length})`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </main>
   );
