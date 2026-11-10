@@ -1,5 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import { SALE_STATUSES, currentFeeRates, notify } from "./_shared/affiliate-store-orders.mts";
 import { canUseStore } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
+import { syncApplicantChannels, withinTime } from "./_shared/applicant-channel-sync.mts";
 import { pageOf, readCursor } from "./_shared/list-cursor.mts";
 import { dateOnly, kstToday, parseDateInput, saleStateOf } from "./_shared/affiliate-sale-period.mts";
 
@@ -303,7 +304,7 @@ async function brandCounts(db: any, username: string) {
  *   section=counts         숫자만(상품 삭제 · 판매 상태 변경 뒤 새로 고침용).
  * 목록은 최신순 커서(list-cursor.mts)로 나눠 준다.
  */
-async function brandGet(db: any, username: string, url: URL) {
+async function brandGet(db: any, username: string, url: URL, context?: Context) {
   const app = await loadApplication(db, username);
   if (!app || app.status !== "approved") {
     return Response.json({ application: shapeApplication(app), products: [], requests: [], productTotal: 0, onSaleTotal: 0, pendingRequestCount: 0, newRequestCount: 0, requestTotal: 0, productHasMore: false, productNextCursor: null, opsCounts: { newOrders: 0, claimsNeedAction: 0, unread: 0 }, categories: CATEGORIES, taxonomy: TAXONOMY });
@@ -343,7 +344,15 @@ async function brandGet(db: any, username: string, url: URL) {
       ` as Promise<any[]>,
     ]);
     const { page, hasMore, nextCursor } = pageOf(rows, BRAND_LIST_PAGE_SIZE, (r) => r.created_at);
-    // 지원한 인플루언서의 인스타 프로필 · 최근 릴스. 브랜드에게는 인플루언서가 등록한 단가를 보내지 않는다.
+    // 지원한 인플루언서의 인스타 프로필 · 최근 릴스를 연동된 계정의 지금 것으로 맞춘다.
+    // 채널 정보가 한 번도 채워지지 않았거나 다른 계정 것으로 남아 있으면, 카드가 엉뚱한
+    // 사진(픽스폴리오 아바타 · 지난 계정)을 보여 주고 릴스를 비운다. 잠깐만 기다리고,
+    // 그 안에 못 끝난 일은 응답을 보낸 뒤에 마저 돌린다(다음 열기에 반영).
+    const applicantSync = syncApplicantChannels(db, page.map((r) => r.influencer_username))
+      .catch((e) => console.error("[affiliate-store] applicant sync failed", e));
+    context?.waitUntil(applicantSync);
+    await withinTime(applicantSync, 6000);
+    // 브랜드에게는 인플루언서가 등록한 단가를 보내지 않는다.
     const snapshots = await buildSnapshots(db, page.map((r) => r.influencer_username))
       .catch((e) => { console.error("[affiliate-store] snapshot load failed", e); return new Map(); });
     return Response.json({
@@ -983,7 +992,7 @@ async function creatorRequests(db: any, username: string, url: URL) {
   return Response.json({ requests: page.map(shapeRequest), hasMore, nextCursor });
 }
 
-async function creatorRequest(db: any, username: string, body: any) {
+async function creatorRequest(db: any, username: string, body: any, context?: Context) {
   const productId = clip(body.productId, 60);
   const message = clip(body.message, 1000);
   const channelUrl = clip(body.channelUrl, 500);
@@ -1010,6 +1019,11 @@ async function creatorRequest(db: any, username: string, body: any) {
   `) as any[];
   // 취소했거나 반려된 신청은 다시 낼 수 있다. 대기 중이거나 이미 선정된 신청만 막는다.
   if (!rows[0]) return err("이미 신청한 상품입니다.");
+  // 브랜드가 지원자 카드를 열기 전에 이 사람의 인스타 사진 · 최근 릴스를 받아 둔다.
+  context?.waitUntil(
+    syncApplicantChannels(db, [username], { maxFullSync: 1 })
+      .catch((e) => console.error("[affiliate-store] applicant sync failed", e)),
+  );
   // 브랜드에게 새 신청 알림(화면 알림 + 앱 푸시 · 실패해도 신청은 그대로).
   await notify(db, {
     recipientType: "brand",
@@ -1126,7 +1140,7 @@ async function managerUpdate(db: any, manager: string, body: any) {
 
 // ─────────────────────────── 진입 ───────────────────────────
 
-export default async (req: Request) => {
+export default async (req: Request, context: Context) => {
   const url = new URL(req.url);
   const db = getDatabase();
   let body: any = {};
@@ -1175,7 +1189,7 @@ export default async (req: Request) => {
 
   try {
     if (req.method === "GET") {
-      if (scope === "brand") return await brandGet(db, username, url);
+      if (scope === "brand") return await brandGet(db, username, url, context);
       if (scope === "creator") return await creatorProducts(db, url);
       if (scope === "product-detail") return await creatorProductDetail(db, username, url);
       if (scope === "brands") return await creatorBrands(db, url);
@@ -1192,7 +1206,7 @@ export default async (req: Request) => {
       case "review_request": return await brandReviewRequest(db, username, body);
       case "mark_requests_seen": return await brandMarkRequestsSeen(db, username, body);
       case "update_seller_info": return await brandUpdateSeller(db, username, body);
-      case "request": return await creatorRequest(db, username, body);
+      case "request": return await creatorRequest(db, username, body, context);
       case "cancel_request": return await creatorCancel(db, username, body);
       default: return err("알 수 없는 요청입니다.");
     }
