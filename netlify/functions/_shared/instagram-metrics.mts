@@ -1262,6 +1262,18 @@ async function refreshOneChannelImages(db: any, row: any, withMedia: boolean): P
     // 바뀐 이름이 여기서 반영된다.
     await applyRenamedHandle(db, username, scope, link, payload?.username);
 
+    // 연동된 계정과 명단 행의 계정이 아예 다르면(다른 계정으로 다시 연동한 사람) 사진만
+    // 갈아 끼우지 않는다. 그러면 카드에 새 계정 얼굴과 옛 계정 @아이디 · 팔로워가 섞여,
+    // 브랜드는 지원자가 실제로 쓰는 계정이 아닌 다른 계정을 열게 된다. 이름이 바뀐 경우는
+    // 위 applyRenamedHandle 이 이미 고쳤으므로, 여기 남는 것은 계정 자체가 바뀐 경우뿐이다.
+    const liveHandle = cleanHandle(payload?.username).toLowerCase();
+    const rowHandle = cleanHandle(row?.instagram_handle).toLowerCase();
+    const renamedFrom = cleanHandle(link?.igUsername).toLowerCase();
+    if (liveHandle && rowHandle && liveHandle !== rowHandle && rowHandle !== renamedFrom) {
+      const synced = await syncChannelFromMeta(db, username, link!, scope);
+      if (synced.ok) return true;
+    }
+
     // 썸네일은 아직 메타 주소로 남은 계정에만, 그것도 요청당 몇 계정까지만 옮긴다.
     const media =
       withMedia && channelNeedsMediaMirror(row)
