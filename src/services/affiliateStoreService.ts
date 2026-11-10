@@ -4,6 +4,8 @@ import { collabHeaders } from './apiService';
 
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected';
 export type ProductStatus = 'draft' | 'on_sale' | 'paused';
+/** 지금 실제 판매 상태(판매중 상태 + 판매기간 + 재고 + 삭제 여부). */
+export type SaleState = 'on_sale' | 'scheduled' | 'ended' | 'sold_out' | 'paused' | 'draft' | 'deleted';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 /** 선정된 신청의 링크 상태. 선정하면 바로 'done'(링크 발급), 운영자가 잠시 닫으면 'contacting'. */
 export type ManagerStatus = 'waiting' | 'contacting' | 'done';
@@ -141,6 +143,8 @@ export interface BrandCounts {
   onSaleTotal: number;
   requestTotal: number;
   pendingRequestCount: number;
+  /** 브랜드가 아직 확인하지 않은 검토 대기 신청 수(상품별 신청자 목록을 열면 줄어든다). */
+  newRequestCount: number;
   opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
 }
 
@@ -182,12 +186,19 @@ export interface StoreProduct {
   shippingFee: number;
   productUrl: string;
   status: ProductStatus;
+  /** 판매기간(한국 날짜 'YYYY-MM-DD'). 비어 있으면 제한 없음. */
+  saleStartDate: string;
+  saleEndDate: string;
+  /** 서버가 계산한 지금 판매 상태. */
+  saleState?: SaleState;
   createdAt: string;
   updatedAt: string;
-  requestCounts?: { pending: number; approved: number };
+  requestCounts?: { pending: number; approved: number; rejected?: number; unseen?: number };
+  /** 판매 신청 · 상품별 묶음에서만 온다. */
+  lastRequestAt?: string;
 }
 
-export type ProductInput = Omit<StoreProduct, 'id' | 'businessUsername' | 'brandName' | 'createdAt' | 'updatedAt' | 'requestCounts'> & { id?: string };
+export type ProductInput = Omit<StoreProduct, 'id' | 'businessUsername' | 'brandName' | 'createdAt' | 'updatedAt' | 'requestCounts' | 'saleState' | 'lastRequestAt'> & { id?: string };
 
 export interface StoreRequest {
   id: string;
@@ -205,6 +216,10 @@ export interface StoreRequest {
   /** 브랜드가 선정하면 바로 생기는 인플루언서 전용 링크 코드(/shop/<코드>). */
   linkCode: string;
   clickCount: number;
+  /** 상품의 지금 판매 상태(내 신청 목록 등). */
+  productState?: SaleState;
+  /** 브랜드가 아직 확인하지 않은 신청. */
+  unseen?: boolean;
   createdAt: string;
   updatedAt: string;
   /** 브랜드 화면에서만 온다 — 지원한 인플루언서의 인스타 프로필 · 최근 릴스(캠페인 지원자와 같은 스냅샷). */
@@ -323,6 +338,32 @@ export const PRODUCT_STATUS_LABEL: Record<ProductStatus, string> = {
   paused: '판매중지',
 };
 
+/** 인플루언서 · 브랜드에게 보여 주는 판매 상태 이름. */
+export const SALE_STATE_LABEL: Record<SaleState, string> = {
+  on_sale: '판매중',
+  scheduled: '판매 예정',
+  ended: '판매 기간 종료',
+  sold_out: '품절',
+  paused: '판매 중지',
+  draft: '판매 중지',
+  deleted: '판매 종료',
+};
+export const SALE_STATE_STYLE: Record<SaleState, string> = {
+  on_sale: 'bg-emerald-50 text-emerald-600',
+  scheduled: 'bg-blue-50 text-blue-600',
+  ended: 'bg-slate-100 text-slate-500',
+  sold_out: 'bg-orange-50 text-orange-600',
+  paused: 'bg-red-50 text-red-500',
+  draft: 'bg-red-50 text-red-500',
+  deleted: 'bg-slate-100 text-slate-500',
+};
+
+/** 'YYYY-MM-DD' → '2026.11.10' */
+export const periodDate = (d: string) => (d ? d.replace(/-/g, '.') : '');
+/** 판매기간 한 줄. 둘 다 비어 있으면 '상시 판매'. */
+export const salePeriodText = (start?: string, end?: string) =>
+  !start && !end ? '상시 판매' : `${start ? periodDate(start) : '등록일'} ~ ${end ? periodDate(end) : '종료일 없음'}`;
+
 export const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
   pending: '검토 대기',
   approved: '선정',
@@ -374,8 +415,18 @@ export const affiliateStoreService = {
   getBrandCounts(account: string) {
     return call<BrandCounts>('GET', `${URL_BASE}?scope=brand&section=counts`, undefined, { account });
   },
-  getBrandRequests(account: string, cursor?: ListCursor | null) {
+  /** 판매 신청 — 신청을 받은 상품별 묶음(대기 · 선정 · 반려 · 새 신청 수). */
+  getBrandRequestProducts(account: string) {
+    return call<{ products: StoreProduct[] }>('GET', `${URL_BASE}?scope=brand&section=request-products`, undefined, { account });
+  },
+  /** 상품의 신청자 목록을 열었을 때 그 상품의 새 신청 알림을 끈다. 응답에 새 숫자가 온다. */
+  markRequestsSeen(account: string, productId: string) {
+    return call<BrandCounts & { ok: true }>('POST', URL_BASE, { action: 'mark_requests_seen', productId }, { account });
+  },
+  getBrandRequests(account: string, cursor?: ListCursor | null, filter: { productId?: string; status?: 'pending' | 'approved' | 'rejected' | '' } = {}) {
     const p = withCursor(new URLSearchParams({ scope: 'brand', section: 'requests' }), cursor);
+    if (filter.productId) p.set('productId', filter.productId);
+    if (filter.status) p.set('status', filter.status);
     return call<{ requests: StoreRequest[]; requestHasMore: boolean; requestNextCursor: ListCursor | null; requestTotal?: number; pendingRequestCount?: number }>(
       'GET', `${URL_BASE}?${p.toString()}`, undefined, { account },
     );

@@ -7,6 +7,8 @@ import {
   ORDER_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
   COMMISSION_STATUS_STYLE,
+  SALE_STATE_LABEL,
+  SALE_STATE_STYLE,
   type MyAffiliateItem,
   type StoreOrder,
 } from '../../services/affiliateStoreService';
@@ -163,9 +165,18 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
-                    {!i.live && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">판매 중지 · 품절</span>}
+                    {!i.live && (
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${i.productState ? SALE_STATE_STYLE[i.productState] : 'bg-slate-100 text-slate-500'}`}>
+                        {i.productState && i.productState !== 'on_sale' ? SALE_STATE_LABEL[i.productState] : '판매 중지 · 품절'}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm font-black text-slate-900 truncate">{i.productName}</p>
+                  {!i.live && (i.productState === 'paused' || i.productState === 'draft' || i.productState === 'deleted' || i.productState === 'ended') && (
+                    <p className="text-[11px] text-red-500 font-bold mt-0.5">
+                      {i.productState === 'ended' ? '판매기간이 끝나 지금은 이 링크로 구매할 수 없어요.' : '브랜드가 판매를 중지한 상품이에요. 지금은 이 링크로 구매할 수 없어요.'}
+                    </p>
+                  )}
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b> (개당 {won(Math.floor(i.salePrice * i.commissionRate / 100))})
                   </p>

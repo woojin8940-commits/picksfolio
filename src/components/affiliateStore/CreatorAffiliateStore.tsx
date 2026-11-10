@@ -6,6 +6,9 @@ import {
   MANAGER_STATUS_LABEL,
   MANAGER_STATUS_STYLE,
   REQUEST_STATUS_LABEL,
+  SALE_STATE_LABEL,
+  SALE_STATE_STYLE,
+  salePeriodText,
   type BrandInfo,
   type CategoryNode,
   type ListCursor,
@@ -319,7 +322,10 @@ const ProductDetailPage: React.FC<DetailProps> = ({
   product: detail, request, onBack, onApply, onMine, loading, loadError, onRetry,
 }) => {
   const [imageIndex, setImageIndex] = useState(0);
-  const images = detail.imageUrls;
+  const images = detail.imageUrls || [];
+  // 브랜드가 판매를 중지했거나 판매기간 밖인 상품 — 안내를 띄우고 지원하기를 막는다(품절은 신청은 받는다).
+  const stopped = !!detail.saleState && detail.saleState !== 'on_sale' && detail.saleState !== 'sold_out';
+  const hasPeriod = !!(detail.saleStartDate || detail.saleEndDate);
   const discount = detail.retailPrice > detail.salePrice ? Math.round((1 - detail.salePrice / detail.retailPrice) * 100) : 0;
 
   if (loading || loadError) {
@@ -350,11 +356,30 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             <ArrowLeft className="w-5 h-5 text-slate-700" />
           </button>
           <h3 className="text-sm font-black text-slate-900 truncate flex-1">{detail.name}</h3>
+          {stopped && detail.saleState && (
+            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 ${SALE_STATE_STYLE[detail.saleState]}`}>{SALE_STATE_LABEL[detail.saleState]}</span>
+          )}
           {request && (
             <span className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 ${REQUEST_STATUS_STYLE[request.status]}`}>{REQUEST_STATUS_LABEL[request.status]}</span>
           )}
         </div>
       </div>
+      {stopped && (
+        <div className="max-w-3xl mx-auto px-4 md:px-8 mt-3">
+          <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
+            <p className="text-sm font-black text-red-600">
+              {detail.saleState === 'scheduled' ? '아직 판매기간이 시작되지 않은 상품이에요'
+                : detail.saleState === 'ended' ? '판매기간이 끝난 상품이에요'
+                : '브랜드가 판매를 중지한 상품이에요'}
+            </p>
+            <p className="text-xs text-red-500/90 mt-0.5">
+              {detail.saleState === 'scheduled'
+                ? `판매기간(${salePeriodText(detail.saleStartDate, detail.saleEndDate)})이 시작되면 판매 신청과 구매가 열려요.`
+                : '지금은 판매 신청을 받지 않고, 전용 링크로도 구매할 수 없어요. 브랜드가 판매를 다시 시작하면 이어서 판매할 수 있어요.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-3xl mx-auto">
         {/* 이미지 — 하단 판매 신청하기 버튼과 같은 너비로, 정사각 비율을 유지한다. */}
@@ -409,6 +434,11 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             </div>
             <h1 className="text-xl md:text-2xl font-black text-slate-900 leading-tight">{detail.name}</h1>
             {detail.summary && <p className="text-sm text-slate-500 mt-2">{detail.summary}</p>}
+            {hasPeriod && (
+              <p className="inline-flex items-center gap-1.5 mt-3 px-2.5 py-1 rounded-lg bg-slate-100 text-[11px] font-black text-slate-600">
+                판매기간 <span className="text-slate-900">{salePeriodText(detail.saleStartDate, detail.saleEndDate)}</span>
+              </p>
+            )}
             <div className="flex items-baseline gap-2 mt-4">
               {discount > 0 && <span className="text-lg font-black text-red-500">{discount}%</span>}
               <span className="text-2xl font-black text-slate-900">{won(detail.salePrice)}</span>
@@ -525,6 +555,10 @@ const ProductDetailPage: React.FC<DetailProps> = ({
                 )}
                 <button onClick={onMine} className="mt-3 text-xs font-black text-slate-600 underline">내 신청 보기</button>
               </div>
+            ) : stopped ? (
+              <div className="bg-slate-50 rounded-2xl p-5">
+                <p className="text-sm font-black text-slate-700">지금은 판매 신청을 받지 않는 상품이에요</p>
+              </div>
             ) : (
               <>
                 <h3 className="text-base font-black text-slate-900 mb-1">판매 신청</h3>
@@ -536,7 +570,14 @@ const ProductDetailPage: React.FC<DetailProps> = ({
       </div>
 
       {/* 하단 고정 버튼 */}
-      {!request && (
+      {!request && stopped && detail.saleState && (
+        <div className="sticky bottom-0 z-20 bg-white/95 backdrop-blur border-t border-slate-100">
+          <div className="max-w-3xl mx-auto px-4 py-3">
+            <button disabled className="w-full h-12 rounded-xl bg-slate-200 text-slate-500 text-sm font-black">{SALE_STATE_LABEL[detail.saleState]}된 상품</button>
+          </div>
+        </div>
+      )}
+      {!request && !stopped && (
         <div className="sticky bottom-0 z-20 bg-white/95 backdrop-blur border-t border-slate-100">
           <div className="max-w-3xl mx-auto px-4 py-3">
             <button
@@ -1001,12 +1042,30 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
           </div>
         ) : (
           <div className="space-y-2.5">
-            {mineRequests.map(r => (
-              <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
-                {r.productImage && <img src={r.productImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0" />}
+            {mineRequests.map(r => {
+              const productStopped = !!r.productState && r.productState !== 'on_sale' && r.productState !== 'sold_out';
+              return (
+              <div key={r.id} className={`bg-white rounded-2xl border shadow-sm p-4 flex items-center gap-3 ${productStopped ? 'border-red-100' : 'border-slate-100'}`}>
+                <button
+                  type="button"
+                  disabled={r.productState === 'deleted'}
+                  onClick={() => { void openDetail({ id: r.productId, name: r.productName || '', imageUrls: r.productImage ? [r.productImage] : [] } as StoreProduct); }}
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:cursor-default"
+                >
+                {r.productImage && <img src={r.productImage} alt="" className={`w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0 ${productStopped ? 'grayscale opacity-60' : ''}`} />}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold text-slate-400 truncate">{r.brandName}</p>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="text-[10px] font-bold text-slate-400 truncate">{r.brandName}</p>
+                    {r.productState && r.productState !== 'on_sale' && (
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${SALE_STATE_STYLE[r.productState]}`}>{SALE_STATE_LABEL[r.productState]}</span>
+                    )}
+                  </div>
                   <p className="text-sm font-black text-slate-900 truncate">{r.productName}</p>
+                  {productStopped && (
+                    <p className="text-[11px] text-red-500 font-bold mt-0.5">
+                      {r.productState === 'scheduled' ? '판매기간 시작 전인 상품이에요.' : r.productState === 'ended' ? '판매기간이 끝난 상품이에요.' : '브랜드가 판매를 중지한 상품이에요.'}
+                    </p>
+                  )}
                   {r.status === 'rejected' && r.brandNote && <p className="text-[11px] text-red-500 mt-0.5 line-clamp-2">반려 사유: {r.brandNote}</p>}
                   {r.status === 'approved' && (
                     r.managerStatus === 'done'
@@ -1014,6 +1073,7 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
                       : <p className="text-[11px] text-blue-600 font-bold mt-0.5">브랜드에 선정되었어요! 전용 링크를 준비하고 있어요.</p>
                   )}
                 </div>
+                </button>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                   <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
                   {r.status === 'approved' && r.managerStatus && (
@@ -1022,7 +1082,8 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
                   {r.status === 'pending' && <button onClick={() => cancel(r)} className="text-[11px] font-bold text-slate-400 hover:text-red-500">신청 취소</button>}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {mineError && <p className="text-sm font-bold text-red-500 text-center py-2">{mineError}</p>}
             {mineHasMore && <MoreButton loading={mineLoading} label={mineError ? '다시 시도' : undefined} onClick={() => { void loadMineRequests(mineCursor); }} />}
           </div>

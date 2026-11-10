@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { finalizePaidOrder, pgRateFor, platformRate } from "./_shared/affiliate-store-orders.mts";
+import { saleStateOf } from "./_shared/affiliate-sale-period.mts";
 
 /**
  * 어필리에이트 공개 상품 페이지(/shop/<코드>)의 주문 · 결제. 로그인 없이 쓴다.
@@ -70,7 +71,9 @@ function publicProduct(r: any) {
     retailPrice: Number(r.retail_price) || 0,
     salePrice: Number(r.sale_price) || 0,
     shippingFee: Number(r.shipping_fee) || 0,
-    onSale: r.status === "on_sale" && Number(r.stock) > 0,
+    onSale: saleStateOf(r) === "on_sale",
+    /** 판매 예정 · 판매기간 종료 · 품절 · 판매중지 등 지금 상태(구매 버튼 안내용). */
+    saleState: saleStateOf(r),
     // 재고 수량이 화면에 드러나지 않도록 고정 상한을 준다. 재고 부족은 주문 · 결제 때 안내한다.
     maxQuantity: MAX_QUANTITY,
     // 상품 페이지 "판매자 정보 보기"(전자상거래법 표시 항목). 입점 신청서 · 판매자 정보 값.
@@ -104,6 +107,9 @@ async function createOrder(db: any, body: any, buyer: { userId: string; username
   const link = await loadLink(db, clip(body.code, 40));
   if (!link) return err("판매가 끝났거나 없는 링크입니다.", 404);
   if (link.status !== "on_sale") return err("지금은 판매하지 않는 상품입니다.");
+  const periodState = saleStateOf({ ...link, stock: undefined });
+  if (periodState === "scheduled") return err("아직 판매가 시작되지 않은 상품입니다.");
+  if (periodState === "ended") return err("판매기간이 끝난 상품입니다.");
   // 본인 구매 허용(정책): 인플루언서가 자기 전용 링크로 사도 정상 주문이고, 수수료도 다른 주문과 똑같이 잡힌다.
 
   const quantity = Math.round(Number(body.quantity));

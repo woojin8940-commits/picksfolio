@@ -4,10 +4,11 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
-import { SALE_STATUSES, currentFeeRates } from "./_shared/affiliate-store-orders.mts";
+import { SALE_STATUSES, currentFeeRates, notify } from "./_shared/affiliate-store-orders.mts";
 import { canUseStore } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 import { pageOf, readCursor } from "./_shared/list-cursor.mts";
+import { dateOnly, kstToday, parseDateInput, saleStateOf } from "./_shared/affiliate-sale-period.mts";
 
 /**
  * 어필리에이트 스토어(ZVZO 방식) — 카페24 연동 없이 플랫폼 안에서 상품을 올리고
@@ -17,7 +18,8 @@ import { pageOf, readCursor } from "./_shared/list-cursor.mts";
  * 첫 페이지(커서 없음)에만 건수 · 숫자를 함께 주고, "더 보기"(커서 있음)는 목록만 준다.
  *
  *   GET  /api/affiliate-store?scope=brand                    브랜드: 입점 신청서 + 숫자 + 내 상품(30개씩)
- *   GET  /api/affiliate-store?scope=brand&section=requests   브랜드: 받은 판매 신청(30개씩)
+ *   GET  /api/affiliate-store?scope=brand&section=requests   브랜드: 받은 판매 신청(30개씩 · &productId &status 로 상품별)
+ *   GET  /api/affiliate-store?scope=brand&section=request-products  브랜드: 신청을 받은 상품별 묶음(대기 · 선정 · 반려 · 새 신청 수)
  *   GET  /api/affiliate-store?scope=brand&section=counts     브랜드: 숫자만(상품 · 판매중 · 신청 · 주문 운영 배지)
  *   GET  /api/affiliate-store?scope=creator                  인플루언서: 판매중인 상품(&category &sub &q &brand · 40개씩)
  *   GET  /api/affiliate-store?scope=product-detail&id=       인플루언서: 상품 상세(이미지 · 안내 전체)
@@ -28,7 +30,7 @@ import { pageOf, readCursor } from "./_shared/list-cursor.mts";
  *   GET  /api/affiliate-store?scope=my-affiliate-orders      인플루언서: 판매 내역(40개씩)
  *   GET  /api/affiliate-store?scope=admin                    운영자: 입점 신청 목록
  *   POST /api/affiliate-store  { action, ... }
- *     브랜드    apply · save_product · delete_product · review_request · update_seller_info
+ *     브랜드    apply · save_product · delete_product · review_request · update_seller_info · mark_requests_seen
  *     (주문 · 취소 · 반품 · 문의는 api-affiliate-store-ops)
  *     인플루언서 request · cancel_request
  *     운영자    review_application
@@ -124,6 +126,11 @@ function shapeProduct(r: any, forCreator = false) {
     shippingFee: Number(r.shipping_fee) || 0,
     productUrl: r.product_url || "",
     status: r.status,
+    /** 판매기간(한국 날짜 'YYYY-MM-DD', 비어 있으면 제한 없음). */
+    saleStartDate: dateOnly(r.sale_start_date),
+    saleEndDate: dateOnly(r.sale_end_date),
+    /** 지금 실제 판매 상태(판매중 · 판매 예정 · 기간 종료 · 품절 · 판매중지 …). */
+    saleState: saleStateOf(r),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -135,7 +142,15 @@ function shapeProduct(r: any, forCreator = false) {
       options: base.options.map((o: any) => ({ name: String(o?.name ?? ""), soldOut: !(Number(o?.stock) > 0) })),
     };
   }
-  return { ...base, requestCounts: { pending: Number(r.pending_count) || 0, approved: Number(r.approved_count) || 0 } };
+  return {
+    ...base,
+    requestCounts: {
+      pending: Number(r.pending_count) || 0,
+      approved: Number(r.approved_count) || 0,
+      rejected: Number(r.rejected_count) || 0,
+      unseen: Number(r.unseen_count) || 0,
+    },
+  };
 }
 
 function shapeRequest(r: any) {
@@ -154,6 +169,15 @@ function shapeRequest(r: any) {
     managerStatus: r.manager_status || "",
     linkCode: r.manager_status === "done" ? r.link_code || "" : "",
     clickCount: Number(r.click_count) || 0,
+    /** 상품의 지금 판매 상태(상품 정보를 함께 읽은 목록에서만 온다). */
+    productState: r.product_status !== undefined
+      ? saleStateOf({
+        status: r.product_status, deleted_at: r.product_deleted_at, stock: r.product_stock,
+        sale_start_date: r.sale_start_date, sale_end_date: r.sale_end_date,
+      })
+      : undefined,
+    /** 브랜드가 아직 확인하지 않은 신청(브랜드 화면에서만 의미가 있다). */
+    unseen: r.brand_seen_at === undefined ? undefined : !r.brand_seen_at && r.status === "pending",
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -231,12 +255,18 @@ const BRAND_LIST_PAGE_SIZE = 30;
 
 /** 브랜드 화면 상단 숫자 + 탭 배지(상품 · 신청 · 주문 운영). 목록을 다시 받지 않고 숫자만 새로 고칠 때도 쓴다. */
 async function brandCounts(db: any, username: string) {
+  const today = kstToday();
   const [counts, ops] = await Promise.all([
     db.sql`
       SELECT COUNT(*)::int AS product_total,
-             COUNT(*) FILTER (WHERE status = 'on_sale')::int AS on_sale_total,
+             COUNT(*) FILTER (WHERE status = 'on_sale'
+               AND (sale_start_date IS NULL OR sale_start_date <= ${today}::date)
+               AND (sale_end_date IS NULL OR sale_end_date >= ${today}::date))::int AS on_sale_total,
              (SELECT COUNT(*)::int FROM affiliate_store_requests WHERE business_username = ${username} AND status <> 'cancelled') AS request_total,
-             (SELECT COUNT(*)::int FROM affiliate_store_requests WHERE business_username = ${username} AND status = 'pending') AS pending_request_count
+             (SELECT COUNT(*)::int FROM affiliate_store_requests WHERE business_username = ${username} AND status = 'pending') AS pending_request_count,
+             (SELECT COUNT(*)::int FROM affiliate_store_requests r2
+              JOIN affiliate_store_products p2 ON p2.id = r2.product_id AND p2.deleted_at IS NULL
+              WHERE r2.business_username = ${username} AND r2.status = 'pending' AND r2.brand_seen_at IS NULL) AS new_request_count
       FROM affiliate_store_products WHERE business_username = ${username} AND deleted_at IS NULL
     ` as Promise<any[]>,
     db.sql`
@@ -256,6 +286,7 @@ async function brandCounts(db: any, username: string) {
     onSaleTotal: Number(counts[0]?.on_sale_total || 0),
     requestTotal: Number(counts[0]?.request_total || 0),
     pendingRequestCount: Number(counts[0]?.pending_request_count || 0),
+    newRequestCount: Number(counts[0]?.new_request_count || 0),
     opsCounts: {
       newOrders: Number(ops[0]?.new_orders || 0),
       claimsNeedAction: Number(ops[0]?.claims_need_action || 0),
@@ -275,23 +306,31 @@ async function brandCounts(db: any, username: string) {
 async function brandGet(db: any, username: string, url: URL) {
   const app = await loadApplication(db, username);
   if (!app || app.status !== "approved") {
-    return Response.json({ application: shapeApplication(app), products: [], requests: [], productTotal: 0, onSaleTotal: 0, pendingRequestCount: 0, requestTotal: 0, productHasMore: false, productNextCursor: null, opsCounts: { newOrders: 0, claimsNeedAction: 0, unread: 0 }, categories: CATEGORIES, taxonomy: TAXONOMY });
+    return Response.json({ application: shapeApplication(app), products: [], requests: [], productTotal: 0, onSaleTotal: 0, pendingRequestCount: 0, newRequestCount: 0, requestTotal: 0, productHasMore: false, productNextCursor: null, opsCounts: { newOrders: 0, claimsNeedAction: 0, unread: 0 }, categories: CATEGORIES, taxonomy: TAXONOMY });
   }
 
   const section = url.searchParams.get("section") || "products";
   if (section === "counts") return Response.json(await brandCounts(db, username));
 
+  if (section === "request-products") return await brandRequestProducts(db, username);
+
   const { hasCursor, cursorAt, cursorId } = readCursor(url);
   if (section === "requests") {
+    // 상품별로 볼 때(productId) · 상태 칸(status)으로 거를 때.
+    const productId = clip(url.searchParams.get("productId"), 60);
+    const statusFilter = ["pending", "approved", "rejected"].includes(String(url.searchParams.get("status")))
+      ? String(url.searchParams.get("status")) : "";
     const [rows, counts] = await Promise.all([
       db.sql`
         SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
-               r.brand_note, r.manager_status, r.link_code, r.click_count, r.created_at, r.updated_at,
+               r.brand_note, r.manager_status, r.link_code, r.click_count, r.brand_seen_at, r.created_at, r.updated_at,
                p.name AS product_name, p.image_urls, a.brand_name
         FROM affiliate_store_requests r
         JOIN affiliate_store_products p ON p.id = r.product_id
         LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
         WHERE r.business_username = ${username} AND r.status <> 'cancelled'
+          AND (${productId} = '' OR r.product_id = ${productId})
+          AND (${statusFilter} = '' OR r.status = ${statusFilter})
           AND (NOT ${hasCursor} OR r.created_at < ${cursorAt}::timestamptz OR
             (r.created_at = ${cursorAt}::timestamptz AND r.id < ${cursorId}))
         ORDER BY r.created_at DESC, r.id DESC
@@ -332,13 +371,17 @@ async function brandGet(db: any, username: string, url: URL) {
     ), request_counts AS (
       SELECT product_id,
              COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
-             COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count
+             COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
+             COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
+             COUNT(*) FILTER (WHERE status = 'pending' AND brand_seen_at IS NULL)::int AS unseen_count
       FROM affiliate_store_requests
-      WHERE product_id IN (SELECT id FROM page) AND status IN ('pending', 'approved')
+      WHERE product_id IN (SELECT id FROM page) AND status IN ('pending', 'approved', 'rejected')
       GROUP BY product_id
     )
     SELECT page.*, COALESCE(rc.pending_count, 0)::int AS pending_count,
-           COALESCE(rc.approved_count, 0)::int AS approved_count
+           COALESCE(rc.approved_count, 0)::int AS approved_count,
+           COALESCE(rc.rejected_count, 0)::int AS rejected_count,
+           COALESCE(rc.unseen_count, 0)::int AS unseen_count
     FROM page LEFT JOIN request_counts rc ON rc.product_id = page.id
     ORDER BY page.created_at DESC, page.id DESC
   `) as any[];
@@ -357,6 +400,47 @@ async function brandGet(db: any, username: string, url: URL) {
     taxonomy: TAXONOMY,
     feeRates,
   });
+}
+
+const REQUEST_PRODUCTS_LIMIT = 200;
+
+/**
+ * 판매 신청 — 상품별 묶음. 신청(취소 제외)을 받은 상품마다 대기 · 선정 · 반려 · 새 신청(브랜드가 아직 확인 안 함) 수.
+ * 새 신청이 있는 상품 → 최근 신청 순으로 준다. 상품을 누르면 section=requests&productId= 로 신청자를 본다.
+ */
+async function brandRequestProducts(db: any, username: string) {
+  const rows = (await db.sql`
+    WITH rc AS (
+      SELECT product_id,
+             COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
+             COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
+             COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
+             COUNT(*) FILTER (WHERE status = 'pending' AND brand_seen_at IS NULL)::int AS unseen_count,
+             MAX(created_at) AS last_request_at
+      FROM affiliate_store_requests
+      WHERE business_username = ${username} AND status <> 'cancelled'
+      GROUP BY product_id
+    )
+    SELECT p.*, rc.pending_count, rc.approved_count, rc.rejected_count, rc.unseen_count, rc.last_request_at
+    FROM rc JOIN affiliate_store_products p ON p.id = rc.product_id
+    WHERE p.business_username = ${username} AND p.deleted_at IS NULL
+    ORDER BY (rc.unseen_count > 0) DESC, rc.last_request_at DESC, p.id DESC
+    LIMIT ${REQUEST_PRODUCTS_LIMIT}
+  `) as any[];
+  return Response.json({
+    products: rows.map((p) => ({ ...shapeProduct(p), lastRequestAt: p.last_request_at })),
+  });
+}
+
+/** 브랜드가 상품의 신청자 목록을 열면 그 상품의 새 신청 알림을 끈다. */
+async function brandMarkRequestsSeen(db: any, username: string, body: any) {
+  const productId = clip(body.productId, 60);
+  if (!productId) return err("상품을 선택해 주세요.");
+  await db.sql`
+    UPDATE affiliate_store_requests SET brand_seen_at = NOW()
+    WHERE business_username = ${username} AND product_id = ${productId} AND brand_seen_at IS NULL
+  `;
+  return Response.json({ ok: true, ...(await brandCounts(db, username)) });
 }
 
 /**
@@ -496,6 +580,12 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (options.length > 0) stock = options.reduce((s: number, o: any) => s + o.stock, 0);
   const productUrl = clip(p.productUrl, 1000);
   const status = ["draft", "on_sale", "paused"].includes(p.status) ? p.status : "draft";
+  // 판매기간(한국 날짜). 예전 화면처럼 두 칸을 모두 보내지 않은 저장은 기존 기간을 그대로 둔다.
+  const keepPeriod = p.saleStartDate === undefined && p.saleEndDate === undefined;
+  const saleStartDate = parseDateInput(p.saleStartDate);
+  const saleEndDate = parseDateInput(p.saleEndDate);
+  if (saleStartDate === null || saleEndDate === null) return err("판매기간 날짜를 확인해 주세요.");
+  if (saleStartDate && saleEndDate && saleEndDate < saleStartDate) return err("판매 종료일은 시작일과 같거나 뒤여야 합니다.");
 
   if (!Number.isFinite(salePrice) || salePrice <= 0) return err("판매가를 입력해 주세요.");
   if (!Number.isFinite(retailPrice) || retailPrice < salePrice) return err("정가는 판매가보다 같거나 커야 합니다.");
@@ -518,12 +608,25 @@ async function brandSaveProduct(db: any, username: string, body: any) {
     if (missing.length > 0) return err(`${missing.join(", ")}을(를) 글이나 이미지로 입력해 주세요.`);
   }
 
+  // 이미 끝난 기간으로 새로 판매를 시작하지 않게 막는다(기간이 끝난 판매중 상품의 다른 칸 수정은 둔다).
+  const id = clip(p.id, 60);
+  if (status === "on_sale" && !keepPeriod && saleEndDate && saleEndDate < kstToday()) {
+    const prev = id ? ((await db.sql`
+      SELECT status, sale_end_date FROM affiliate_store_products
+      WHERE id = ${id} AND business_username = ${username} AND deleted_at IS NULL
+    `) as any[])[0] : null;
+    if (!prev || prev.status !== "on_sale" || dateOnly(prev.sale_end_date) !== saleEndDate) {
+      return err("판매 종료일이 이미 지났어요. 판매기간을 오늘 이후로 바꿔 주세요.");
+    }
+  }
+  const startParam = saleStartDate || null;
+  const endParam = saleEndDate || null;
+
   const imgs = JSON.stringify(imageUrls);
   const detailImgs = JSON.stringify(detailImageUrls);
   // 상세페이지 칸을 보내지 않은 저장(예: 예전 화면)은 기존 상세페이지를 그대로 둔다.
   const keepDetail = !Array.isArray(p.detailImageUrls);
   const opts = JSON.stringify(options);
-  const id = clip(p.id, 60);
   let rows: any[];
   if (id) {
     rows = (await db.sql`
@@ -536,6 +639,8 @@ async function brandSaveProduct(db: any, username: string, body: any) {
         description_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN description_image_urls ELSE ${descImgs}::jsonb END,
         size_guide_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN size_guide_image_urls ELSE ${sizeImgs}::jsonb END,
         delivery_guide_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN delivery_guide_image_urls ELSE ${deliveryImgs}::jsonb END,
+        sale_start_date = CASE WHEN ${keepPeriod}::boolean THEN sale_start_date ELSE ${startParam}::date END,
+        sale_end_date = CASE WHEN ${keepPeriod}::boolean THEN sale_end_date ELSE ${endParam}::date END,
         product_url = ${productUrl}, status = ${status}, updated_at = NOW()
       WHERE id = ${id} AND business_username = ${username} AND deleted_at IS NULL
       RETURNING *
@@ -546,11 +651,11 @@ async function brandSaveProduct(db: any, username: string, body: any) {
       INSERT INTO affiliate_store_products
         (id, business_username, name, category, subcategory, summary, description, image_urls, detail_image_urls, options,
          retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status, size_guide, delivery_guide,
-         description_image_urls, size_guide_image_urls, delivery_guide_image_urls)
+         description_image_urls, size_guide_image_urls, delivery_guide_image_urls, sale_start_date, sale_end_date)
       VALUES
         (${newId("asp")}, ${username}, ${name}, ${category}, ${subcategory}, ${summary}, ${description}, ${imgs}::jsonb, ${detailImgs}::jsonb, ${opts}::jsonb,
          ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status}, ${sizeGuide}, ${deliveryGuide},
-         ${descImgs}::jsonb, ${sizeImgs}::jsonb, ${deliveryImgs}::jsonb)
+         ${descImgs}::jsonb, ${sizeImgs}::jsonb, ${deliveryImgs}::jsonb, ${startParam}::date, ${endParam}::date)
       RETURNING *
     `) as any[];
   }
@@ -581,6 +686,7 @@ async function brandReviewRequest(db: any, username: string, body: any) {
     UPDATE affiliate_store_requests SET status = ${decision}, brand_note = ${note},
       manager_status = CASE WHEN ${decision}::text = 'approved' AND manager_status <> 'contacting' THEN 'done' ELSE manager_status END,
       manager_updated_at = CASE WHEN ${decision}::text = 'approved' AND manager_status <> 'done' THEN NOW() ELSE manager_updated_at END,
+      brand_seen_at = COALESCE(brand_seen_at, NOW()),
       updated_at = NOW()
     WHERE id = ${id} AND business_username = ${username} AND status IN ('pending', 'approved', 'rejected')
     RETURNING *
@@ -599,7 +705,7 @@ async function brandReviewRequest(db: any, username: string, body: any) {
 async function creatorMyAffiliate(db: any, username: string) {
   const rows = (await db.sql`
     SELECT r.*, p.name AS product_name, p.image_urls, p.sale_price, p.commission_rate, p.status AS product_status,
-           p.deleted_at AS product_deleted_at, p.stock, a.brand_name
+           p.deleted_at AS product_deleted_at, p.stock, p.stock AS product_stock, p.sale_start_date, p.sale_end_date, a.brand_name
     FROM affiliate_store_requests r
     JOIN affiliate_store_products p ON p.id = r.product_id
     LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
@@ -637,7 +743,10 @@ async function creatorMyAffiliate(db: any, username: string) {
       ...shapeRequest(r),
       salePrice: Number(r.sale_price) || 0,
       commissionRate: Number(r.commission_rate) || 0,
-      live: !r.product_deleted_at && r.product_status === "on_sale" && Number(r.stock) > 0,
+      live: saleStateOf({
+        status: r.product_status, deleted_at: r.product_deleted_at, stock: r.stock,
+        sale_start_date: r.sale_start_date, sale_end_date: r.sale_end_date,
+      }) === "on_sale",
       stats: {
         orders: st?.orders || 0,
         units: st?.units || 0,
@@ -707,15 +816,18 @@ async function creatorProducts(db: any, url: URL) {
   const brand = norm(url.searchParams.get("brand"));
   const like = q ? likeOf(q) : "";
   const { hasCursor, cursorAt, cursorId } = readCursor(url);
+  const today = kstToday();
 
   const rows = (await db.sql`
     SELECT p.id, p.business_username, p.name, p.category, p.subcategory, p.summary,
       CASE WHEN p.image_urls->0 IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(p.image_urls->0) END AS image_urls,
-      p.retail_price, p.sale_price, p.commission_rate, p.status, p.created_at,
+      p.retail_price, p.sale_price, p.commission_rate, p.status, p.sale_start_date, p.sale_end_date, p.created_at,
       a.brand_name
     FROM affiliate_store_products p
     JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
     WHERE p.deleted_at IS NULL AND p.status = 'on_sale'
+      AND (p.sale_start_date IS NULL OR p.sale_start_date <= ${today}::date)
+      AND (p.sale_end_date IS NULL OR p.sale_end_date >= ${today}::date)
       AND (${category} = '' OR p.category = ${category})
       AND (${sub} = '' OR p.subcategory = ${sub})
       AND (${brand} = '' OR p.business_username = ${brand})
@@ -732,6 +844,8 @@ async function creatorProducts(db: any, url: URL) {
     FROM affiliate_store_products p
     JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
     WHERE p.deleted_at IS NULL AND p.status = 'on_sale'
+      AND (p.sale_start_date IS NULL OR p.sale_start_date <= ${today}::date)
+      AND (p.sale_end_date IS NULL OR p.sale_end_date >= ${today}::date)
       AND (${category} = '' OR p.category = ${category})
       AND (${sub} = '' OR p.subcategory = ${sub})
       AND (${brand} = '' OR p.business_username = ${brand})
@@ -756,18 +870,30 @@ async function creatorProducts(db: any, url: URL) {
   });
 }
 
-async function creatorProductDetail(db: any, url: URL) {
+/**
+ * 상품 상세. 판매중(기간 안)인 상품은 누구나, 판매중지 · 기간 종료 등 지금 판매하지 않는 상품은
+ * 이미 판매 신청한 인플루언서만 본다(응답 saleState 로 "판매 중지된 상품" 안내를 띄운다).
+ */
+async function creatorProductDetail(db: any, username: string, url: URL) {
   const id = clip(url.searchParams.get("id"), 100);
   if (!id) return err("상품을 찾을 수 없습니다.", 404);
   const rows = (await db.sql`
-    SELECT p.*, a.brand_name
+    SELECT p.*, a.brand_name,
+      EXISTS (
+        SELECT 1 FROM affiliate_store_requests r
+        WHERE r.product_id = p.id AND r.influencer_username = ${username} AND r.status <> 'cancelled'
+      ) AS has_request
     FROM affiliate_store_products p
     JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
-    WHERE p.id = ${id} AND p.deleted_at IS NULL AND p.status = 'on_sale'
+    WHERE p.id = ${id} AND p.deleted_at IS NULL
     LIMIT 1
   `) as any[];
-  if (!rows[0]) return err("판매 중인 상품을 찾을 수 없습니다.", 404);
-  return Response.json({ product: shapeProduct(rows[0], true) });
+  const row = rows[0];
+  if (!row) return err("판매 중인 상품을 찾을 수 없습니다.", 404);
+  const state = saleStateOf(row);
+  // 품절은 목록에도 보이므로 그대로 보여 준다. 그 밖의 판매하지 않는 상품은 신청한 인플루언서만.
+  if (state !== "on_sale" && state !== "sold_out" && !row.has_request) return err("판매 중인 상품을 찾을 수 없습니다.", 404);
+  return Response.json({ product: shapeProduct(row, true) });
 }
 
 /** 입점(승인)된 브랜드 전체. 수천 개가 될 것이라 검색 + 페이지로 내려보낸다. */
@@ -784,6 +910,8 @@ async function creatorBrands(db: any, url: URL) {
     FROM affiliate_store_applications a
     LEFT JOIN affiliate_store_products p
       ON p.business_username = a.business_username AND p.deleted_at IS NULL AND p.status = 'on_sale'
+      AND (p.sale_start_date IS NULL OR p.sale_start_date <= ${kstToday()}::date)
+      AND (p.sale_end_date IS NULL OR p.sale_end_date >= ${kstToday()}::date)
     WHERE a.status = 'approved'
       AND (${like} = '' OR a.brand_name ILIKE ${like})
     GROUP BY a.business_username, a.brand_name, a.categories
@@ -839,7 +967,9 @@ async function creatorRequests(db: any, username: string, url: URL) {
   const rows = (await db.sql`
     SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
            r.brand_note, r.manager_status, r.link_code, r.click_count, r.created_at, r.updated_at,
-           p.name AS product_name, p.image_urls, a.brand_name
+           p.name AS product_name, p.image_urls, a.brand_name,
+           p.status AS product_status, p.deleted_at AS product_deleted_at, p.stock AS product_stock,
+           p.sale_start_date, p.sale_end_date
     FROM affiliate_store_requests r
     JOIN affiliate_store_products p ON p.id = r.product_id
     LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
@@ -859,23 +989,36 @@ async function creatorRequest(db: any, username: string, body: any) {
   const channelUrl = clip(body.channelUrl, 500);
   if (channelUrl && !isUrl(channelUrl)) return err("채널 주소는 https:// 로 시작하는 주소로 입력해 주세요.");
   const prows = (await db.sql`
-    SELECT p.id, p.business_username FROM affiliate_store_products p
+    SELECT p.id, p.business_username, p.name, p.sale_start_date, p.sale_end_date FROM affiliate_store_products p
     JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
     WHERE p.id = ${productId} AND p.deleted_at IS NULL AND p.status = 'on_sale'
   `) as any[];
   const product = prows[0];
   if (!product) return err("판매중인 상품이 아닙니다.", 404);
+  const periodState = saleStateOf({ status: "on_sale", sale_start_date: product.sale_start_date, sale_end_date: product.sale_end_date });
+  if (periodState === "scheduled") return err("아직 판매기간이 시작되지 않은 상품입니다.");
+  if (periodState === "ended") return err("판매기간이 끝난 상품입니다.");
   if (product.business_username === username) return err("내 브랜드 상품에는 신청할 수 없습니다.");
   const rows = (await db.sql`
     INSERT INTO affiliate_store_requests (id, product_id, business_username, influencer_username, message, channel_url)
     VALUES (${newId("asr")}, ${productId}, ${product.business_username}, ${username}, ${message}, ${channelUrl})
     ON CONFLICT (product_id, influencer_username) DO UPDATE SET
-      message = EXCLUDED.message, channel_url = EXCLUDED.channel_url, status = 'pending', brand_note = '', updated_at = NOW()
+      message = EXCLUDED.message, channel_url = EXCLUDED.channel_url, status = 'pending', brand_note = '',
+      brand_seen_at = NULL, updated_at = NOW()
     WHERE affiliate_store_requests.status IN ('cancelled', 'rejected')
     RETURNING *
   `) as any[];
   // 취소했거나 반려된 신청은 다시 낼 수 있다. 대기 중이거나 이미 선정된 신청만 막는다.
   if (!rows[0]) return err("이미 신청한 상품입니다.");
+  // 브랜드에게 새 신청 알림(화면 알림 + 앱 푸시 · 실패해도 신청은 그대로).
+  await notify(db, {
+    recipientType: "brand",
+    recipient: product.business_username,
+    kind: "sales_request",
+    title: "새 판매 신청이 도착했어요",
+    body: `@${username} 님이 '${String(product.name || "").slice(0, 60)}' 판매를 신청했어요.`,
+    link: "/business-admin?tab=affiliate",
+  });
   return Response.json({ request: shapeRequest(rows[0]) }, { status: 201 });
 }
 
@@ -1034,7 +1177,7 @@ export default async (req: Request) => {
     if (req.method === "GET") {
       if (scope === "brand") return await brandGet(db, username, url);
       if (scope === "creator") return await creatorProducts(db, url);
-      if (scope === "product-detail") return await creatorProductDetail(db, url);
+      if (scope === "product-detail") return await creatorProductDetail(db, username, url);
       if (scope === "brands") return await creatorBrands(db, url);
       if (scope === "my-request-status") return await creatorRequestStatuses(db, username, url);
       if (scope === "my-requests") return await creatorRequests(db, username, url);
@@ -1047,6 +1190,7 @@ export default async (req: Request) => {
       case "save_product": return await brandSaveProduct(db, username, body);
       case "delete_product": return await brandDeleteProduct(db, username, body);
       case "review_request": return await brandReviewRequest(db, username, body);
+      case "mark_requests_seen": return await brandMarkRequestsSeen(db, username, body);
       case "update_seller_info": return await brandUpdateSeller(db, username, body);
       case "request": return await creatorRequest(db, username, body);
       case "cancel_request": return await creatorCancel(db, username, body);
