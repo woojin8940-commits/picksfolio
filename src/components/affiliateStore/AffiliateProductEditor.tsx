@@ -362,6 +362,14 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
       setError(`${missing.join(', ')}을(를) 글이나 이미지로 입력해 주세요. 구매자와 인플루언서가 보는 필수 상품 정보입니다.`);
       return;
     }
+    if (!form.productUrl.trim()) {
+      setError('상품 링크를 입력해 주세요. 인플루언서가 상품 상세에서 눌러 자세히 보는 링크입니다.');
+      return;
+    }
+    if (!/^https?:\/\//i.test(form.productUrl.trim())) {
+      setError('상품 링크는 https:// 로 시작하는 주소로 입력해 주세요.');
+      return;
+    }
     const payload: ProductInput = {
       ...form,
       status: statusOverride || form.status,
@@ -415,7 +423,7 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
         <Row label="한 줄 소개" hint="상품 목록에 이름 아래로 보이는 짧은 설명입니다.">
           <input className={inputCls} value={form.summary} onChange={e => set('summary', e.target.value)} maxLength={200} placeholder="예: 구김 적은 데일리 셔츠, 4가지 컬러" />
         </Row>
-        <Row label="상품 상세 주소" hint="자사몰 등 실제 판매 페이지 주소가 있으면 입력해 주세요.">
+        <Row label="상품 링크" required hint="자사몰 · 스마트스토어 등 실제 상품 페이지 주소를 입력해 주세요. 인플루언서가 상품 상세에서 이 링크를 눌러 자세히 볼 수 있습니다.">
           <input className={inputCls} value={form.productUrl} onChange={e => set('productUrl', e.target.value.trim())} placeholder="https://" inputMode="url" />
         </Row>
       </Section>

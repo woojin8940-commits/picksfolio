@@ -502,7 +502,9 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   if (!Number.isFinite(commissionRate) || commissionRate <= 0 || commissionRate > 90) return err("인플루언서 수수료율은 0% 초과 90% 이하로 입력해 주세요.");
   if (!Number.isFinite(shippingFee)) return err("배송비를 확인해 주세요.");
   if (!Number.isFinite(stock)) return err("재고 수량을 입력해 주세요.");
-  if (productUrl && !isUrl(productUrl)) return err("상품 상세 주소는 https:// 로 시작하는 주소로 입력해 주세요.");
+  if (productUrl && !isUrl(productUrl)) return err("상품 링크는 https:// 로 시작하는 주소로 입력해 주세요.");
+  // 인플루언서가 상품 상세에서 눌러 자세히 보는 링크라, 새로 등록할 때와 판매중으로 둘 때는 꼭 있어야 한다.
+  if (!productUrl && (!clip(p.id, 60) || status === "on_sale")) return err("상품 링크를 입력해 주세요. 인플루언서가 상품을 자세히 볼 때 쓰는 링크입니다.");
   if (status === "on_sale" && stock <= 0) return err("재고가 0개인 상품은 판매중으로 둘 수 없습니다.");
   // 상품 설명 · 사이즈 가이드 · 배송/반품 안내는 칸마다 글이나 이미지 중 하나가 꼭 있어야 한다.
   // 새로 등록할 때와 판매중으로 둘 때 확인한다(예전 상품을 판매중지로 돌리는 것은 막지 않는다).

@@ -442,10 +442,27 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             </div>
           )}
 
+          {/* 상품 링크 — 브랜드가 등록한 실제 상품 페이지에서 자세히 볼 수 있게 상세 위쪽에 크게 둔다. */}
+          {detail.productUrl && (
+            <div className="py-5 border-b border-slate-100">
+              <a
+                href={detail.productUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-3 w-full rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3.5 hover:bg-blue-100 transition-colors"
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-black text-blue-700">상품 자세히 보기</span>
+                  <span className="block text-xs text-blue-500/80 font-medium truncate">{detail.productUrl}</span>
+                </span>
+                <ExternalLink className="w-4 h-4 text-blue-600 shrink-0" />
+              </a>
+            </div>
+          )}
+
+          {/* 사이즈 가이드 · 배송/반품 안내는 구매자용 정보라 인플루언서 상세에서는 보여 주지 않는다. */}
           {[
             { title: '상품 설명', body: detail.description || '', images: detail.descriptionImageUrls || [] },
-            { title: '사이즈 가이드', body: detail.sizeGuide || '', images: detail.sizeGuideImageUrls || [] },
-            { title: '배송 · 반품 안내', body: detail.deliveryGuide || '', images: detail.deliveryGuideImageUrls || [] },
           ].filter(b => b.body.trim() || b.images.length > 0).map(b => (
             <div key={b.title} className="py-5 border-b border-slate-100">
               <h3 className="text-sm font-black text-slate-900 mb-3">{b.title}</h3>
@@ -472,14 +489,6 @@ const ProductDetailPage: React.FC<DetailProps> = ({
                   <img key={u + i} src={u} alt={`${detail.name} 상세 ${i + 1}`} className="block w-full h-auto" loading="lazy" />
                 ))}
               </div>
-            </div>
-          )}
-
-          {detail.productUrl && (
-            <div className="py-4 border-b border-slate-100">
-              <a href={detail.productUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-bold text-blue-600">
-                브랜드 상품 페이지 보기 <ExternalLink className="w-4 h-4" />
-              </a>
             </div>
           )}
 
