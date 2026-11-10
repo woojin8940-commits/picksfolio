@@ -4,12 +4,13 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
-import { SALE_STATUSES, currentFeeRates, notify } from "./_shared/affiliate-store-orders.mts";
+import { SALE_STATUSES, currentFeeRates, notify, trackingUrl } from "./_shared/affiliate-store-orders.mts";
 import { canUseStore } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 import { syncApplicantChannels, withinTime } from "./_shared/applicant-channel-sync.mts";
 import { pageOf, readCursor } from "./_shared/list-cursor.mts";
 import { dateOnly, kstToday, parseDateInput, saleStateOf } from "./_shared/affiliate-sale-period.mts";
+import { sendPushToUser } from "./_shared/push.mts";
 
 /**
  * 어필리에이트 스토어(ZVZO 방식) — 카페24 연동 없이 플랫폼 안에서 상품을 올리고
@@ -31,15 +32,20 @@ import { dateOnly, kstToday, parseDateInput, saleStateOf } from "./_shared/affil
  *   GET  /api/affiliate-store?scope=my-affiliate-orders      인플루언서: 판매 내역(40개씩)
  *   GET  /api/affiliate-store?scope=admin                    운영자: 입점 신청 목록
  *   POST /api/affiliate-store  { action, ... }
- *     브랜드    apply · save_product · delete_product · review_request · update_seller_info · mark_requests_seen
+ *     브랜드    apply · save_product · delete_product · review_request · ship_selection · update_seller_info · mark_requests_seen
  *     (주문 · 취소 · 반품 · 문의는 api-affiliate-store-ops)
- *     인플루언서 request · cancel_request
+ *     인플루언서 request · cancel_request · submit_shipping · decline_selection
  *     운영자    review_application
- *     담당자    manager_update  (GET scope=selections: 브랜드가 선정한 신청 — 담당자 연락 큐)
+ *     담당자    manager_update · manager_mark_seen  (GET scope=selections: 브랜드가 선정한 신청 — 선정 즉시 보이는 담당자 조율 큐, &countOnly=1 새 선정 수)
  *
- * 선정 이후 흐름: 브랜드가 선정(approve)하면 담당자 연락 없이 바로 manager_status = 'done' 이 되고
- * 인플루언서 전용 링크가 열린다. (예전 흐름: 'waiting' 이 되고, 픽스폴리오
- * 담당자가 양쪽에 연락해 조건을 맞춘 뒤 'done' 으로 바꾸면 링크가 열렸다.)
+ * 선정 이후 흐름(협찬 배송): 브랜드가 선정(approve)하면 인플루언서에게 선정 알림이 가고
+ * shipping_status = 'awaiting_info'(링크는 아직 닫힘, manager_status 'waiting')가 된다.
+ *   인플루언서 submit_shipping   배송정보 입력 → 'info_submitted', 협업 진행(링크는 아직 닫힘)
+ *   인플루언서 decline_selection 반려 → 'declined', 협업 진행 안 함(링크 열리지 않음)
+ *   브랜드     ship_selection    송장번호 입력 → 'shipped', 전용 판매 링크 열림(manager_status 'done')
+ * 배송정보가 들어온 협업은 운영 콘솔(scope=selections)에서 담당자가 보고 중간에서 조율한다.
+ * 예전 흐름으로 이미 링크가 열린 선정(shipping_status '')은 그대로 둔다.
+ * 직거래 금지 동의: 브랜드 입점 신청 · 크리에이터 지원 때 체크한다(이전에 승인된 계정은 처음 선정 · 신청할 때).
  * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
  *
  * 공개 여부(전체 공개 · 테스트 계정 전용)는 _shared/store-testers.mts
@@ -94,6 +100,8 @@ function shapeApplication(r: any) {
     csPhone: r.cs_phone || "",
     mailOrderNumber: r.mail_order_number || "",
     inquiryUrl: r.inquiry_url || "",
+    /** 직거래 금지 동의 시각(입점 심사 때 체크). 없으면 처음 선정할 때 한 번 동의받는다. */
+    directDealAgreedAt: r.direct_deal_agreed_at || null,
     status: r.status,
     rejectReason: r.reject_reason,
     reviewedAt: r.reviewed_at,
@@ -150,6 +158,7 @@ function shapeProduct(r: any, forCreator = false) {
       approved: Number(r.approved_count) || 0,
       rejected: Number(r.rejected_count) || 0,
       unseen: Number(r.unseen_count) || 0,
+      toShip: Number(r.to_ship_count) || 0,
     },
   };
 }
@@ -179,10 +188,42 @@ function shapeRequest(r: any) {
       : undefined,
     /** 브랜드가 아직 확인하지 않은 신청(브랜드 화면에서만 의미가 있다). */
     unseen: r.brand_seen_at === undefined ? undefined : !r.brand_seen_at && r.status === "pending",
+    ...shapeShipping(r),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
+
+/**
+ * 선정 뒤 협찬 배송 단계. 배송지는 그 신청의 브랜드 · 인플루언서 본인 · 운영자 화면에만 내려간다
+ * (shapeRequest 를 쓰는 목록이 모두 그 셋이다). 배송지 칸을 읽지 않은 목록에는 주소를 싣지 않는다.
+ *   '' 해당 없음(예전 흐름) · awaiting_info · info_submitted · shipped · declined
+ */
+function shapeShipping(r: any) {
+  if (r.shipping_status === undefined) return {};
+  const hasAddress = r.ship_recipient_name !== undefined && (r.shipping_status === "info_submitted" || r.shipping_status === "shipped");
+  return {
+    shippingStatus: r.shipping_status || "",
+    shipping: hasAddress ? {
+      recipientName: r.ship_recipient_name || "",
+      recipientPhone: r.ship_recipient_phone || "",
+      postcode: r.ship_postcode || "",
+      address1: r.ship_address1 || "",
+      address2: r.ship_address2 || "",
+      memo: r.ship_memo || "",
+      submittedAt: r.ship_info_at || null,
+    } : null,
+    trackingCompany: r.ship_tracking_company || "",
+    trackingNumber: r.ship_tracking_number || "",
+    trackingUrl: r.ship_tracking_number ? trackingUrl(r.ship_tracking_company || "", r.ship_tracking_number) : "",
+    shippedAt: r.shipped_at || null,
+    declinedReason: r.declined_reason || "",
+    declinedAt: r.declined_at || null,
+  };
+}
+
+/** 직거래 금지 동의 문구(화면과 같은 뜻). */
+const DIRECT_DEAL_REQUIRED = "직거래 금지 안내에 동의해 주세요. 픽스폴리오를 거치지 않은 직거래가 확인되면 바로 서비스 이용이 제한됩니다.";
 
 /** 인플루언서 전용 링크 코드. 주소에 그대로 들어가므로 영문 · 숫자만 쓴다. */
 const linkCode = () => {
@@ -267,7 +308,9 @@ async function brandCounts(db: any, username: string) {
              (SELECT COUNT(*)::int FROM affiliate_store_requests WHERE business_username = ${username} AND status = 'pending') AS pending_request_count,
              (SELECT COUNT(*)::int FROM affiliate_store_requests r2
               JOIN affiliate_store_products p2 ON p2.id = r2.product_id AND p2.deleted_at IS NULL
-              WHERE r2.business_username = ${username} AND r2.status = 'pending' AND r2.brand_seen_at IS NULL) AS new_request_count
+              WHERE r2.business_username = ${username} AND r2.status = 'pending' AND r2.brand_seen_at IS NULL) AS new_request_count,
+             (SELECT COUNT(*)::int FROM affiliate_store_requests
+              WHERE business_username = ${username} AND status = 'approved' AND shipping_status = 'info_submitted') AS ship_pending_count
       FROM affiliate_store_products WHERE business_username = ${username} AND deleted_at IS NULL
     ` as Promise<any[]>,
     db.sql`
@@ -288,6 +331,8 @@ async function brandCounts(db: any, username: string) {
     requestTotal: Number(counts[0]?.request_total || 0),
     pendingRequestCount: Number(counts[0]?.pending_request_count || 0),
     newRequestCount: Number(counts[0]?.new_request_count || 0),
+    /** 인플루언서가 배송정보를 입력해 브랜드가 협찬 상품을 보내야 하는 선정 수. */
+    shipPendingCount: Number(counts[0]?.ship_pending_count || 0),
     opsCounts: {
       newOrders: Number(ops[0]?.new_orders || 0),
       claimsNeedAction: Number(ops[0]?.claims_need_action || 0),
@@ -307,7 +352,7 @@ async function brandCounts(db: any, username: string) {
 async function brandGet(db: any, username: string, url: URL, context?: Context) {
   const app = await loadApplication(db, username);
   if (!app || app.status !== "approved") {
-    return Response.json({ application: shapeApplication(app), products: [], requests: [], productTotal: 0, onSaleTotal: 0, pendingRequestCount: 0, newRequestCount: 0, requestTotal: 0, productHasMore: false, productNextCursor: null, opsCounts: { newOrders: 0, claimsNeedAction: 0, unread: 0 }, categories: CATEGORIES, taxonomy: TAXONOMY });
+    return Response.json({ application: shapeApplication(app), products: [], requests: [], productTotal: 0, onSaleTotal: 0, pendingRequestCount: 0, newRequestCount: 0, shipPendingCount: 0, requestTotal: 0, productHasMore: false, productNextCursor: null, opsCounts: { newOrders: 0, claimsNeedAction: 0, unread: 0 }, categories: CATEGORIES, taxonomy: TAXONOMY });
   }
 
   const section = url.searchParams.get("section") || "products";
@@ -325,6 +370,9 @@ async function brandGet(db: any, username: string, url: URL, context?: Context) 
       db.sql`
         SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
                r.brand_note, r.manager_status, r.link_code, r.click_count, r.brand_seen_at, r.created_at, r.updated_at,
+               r.shipping_status, r.ship_recipient_name, r.ship_recipient_phone, r.ship_postcode, r.ship_address1,
+               r.ship_address2, r.ship_memo, r.ship_info_at, r.ship_tracking_company, r.ship_tracking_number,
+               r.shipped_at, r.declined_reason, r.declined_at,
                p.name AS product_name, p.image_urls, a.brand_name
         FROM affiliate_store_requests r
         JOIN affiliate_store_products p ON p.id = r.product_id
@@ -425,15 +473,16 @@ async function brandRequestProducts(db: any, username: string) {
              COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
              COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
              COUNT(*) FILTER (WHERE status = 'pending' AND brand_seen_at IS NULL)::int AS unseen_count,
+             COUNT(*) FILTER (WHERE status = 'approved' AND shipping_status = 'info_submitted')::int AS to_ship_count,
              MAX(created_at) AS last_request_at
       FROM affiliate_store_requests
       WHERE business_username = ${username} AND status <> 'cancelled'
       GROUP BY product_id
     )
-    SELECT p.*, rc.pending_count, rc.approved_count, rc.rejected_count, rc.unseen_count, rc.last_request_at
+    SELECT p.*, rc.pending_count, rc.approved_count, rc.rejected_count, rc.unseen_count, rc.to_ship_count, rc.last_request_at
     FROM rc JOIN affiliate_store_products p ON p.id = rc.product_id
     WHERE p.business_username = ${username} AND p.deleted_at IS NULL
-    ORDER BY (rc.unseen_count > 0) DESC, rc.last_request_at DESC, p.id DESC
+    ORDER BY (rc.unseen_count > 0 OR rc.to_ship_count > 0) DESC, rc.last_request_at DESC, p.id DESC
     LIMIT ${REQUEST_PRODUCTS_LIMIT}
   `) as any[];
   return Response.json({
@@ -511,17 +560,18 @@ async function brandApply(db: any, username: string, body: any) {
   if (!contactName) return err("담당자 이름을 입력해 주세요.");
   if (contactPhone.replace(/\D/g, "").length < 9) return err("담당자 연락처를 정확히 입력해 주세요.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return err("담당자 이메일을 정확히 입력해 주세요.");
+  if (body.directDealAgreement !== true) return err(DIRECT_DEAL_REQUIRED);
 
   const cats = JSON.stringify(categories);
   const rows = (await db.sql`
     INSERT INTO affiliate_store_applications
       (id, business_username, business_name, business_number, brand_name, channel_url, categories,
        contact_name, contact_position, contact_phone, contact_email, ceo_name, business_address, cs_phone,
-       mail_order_number, inquiry_url, status)
+       mail_order_number, inquiry_url, status, direct_deal_agreed_at)
     VALUES
       (${newId("asa")}, ${username}, ${businessName}, ${businessNumber}, ${brandName}, ${channelUrl}, ${cats}::jsonb,
        ${contactName}, ${contactPosition}, ${contactPhone}, ${contactEmail}, ${ceoName}, ${businessAddress}, ${csPhone},
-       ${mailOrderNumber}, ${inquiryUrl}, 'pending')
+       ${mailOrderNumber}, ${inquiryUrl}, 'pending', NOW())
     ON CONFLICT (business_username) DO UPDATE SET
       business_name = EXCLUDED.business_name, business_number = EXCLUDED.business_number,
       brand_name = EXCLUDED.brand_name, channel_url = EXCLUDED.channel_url, categories = EXCLUDED.categories,
@@ -529,7 +579,7 @@ async function brandApply(db: any, username: string, body: any) {
       contact_phone = EXCLUDED.contact_phone, contact_email = EXCLUDED.contact_email,
       ceo_name = EXCLUDED.ceo_name, business_address = EXCLUDED.business_address, cs_phone = EXCLUDED.cs_phone,
       mail_order_number = EXCLUDED.mail_order_number, inquiry_url = EXCLUDED.inquiry_url,
-      status = 'pending', reject_reason = '', reviewed_by = '', reviewed_at = NULL, updated_at = NOW()
+      direct_deal_agreed_at = NOW(), status = 'pending', reject_reason = '', reviewed_by = '', reviewed_at = NULL, updated_at = NOW()
     WHERE affiliate_store_applications.status = 'rejected'
     RETURNING *
   `) as any[];
@@ -686,23 +736,91 @@ async function brandReviewRequest(db: any, username: string, body: any) {
   const id = clip(body.id, 60);
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!decision) return err("승인 또는 반려를 선택해 주세요.");
-  if (!(await requireApproved(db, username))) return err("입점 승인 후 인플루언서를 선정할 수 있습니다.", 403);
+  const app = await loadApplication(db, username);
+  if (app?.status !== "approved") return err("입점 승인 후 인플루언서를 선정할 수 있습니다.", 403);
   const note = clip(body.note, 500);
-  // 선정하면 담당자 연락 없이 바로 진행 확정(done)이 되고 인플루언서 전용 링크가 열린다.
-  // 반려하면 신청 상태가 'rejected' 라 링크는 닫힌다(다시 선정하면 같은 링크가 살아난다).
-  // 운영자가 링크를 잠시 닫은('contacting') 신청은 브랜드가 다시 선정해도 닫힌 채로 둔다.
+  const curRows = (await db.sql`
+    SELECT r.*, p.name AS product_name FROM affiliate_store_requests r
+    JOIN affiliate_store_products p ON p.id = r.product_id
+    WHERE r.id = ${id} AND r.business_username = ${username} AND r.status IN ('pending', 'approved', 'rejected')
+  `) as any[];
+  const cur = curRows[0];
+  if (!cur) return err("신청을 찾을 수 없습니다.", 404);
+  const shipping = String(cur.shipping_status || "");
+  // 예전 흐름(선정 즉시 링크 발급)으로 이미 진행 중인 선정. 배송 단계 없이 그대로 둔다.
+  const legacyLive = cur.status === "approved" && shipping === "" && cur.manager_status === "done";
+
+  if (decision === "approved") {
+    if (shipping === "declined") return err("인플루언서가 협업을 반려한 신청이라 다시 선정할 수 없어요.", 409);
+    // 이미 승인된 브랜드는 처음 선정할 때 한 번 직거래 금지 안내에 동의한다.
+    if (!app.direct_deal_agreed_at) {
+      if (body.directDealAgreement !== true) {
+        return Response.json({ error: DIRECT_DEAL_REQUIRED, code: "DIRECT_DEAL_AGREEMENT_REQUIRED" }, { status: 400 });
+      }
+      await db.sql`UPDATE affiliate_store_applications SET direct_deal_agreed_at = NOW() WHERE business_username = ${username}`;
+    }
+  } else if (shipping === "info_submitted" || shipping === "shipped") {
+    // 인플루언서가 배송정보를 입력해 협업이 진행 중이다. 중간 조율은 담당자가 한다.
+    return err("인플루언서가 배송정보를 입력해 협업이 진행 중인 건은 반려할 수 없어요. 픽스폴리오 담당자에게 문의해 주세요.", 409);
+  }
+
+  // 선정하면 인플루언서에게 선정 알림이 가고 배송정보 입력을 기다린다(링크는 아직 닫혀 있다).
+  // 인플루언서가 배송정보를 입력하면 협업이 진행되고, 브랜드가 송장번호를 입력하면 전용 링크가 열린다.
+  // 반려하면 배송정보 입력 대기도 함께 거둔다(다시 선정하면 다시 입력을 기다린다).
+  const nextShipping = decision === "approved"
+    ? (legacyLive ? "" : shipping === "" ? "awaiting_info" : shipping)
+    : (shipping === "awaiting_info" ? "" : shipping);
+  const nextManager = decision === "approved" && !legacyLive && cur.manager_status !== "contacting" && nextShipping === "awaiting_info"
+    ? "waiting" : cur.manager_status || "";
   const rows = (await db.sql`
     UPDATE affiliate_store_requests SET status = ${decision}, brand_note = ${note},
-      manager_status = CASE WHEN ${decision}::text = 'approved' AND manager_status <> 'contacting' THEN 'done' ELSE manager_status END,
-      manager_updated_at = CASE WHEN ${decision}::text = 'approved' AND manager_status <> 'done' THEN NOW() ELSE manager_updated_at END,
+      shipping_status = ${nextShipping}, manager_status = ${nextManager},
+      operator_seen_at = CASE WHEN ${decision}::text = 'approved' AND status <> 'approved' THEN NULL ELSE operator_seen_at END,
+      manager_updated_at = CASE WHEN ${nextManager}::text <> manager_status THEN NOW() ELSE manager_updated_at END,
       brand_seen_at = COALESCE(brand_seen_at, NOW()),
       updated_at = NOW()
     WHERE id = ${id} AND business_username = ${username} AND status IN ('pending', 'approved', 'rejected')
     RETURNING *
   `) as any[];
   if (!rows[0]) return err("신청을 찾을 수 없습니다.", 404);
-  if (decision === "approved" && !rows[0].link_code) rows[0].link_code = await ensureLinkCode(db, rows[0].id);
+  if (decision === "approved" && cur.status !== "approved" && nextShipping === "awaiting_info") {
+    notifyCreator(rows[0].influencer_username, "브랜드에 선정되었어요!",
+      `'${String(cur.product_name || "").slice(0, 60)}' 협업에 선정되었어요. 협찬 상품을 받을 배송정보를 입력해 주세요.`);
+  }
   return Response.json({ request: shapeRequest(rows[0]) });
+}
+
+const TRACKING_COMPANIES = ["CJ대한통운", "한진택배", "롯데택배", "우체국택배", "로젠택배", "경동택배", "기타"];
+
+/** 브랜드: 인플루언서가 입력한 배송지로 협찬 상품을 보내고 송장번호를 입력한다(고칠 수도 있다). */
+async function brandShipSelection(db: any, username: string, body: any) {
+  const id = clip(body.id, 60);
+  const company = clip(body.trackingCompany, 40);
+  const number = clip(body.trackingNumber, 40).replace(/\s+/g, "");
+  if (!company || !TRACKING_COMPANIES.includes(company)) return err("택배사를 선택해 주세요.");
+  if (!/^[0-9A-Za-z-]{6,40}$/.test(number)) return err("송장번호를 정확히 입력해 주세요.");
+  // 송장을 입력하면 협찬 상품이 나간 것이라 인플루언서 전용 판매 링크를 연다
+  // (운영자가 잠시 닫은 'contacting' 링크는 닫힌 채로 둔다).
+  const rows = (await db.sql`
+    UPDATE affiliate_store_requests SET shipping_status = 'shipped', ship_tracking_company = ${company},
+      ship_tracking_number = ${number}, shipped_at = COALESCE(shipped_at, NOW()),
+      manager_status = CASE WHEN manager_status = 'contacting' THEN manager_status ELSE 'done' END,
+      manager_updated_at = CASE WHEN manager_status IN ('contacting', 'done') THEN manager_updated_at ELSE NOW() END,
+      updated_at = NOW()
+    WHERE id = ${id} AND business_username = ${username} AND status = 'approved'
+      AND shipping_status IN ('info_submitted', 'shipped')
+    RETURNING *, (SELECT name FROM affiliate_store_products WHERE id = affiliate_store_requests.product_id) AS product_name
+  `) as any[];
+  if (!rows[0]) return err("인플루언서가 배송정보를 입력한 선정에만 송장을 등록할 수 있어요.", 404);
+  if (rows[0].manager_status === "done" && !rows[0].link_code) rows[0].link_code = await ensureLinkCode(db, rows[0].id);
+  notifyCreator(rows[0].influencer_username, "협찬 상품이 발송되었어요",
+    `'${String(rows[0].product_name || "").slice(0, 60)}' · ${company} ${number} · MY 어필리에이트에서 전용 판매 링크가 열렸어요.`);
+  return Response.json({ request: shapeRequest(rows[0]) });
+}
+
+/** 인플루언서에게 앱 푸시(실패해도 처리는 그대로). 화면에서는 "내 신청" 안내로 보인다. */
+function notifyCreator(username: string, title: string, body: string) {
+  sendPushToUser(username, { title, body, data: { path: "/admin?tab=affiliate" } }).catch(() => {});
 }
 
 // ─────────────────────────── 인플루언서 ───────────────────────────
@@ -955,18 +1073,27 @@ async function creatorRequestStatuses(db: any, username: string, url: URL) {
     .slice(0, REQUEST_STATUS_MAX_IDS);
   const [requests, count] = await Promise.all([
     ids.length ? db.sql`
-      SELECT product_id, status, manager_status
+      SELECT product_id, status, manager_status, shipping_status
       FROM affiliate_store_requests
       WHERE influencer_username = ${username} AND status <> 'cancelled' AND product_id = ANY(${ids}::text[])
     ` as Promise<any[]> : Promise.resolve([]),
     db.sql`
-      SELECT COUNT(*)::int AS n FROM affiliate_store_requests
+      SELECT COUNT(*)::int AS n,
+             COUNT(*) FILTER (WHERE status = 'approved' AND shipping_status = 'awaiting_info')::int AS awaiting,
+             (SELECT direct_deal_agreed_at IS NOT NULL FROM creator_applications WHERE username = ${username}) AS agreed
+      FROM affiliate_store_requests
       WHERE influencer_username = ${username} AND status <> 'cancelled'
     ` as Promise<any[]>,
   ]);
   return Response.json({
     total: Number(count[0]?.n || 0),
-    requests: requests.map((r: any) => ({ productId: r.product_id, status: r.status, managerStatus: r.manager_status || "" })),
+    /** 선정됐지만 아직 배송정보를 입력하지 않은 신청 수(화면 상단 안내). */
+    awaitingShippingCount: Number(count[0]?.awaiting || 0),
+    /** 직거래 금지 안내에 이미 동의했는지(아니면 판매 신청 때 체크받는다). */
+    directDealAgreed: count[0]?.agreed === true,
+    requests: requests.map((r: any) => ({
+      productId: r.product_id, status: r.status, managerStatus: r.manager_status || "", shippingStatus: r.shipping_status || "",
+    })),
   });
 }
 
@@ -976,6 +1103,9 @@ async function creatorRequests(db: any, username: string, url: URL) {
   const rows = (await db.sql`
     SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
            r.brand_note, r.manager_status, r.link_code, r.click_count, r.created_at, r.updated_at,
+           r.shipping_status, r.ship_recipient_name, r.ship_recipient_phone, r.ship_postcode, r.ship_address1,
+           r.ship_address2, r.ship_memo, r.ship_info_at, r.ship_tracking_company, r.ship_tracking_number,
+           r.shipped_at, r.declined_reason, r.declined_at,
            p.name AS product_name, p.image_urls, a.brand_name,
            p.status AS product_status, p.deleted_at AS product_deleted_at, p.stock AS product_stock,
            p.sale_start_date, p.sale_end_date
@@ -1008,12 +1138,22 @@ async function creatorRequest(db: any, username: string, body: any, context?: Co
   if (periodState === "scheduled") return err("아직 판매기간이 시작되지 않은 상품입니다.");
   if (periodState === "ended") return err("판매기간이 끝난 상품입니다.");
   if (product.business_username === username) return err("내 브랜드 상품에는 신청할 수 없습니다.");
+  // 직거래 금지 동의 — 크리에이터 지원서에서 체크한다. 지원 없이 쓰는 기존 계정은 처음 신청할 때 한 번 동의한다.
+  const agreed = (await db.sql`
+    SELECT direct_deal_agreed_at FROM creator_applications WHERE username = ${username} LIMIT 1
+  `) as any[];
+  if (!agreed[0]?.direct_deal_agreed_at) {
+    if (body.directDealAgreement !== true) {
+      return Response.json({ error: DIRECT_DEAL_REQUIRED, code: "DIRECT_DEAL_AGREEMENT_REQUIRED" }, { status: 400 });
+    }
+    await db.sql`UPDATE creator_applications SET direct_deal_agreed_at = NOW() WHERE username = ${username}`;
+  }
   const rows = (await db.sql`
     INSERT INTO affiliate_store_requests (id, product_id, business_username, influencer_username, message, channel_url)
     VALUES (${newId("asr")}, ${productId}, ${product.business_username}, ${username}, ${message}, ${channelUrl})
     ON CONFLICT (product_id, influencer_username) DO UPDATE SET
       message = EXCLUDED.message, channel_url = EXCLUDED.channel_url, status = 'pending', brand_note = '',
-      brand_seen_at = NULL, updated_at = NOW()
+      brand_seen_at = NULL, shipping_status = '', declined_reason = '', declined_at = NULL, updated_at = NOW()
     WHERE affiliate_store_requests.status IN ('cancelled', 'rejected')
     RETURNING *
   `) as any[];
@@ -1034,6 +1174,68 @@ async function creatorRequest(db: any, username: string, body: any, context?: Co
     link: "/business-admin?tab=affiliate",
   });
   return Response.json({ request: shapeRequest(rows[0]) }, { status: 201 });
+}
+
+/**
+ * 인플루언서: 선정된 협업의 협찬 상품 배송정보 입력(브랜드가 보내기 전까지 고칠 수 있다).
+ * 입력하면 협업이 진행되고 브랜드에게 알린다. 전용 판매 링크는 브랜드가 송장번호를 입력하면 열린다.
+ */
+async function creatorSubmitShipping(db: any, username: string, body: any) {
+  const id = clip(body.id, 60);
+  const recipientName = clip(body.recipientName, 50);
+  const recipientPhone = clip(body.recipientPhone, 20);
+  const postcode = clip(body.postcode, 10);
+  const address1 = clip(body.address1, 200);
+  const address2 = clip(body.address2, 200);
+  const memo = clip(body.memo, 200);
+  if (!recipientName) return err("받는 분 이름을 입력해 주세요.");
+  if (recipientPhone.replace(/\D/g, "").length < 9) return err("받는 분 연락처를 정확히 입력해 주세요.");
+  if (!address1) return err("배송 주소를 입력해 주세요.");
+  if (!address2) return err("상세 주소를 입력해 주세요.");
+  const rows = (await db.sql`
+    UPDATE affiliate_store_requests SET
+      ship_recipient_name = ${recipientName}, ship_recipient_phone = ${recipientPhone}, ship_postcode = ${postcode},
+      ship_address1 = ${address1}, ship_address2 = ${address2}, ship_memo = ${memo}, ship_info_at = NOW(),
+      shipping_status = 'info_submitted',
+      updated_at = NOW()
+    WHERE id = ${id} AND influencer_username = ${username} AND status = 'approved'
+      AND shipping_status IN ('awaiting_info', 'info_submitted')
+    RETURNING *, (SELECT name FROM affiliate_store_products WHERE id = affiliate_store_requests.product_id) AS product_name
+  `) as any[];
+  const row = rows[0];
+  if (!row) return err("배송정보를 입력할 수 있는 선정이 아니에요. 이미 발송됐거나 협업이 진행되지 않는 건입니다.", 404);
+  await notify(db, {
+    recipientType: "brand",
+    recipient: row.business_username,
+    kind: "selection_shipping_info",
+    title: "인플루언서가 배송정보를 입력했어요",
+    body: `@${username} 님이 '${String(row.product_name || "").slice(0, 60)}' 협찬 배송정보를 입력했어요. 상품을 보내고 송장번호를 입력해 주세요.`,
+    link: "/business-admin?tab=affiliate",
+  });
+  return Response.json({ request: shapeRequest(row) });
+}
+
+/** 인플루언서: 선정된 협업을 반려한다(배송정보 입력 전만). 협업은 진행되지 않고 링크도 열리지 않는다. */
+async function creatorDeclineSelection(db: any, username: string, body: any) {
+  const id = clip(body.id, 60);
+  const reason = clip(body.reason, 500);
+  const rows = (await db.sql`
+    UPDATE affiliate_store_requests SET shipping_status = 'declined', declined_reason = ${reason}, declined_at = NOW(),
+      updated_at = NOW()
+    WHERE id = ${id} AND influencer_username = ${username} AND status = 'approved' AND shipping_status = 'awaiting_info'
+    RETURNING *, (SELECT name FROM affiliate_store_products WHERE id = affiliate_store_requests.product_id) AS product_name
+  `) as any[];
+  const row = rows[0];
+  if (!row) return err("배송정보 입력을 기다리는 선정만 반려할 수 있어요.", 404);
+  await notify(db, {
+    recipientType: "brand",
+    recipient: row.business_username,
+    kind: "selection_declined",
+    title: "인플루언서가 협업을 반려했어요",
+    body: `@${username} 님이 '${String(row.product_name || "").slice(0, 60)}' 협업을 진행하지 않기로 했어요.${reason ? ` 사유: ${reason.slice(0, 120)}` : ""}`,
+    link: "/business-admin?tab=affiliate",
+  });
+  return Response.json({ request: shapeRequest(row) });
 }
 
 async function creatorCancel(db: any, username: string, body: any) {
@@ -1089,8 +1291,21 @@ async function adminReview(db: any, operator: string, body: any) {
 
 const MANAGER_STATUSES = ["waiting", "contacting", "done"] as const;
 
-/** 브랜드가 선정한 신청 — 담당자가 양쪽에 연락해 진행한다. 연락처를 함께 내려준다. */
-async function managerSelections(db: any) {
+/** 운영자가 아직 확인하지 않은 새 선정(브랜드가 선정한 뒤 운영 콘솔에서 열어 보지 않은 건). */
+async function managerUnseenCount(db: any) {
+  const rows = (await db.sql`
+    SELECT COUNT(*)::int AS n FROM affiliate_store_requests
+    WHERE status = 'approved' AND shipping_status <> '' AND operator_seen_at IS NULL
+  `) as any[];
+  return Number(rows[0]?.n || 0);
+}
+
+/**
+ * 브랜드가 선정한 신청 — 선정되는 순간부터 담당자가 보고 양쪽 사이에서 조율한다. 연락처 · 배송지를 함께 내려준다.
+ * &countOnly=1 이면 새 선정 수만(메뉴 배지).
+ */
+async function managerSelections(db: any, url: URL) {
+  if (url.searchParams.get("countOnly") === "1") return Response.json({ newCount: await managerUnseenCount(db) });
   const rows = (await db.sql`
     SELECT r.*, p.name AS product_name, p.image_urls, p.sale_price, p.commission_rate,
            a.brand_name, a.contact_name AS brand_contact_name, a.contact_phone AS brand_contact_phone,
@@ -1100,11 +1315,15 @@ async function managerSelections(db: any) {
     JOIN affiliate_store_products p ON p.id = r.product_id
     LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
     LEFT JOIN creator_applications c ON c.username = r.influencer_username
-    WHERE r.status = 'approved' AND r.manager_status IN ('waiting', 'contacting', 'done')
-    ORDER BY (r.manager_status = 'waiting') DESC, (r.manager_status = 'contacting') DESC, r.updated_at DESC
+    WHERE r.status = 'approved' AND (r.manager_status IN ('waiting', 'contacting', 'done') OR r.shipping_status <> '')
+    ORDER BY (r.shipping_status <> '' AND r.operator_seen_at IS NULL) DESC,
+             CASE r.shipping_status WHEN 'info_submitted' THEN 0 WHEN 'awaiting_info' THEN 1 WHEN 'shipped' THEN 2
+               WHEN 'declined' THEN 4 ELSE 3 END,
+             r.updated_at DESC
     LIMIT 500
   `) as any[];
   return Response.json({
+    newCount: rows.filter((r) => r.shipping_status && !r.operator_seen_at).length,
     selections: rows.map((r) => ({
       ...shapeRequest(r),
       linkCode: r.link_code || "",
@@ -1114,10 +1333,23 @@ async function managerSelections(db: any) {
       managerUsername: r.manager_username || "",
       managerNote: r.manager_note || "",
       managerUpdatedAt: r.manager_updated_at,
+      /** 운영자가 아직 확인하지 않은 새 선정. */
+      operatorUnseen: !!r.shipping_status && !r.operator_seen_at,
       brandContact: { name: r.brand_contact_name || "", phone: r.brand_contact_phone || "", email: r.brand_contact_email || "" },
       creatorContact: { name: r.creator_name || "", phone: r.creator_contact || "", instagramUrl: r.creator_instagram || "" },
     })),
   });
+}
+
+/** 운영자가 협업 진행 목록에서 새 선정을 확인했다(ids 없으면 전부). */
+async function managerMarkSeen(db: any, body: any) {
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map((v: unknown) => clip(v, 60)).filter(Boolean).slice(0, 500);
+  if (ids.length) {
+    await db.sql`UPDATE affiliate_store_requests SET operator_seen_at = NOW() WHERE id = ANY(${ids}::text[]) AND operator_seen_at IS NULL`;
+  } else {
+    await db.sql`UPDATE affiliate_store_requests SET operator_seen_at = NOW() WHERE status = 'approved' AND shipping_status <> '' AND operator_seen_at IS NULL`;
+  }
+  return Response.json({ ok: true, newCount: await managerUnseenCount(db) });
 }
 
 async function managerUpdate(db: any, manager: string, body: any) {
@@ -1156,11 +1388,13 @@ export default async (req: Request, context: Context) => {
     return scope === "admin" ? adminGet(db) : adminReview(db, op.username, body);
   }
 
-  if (scope === "selections" || action === "manager_update") {
+  if (scope === "selections" || action === "manager_update" || action === "manager_mark_seen") {
     const mgr = await requireManager(req);
     if (!mgr.ok) return mgr.response;
     try {
-      return scope === "selections" ? await managerSelections(db) : await managerUpdate(db, mgr.managerUsername, body);
+      if (scope === "selections") return await managerSelections(db, url);
+      if (action === "manager_mark_seen") return await managerMarkSeen(db, body);
+      return await managerUpdate(db, mgr.managerUsername, body);
     } catch (e) {
       console.error("[affiliate-store]", action || scope, e);
       return err("요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.", 500);
@@ -1175,7 +1409,7 @@ export default async (req: Request, context: Context) => {
 
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
   const creatorScope = ["creator", "product-detail", "brands", "my-request-status", "my-requests", "my-affiliate", "my-affiliate-orders"].includes(String(scope || ""))
-    || action === "request" || action === "cancel_request";
+    || action === "request" || action === "cancel_request" || action === "submit_shipping" || action === "decline_selection";
   if (creatorScope && !caller.isAdmin) {
     const creator = await readCreatorAccess(username);
     if (!creator) return err("크리에이터 승인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
@@ -1204,10 +1438,13 @@ export default async (req: Request, context: Context) => {
       case "save_product": return await brandSaveProduct(db, username, body);
       case "delete_product": return await brandDeleteProduct(db, username, body);
       case "review_request": return await brandReviewRequest(db, username, body);
+      case "ship_selection": return await brandShipSelection(db, username, body);
       case "mark_requests_seen": return await brandMarkRequestsSeen(db, username, body);
       case "update_seller_info": return await brandUpdateSeller(db, username, body);
       case "request": return await creatorRequest(db, username, body, context);
       case "cancel_request": return await creatorCancel(db, username, body);
+      case "submit_shipping": return await creatorSubmitShipping(db, username, body);
+      case "decline_selection": return await creatorDeclineSelection(db, username, body);
       default: return err("알 수 없는 요청입니다.");
     }
   } catch (e) {

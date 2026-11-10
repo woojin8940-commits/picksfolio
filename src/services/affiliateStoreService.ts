@@ -21,6 +21,42 @@ export const MANAGER_STATUS_STYLE: Record<ManagerStatus, string> = {
   done: 'bg-emerald-50 text-emerald-600',
 };
 
+/**
+ * 선정 뒤 협찬 배송 단계. 선정 → 인플루언서 배송정보 입력(협업 진행 · 링크 열림) → 브랜드 송장 입력.
+ * 인플루언서가 반려하면 협업은 진행되지 않는다. '' 는 예전 흐름(선정 즉시 링크 발급)이나 해당 없음.
+ */
+export type ShippingStatus = 'awaiting_info' | 'info_submitted' | 'shipped' | 'declined';
+
+export const SHIPPING_STATUS_LABEL: Record<ShippingStatus, string> = {
+  awaiting_info: '배송정보 입력 대기',
+  info_submitted: '발송 대기',
+  shipped: '발송 완료',
+  declined: '인플루언서 반려',
+};
+export const SHIPPING_STATUS_STYLE: Record<ShippingStatus, string> = {
+  awaiting_info: 'bg-amber-50 text-amber-600',
+  info_submitted: 'bg-blue-50 text-blue-600',
+  shipped: 'bg-emerald-50 text-emerald-600',
+  declined: 'bg-slate-100 text-slate-500',
+};
+
+/** 협찬 상품 택배사(서버 목록과 같다). */
+export const SHIPPING_COURIERS = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배', '경동택배', '기타'];
+
+export interface SelectionShipping {
+  recipientName: string;
+  recipientPhone: string;
+  postcode: string;
+  address1: string;
+  address2: string;
+  memo: string;
+  submittedAt: string | null;
+}
+export type SelectionShippingInput = Omit<SelectionShipping, 'submittedAt'>;
+
+/** 직거래 금지 동의가 필요할 때 서버가 돌려주는 코드. */
+export const DIRECT_DEAL_AGREEMENT_REQUIRED = 'DIRECT_DEAL_AGREEMENT_REQUIRED';
+
 /** 담당자 연락 큐 한 줄(운영 콘솔). */
 export interface ManagerSelection extends StoreRequest {
   businessUsername: string;
@@ -29,6 +65,8 @@ export interface ManagerSelection extends StoreRequest {
   managerUsername: string;
   managerNote: string;
   managerUpdatedAt: string | null;
+  /** 운영자가 아직 확인하지 않은 새 선정. */
+  operatorUnseen?: boolean;
   brandContact: { name: string; phone: string; email: string };
   creatorContact: { name: string; phone: string; instagramUrl: string };
 }
@@ -49,7 +87,7 @@ export interface CreatorApplication {
   createdAt: string;
   updatedAt: string;
 }
-export interface CreatorApplicationInput { name: string; contact: string; instagramUrl: string; privacyConsent: boolean }
+export interface CreatorApplicationInput { name: string; contact: string; instagramUrl: string; privacyConsent: boolean; directDealAgreement: boolean }
 
 export interface StoreApplication {
   id: string;
@@ -70,6 +108,8 @@ export interface StoreApplication {
   mailOrderNumber: string;
   /** 구매자 "문의하기"가 여는 자사몰 · 고객센터 주소(https://) */
   inquiryUrl: string;
+  /** 직거래 금지 동의 시각. 없으면 처음 선정할 때 동의받는다. */
+  directDealAgreedAt?: string | null;
   status: ApplicationStatus;
   rejectReason: string;
   reviewedAt: string | null;
@@ -145,6 +185,8 @@ export interface BrandCounts {
   pendingRequestCount: number;
   /** 브랜드가 아직 확인하지 않은 검토 대기 신청 수(상품별 신청자 목록을 열면 줄어든다). */
   newRequestCount: number;
+  /** 인플루언서가 배송정보를 입력해 협찬 상품을 보내야 하는 선정 수. */
+  shipPendingCount?: number;
   opsCounts: { newOrders: number; claimsNeedAction: number; unread: number };
 }
 
@@ -193,7 +235,7 @@ export interface StoreProduct {
   saleState?: SaleState;
   createdAt: string;
   updatedAt: string;
-  requestCounts?: { pending: number; approved: number; rejected?: number; unseen?: number };
+  requestCounts?: { pending: number; approved: number; rejected?: number; unseen?: number; toShip?: number };
   /** 판매 신청 · 상품별 묶음에서만 온다. */
   lastRequestAt?: string;
 }
@@ -222,6 +264,16 @@ export interface StoreRequest {
   unseen?: boolean;
   createdAt: string;
   updatedAt: string;
+  /** 선정 뒤 협찬 배송 단계('' = 예전 흐름 · 해당 없음). */
+  shippingStatus?: ShippingStatus | '';
+  /** 인플루언서가 입력한 배송지(그 신청의 브랜드 · 인플루언서 본인 · 운영자에게만). */
+  shipping?: SelectionShipping | null;
+  trackingCompany?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  shippedAt?: string | null;
+  declinedReason?: string;
+  declinedAt?: string | null;
   /** 브랜드 화면에서만 온다 — 지원한 인플루언서의 인스타 프로필 · 최근 릴스(캠페인 지원자와 같은 스냅샷). */
   insights?: Record<string, any> | null;
 }
@@ -431,7 +483,7 @@ export const affiliateStoreService = {
       'GET', `${URL_BASE}?${p.toString()}`, undefined, { account },
     );
   },
-  apply(account: string, input: ApplicationInput) {
+  apply(account: string, input: ApplicationInput & { directDealAgreement: boolean }) {
     return call<{ application: StoreApplication }>('POST', URL_BASE, { action: 'apply', ...input }, { account });
   },
   saveProduct(account: string, product: ProductInput) {
@@ -440,8 +492,12 @@ export const affiliateStoreService = {
   deleteProduct(account: string, id: string) {
     return call<{ ok: true }>('POST', URL_BASE, { action: 'delete_product', id }, { account });
   },
-  reviewRequest(account: string, id: string, decision: 'approve' | 'reject', note = '') {
-    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'review_request', id, decision, note }, { account });
+  reviewRequest(account: string, id: string, decision: 'approve' | 'reject', note = '', directDealAgreement?: boolean) {
+    return call<{ request: StoreRequest; code?: string }>('POST', URL_BASE, { action: 'review_request', id, decision, note, directDealAgreement }, { account });
+  },
+  /** 인플루언서가 입력한 배송지로 협찬 상품을 보내고 송장번호를 입력한다(다시 부르면 고친다). */
+  shipSelection(account: string, id: string, trackingCompany: string, trackingNumber: string) {
+    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'ship_selection', id, trackingCompany, trackingNumber }, { account });
   },
 
   updateSeller(account: string, input: { ceoName: string; businessAddress: string; csPhone: string; mailOrderNumber: string; inquiryUrl: string }) {
@@ -519,14 +575,27 @@ export const affiliateStoreService = {
   myRequestStatuses(productIds: string[] = []) {
     const p = new URLSearchParams({ scope: 'my-request-status' });
     if (productIds.length) p.set('ids', productIds.slice(0, 100).join(','));
-    return call<{ total: number; requests: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>[] }>('GET', `${URL_BASE}?${p.toString()}`);
+    return call<{
+      total: number;
+      awaitingShippingCount?: number;
+      directDealAgreed?: boolean;
+      requests: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus' | 'shippingStatus'>[];
+    }>('GET', `${URL_BASE}?${p.toString()}`);
   },
   myRequests(cursor?: ListCursor | null) {
     const p = withCursor(new URLSearchParams({ scope: 'my-requests' }), cursor);
     return call<{ requests: StoreRequest[]; hasMore: boolean; nextCursor: ListCursor | null }>('GET', `${URL_BASE}?${p.toString()}`);
   },
-  request(productId: string, message: string, channelUrl: string) {
-    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'request', productId, message, channelUrl });
+  request(productId: string, message: string, channelUrl: string, directDealAgreement?: boolean) {
+    return call<{ request: StoreRequest; code?: string }>('POST', URL_BASE, { action: 'request', productId, message, channelUrl, directDealAgreement });
+  },
+  /** 선정된 협업의 협찬 상품 배송정보 입력(발송 전까지 고칠 수 있다). 입력하면 협업이 진행된다. */
+  submitShipping(id: string, input: SelectionShippingInput) {
+    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'submit_shipping', id, ...input });
+  },
+  /** 선정된 협업 반려(배송정보 입력 전만). 협업은 진행되지 않는다. */
+  declineSelection(id: string, reason: string) {
+    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'decline_selection', id, reason });
   },
   cancelRequest(id: string) {
     return call<{ ok: true }>('POST', URL_BASE, { action: 'cancel_request', id });
@@ -534,7 +603,14 @@ export const affiliateStoreService = {
 
   // 담당자 — 브랜드가 선정한 신청의 연락 진행
   listSelections(token: string) {
-    return call<{ selections: ManagerSelection[] }>('GET', `${URL_BASE}?scope=selections`, undefined, { token });
+    return call<{ selections: ManagerSelection[]; newCount: number }>('GET', `${URL_BASE}?scope=selections`, undefined, { token });
+  },
+  /** 운영 콘솔 메뉴 배지: 브랜드가 새로 선정했는데 운영자가 아직 확인하지 않은 협업 수. */
+  selectionsNewCount(token: string) {
+    return call<{ newCount: number }>('GET', `${URL_BASE}?scope=selections&countOnly=1`, undefined, { token });
+  },
+  markSelectionsSeen(token: string, ids: string[]) {
+    return call<{ ok: true; newCount: number }>('POST', URL_BASE, { action: 'manager_mark_seen', ids }, { token });
   },
   updateSelection(token: string, id: string, managerStatus: ManagerStatus, note?: string) {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'manager_update', id, managerStatus, note }, { token });

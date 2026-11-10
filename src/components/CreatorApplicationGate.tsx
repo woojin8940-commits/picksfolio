@@ -5,6 +5,7 @@ import {
   type CreatorAccess,
   type CreatorApplication,
 } from '../services/affiliateStoreService';
+import DirectDealAgreement from './affiliateStore/DirectDealAgreement';
 
 /**
  * 크리에이터 지원 카드.
@@ -33,6 +34,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, children, onAccess }
   const [contact, setContact] = useState('');
   const [instagramUrl, setInstagramUrl] = useState('');
   const [consent, setConsent] = useState(false);
+  const [directDeal, setDirectDeal] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
 
@@ -53,6 +55,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, children, onAccess }
 
   const submit = async () => {
     if (!consent) { setSendError('개인정보 수집·이용에 동의해 주세요.'); return; }
+    if (!directDeal) { setSendError('직거래 금지 안내에 동의해 주세요.'); return; }
     setSending(true);
     setSendError('');
     const res = await affiliateStoreService.applyCreator({
@@ -60,6 +63,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, children, onAccess }
       contact: contact.trim(),
       instagramUrl: instagramUrl.trim(),
       privacyConsent: true,
+      directDealAgreement: true,
     });
     setSending(false);
     if (res.error) { setSendError(res.error); return; }
@@ -150,12 +154,13 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, children, onAccess }
               동의하지 않으면 지원할 수 없습니다. 자세한 내용은 <a href="/privacy" target="_blank" rel="noreferrer" className="text-blue-600 font-bold underline">개인정보처리방침</a>을 확인해 주세요.
             </span>
           </label>
+          <DirectDealAgreement checked={directDeal} onChange={setDirectDeal} />
           {sendError && <p className="text-xs font-bold text-red-500">{sendError}</p>}
           <div className="flex gap-2">
             {editing && (
               <button onClick={() => setEditing(false)} className="h-12 px-5 rounded-xl border border-slate-200 text-sm font-black text-slate-600">취소</button>
             )}
-            <button onClick={submit} disabled={sending || !consent} className="flex-1 h-12 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
+            <button onClick={submit} disabled={sending || !consent || !directDeal} className="flex-1 h-12 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
               {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               크리에이터 지원하기
             </button>

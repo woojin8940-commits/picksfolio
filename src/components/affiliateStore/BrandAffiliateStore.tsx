@@ -9,6 +9,10 @@ import {
   MANAGER_STATUS_STYLE,
   SALE_STATE_LABEL,
   SALE_STATE_STYLE,
+  SHIPPING_STATUS_LABEL,
+  SHIPPING_STATUS_STYLE,
+  SHIPPING_COURIERS,
+  DIRECT_DEAL_AGREEMENT_REQUIRED,
   salePeriodText,
   sellerInfoMissing,
   type CategoryNode,
@@ -25,6 +29,8 @@ import BrandAffiliateOrders from './BrandAffiliateOrders';
 import BrandSellerInfo from './BrandSellerInfo';
 import AffiliatePayouts from './AffiliatePayouts';
 import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
+import DirectDealAgreement from './DirectDealAgreement';
+import { formatPhone } from '../../utils/formatters';
 
 /**
  * 브랜드 어필리에이트 메뉴(ZVZO 방식).
@@ -36,6 +42,9 @@ import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
  * 판매 신청은 상품별로 묶어 본다. 상품마다 대기 · 선정 · 반려 수와 "새 신청"(아직 확인 안 함) 알림을 보여 주고,
  * 상품을 누르면 광고비 지급형 캠페인 지원자처럼 인플루언서 카드(인스타 프로필 · 팔로워 · 최근 릴스)로 신청자를 본다.
  * 신청자 목록을 열면 그 상품의 새 신청 알림이 꺼진다.
+ *
+ * 선정하면 인플루언서에게 선정 알림이 가고, 인플루언서가 협찬 상품 배송정보를 입력하면 카드에 배송지가 보인다.
+ * 브랜드는 상품을 보내고 송장번호를 입력한다. 인플루언서가 반려하면 협업은 진행되지 않는다.
  *
  * 상품 · 받은 신청은 30개씩(커서) 받는다. 상품 삭제 · 판매 상태 변경 · 수정 · 신청 선정/반려는
  * 바뀐 한 건만 고치고 숫자만 새로 받는다(펼쳐 둔 목록은 그대로). "더 보기"가 실패하면 목록 아래에만 오류가 나온다.
@@ -98,12 +107,19 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [editing, setEditing] = useState<StoreProduct | 'new' | null>(null);
   const [reapply, setReapply] = useState(false);
   const [busyId, setBusyId] = useState('');
+  const [shipPendingCount, setShipPendingCount] = useState(0);
+  /** 직거래 금지 동의 전에 선정하려는 신청(동의 창). */
+  const [agreeFor, setAgreeFor] = useState<StoreRequest | null>(null);
+  const [agreeChecked, setAgreeChecked] = useState(false);
+  /** 카드별 송장 입력값. */
+  const [trackingDraft, setTrackingDraft] = useState<Record<string, { company: string; number: string; editing?: boolean }>>({});
 
   const applyCounts = useCallback((c: Partial<BrandCounts>) => {
     if (c.productTotal !== undefined) setProductTotal(c.productTotal);
     if (c.onSaleTotal !== undefined) setOnSaleTotal(c.onSaleTotal);
     if (c.pendingRequestCount !== undefined) setPendingRequestCount(c.pendingRequestCount);
     if (c.newRequestCount !== undefined) setNewRequestCount(c.newRequestCount);
+    if (c.shipPendingCount !== undefined) setShipPendingCount(c.shipPendingCount);
     if (c.opsCounts) setOpsCounts(c.opsCounts);
   }, []);
 
@@ -367,24 +383,38 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     }
   };
 
-  const review = async (r: StoreRequest, decision: 'approve' | 'reject') => {
+  const review = async (r: StoreRequest, decision: 'approve' | 'reject', agreed = false) => {
     let note = '';
     if (decision === 'reject') {
       const input = window.prompt('반려 사유를 적어 주세요(인플루언서에게 보입니다).', '');
       if (input === null) return;
       note = input;
-    } else if (!window.confirm(`@${r.influencerUsername} 님을 선정할까요?\n선정하면 인플루언서에게 바로 전용 판매 링크가 열립니다.`)) {
+    } else if (!application?.directDealAgreedAt && !agreed) {
+      // 이전에 입점한 브랜드는 처음 선정할 때 직거래 금지 안내에 한 번 동의한다.
+      setAgreeChecked(false);
+      setAgreeFor(r);
+      return;
+    } else if (!agreed && !window.confirm(`@${r.influencerUsername} 님을 선정할까요?\n인플루언서에게 선정 알림이 가고, 인플루언서가 협찬 상품 배송정보를 입력하면 협업이 진행됩니다.\n상품을 보내고 송장번호를 입력하면 인플루언서의 전용 판매 링크가 열립니다.`)) {
       return;
     }
     setBusyId(r.id);
-    const res = await affiliateStoreService.reviewRequest(businessUsername, r.id, decision, note);
+    const res = await affiliateStoreService.reviewRequest(businessUsername, r.id, decision, note, agreed || undefined);
     setBusyId('');
-    if (res.error) window.alert(res.error);
-    else {
+    if (res.error) {
+      if (res.code === DIRECT_DEAL_AGREEMENT_REQUIRED) {
+        setApplication(a => (a ? { ...a, directDealAgreedAt: null } : a));
+        setAgreeChecked(false);
+        setAgreeFor(r);
+        return;
+      }
+      window.alert(res.error);
+    } else {
+      if (agreed) setApplication(a => (a ? { ...a, directDealAgreedAt: new Date().toISOString() } : a));
       // 응답에는 상품 이름 · 인스타 정보가 없어 기존 카드 값에 상태만 덮는다.
       setRequests(prev => prev.map(x => x.id === r.id ? {
         ...x, status: res.request.status, brandNote: res.request.brandNote, managerStatus: res.request.managerStatus,
         linkCode: res.request.linkCode, updatedAt: res.request.updatedAt, unseen: false,
+        shippingStatus: res.request.shippingStatus,
       } : x));
       // 고른 상품 머리의 숫자도 바로 고친다.
       setSelectedProduct(prev => {
@@ -398,6 +428,88 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       });
       void refreshCounts();
     }
+  };
+
+  /** 인플루언서가 입력한 배송지로 보낸 송장번호를 등록(고치기)한다. */
+  const ship = async (r: StoreRequest) => {
+    const d = trackingDraft[r.id] || { company: r.trackingCompany || SHIPPING_COURIERS[0], number: r.trackingNumber || '' };
+    const company = d.company || SHIPPING_COURIERS[0];
+    if (!d.number.trim()) { window.alert('송장번호를 입력해 주세요.'); return; }
+    setBusyId(r.id);
+    const res = await affiliateStoreService.shipSelection(businessUsername, r.id, company, d.number.trim());
+    setBusyId('');
+    if (res.error) { window.alert(res.error); return; }
+    setRequests(prev => prev.map(x => x.id === r.id ? {
+      ...x, shippingStatus: res.request.shippingStatus, trackingCompany: res.request.trackingCompany,
+      trackingNumber: res.request.trackingNumber, trackingUrl: res.request.trackingUrl, shippedAt: res.request.shippedAt,
+    } : x));
+    setTrackingDraft(prev => { const n = { ...prev }; delete n[r.id]; return n; });
+    void refreshCounts();
+  };
+
+  /** 선정된 카드 아래 협찬 배송 단계. */
+  const shippingPanel = (r: StoreRequest) => {
+    if (r.status !== 'approved' || !r.shippingStatus) return null;
+    if (r.shippingStatus === 'awaiting_info') {
+      return <p className="rounded-xl bg-amber-50 text-amber-700 text-[11px] font-bold px-3 py-2.5">인플루언서가 협찬 상품 배송정보를 입력하면 여기에 배송지가 보여요.</p>;
+    }
+    if (r.shippingStatus === 'declined') {
+      return (
+        <div className="rounded-xl bg-slate-50 text-slate-500 text-[11px] font-bold px-3 py-2.5">
+          인플루언서가 협업을 반려했어요. 이 협업은 진행되지 않아요.
+          {r.declinedReason && <span className="block text-slate-400 font-medium mt-0.5 whitespace-pre-wrap">사유: {r.declinedReason}</span>}
+        </div>
+      );
+    }
+    const a = r.shipping;
+    const draft = trackingDraft[r.id];
+    const editing = r.shippingStatus === 'info_submitted' || !!draft?.editing;
+    return (
+      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2 text-[11px]">
+        <p className="font-black text-slate-500">협찬 상품 배송지</p>
+        {a && (
+          <div className="text-slate-700 space-y-0.5">
+            <p className="font-black text-slate-900">{a.recipientName} · {formatPhone(a.recipientPhone)}</p>
+            <p>{a.postcode ? `(${a.postcode}) ` : ''}{a.address1} {a.address2}</p>
+            {a.memo && <p className="text-slate-500">메모: {a.memo}</p>}
+          </div>
+        )}
+        {editing ? (
+          <div className="flex gap-1.5 pt-1">
+            <select
+              value={draft?.company || r.trackingCompany || SHIPPING_COURIERS[0]}
+              onChange={e => setTrackingDraft(p => ({ ...p, [r.id]: { company: e.target.value, number: p[r.id]?.number ?? r.trackingNumber ?? '', editing: p[r.id]?.editing } }))}
+              className="h-9 px-2 rounded-lg border border-slate-200 bg-white text-xs font-bold shrink-0"
+            >
+              {SHIPPING_COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <input
+              value={draft?.number ?? r.trackingNumber ?? ''}
+              onChange={e => setTrackingDraft(p => ({ ...p, [r.id]: { company: p[r.id]?.company || r.trackingCompany || SHIPPING_COURIERS[0], number: e.target.value, editing: p[r.id]?.editing } }))}
+              placeholder="송장번호"
+              inputMode="numeric"
+              className="h-9 min-w-0 flex-1 px-2.5 rounded-lg border border-slate-200 bg-white text-xs focus:outline-none focus:border-blue-600"
+            />
+            <button disabled={busyId === r.id} onClick={() => ship(r)} className="h-9 px-3 rounded-lg bg-slate-900 text-white text-xs font-black shrink-0 disabled:opacity-50">
+              {r.shippingStatus === 'shipped' ? '저장' : '발송 완료'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <p className="font-black text-emerald-600 truncate">
+              {r.trackingCompany} {r.trackingNumber}
+              {r.trackingUrl && <a href={r.trackingUrl} target="_blank" rel="noreferrer" className="ml-1.5 text-blue-600 underline">배송 조회</a>}
+            </p>
+            <button
+              onClick={() => setTrackingDraft(p => ({ ...p, [r.id]: { company: r.trackingCompany || SHIPPING_COURIERS[0], number: r.trackingNumber || '', editing: true } }))}
+              className="text-slate-400 font-bold hover:text-slate-700 shrink-0"
+            >
+              송장 수정
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -430,6 +542,20 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
             <span className="block text-xs text-blue-700 mt-0.5">상품별로 신청한 인플루언서를 확인하고 선정해 주세요.</span>
           </span>
           <ChevronRight className="w-4 h-4 text-blue-500 shrink-0" />
+        </button>
+      )}
+
+      {shipPendingCount > 0 && (
+        <button
+          onClick={() => { setTab('requests'); setSelectedProduct(null); setRequestProductsLoaded(false); }}
+          className="w-full text-left mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-center gap-3"
+        >
+          <Truck className="w-5 h-5 text-emerald-600 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-black text-emerald-800">협찬 상품을 보낼 협업이 {shipPendingCount.toLocaleString('ko-KR')}건 있어요</span>
+            <span className="block text-xs text-emerald-700 mt-0.5">인플루언서가 배송정보를 입력했어요. 상품을 보내고 송장번호를 입력하면 인플루언서의 판매 링크가 열려요.</span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-emerald-500 shrink-0" />
         </button>
       )}
 
@@ -596,7 +722,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : (
           <div className="space-y-2.5">
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
-              상품을 누르면 판매를 신청한 인플루언서를 볼 수 있어요. 선정하면 바로 인플루언서의 전용 판매 링크가 열립니다.
+              상품을 누르면 판매를 신청한 인플루언서를 볼 수 있어요. 선정하면 인플루언서에게 알림이 가고, 인플루언서가 배송정보를 입력하면 협찬 상품을 보내고 송장번호를 입력해 주세요. 송장번호를 입력하면 인플루언서의 전용 판매 링크가 열립니다.
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {requestProducts.map(p => {
@@ -608,7 +734,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                     key={p.id}
                     type="button"
                     onClick={() => openProductRequests(p)}
-                    className={`relative text-left bg-white rounded-2xl border shadow-sm p-4 flex items-center gap-3 hover:border-blue-300 transition-colors ${unseen > 0 ? 'border-red-200' : 'border-slate-100'}`}
+                    className={`relative text-left bg-white rounded-2xl border shadow-sm p-4 flex items-center gap-3 hover:border-blue-300 transition-colors ${unseen > 0 ? 'border-red-200' : (c.toShip || 0) > 0 ? 'border-blue-200' : 'border-slate-100'}`}
                   >
                     {unseen > 0 && (
                       <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center shadow">{unseen}</span>
@@ -625,6 +751,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                         <span className="text-amber-600">검토 대기 {c.pending || 0}</span>
                         <span className="text-emerald-600">선정 {c.approved || 0}</span>
                         <span className="text-slate-400">반려 {c.rejected || 0}</span>
+                        {(c.toShip || 0) > 0 && <span className="text-blue-600 flex items-center gap-0.5"><Truck className="w-3 h-3" /> 발송 대기 {c.toShip}</span>}
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
@@ -699,18 +826,21 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                     <>
                       {r.unseen && <span className="px-2 py-1 rounded-md text-[10px] font-black bg-red-500 text-white">NEW</span>}
                       <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
-                      {r.status === 'approved' && r.managerStatus && (
+                      {r.status === 'approved' && r.shippingStatus ? (
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-black ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
+                      ) : r.status === 'approved' && r.managerStatus && (
                         <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
                       )}
                       <span className="text-[11px] text-slate-300 font-bold">{dateText(r.createdAt)}</span>
                     </>
                   }
                 >
+                  {shippingPanel(r)}
                   <div className="flex items-center gap-2 pt-1 justify-end">
                     {r.status !== 'approved' && (
                       <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-9 flex-1 px-3 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-50">선정</button>
                     )}
-                    {r.status !== 'rejected' && (
+                    {r.status !== 'rejected' && r.shippingStatus !== 'info_submitted' && r.shippingStatus !== 'shipped' && r.shippingStatus !== 'declined' && (
                       <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-9 flex-1 px-3 rounded-lg border border-slate-200 text-slate-600 text-xs font-black disabled:opacity-50">반려</button>
                     )}
                   </div>
@@ -728,6 +858,29 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {agreeFor && (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setAgreeFor(null)} />
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-black text-slate-900">@{agreeFor.influencerUsername} 님을 선정할까요?</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">인플루언서에게 선정 알림이 가고, 인플루언서가 협찬 상품 배송정보를 입력하면 협업이 진행되고, 송장번호를 입력하면 인플루언서의 전용 판매 링크가 열립니다. 처음 선정하기 전에 아래 안내에 동의해 주세요.</p>
+            </div>
+            <DirectDealAgreement checked={agreeChecked} onChange={setAgreeChecked} />
+            <div className="flex gap-2">
+              <button onClick={() => setAgreeFor(null)} className="h-11 px-5 rounded-xl bg-slate-100 text-sm font-black text-slate-600">취소</button>
+              <button
+                disabled={!agreeChecked}
+                onClick={() => { const r = agreeFor; setAgreeFor(null); void review(r, 'approve', true); }}
+                className="flex-1 h-11 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50"
+              >
+                동의하고 선정
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>

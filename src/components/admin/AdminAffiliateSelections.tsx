@@ -4,26 +4,40 @@ import {
   won,
   MANAGER_STATUS_LABEL,
   MANAGER_STATUS_STYLE,
+  SHIPPING_STATUS_LABEL,
+  SHIPPING_STATUS_STYLE,
   type ManagerSelection,
   type ManagerStatus,
 } from '../../services/affiliateStoreService';
 import { formatPhone } from '../../utils/formatters';
 
 /**
- * 어필리에이트 선정 연락 — 인플루언서가 판매 신청하고 브랜드가 선정한 건.
+ * 어필리에이트 협업 진행 — 브랜드가 선정한 판매 신청. 선정되는 순간부터 여기에 보인다.
  *
- * 브랜드가 선정하면 담당자 연락 없이 바로 인플루언서 전용 판매 링크가 열린다(링크 발급).
- * 이 화면은 선정 · 링크 현황을 보는 곳이다. 문제가 있는 건은 상태를 되돌려 링크를 잠시 닫을 수 있다.
+ * 브랜드가 선정하면 인플루언서에게 알림이 가고, 인플루언서가 협찬 상품 배송정보를 입력하면 협업이 진행된다
+ * (브랜드가 송장번호를 입력하면 전용 판매 링크가 열린다). 담당자는 "협업 진행" 건을 보고 양쪽 사이에서 조율한다.
+ * 인플루언서가 반려한 건은 진행되지 않는다. 문제가 있는 건은 링크를 잠시 닫을 수 있다.
  */
 
-type Filter = 'all' | ManagerStatus;
+type Filter = 'active' | 'new' | 'awaiting_info' | 'info_submitted' | 'shipped' | 'declined' | 'all';
+const FILTER_LABEL: Record<Filter, string> = {
+  active: '진행 중 전체',
+  new: '새 선정',
+  awaiting_info: '배송정보 입력 대기',
+  info_submitted: '발송 대기',
+  shipped: '발송 완료',
+  declined: '인플루언서 반려',
+  all: '전체',
+};
+/** 진행 중 = 브랜드가 선정한 뒤 인플루언서가 반려하지 않은 건(배송정보 대기 · 발송 대기 · 발송 완료 · 예전 흐름). */
+const isActive = (r: ManagerSelection) => r.shippingStatus !== 'declined';
 const dateTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
-const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
+const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n: number) => void }> = ({ token, onNewCountChange }) => {
   const [rows, setRows] = useState<ManagerSelection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<Filter>('done');
+  const [filter, setFilter] = useState<Filter>('active');
   const [busy, setBusy] = useState('');
   const [notes, setNotes] = useState<Record<string, string>>({});
 
@@ -35,18 +49,25 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
       setError('');
       setRows(res.selections || []);
       setNotes(Object.fromEntries((res.selections || []).map(r => [r.id, r.managerNote || ''])));
+      // 목록을 열어 본 새 선정은 확인한 것으로 둔다(이번 화면에서는 NEW 표시를 남겨 둔다).
+      const unseen = (res.selections || []).filter(r => r.operatorUnseen).map(r => r.id);
+      if (unseen.length) {
+        const seen = await affiliateStoreService.markSelectionsSeen(token, unseen);
+        if (!seen.error) onNewCountChange?.(seen.newCount);
+      } else {
+        onNewCountChange?.(0);
+      }
     }
     setLoading(false);
-  }, [token]);
+  }, [token, onNewCountChange]);
   useEffect(() => { load(); }, [load]);
 
-  const counts = useMemo(() => ({
-    all: rows.length,
-    waiting: rows.filter(r => r.managerStatus === 'waiting').length,
-    contacting: rows.filter(r => r.managerStatus === 'contacting').length,
-    done: rows.filter(r => r.managerStatus === 'done').length,
-  }), [rows]);
-  const visible = filter === 'all' ? rows : rows.filter(r => r.managerStatus === filter);
+  const matches = (r: ManagerSelection, f: Filter) =>
+    f === 'all' ? true : f === 'active' ? isActive(r) : f === 'new' ? !!r.operatorUnseen : r.shippingStatus === f;
+  const counts = useMemo(() => Object.fromEntries(
+    (Object.keys(FILTER_LABEL) as Filter[]).map(f => [f, rows.filter(r => matches(r, f)).length]),
+  ) as Record<Filter, number>, [rows]);
+  const visible = rows.filter(r => matches(r, filter));
 
   const update = async (r: ManagerSelection, next: ManagerStatus) => {
     if (next === 'done' && !window.confirm('링크를 다시 열까요? 인플루언서의 전용 판매 링크로 다시 주문을 받을 수 있습니다.')) return;
@@ -62,20 +83,20 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-2 flex-wrap">
         <div>
-          <h3 className="text-sm font-black text-slate-900">어필리에이트 선정 · 링크 현황</h3>
-          <p className="text-[10px] font-bold text-slate-400 mt-0.5">브랜드가 선정한 판매 신청입니다. 선정과 동시에 인플루언서의 판매 링크가 자동으로 열립니다. 문제가 있으면 상태를 바꿔 링크를 잠시 닫을 수 있습니다.</p>
+          <h3 className="text-sm font-black text-slate-900">어필리에이트 협업 진행</h3>
+          <p className="text-[10px] font-bold text-slate-400 mt-0.5">브랜드가 선정한 협업이 선정 즉시 여기에 올라옵니다. 인플루언서 배송정보 입력 → 브랜드 송장 입력(판매 링크 열림)까지 양쪽 연락처를 보고 중간에서 조율해 주세요. 문제가 있으면 링크를 잠시 닫을 수 있습니다.</p>
         </div>
         <button onClick={load} className="px-3 py-1.5 rounded-lg bg-slate-100 text-[11px] font-black text-slate-600 hover:bg-slate-200">새로고침</button>
       </div>
 
       <div className="flex gap-1.5 flex-wrap">
-        {(['done', 'contacting', 'all'] as Filter[]).map(f => (
+        {(Object.keys(FILTER_LABEL) as Filter[]).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${filter === f ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}
           >
-            {f === 'all' ? '전체' : MANAGER_STATUS_LABEL[f]} {counts[f]}
+            {FILTER_LABEL[f]} {counts[f]}
           </button>
         ))}
       </div>
@@ -90,15 +111,24 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
         <div className="grid gap-3">
           {visible.map(r => {
             const status = (r.managerStatus || 'waiting') as ManagerStatus;
+            // 배송정보 입력 전 · 반려된 건은 링크를 열지 않는다(협업이 진행되지 않음).
+            // 송장 입력 전 링크는 브랜드가 발송해야 열린다.
+            const canToggleLink = r.shippingStatus === 'shipped' || !r.shippingStatus;
             return (
-              <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <div key={r.id} className={`bg-white rounded-2xl border shadow-sm p-5 ${r.operatorUnseen ? 'border-red-200' : 'border-slate-100'}`}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-3 min-w-0">
                     {r.productImage && <img src={r.productImage} alt="" className="w-12 h-12 rounded-xl object-cover bg-slate-100 shrink-0" />}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {r.operatorUnseen && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-black bg-red-500 text-white">NEW</span>}
                         <p className="text-sm font-black text-slate-900 truncate">{r.brandName} · {r.productName}</p>
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[status]}`}>{MANAGER_STATUS_LABEL[status]}</span>
+                        {r.shippingStatus && (
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
+                        )}
+                        {canToggleLink && (
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[status]}`}>{MANAGER_STATUS_LABEL[status]}</span>
+                        )}
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5">
                         판매가 {won(r.salePrice)} · 인플루언서 수수료 {r.commissionRate}% · 선정 {dateTime(r.updatedAt)}
@@ -107,10 +137,10 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    {status !== 'done' && (
+                    {canToggleLink && status !== 'done' && (
                       <button disabled={busy === r.id} onClick={() => update(r, 'done')} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black disabled:opacity-50">링크 다시 열기</button>
                     )}
-                    {status === 'done' && (
+                    {canToggleLink && status === 'done' && (
                       <button disabled={busy === r.id} onClick={() => update(r, 'contacting')} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black disabled:opacity-50">링크 잠시 닫기</button>
                     )}
                   </div>
@@ -136,6 +166,31 @@ const AdminAffiliateSelections: React.FC<{ token: string }> = ({ token }) => {
                     {r.message && <p className="text-slate-500 whitespace-pre-wrap line-clamp-3">"{r.message}"</p>}
                   </div>
                 </div>
+
+                {(r.shipping || r.trackingNumber || r.declinedAt) && (
+                  <div className="mt-3 bg-blue-50/60 border border-blue-100 rounded-xl p-3 text-xs space-y-1">
+                    <p className="text-[10px] font-black text-slate-400">협찬 상품 배송</p>
+                    {r.shipping && (
+                      <>
+                        <p className="font-bold text-slate-800">{r.shipping.recipientName} · {formatPhone(r.shipping.recipientPhone)}</p>
+                        <p className="text-slate-600">{r.shipping.postcode ? `(${r.shipping.postcode}) ` : ''}{r.shipping.address1} {r.shipping.address2}</p>
+                        {r.shipping.memo && <p className="text-slate-500">메모: {r.shipping.memo}</p>}
+                        <p className="text-[10px] text-slate-400">배송정보 입력 {dateTime(r.shipping.submittedAt)}</p>
+                      </>
+                    )}
+                    {r.trackingNumber ? (
+                      <p className="font-bold text-emerald-600">
+                        송장 {r.trackingCompany} {r.trackingNumber} · 발송 {dateTime(r.shippedAt || null)}
+                        {r.trackingUrl && <a href={r.trackingUrl} target="_blank" rel="noreferrer" className="ml-1.5 text-blue-600 underline">배송 조회</a>}
+                      </p>
+                    ) : r.shippingStatus === 'info_submitted' && (
+                      <p className="font-bold text-amber-600">브랜드 발송 대기 중(송장 미입력 · 판매 링크는 송장 입력 뒤 열림)</p>
+                    )}
+                    {r.shippingStatus === 'declined' && (
+                      <p className="font-bold text-slate-500">인플루언서가 협업을 반려했어요 · {dateTime(r.declinedAt || null)}{r.declinedReason ? ` · 사유: ${r.declinedReason}` : ''}</p>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-3 flex gap-2">
                   <input

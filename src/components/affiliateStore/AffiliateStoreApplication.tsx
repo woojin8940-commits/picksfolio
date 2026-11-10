@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { affiliateStoreService, isHttpsUrl, type ApplicationInput, type StoreApplication } from '../../services/affiliateStoreService';
+import DirectDealAgreement from './DirectDealAgreement';
 
 /**
  * 어필리에이트 입점 신청서.
@@ -77,6 +78,7 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     contactEmail: previous?.contactEmail || '',
   }));
   const [agree, setAgree] = useState(false);
+  const [agreeDirectDeal, setAgreeDirectDeal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -92,9 +94,9 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
       form.contactName.trim().length > 0 &&
       form.contactPhone.replace(/\D/g, '').length >= 9 &&
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim()) &&
-      agree
+      agree && agreeDirectDeal
     );
-  }, [step, form, agree]);
+  }, [step, form, agree, agreeDirectDeal]);
 
   const toggleCategory = (c: string) =>
     set('categories', form.categories.includes(c) ? form.categories.filter(x => x !== c) : [...form.categories, c]);
@@ -111,6 +113,7 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     const res = await affiliateStoreService.apply(businessUsername, {
       ...form,
       businessNumber: form.businessNumber.replace(/\D/g, ''),
+      directDealAgreement: agreeDirectDeal,
     });
     setSubmitting(false);
     if (res.error || !res.application) {
@@ -238,6 +241,9 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
                 입점 심사와 운영 안내를 위해 담당자 이름 · 직책 · 연락처 · 이메일을 수집하며, 입점 해지 시까지 보관합니다.
               </span>
             </label>
+            <div className="mt-2">
+              <DirectDealAgreement checked={agreeDirectDeal} onChange={setAgreeDirectDeal} tone="slate" />
+            </div>
           </>
         )}
 

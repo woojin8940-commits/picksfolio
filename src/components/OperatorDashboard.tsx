@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { logout, getUser } from '@netlify/identity';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
+import { affiliateStoreService } from '../services/affiliateStoreService';
 import { sessionGet, sessionRemove } from '../utils/accountScope';
 import { formatKRW, formatPhone } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
@@ -132,6 +133,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [adminToken, setAdminToken] = useState<string>('');
   // 커머스 캠페인에서 브랜드가 새로 선정한 지원자 수. 탭 배지로 알린다.
   const [newCommerceSelections, setNewCommerceSelections] = useState(0);
+  // 어필리에이트: 브랜드가 새로 선정했는데 운영자가 아직 확인하지 않은 협업 수. 탭 배지로 알린다.
+  const [newAffiliateSelections, setNewAffiliateSelections] = useState(0);
 
   const getToken = useCallback(async () => {
     const user = await getUser();
@@ -245,6 +248,19 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     return () => { alive = false; window.clearTimeout(timer); };
   }, [adminToken]);
 
+  // 어필리에이트 새 선정 배지. 담당자가 바로 조율해야 하므로 화면을 열 때 세고 5분마다 다시 센다(숫자만 받는 가벼운 조회).
+  useEffect(() => {
+    if (!adminToken) return;
+    let alive = true;
+    const load = async () => {
+      const res = await affiliateStoreService.selectionsNewCount(adminToken);
+      if (alive && !res.error) setNewAffiliateSelections(res.newCount || 0);
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 5 * 60 * 1000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [adminToken]);
+
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }
     sessionRemove('picks_admin_token');
@@ -351,7 +367,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         // 어필리에이트(ZVZO 방식) 입점 신청. 승인하면 그 브랜드의 상품 등록이 열린다.
         { key: 'affiliate-store', label: '어필리에이트 입점 신청' },
         // 브랜드가 선정한 판매 신청 — 담당자가 양쪽에 연락해 진행한다.
-        { key: 'affiliate-selections', label: '어필리에이트 선정 · 링크' },
+        { key: 'affiliate-selections', label: '어필리에이트 협업 진행', badge: newAffiliateSelections },
         { key: 'affiliate-issues', label: '미처리 취소·반품' },
         // 어필리에이트 지급 신청 · 지급 완료 · 반려 · 이체 / 원천징수 파일.
         { key: 'affiliate-payouts', label: '어필리에이트 정산' },
@@ -874,7 +890,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {activeTab === 'affiliate-store' && adminToken && <AdminAffiliateStoreApplications token={adminToken} />}
         {activeTab === 'affiliate-issues' && adminToken && <AdminAffiliateStoreIssues token={adminToken} />}
         {activeTab === 'affiliate-payouts' && adminToken && <AdminAffiliatePayouts token={adminToken} />}
-        {activeTab === 'affiliate-selections' && adminToken && <AdminAffiliateSelections token={adminToken} />}
+        {activeTab === 'affiliate-selections' && adminToken && <AdminAffiliateSelections token={adminToken} onNewCountChange={setNewAffiliateSelections} />}
         {activeTab === 'creator-applications' && adminToken && <AdminCreatorApplications token={adminToken} />}
         {activeTab === 'brandleads' && (
           adminToken
