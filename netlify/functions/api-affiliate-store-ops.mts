@@ -31,6 +31,7 @@ import { pageOf, readCursor } from "./_shared/list-cursor.mts";
  *                              &view=orders&filter=new|preparing|shipped|delivered|all
  *                              &view=claims&claim=all|cancel|return|action
  *                              &cursorAt&cursorId(다음 페이지 · 목록만) &orderId(한 건) &summary=0(목록만)
+ *                              &sort=latest|oldest|amount_desc|amount_asc(주문 목록 · 내려받기 정렬)
  *                              &export=1(엑셀 내려받기용 · 고른 필터의 주문 전부, 최대 BRAND_EXPORT_MAX건 · 목록만)
  *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 + 처리 기록
  *   POST { action, ... }
@@ -147,6 +148,8 @@ const ORDER_FILTERS: Record<string, string[] | null> = {
   to_ship: ["paid", "preparing"],
   all: null,
 };
+/** 주문 정렬: latest 주문일 최신순 · oldest 주문일 오래된순 · amount_desc 금액 높은순 · amount_asc 금액 낮은순. */
+const ORDER_SORTS = ["latest", "oldest", "amount_desc", "amount_asc"] as const;
 /** 취소·반품 필터: all 전체 · cancel 주문취소(반품 없음) · return 반품 · action 처리 필요. */
 const CLAIM_FILTERS = ["all", "cancel", "return", "action"] as const;
 
@@ -180,6 +183,9 @@ async function brandGet(db: any, brand: string, url: URL) {
   const claim = (CLAIM_FILTERS as readonly string[]).includes(claimParam) ? claimParam : "all";
   const { hasCursor, cursorAt, cursorId } = readCursor(url);
   const exporting = url.searchParams.get("export") === "1";
+  const sortParam = String(url.searchParams.get("sort") || "latest");
+  const sort = (ORDER_SORTS as readonly string[]).includes(sortParam) ? sortParam : "latest";
+  const cursorAmount = Number(url.searchParams.get("cursorAmount"));
   const withSummary = !hasCursor && !exporting && url.searchParams.get("summary") !== "0";
 
   const params: unknown[] = [brand];
@@ -201,11 +207,19 @@ async function brandGet(db: any, brand: string, url: URL) {
     order = `${CLAIM_AT} DESC, o.id DESC`;
   } else {
     if (statuses) where.push(`o.status = ANY(${p(statuses)}::text[])`);
-    if (hasCursor) {
+    // 정렬: 금액순은 (금액, id), 주문일순은 (주문 시각, id)로 커서를 이어 간다.
+    const amountSort = sort === "amount_desc" || sort === "amount_asc";
+    const asc = sort === "oldest" || sort === "amount_asc";
+    const cmp = asc ? ">" : "<";
+    const dir = asc ? "ASC" : "DESC";
+    if (hasCursor && amountSort && Number.isFinite(cursorAmount)) {
+      const amt = p(cursorAmount);
+      where.push(`(o.total_amount ${cmp} ${amt} OR (o.total_amount = ${amt} AND o.id ${cmp} ${p(cursorId)}))`);
+    } else if (hasCursor && !amountSort) {
       const at = p(cursorAt);
-      where.push(`(o.created_at < ${at}::timestamptz OR (o.created_at = ${at}::timestamptz AND o.id < ${p(cursorId)}))`);
+      where.push(`(o.created_at ${cmp} ${at}::timestamptz OR (o.created_at = ${at}::timestamptz AND o.id ${cmp} ${p(cursorId)}))`);
     }
-    order = "o.created_at DESC, o.id DESC";
+    order = amountSort ? `o.total_amount ${dir}, o.id ${dir}` : `o.created_at ${dir}, o.id ${dir}`;
   }
 
   const [orders, metrics, notifications] = await Promise.all([
@@ -249,6 +263,10 @@ async function brandGet(db: any, brand: string, url: URL) {
     : exporting
     ? { page: orders.slice(0, BRAND_EXPORT_MAX), hasMore: orders.length > BRAND_EXPORT_MAX, nextCursor: null }
     : pageOf(orders, BRAND_ORDER_PAGE_SIZE, (o: any) => view === "claims" ? o.ret_requested_at || o.cancelled_at || o.created_at : o.created_at);
+  const lastOrder = pageOrders[pageOrders.length - 1];
+  const cursorOut = nextCursor && view === "orders" && (sort === "amount_desc" || sort === "amount_asc") && lastOrder
+    ? { ...nextCursor, cursorAmount: Number(lastOrder.total_amount) || 0 }
+    : nextCursor;
   const m = metrics[0] || {};
   const summary = {
     orderCounts: {
@@ -281,7 +299,7 @@ async function brandGet(db: any, brand: string, url: URL) {
   return Response.json({
     orders: pageOrders.map(shapeBrandOrder),
     hasMore,
-    nextCursor,
+    nextCursor: cursorOut,
     ...(withSummary ? { summary, notifications } : {}),
   });
 }

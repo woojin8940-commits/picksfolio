@@ -600,6 +600,27 @@ describe("D. 주문 관리 · 취소·반품", () => {
     assert.equal(other.body.results?.[0]?.ok ?? false, false, "다른 브랜드 주문은 처리되지 않는다");
   });
 
+  test("주문 정렬: 금액 · 주문일 순으로 커서를 이어도 겹치지 않고, 내려받기도 같은 순서", async () => {
+    const sorted = (list: any[], key: (o: any) => number, asc: boolean) =>
+      list.every((o, i) => i === 0 || (asc ? key(list[i - 1]) <= key(o) : key(list[i - 1]) >= key(o)));
+    for (const [sort, key, asc] of [
+      ["amount_desc", (o: any) => Number(o.totalAmount), false],
+      ["amount_asc", (o: any) => Number(o.totalAmount), true],
+      ["oldest", (o: any) => Date.parse(o.createdAt), true],
+      ["latest", (o: any) => Date.parse(o.createdAt), false],
+    ] as const) {
+      const all = await readAll(async (c) => {
+        const extra = c?.cursorAmount !== undefined ? `&cursorAmount=${c.cursorAmount}` : "";
+        const r = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all&sort=${sort}${qs(c)}${extra}`);
+        return { items: r.body.orders, hasMore: r.body.hasMore, nextCursor: r.body.nextCursor };
+      });
+      assertUnique(ids(all), sort);
+      assert.ok(sorted(all, key, asc), `${sort} 순서`);
+      const exp = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all&sort=${sort}&export=1`);
+      assert.deepEqual(ids(exp.body.orders), ids(all), `${sort} 내려받기 순서`);
+    }
+  });
+
   test("다른 브랜드의 주문은 보이지 않는다", async () => {
     const list = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all`);
     const other = await call(h.ops, BRAND2, "GET", `${OPS}&view=orders&orderId=${list.body.orders[0].id}`);

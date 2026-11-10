@@ -8,6 +8,8 @@ import {
   ORDER_STATUS_LABEL,
   COMMISSION_STATUS_LABEL,
   COMMISSION_STATUS_STYLE,
+  BRAND_ORDER_SORTS,
+  type BrandOrderSort,
   type BrandOpsSummary,
   type ListCursor,
   type StoreNotification,
@@ -37,6 +39,13 @@ const DENSITY_KEY = 'picks.brandOrders.density';
 type Density = 'compact' | 'detail';
 const readDensity = (): Density => {
   try { return localStorage.getItem(DENSITY_KEY) === 'detail' ? 'detail' : 'compact'; } catch { return 'compact'; }
+};
+const SORT_KEY = 'picks.brandOrders.sort';
+const readSort = (): BrandOrderSort => {
+  try {
+    const v = localStorage.getItem(SORT_KEY);
+    return BRAND_ORDER_SORTS.some(s => s.key === v) ? v as BrandOrderSort : 'latest';
+  } catch { return 'latest'; }
 };
 const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
@@ -107,6 +116,11 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const [f2, setF2] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [notiOpen, setNotiOpen] = useState(false);
+  const [sort, setSortState] = useState<BrandOrderSort>(readSort);
+  const setSort = (v: BrandOrderSort) => {
+    setSortState(v);
+    try { localStorage.setItem(SORT_KEY, v); } catch { /* 기억만 못 한다 */ }
+  };
   const [density, setDensityState] = useState<Density>(readDensity);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -140,6 +154,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
       view,
       filter: view === 'orders' ? filter : undefined,
       claim: view === 'claims' ? claimFilter : undefined,
+      sort: view === 'orders' ? sort : undefined,
       cursor,
       summary: !summaryLoaded.current,
     });
@@ -155,9 +170,9 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     applySummary(res.summary, res.notifications);
     setNextCursor(res.nextCursor || null);
     setHasMore(!!res.hasMore);
-  }, [businessUsername, view, filter, claimFilter, applySummary]);
+  }, [businessUsername, view, filter, claimFilter, sort, applySummary]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setSelected(new Set()); setExpanded(new Set()); }, [filter, view]);
+  useEffect(() => { setSelected(new Set()); setExpanded(new Set()); }, [filter, view, sort]);
 
   /** 일괄 처리 뒤: 숫자까지 새로 받고 목록을 처음부터 다시 받는다. */
   const reloadAll = () => {
@@ -171,14 +186,15 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     try {
       let list = only;
       if (!list) {
-        const res = await affiliateStoreService.brandOrdersExport(businessUsername, filter);
+        const res = await affiliateStoreService.brandOrdersExport(businessUsername, filter, sort);
         if (res.error) { window.alert(res.error); return; }
         list = res.orders || [];
         if (res.hasMore) window.alert('주문이 많아 최근 3,000건만 내려받아요. 필터를 나눠 받아 주세요.');
       }
       if (!list.length) { window.alert('내려받을 주문이 없어요.'); return; }
       const label = FILTERS.find(f => f.key === filter)?.label.replace(/\s*·\s*/g, '_') || '주문';
-      await downloadOrdersExcel(list, `주문목록_${only ? '선택' : label}_${stamp()}.xlsx`);
+      const sortLabel = BRAND_ORDER_SORTS.find(x => x.key === sort)?.label.replace(/\s+/g, '') || '';
+      await downloadOrdersExcel(list, `주문목록_${only ? '선택' : label}_${sortLabel}_${stamp()}.xlsx`);
     } catch {
       window.alert('엑셀 파일을 만들지 못했어요.');
     } finally {
@@ -446,9 +462,19 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
           </div>
 
           <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+            <div className="flex items-center gap-1.5 flex-wrap">
+            <select
+              value={sort}
+              onChange={e => setSort(e.target.value as BrandOrderSort)}
+              aria-label="정렬"
+              className="h-8 pl-2 pr-7 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-600"
+            >
+              {BRAND_ORDER_SORTS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
               <button onClick={() => setDensity('compact')} className={`h-7 px-2.5 rounded-md text-[11px] font-black flex items-center gap-1 ${density === 'compact' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><List className="w-3.5 h-3.5" />간단히</button>
               <button onClick={() => setDensity('detail')} className={`h-7 px-2.5 rounded-md text-[11px] font-black flex items-center gap-1 ${density === 'detail' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><Rows3 className="w-3.5 h-3.5" />자세히</button>
+            </div>
             </div>
             <div className="flex gap-1.5">
               <button disabled={exporting} onClick={() => { void exportExcel(); }} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-[11px] font-black text-slate-600 flex items-center gap-1.5 disabled:opacity-50">
@@ -635,7 +661,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
         </div>
       )}
 
-      {bulkOpen && <BulkShipDialog businessUsername={businessUsername} onClose={() => setBulkOpen(false)} onDone={reloadAll} />}
+      {bulkOpen && <BulkShipDialog businessUsername={businessUsername} sort={sort} onClose={() => setBulkOpen(false)} onDone={reloadAll} />}
 
       {dialog && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">

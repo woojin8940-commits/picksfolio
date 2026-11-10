@@ -42,6 +42,17 @@ export const SHIPPING_STATUS_STYLE: Record<ShippingStatus, string> = {
 
 /** 협찬 상품 택배사(서버 목록과 같다). */
 export const SHIPPING_COURIERS = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배', '경동택배', '기타'];
+/** 엑셀 송장 일괄 등록에 쓰는 택배사 코드(두 자리). 엑셀의 '택배사 코드' 칸에 이 숫자를 적는다. */
+export const COURIER_CODES: { code: string; name: string }[] = [
+  { code: '01', name: 'CJ대한통운' },
+  { code: '02', name: '한진택배' },
+  { code: '03', name: '롯데택배' },
+  { code: '04', name: '우체국택배' },
+  { code: '05', name: '로젠택배' },
+  { code: '06', name: '경동택배' },
+  { code: '99', name: '기타' },
+];
+export const courierCodeOf = (name?: string | null) => COURIER_CODES.find(c => c.name === name)?.code || '';
 
 export interface SelectionShipping {
   recipientName: string;
@@ -168,12 +179,13 @@ export interface BrandInfo { username: string; brandName: string; channelUrl: st
 export interface ProductQuery { category?: string; sub?: string; q?: string; brand?: string }
 
 /** 목록 커서(최신순). 서버 응답의 nextCursor 를 그대로 다음 요청에 넘긴다. */
-export interface ListCursor { cursorAt: string; cursorId: string }
+export interface ListCursor { cursorAt: string; cursorId: string; cursorAmount?: number }
 
 const withCursor = (p: URLSearchParams, cursor?: ListCursor | null) => {
   if (cursor) {
     p.set('cursorAt', cursor.cursorAt);
     p.set('cursorId', cursor.cursorId);
+    if (cursor.cursorAmount !== undefined) p.set('cursorAmount', String(cursor.cursorAmount));
   }
   return p;
 };
@@ -198,6 +210,13 @@ export interface BrandOpsSummary {
 }
 
 export interface BulkResult { id: string; ok: boolean; skipped?: boolean; error?: string }
+export type BrandOrderSort = 'latest' | 'oldest' | 'amount_desc' | 'amount_asc';
+export const BRAND_ORDER_SORTS: { key: BrandOrderSort; label: string }[] = [
+  { key: 'latest', label: '주문일 최신순' },
+  { key: 'oldest', label: '주문일 오래된순' },
+  { key: 'amount_desc', label: '금액 높은순' },
+  { key: 'amount_asc', label: '금액 낮은순' },
+];
 export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all' | 'to_ship';
 export type BrandClaimFilter = 'all' | 'cancel' | 'return' | 'action';
 
@@ -514,6 +533,7 @@ export const affiliateStoreService = {
     view?: 'orders' | 'claims';
     filter?: BrandOrderFilter;
     claim?: BrandClaimFilter;
+    sort?: BrandOrderSort;
     cursor?: ListCursor | null;
     orderId?: string;
     summary?: boolean;
@@ -521,6 +541,7 @@ export const affiliateStoreService = {
     const p = withCursor(new URLSearchParams({ scope: 'brand', view: opt.view || 'orders' }), opt.cursor);
     if (opt.filter) p.set('filter', opt.filter);
     if (opt.claim) p.set('claim', opt.claim);
+    if (opt.sort) p.set('sort', opt.sort);
     if (opt.orderId) p.set('orderId', opt.orderId);
     if (opt.summary === false) p.set('summary', '0');
     return call<{
@@ -535,8 +556,8 @@ export const affiliateStoreService = {
     return call<{ ok: true }>('POST', OPS, { action, ...payload }, { account });
   },
   /** 엑셀 내려받기용: 고른 필터의 주문 전부(최대 3,000건). hasMore 면 잘린 것. */
-  brandOrdersExport(account: string, filter: BrandOrderFilter) {
-    const p = new URLSearchParams({ scope: 'brand', view: 'orders', filter, export: '1' });
+  brandOrdersExport(account: string, filter: BrandOrderFilter, sort: BrandOrderSort = 'latest') {
+    const p = new URLSearchParams({ scope: 'brand', view: 'orders', filter, sort, export: '1' });
     return call<{ orders: StoreOrder[]; hasMore: boolean }>('GET', `${OPS}?${p.toString()}`, undefined, { account });
   },
   /** 일괄 처리(한 번에 100건까지 · 줄마다 결과). */

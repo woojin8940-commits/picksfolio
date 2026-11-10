@@ -1,15 +1,18 @@
 import writeXlsxFile from 'write-excel-file/browser';
 import readXlsxFile from 'read-excel-file/browser';
-import { ORDER_STATUS_LABEL, SHIPPING_COURIERS, type StoreOrder } from '../../services/affiliateStoreService';
+import { COURIER_CODES, courierCodeOf, ORDER_STATUS_LABEL, type StoreOrder } from '../../services/affiliateStoreService';
 
 /**
  * 브랜드 주문 엑셀 처리.
- *   내려받기: 주문 목록(받는 분 · 주소 · 송장 포함). 같은 파일에 택배사 · 송장번호를 채워 다시 올리면 일괄 발송된다.
- *   올리기: 첫 줄(머리글)에서 '주문번호' · '택배사' · '송장번호' 열을 찾는다. 송장번호가 빈 줄은 건너뛴다.
+ *   내려받기: 주문 목록(화면에서 고른 필터 · 정렬 그대로) + 두 번째 시트 '택배사 코드표'.
+ *     맨 오른쪽 노란 칸 '택배사 코드' · '송장번호'를 채워 다시 올리면 일괄 발송된다.
+ *   택배사 규칙: 코드 두 자리(01 CJ대한통운, 02 한진택배 …, COURIER_CODES). 엑셀이 01을 1로 바꿔도 같은 코드로 읽는다.
+ *     예전 양식처럼 택배사 이름을 적어도 읽지만, 코드표에 없는 값은 오류로 보여 준다.
+ *   올리기: 첫 시트에서 '주문번호' 머리글 줄을 찾고, 송장번호가 빈 줄은 건너뛴다.
  */
 
 const ORDER_ID_COL = '주문번호';
-const COURIER_COL = '택배사';
+const COURIER_COL = '택배사 코드';
 const TRACKING_COL = '송장번호';
 
 const fmt = (iso?: string | null) => {
@@ -19,7 +22,7 @@ const fmt = (iso?: string | null) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-const COLUMNS: { title: string; width: number; value: (o: StoreOrder) => string | number }[] = [
+const COLUMNS: { title: string; width: number; input?: boolean; value: (o: StoreOrder) => string | number }[] = [
   { title: ORDER_ID_COL, width: 26, value: o => o.id },
   { title: '주문상태', width: 12, value: o => ORDER_STATUS_LABEL[o.status] || o.status },
   { title: '주문일시', width: 17, value: o => fmt(o.paidAt || o.createdAt) },
@@ -36,41 +39,58 @@ const COLUMNS: { title: string; width: number; value: (o: StoreOrder) => string 
   { title: '주문자', width: 10, value: o => o.buyerName || '' },
   { title: '주문자 연락처', width: 15, value: o => o.buyerPhone || '' },
   { title: '인플루언서', width: 14, value: o => o.influencerUsername ? `@${o.influencerUsername}` : '' },
-  { title: COURIER_COL, width: 12, value: o => o.trackingCompany || '' },
-  { title: TRACKING_COL, width: 18, value: o => o.trackingNumber || '' },
+  { title: COURIER_COL, width: 12, input: true, value: o => courierCodeOf(o.trackingCompany) || (o.trackingCompany || '') },
+  { title: TRACKING_COL, width: 20, input: true, value: o => o.trackingNumber || '' },
 ];
 
+const INPUT_HEAD = '#FDE68A';
+const INPUT_CELL = '#FFFBEB';
+
+function codeSheet() {
+  return {
+    sheet: '택배사 코드표',
+    columns: [{ width: 12 }, { width: 18 }],
+    data: [
+      [{ value: '택배사 코드', fontWeight: 'bold' as const, backgroundColor: INPUT_HEAD }, { value: '택배사', fontWeight: 'bold' as const, backgroundColor: INPUT_HEAD }],
+      ...COURIER_CODES.map(c => [{ value: c.code, type: String }, { value: c.name, type: String }]),
+      [],
+      [{ value: '주문 시트의 노란 칸에 택배사 코드(두 자리)와 송장번호를 적어 올려 주세요.', type: String }],
+      [{ value: '송장번호가 빈 줄은 발송 처리하지 않아요.', type: String }],
+    ],
+  };
+}
+
 export async function downloadOrdersExcel(orders: StoreOrder[], fileName: string) {
-  const header = COLUMNS.map(c => ({ value: c.title, fontWeight: 'bold' as const, backgroundColor: '#EEF2F7' }));
+  const header = COLUMNS.map(c => ({ value: c.title, fontWeight: 'bold' as const, backgroundColor: c.input ? INPUT_HEAD : '#EEF2F7' }));
   const rows = orders.map(o => COLUMNS.map(c => {
     const v = c.value(o);
-    return typeof v === 'number' ? { value: v, type: Number } : { value: v, type: String };
+    const style = c.input ? { backgroundColor: INPUT_CELL } : {};
+    return typeof v === 'number' ? { value: v, type: Number, ...style } : { value: v, type: String, ...style };
   }));
-  await writeXlsxFile([header, ...rows], {
-    columns: COLUMNS.map(c => ({ width: c.width })),
-    stickyRowsCount: 1,
-  }).toFile(fileName);
+  await writeXlsxFile([
+    { sheet: '주문', data: [header, ...rows], columns: COLUMNS.map(c => ({ width: c.width })), stickyRowsCount: 1 },
+    codeSheet(),
+  ]).toFile(fileName);
 }
 
 export interface ShipRow { row: number; id: string; trackingCompany: string; trackingNumber: string }
 export interface ParsedShipFile { rows: ShipRow[]; problems: string[]; noTrackingCount: number }
 
-const COURIER_ALIASES: [RegExp, string][] = [
-  [/^(cj|씨제이|대한통운|cj대한통운)/i, 'CJ대한통운'],
-  [/^한진/, '한진택배'],
-  [/^롯데/, '롯데택배'],
-  [/^(우체국|우편)/, '우체국택배'],
-  [/^로젠/, '로젠택배'],
-  [/^경동/, '경동택배'],
-];
-
-/** 택배사 이름을 화면의 택배사 목록 이름으로 맞춘다(예: 'CJ', '대한통운' → 'CJ대한통운'). 모르는 이름은 그대로 둔다. */
-export function normalizeCourier(v: string) {
+/**
+ * 택배사 칸 값을 택배사 이름으로. 코드(01 · 1 · '01')가 기본이고, 이름도 받는다. 모르면 ''.
+ */
+export function courierFromCell(v: string) {
   const s = v.replace(/\s+/g, '');
   if (!s) return '';
-  if (SHIPPING_COURIERS.includes(s)) return s;
-  for (const [re, name] of COURIER_ALIASES) if (re.test(s)) return name;
-  return v.trim();
+  if (/^\d{1,2}$/.test(s)) return COURIER_CODES.find(c => c.code === s.padStart(2, '0'))?.name || '';
+  const byName = COURIER_CODES.find(c => c.name === s);
+  if (byName) return byName.name;
+  const aliases: [RegExp, string][] = [
+    [/^(cj|씨제이|대한통운)/i, 'CJ대한통운'], [/^한진/, '한진택배'], [/^롯데/, '롯데택배'],
+    [/^(우체국|우편)/, '우체국택배'], [/^로젠/, '로젠택배'], [/^경동/, '경동택배'],
+  ];
+  for (const [re, name] of aliases) if (re.test(s)) return name;
+  return '';
 }
 
 const cellText = (v: unknown) => {
@@ -78,17 +98,19 @@ const cellText = (v: unknown) => {
   if (typeof v === 'number') return Number.isInteger(v) ? v.toFixed(0) : String(v);
   return String(v).trim();
 };
+const norm = (v: unknown) => cellText(v).replace(/\s/g, '');
 
-/** 송장 엑셀 읽기. defaultCourier 는 택배사 칸이 빈 줄에 쓴다. */
+/** 송장 엑셀 읽기. defaultCourier 는 택배사 코드 칸이 빈 줄에 쓴다(빈 문자열이면 빈 칸을 오류로 본다). */
 export async function parseShipExcel(file: File, defaultCourier: string): Promise<ParsedShipFile> {
   const sheets = await readXlsxFile(file);
   const data = sheets[0]?.data || [];
   const problems: string[] = [];
-  const headerIdx = data.findIndex(r => r.some(c => cellText(c).replace(/\s/g, '') === ORDER_ID_COL));
+  const headerIdx = data.findIndex(r => r.some(c => norm(c) === ORDER_ID_COL));
   if (headerIdx < 0) throw new Error(`첫 번째 시트에서 '${ORDER_ID_COL}' 열을 찾지 못했어요. 내려받은 엑셀 양식을 그대로 써 주세요.`);
-  const header = data[headerIdx].map(c => cellText(c).replace(/\s/g, ''));
+  const header = data[headerIdx].map(norm);
   const idCol = header.indexOf(ORDER_ID_COL);
-  const courierCol = header.indexOf(COURIER_COL);
+  // '택배사 코드'(지금 양식) 또는 '택배사'(예전 양식)
+  const courierCol = header.findIndex(h => h === '택배사코드' || h === '택배사');
   const trackingCol = header.indexOf(TRACKING_COL);
   if (trackingCol < 0) throw new Error(`'${TRACKING_COL}' 열이 없어요. 내려받은 엑셀 양식을 그대로 써 주세요.`);
 
@@ -105,19 +127,26 @@ export async function parseShipExcel(file: File, defaultCourier: string): Promis
     if (!trackingNumber) { noTrackingCount++; continue; }
     if (seen.has(id)) { problems.push(`${rowNo}행: 주문번호 ${id}가 위에 이미 있어요.`); continue; }
     if (trackingNumber.length > 60) { problems.push(`${rowNo}행: 송장번호가 너무 길어요.`); continue; }
-    const trackingCompany = normalizeCourier(courierCol >= 0 ? cellText(r[courierCol]) : '') || defaultCourier;
-    if (!trackingCompany) { problems.push(`${rowNo}행: 택배사가 비어 있어요.`); continue; }
+    const raw = courierCol >= 0 ? cellText(r[courierCol]) : '';
+    const trackingCompany = raw ? courierFromCell(raw) : defaultCourier;
+    if (raw && !trackingCompany) { problems.push(`${rowNo}행: 택배사 코드 '${raw}'는 코드표에 없어요.`); continue; }
+    if (!trackingCompany) { problems.push(`${rowNo}행: 택배사 코드가 비어 있어요.`); continue; }
     seen.add(id);
     rows.push({ row: rowNo, id, trackingCompany, trackingNumber });
   }
   return { rows, problems, noTrackingCount };
 }
 
-/** 처리하지 못한 줄을 엑셀로(사유 포함) 내려받는다. 고친 뒤 다시 올리면 된다. */
+/** 처리하지 못한 줄을 엑셀로(사유 포함) 내려받는다. 같은 머리글이라 고친 뒤 그대로 다시 올리면 된다. */
 export async function downloadFailedRows(rows: (ShipRow & { error: string })[], fileName: string) {
   const header = [ORDER_ID_COL, COURIER_COL, TRACKING_COL, '실패 사유'].map(v => ({ value: v, fontWeight: 'bold' as const, backgroundColor: '#FEF2F2' }));
   await writeXlsxFile([
-    header,
-    ...rows.map(r => [r.id, r.trackingCompany, r.trackingNumber, r.error].map(v => ({ value: v, type: String }))),
-  ], { columns: [{ width: 26 }, { width: 12 }, { width: 18 }, { width: 40 }], stickyRowsCount: 1 }).toFile(fileName);
+    {
+      sheet: '실패',
+      data: [header, ...rows.map(r => [r.id, courierCodeOf(r.trackingCompany) || r.trackingCompany, r.trackingNumber, r.error].map(v => ({ value: v, type: String })))],
+      columns: [{ width: 26 }, { width: 12 }, { width: 18 }, { width: 40 }],
+      stickyRowsCount: 1,
+    },
+    codeSheet(),
+  ]).toFile(fileName);
 }

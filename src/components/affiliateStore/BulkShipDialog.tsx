@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { CheckCircle2, Download, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react';
-import { affiliateStoreService, SHIPPING_COURIERS, type BulkResult } from '../../services/affiliateStoreService';
+import { affiliateStoreService, COURIER_CODES, type BrandOrderSort, type BulkResult } from '../../services/affiliateStoreService';
 import { downloadFailedRows, downloadOrdersExcel, parseShipExcel, type ParsedShipFile, type ShipRow } from './orderExcel';
 
 /**
@@ -8,6 +8,7 @@ import { downloadFailedRows, downloadOrdersExcel, parseShipExcel, type ParsedShi
  *   1) 발송 대상(결제 완료 · 배송 준비) 주문을 엑셀로 받는다.
  *   2) 택배사 · 송장번호를 채워 올리면 미리보기를 보여 준다.
  *   3) 확인하면 50건씩 나눠 발송 처리하고, 실패한 줄은 사유와 함께 다시 내려받을 수 있다.
+ * 택배사는 코드 두 자리(01 CJ대한통운 …)로 적는다. 코드표는 이 창과 엑셀 두 번째 시트에 있다.
  * 배송 중 주문의 송장을 바꿔 올리면 송장 수정이 되고, 같은 송장이면 건너뛴다(문자가 다시 가지 않음).
  */
 
@@ -16,13 +17,14 @@ const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 interface Props {
   businessUsername: string;
+  sort: BrandOrderSort;
   onClose: () => void;
   onDone: () => void;
 }
 
-const BulkShipDialog: React.FC<Props> = ({ businessUsername, onClose, onDone }) => {
+const BulkShipDialog: React.FC<Props> = ({ businessUsername, sort, onClose, onDone }) => {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [defaultCourier, setDefaultCourier] = useState(SHIPPING_COURIERS[0]);
+  const [defaultCourier, setDefaultCourier] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [parsed, setParsed] = useState<ParsedShipFile | null>(null);
   const [error, setError] = useState('');
@@ -32,7 +34,7 @@ const BulkShipDialog: React.FC<Props> = ({ businessUsername, onClose, onDone }) 
 
   const downloadTemplate = async () => {
     setBusy('template'); setError('');
-    const res = await affiliateStoreService.brandOrdersExport(businessUsername, 'to_ship');
+    const res = await affiliateStoreService.brandOrdersExport(businessUsername, 'to_ship', sort);
     if (res.error) { setBusy(''); setError(res.error); return; }
     if (!res.orders?.length) { setBusy(''); setError('발송할 주문(결제 완료 · 배송 준비)이 없어요.'); return; }
     await downloadOrdersExcel(res.orders, `송장입력양식_${stamp()}.xlsx`).catch(() => setError('엑셀 파일을 만들지 못했어요.'));
@@ -95,7 +97,7 @@ const BulkShipDialog: React.FC<Props> = ({ businessUsername, onClose, onDone }) 
           <>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
               <p><b>1.</b> 발송할 주문(결제 완료 · 배송 준비)을 엑셀로 받아요.</p>
-              <p><b>2.</b> 파일의 <b>택배사 · 송장번호</b> 칸을 채워요. 송장번호가 빈 줄은 건너뛰어요.</p>
+              <p><b>2.</b> 맨 오른쪽 노란 칸에 <b>택배사 코드</b>(아래 표)와 <b>송장번호</b>를 적어요. 송장번호가 빈 줄은 건너뛰어요.</p>
               <p><b>3.</b> 파일을 올리고 확인하면 발송 처리되고, 구매자에게 발송 알림 문자가 가요.</p>
             </div>
             <button onClick={downloadTemplate} disabled={!!busy} className="mt-3 w-full h-11 rounded-xl border border-slate-200 text-sm font-black text-slate-700 flex items-center justify-center gap-2 disabled:opacity-50">
@@ -103,13 +105,26 @@ const BulkShipDialog: React.FC<Props> = ({ businessUsername, onClose, onDone }) 
               발송 대상 주문 엑셀 받기
             </button>
 
-            <label className="block mt-4 text-[11px] font-black text-slate-500">택배사 칸이 비어 있을 때 쓸 택배사</label>
+            <div className="mt-4">
+              <p className="text-[11px] font-black text-slate-500">택배사 코드표</p>
+              <div className="mt-1 grid grid-cols-4 gap-1 text-[11px]">
+                {COURIER_CODES.map(c => (
+                  <div key={c.code} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 flex items-center gap-1.5">
+                    <b className="text-amber-700">{c.code}</b><span className="text-slate-700 truncate">{c.name}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">엑셀이 01을 1로 바꿔도 괜찮아요. 코드표에 없는 값은 오류로 알려 드려요. 코드표는 내려받은 엑셀의 두 번째 시트에도 있어요.</p>
+            </div>
+
+            <label className="block mt-3 text-[11px] font-black text-slate-500">택배사 코드 칸이 비어 있을 때</label>
             <select
               value={defaultCourier}
               onChange={e => { setDefaultCourier(e.target.value); if (file) void readFile(file, e.target.value); }}
               className="mt-1 w-full h-11 px-3 rounded-xl border border-slate-200 text-sm"
             >
-              {SHIPPING_COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="">오류로 표시(코드를 꼭 적게)</option>
+              {COURIER_CODES.map(c => <option key={c.code} value={c.name}>{c.code} {c.name}로 처리</option>)}
             </select>
 
             <input
@@ -149,7 +164,7 @@ const BulkShipDialog: React.FC<Props> = ({ businessUsername, onClose, onDone }) 
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                         {parsed.rows.map(r => (
-                          <tr key={r.id}><td className="px-2 py-1 text-slate-400">{r.row}</td><td className="px-2 truncate max-w-[140px]">{r.id}</td><td className="px-2">{r.trackingCompany}</td><td className="px-2 font-bold">{r.trackingNumber}</td></tr>
+                          <tr key={r.id}><td className="px-2 py-1 text-slate-400">{r.row}</td><td className="px-2 truncate max-w-[140px]">{r.id}</td><td className="px-2">{COURIER_CODES.find(c => c.name === r.trackingCompany)?.code} {r.trackingCompany}</td><td className="px-2 font-bold">{r.trackingNumber}</td></tr>
                         ))}
                       </tbody>
                     </table>
