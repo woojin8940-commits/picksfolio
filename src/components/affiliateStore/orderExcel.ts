@@ -6,7 +6,7 @@ import { COURIER_CODES, courierCodeOf, ORDER_STATUS_LABEL, type StoreOrder } fro
  * 브랜드 주문 엑셀 처리.
  *   내려받기: 주문 목록(화면에서 고른 필터 · 정렬 그대로) + 두 번째 시트 '택배사 코드표'.
  *     맨 오른쪽 노란 칸 '택배사 코드' · '송장번호'를 채워 다시 올리면 일괄 발송된다.
- *   택배사 규칙: 코드 두 자리(01 CJ대한통운, 02 한진택배 …, COURIER_CODES). 엑셀이 01을 1로 바꿔도 같은 코드로 읽는다.
+ *   택배사 규칙: 코드 두 자리(01 CJ대한통운, 02 한진택배 …, COURIER_CODES). 엑셀이 01을 1로 바꿔도 같은 코드로 읽는다. '기타'는 없다.
  *     예전 양식처럼 택배사 이름을 적어도 읽지만, 코드표에 없는 값은 오류로 보여 준다.
  *   올리기: 첫 시트에서 '주문번호' 머리글 줄을 찾고, 송장번호가 빈 줄은 건너뛴다.
  */
@@ -83,11 +83,15 @@ export function courierFromCell(v: string) {
   const s = v.replace(/\s+/g, '');
   if (!s) return '';
   if (/^\d{1,2}$/.test(s)) return COURIER_CODES.find(c => c.code === s.padStart(2, '0'))?.name || '';
-  const byName = COURIER_CODES.find(c => c.name === s);
+  const byName = COURIER_CODES.find(c => c.name.replace(/\s+/g, '') === s);
   if (byName) return byName.name;
   const aliases: [RegExp, string][] = [
     [/^(cj|씨제이|대한통운)/i, 'CJ대한통운'], [/^한진/, '한진택배'], [/^롯데/, '롯데택배'],
-    [/^(우체국|우편)/, '우체국택배'], [/^로젠/, '로젠택배'], [/^경동/, '경동택배'],
+    [/^(우체국|우편|epost)/i, '우체국택배'], [/^로젠/, '로젠택배'], [/^경동/, '경동택배'],
+    [/^대신/, '대신택배'], [/^일양/, '일양로지스'], [/^합동/, '합동택배'], [/^천일/, '천일택배'],
+    [/^건영/, '건영택배'], [/^(cu|씨유)/i, 'CU 편의점택배'], [/^(gs|지에스|cvsnet)/i, 'GS25 편의점택배'],
+    [/^한의사랑/, '한의사랑택배'], [/^slx/i, 'SLX택배'], [/^홈픽/, '홈픽'], [/^우리/, '우리택배'],
+    [/^용마/, '용마로지스'], [/^농협/, '농협택배'], [/^세방/, '세방택배'],
   ];
   for (const [re, name] of aliases) if (re.test(s)) return name;
   return '';

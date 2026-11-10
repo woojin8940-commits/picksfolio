@@ -20,6 +20,7 @@ import {
   logEvent,
   notify,
   trackingUrl,
+  SHIPPING_COMPANIES,
 } from "./_shared/affiliate-store-orders.mts";
 import { queryRows } from "./_shared/affiliate-payouts.mts";
 import { pageOf, readCursor } from "./_shared/list-cursor.mts";
@@ -368,6 +369,7 @@ async function shipOne(db: any, brand: string, id: string, companyIn: unknown, n
   const company = clip(companyIn, 40);
   const number = clip(numberIn, 60);
   if (!company || !number) return "택배사와 송장번호를 입력해 주세요.";
+  if (!SHIPPING_COMPANIES.includes(company)) return "택배사 코드표에 있는 택배사를 골라 주세요.";
   const rows = (await db.sql`
     UPDATE affiliate_store_orders SET status = 'shipped', tracking_company = ${company}, tracking_number = ${number},
       shipped_at = COALESCE(shipped_at, NOW()), updated_at = NOW()

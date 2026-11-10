@@ -9,6 +9,7 @@ import {
   COMMISSION_STATUS_LABEL,
   COMMISSION_STATUS_STYLE,
   BRAND_ORDER_SORTS,
+  SHIPPING_COURIERS,
   type BrandOrderSort,
   type BrandOpsSummary,
   type ListCursor,
@@ -64,7 +65,7 @@ const CANCEL_BY: Record<string, string> = { buyer: '구매자 취소', brand: '�
 const CANCEL_BY_STYLE: Record<string, string> = {
   buyer: 'bg-red-50 text-red-600', brand: 'bg-slate-100 text-slate-600', operator: 'bg-violet-50 text-violet-600', system: 'bg-slate-100 text-slate-500',
 };
-const COURIERS = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배', '경동택배', '기타'];
+const COURIERS = SHIPPING_COURIERS;
 
 type Filter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all';
 const FILTERS: { key: Filter; label: string; match: (o: StoreOrder) => boolean }[] = [
@@ -247,7 +248,7 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const openDialog = (kind: 'ship' | 'approve' | 'reject' | 'cancel' | 'refund', order: StoreOrder) => {
     setDialog({ kind, order });
     setDialogError('');
-    setF1(kind === 'ship' ? order.trackingCompany || COURIERS[0] : '');
+    setF1(kind === 'ship' ? (COURIERS.includes(order.trackingCompany || '') ? order.trackingCompany! : COURIERS[0]) : '');
     setF2(kind === 'ship' ? order.trackingNumber || '' : '');
   };
 

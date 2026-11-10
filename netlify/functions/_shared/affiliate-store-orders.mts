@@ -320,6 +320,9 @@ export function businessDaysSince(iso: string | Date, now = new Date()): number 
 }
 
 /** 송장 번호로 배송 조회 링크(택배사별). 모르는 택배사는 네이버 검색으로 보낸다. */
+/** 송장에 쓸 수 있는 택배사(화면 · 엑셀 코드표와 같은 목록 · '기타' 없음). */
+export const SHIPPING_COMPANIES: readonly string[] = ["CJ대한통운", "한진택배", "롯데택배", "우체국택배", "로젠택배", "경동택배", "대신택배", "일양로지스", "합동택배", "천일택배", "건영택배", "CU 편의점택배", "GS25 편의점택배", "한의사랑택배", "SLX택배", "홈픽", "우리택배", "용마로지스", "농협택배", "세방택배"];
+
 export function trackingUrl(company: string, number: string): string {
   const n = encodeURIComponent(String(number || "").replace(/\s/g, ""));
   if (!n) return "";

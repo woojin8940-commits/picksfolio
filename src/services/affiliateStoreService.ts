@@ -41,8 +41,7 @@ export const SHIPPING_STATUS_STYLE: Record<ShippingStatus, string> = {
 };
 
 /** 협찬 상품 택배사(서버 목록과 같다). */
-export const SHIPPING_COURIERS = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배', '경동택배', '기타'];
-/** 엑셀 송장 일괄 등록에 쓰는 택배사 코드(두 자리). 엑셀의 '택배사 코드' 칸에 이 숫자를 적는다. */
+/** 국내 택배사 코드(두 자리 · 01~06 주요 택배사, 07~ 중소 · 편의점 택배). 송장 입력 선택지와 엑셀 '택배사 코드' 칸이 같이 쓴다. 한번 정한 번호는 바꾸지 않고 새 택배사는 뒤에 붙인다. 엑셀의 '택배사 코드' 칸에 이 숫자를 적는다. */
 export const COURIER_CODES: { code: string; name: string }[] = [
   { code: '01', name: 'CJ대한통운' },
   { code: '02', name: '한진택배' },
@@ -50,8 +49,23 @@ export const COURIER_CODES: { code: string; name: string }[] = [
   { code: '04', name: '우체국택배' },
   { code: '05', name: '로젠택배' },
   { code: '06', name: '경동택배' },
-  { code: '99', name: '기타' },
+  { code: '07', name: '대신택배' },
+  { code: '08', name: '일양로지스' },
+  { code: '09', name: '합동택배' },
+  { code: '10', name: '천일택배' },
+  { code: '11', name: '건영택배' },
+  { code: '12', name: 'CU 편의점택배' },
+  { code: '13', name: 'GS25 편의점택배' },
+  { code: '14', name: '한의사랑택배' },
+  { code: '15', name: 'SLX택배' },
+  { code: '16', name: '홈픽' },
+  { code: '17', name: '우리택배' },
+  { code: '18', name: '용마로지스' },
+  { code: '19', name: '농협택배' },
+  { code: '20', name: '세방택배' },
 ];
+/** 택배사 이름 목록(송장 입력 선택지). '기타' 없이 코드표의 택배사만 쓴다. */
+export const SHIPPING_COURIERS = COURIER_CODES.map(c => c.name);
 export const courierCodeOf = (name?: string | null) => COURIER_CODES.find(c => c.name === name)?.code || '';
 
 export interface SelectionShipping {

@@ -596,6 +596,8 @@ describe("D. 주문 관리 · 취소·반품", () => {
     const one = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&orderId=${paid[0].id}`);
     assert.equal(one.body.orders[0].status, "shipped");
     assert.equal(one.body.orders[0].trackingNumber, "555000000");
+    const unknown = await call(h.ops, BRAND, "POST", OPS_POST, { action: "bulk_ship", items: [{ id: paid[0].id, trackingCompany: "기타", trackingNumber: "777" }] });
+    assert.equal(unknown.body.results[0].ok, false, "코드표에 없는 택배사('기타')는 받지 않는다");
     const other = await call(h.ops, BRAND2, "POST", OPS_POST, { action: "bulk_ship", items: [{ id: paid[0].id, trackingCompany: "CJ대한통운", trackingNumber: "9" }] });
     assert.equal(other.body.results?.[0]?.ok ?? false, false, "다른 브랜드 주문은 처리되지 않는다");
   });

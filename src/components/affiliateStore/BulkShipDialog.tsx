@@ -107,7 +107,7 @@ const BulkShipDialog: React.FC<Props> = ({ businessUsername, sort, onClose, onDo
 
             <div className="mt-4">
               <p className="text-[11px] font-black text-slate-500">택배사 코드표</p>
-              <div className="mt-1 grid grid-cols-4 gap-1 text-[11px]">
+              <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-1 text-[11px] max-h-40 overflow-y-auto">
                 {COURIER_CODES.map(c => (
                   <div key={c.code} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 flex items-center gap-1.5">
                     <b className="text-amber-700">{c.code}</b><span className="text-slate-700 truncate">{c.name}</span>
