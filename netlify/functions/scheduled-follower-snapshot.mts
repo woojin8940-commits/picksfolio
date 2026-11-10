@@ -5,6 +5,7 @@ import {
   applyFollowerCounts,
   applyRenamedHandle,
   linkIsUsable,
+  linkStampOf,
   syncChannelFromMeta,
   type MetaLink,
   type MetaLinkScope,
@@ -20,7 +21,11 @@ import { fetchProfileCounts, recordFollowerSnapshot } from "./_shared/creator-in
  *
  * 대상은 이미 연동돼 있는 계정 전부다. 보관함이 두 곳이라(캠페인 등록 collab,
  * 디엠 자동화 dm) 양쪽을 훑고 같은 사용자는 한 번만 처리한다 — 같은 사람의 하루에
- * 두 줄이 필요하지 않고, collab 연동이 있으면 그 계정이 본인이 고른 계정이다.
+ * 두 줄이 필요하지 않다. 양쪽에 다 있으면 **더 최근에 붙인 쪽**을 쓴다
+ * (resolveSharedLink 와 같은 규칙). 예전에는 collab 을 무조건 앞세웠는데, 새 연동은
+ * 모두 dm 에 들어가므로 다른 계정으로 다시 연동한 사람은 매일 밤 몇 달 전 옛 계정의
+ * 아이디 · 팔로워 · 릴스로 명단 행이 되돌아갔다. 브랜드는 지원자의 지금 계정이 아닌
+ * 옛 계정을 보게 됐다.
  *
  * ── 무엇을 쓰는가 ──
  *
@@ -54,7 +59,7 @@ import { fetchProfileCounts, recordFollowerSnapshot } from "./_shared/creator-in
  * 다투어 쓰면 어느 쪽이 먼저 돌았는지에 따라 화면 안내가 달라진다.
  */
 
-/** 훑을 보관함. 같은 사용자가 양쪽에 있으면 앞쪽(collab)을 쓴다. */
+/** 훑을 보관함. 같은 사용자가 양쪽에 있으면 더 최근 연동을 쓰고, 시각이 같으면 앞쪽(collab)을 쓴다. */
 const SOURCES = [
   { store: "collab-instagram", prefix: "ig_", scope: "collab" },
   { store: "dm-automation", prefix: "dm_", scope: "dm" },
@@ -80,7 +85,7 @@ const FULL_SYNC_CHUNK = 4;
 export default async () => {
   const db = getDatabase();
 
-  // 사용자명 → 쓸 연동. 먼저 담긴 쪽(collab)이 이긴다.
+  // 사용자명 → 쓸 연동. 더 최근에 붙인 쪽이 이기고, 같으면 먼저 담긴 쪽(collab)이 이긴다.
   const links = new Map<string, { link: MetaLink; scope: MetaLinkScope }>();
 
   for (const source of SOURCES) {
@@ -89,17 +94,18 @@ export default async () => {
       const { blobs } = await store.list({ prefix: source.prefix });
       for (const blob of blobs) {
         const username = blob.key.slice(source.prefix.length).toLowerCase();
-        if (!username || links.has(username)) continue;
+        if (!username) continue;
+        const known = links.get(username);
+        if (!known && links.size >= MAX_ACCOUNTS) continue;
         const link = (await store.get(blob.key, { type: "json" })) as MetaLink | null;
         // 토큰이 죽은 연동은 부르면 실패한다. 재연동은 사람이 해야 하는 일이다.
         if (!linkIsUsable(link)) continue;
+        if (known && linkStampOf(link) <= linkStampOf(known.link)) continue;
         links.set(username, { link: link!, scope: source.scope });
-        if (links.size >= MAX_ACCOUNTS) break;
       }
     } catch (e) {
       console.error(`[follower-snapshot] ${source.store} 목록 실패:`, (e as Error)?.message);
     }
-    if (links.size >= MAX_ACCOUNTS) break;
   }
 
   if (links.size === 0) {

@@ -284,7 +284,11 @@ async function refreshRecord(storeName: string, key: string): Promise<Outcome> {
         tokenExpiresAt: expiresIn
           ? new Date(Date.now() + expiresIn * 1000).toISOString()
           : latest.tokenExpiresAt,
-        updatedAt: new Date().toISOString(),
+        // updatedAt 은 건드리지 않는다. 그 값은 "이 연동을 언제 붙였나"이고, 두 보관함 중
+        // 어느 쪽이 지금 계정인지 고르는 근거다(resolveSharedLink · linkStampOf). 토큰을
+        // 늘릴 때마다 찍으면, 다른 계정으로 다시 연동한 사람의 옛 연동이 밤사이 "더 최근"
+        // 이 되어 브랜드 화면에 옛 계정이 다시 뜬다.
+        tokenRefreshedAt: new Date().toISOString(),
       };
     });
     if (!updated) return "skipped";

@@ -6,6 +6,7 @@ import {
   isTokenInvalidError,
   loadMetaLink,
   linkIsUsable,
+  linkStampOf,
   MEDIA_FIELDS,
   MEDIA_FIELDS_WITH_VIEWS,
   viewsOnMedia,
@@ -435,16 +436,17 @@ export async function scanCreatorMentions(
 /**
  * 인플루언서 본인 계정의 연동을 찾는다.
  *
- * 조회수(인사이트)는 게시물 주인의 토큰으로만 나온다. 캠페인 등록에서 붙인 연동을
- * 먼저 보고 없으면 디엠 자동화 연동을 본다 — 인사이트 화면이 쓰는 순서와 같다.
+ * 조회수(인사이트)는 게시물 주인의 토큰으로만 나온다. 두 보관함 중 더 최근에 붙인
+ * 연동을 쓴다 — 인사이트 화면과 같은 규칙(resolveSharedLink). 옛 캠페인 연동을 무조건
+ * 앞세우면 다른 계정으로 다시 연동한 사람의 토큰 대신 옛 계정 토큰으로 묻게 된다.
  * 죽은 토큰은 여기서 걸러진다(눌러도 영원히 같은 실패가 나는 호출을 아낀다).
  */
 async function usableCreatorLink(username: string): Promise<MetaLink | null> {
-  for (const scope of ["collab", "dm"] as const) {
-    const link = await loadMetaLink(username, scope);
-    if (linkIsUsable(link)) return link;
-  }
-  return null;
+  const usable = (
+    await Promise.all((["collab", "dm"] as const).map((scope) => loadMetaLink(username, scope)))
+  ).filter((link) => linkIsUsable(link));
+  if (!usable.length) return null;
+  return usable.reduce((a, b) => (linkStampOf(b) > linkStampOf(a) ? b : a));
 }
 
 /**
