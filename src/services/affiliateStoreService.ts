@@ -197,7 +197,8 @@ export interface BrandOpsSummary {
   settlement: { payment: number; commission: number; pgFee: number; platformFee: number; amount: number; confirmedAmount: number };
 }
 
-export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all';
+export interface BulkResult { id: string; ok: boolean; skipped?: boolean; error?: string }
+export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all' | 'to_ship';
 export type BrandClaimFilter = 'all' | 'cancel' | 'return' | 'action';
 
 export interface StoreProduct {
@@ -532,6 +533,15 @@ export const affiliateStoreService = {
   },
   orderAction(account: string, action: string, payload: Record<string, unknown>) {
     return call<{ ok: true }>('POST', OPS, { action, ...payload }, { account });
+  },
+  /** 엑셀 내려받기용: 고른 필터의 주문 전부(최대 3,000건). hasMore 면 잘린 것. */
+  brandOrdersExport(account: string, filter: BrandOrderFilter) {
+    const p = new URLSearchParams({ scope: 'brand', view: 'orders', filter, export: '1' });
+    return call<{ orders: StoreOrder[]; hasMore: boolean }>('GET', `${OPS}?${p.toString()}`, undefined, { account });
+  },
+  /** 일괄 처리(한 번에 100건까지 · 줄마다 결과). */
+  bulkOrderAction(account: string, action: 'bulk_ship' | 'bulk_prepare', payload: { items?: { id: string; trackingCompany: string; trackingNumber: string }[]; ids?: string[] }) {
+    return call<{ ok: true; results: BulkResult[] }>('POST', OPS, { action, ...payload }, { account });
   },
 
   // 운영자 미처리 목록

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, Loader2, RotateCcw, Truck } from 'lucide-react';
+import { Bell, ChevronDown, Download, FileSpreadsheet, List, Loader2, Rows3, RotateCcw, Truck } from 'lucide-react';
+import BulkShipDialog from './BulkShipDialog';
+import { downloadOrdersExcel } from './orderExcel';
 import {
   affiliateStoreService,
   won,
@@ -26,7 +28,17 @@ import {
  *
  * 목록은 고른 필터로 서버에서 걸러 40건씩(커서) 받는다. 필터 숫자 · 정산 합계는 서버가 브랜드 전체 주문으로 센다.
  * 필터를 바꾸면 목록만 다시 받고, 주문을 처리하면 그 주문 한 줄과 숫자만 새로 받는다.
+ *
+ * 주문이 많을 때를 위해 '간단히 보기'(한 줄씩 · 누르면 펼침)와 '자세히 보기'(카드)를 고를 수 있다(브라우저에 기억).
+ * 엑셀: 지금 필터의 주문을 내려받거나(선택한 주문만도 가능), 송장을 채운 엑셀을 올려 일괄 발송한다(BulkShipDialog).
+ * 간단히 보기에서 여러 주문을 골라 '배송 준비'로 한 번에 바꿀 수 있다.
  */
+const DENSITY_KEY = 'picks.brandOrders.density';
+type Density = 'compact' | 'detail';
+const readDensity = (): Density => {
+  try { return localStorage.getItem(DENSITY_KEY) === 'detail' ? 'detail' : 'compact'; } catch { return 'compact'; }
+};
+const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 const STYLE: Record<string, string> = {
   paid: 'bg-blue-50 text-blue-600',
@@ -95,6 +107,16 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
   const [f2, setF2] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [notiOpen, setNotiOpen] = useState(false);
+  const [density, setDensityState] = useState<Density>(readDensity);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const setDensity = (d: Density) => {
+    setDensityState(d);
+    try { localStorage.setItem(DENSITY_KEY, d); } catch { /* 기억만 못 한다 */ }
+  };
   // 숫자 · 정산 합계는 처음 한 번(과 주문 처리 뒤)만 받는다. 필터를 바꿀 때는 목록만.
   const summaryLoaded = useRef(false);
   // 필터를 빠르게 바꿀 때 늦게 도착한 예전 응답이 목록을 덮지 않게 한다.
@@ -135,6 +157,50 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     setHasMore(!!res.hasMore);
   }, [businessUsername, view, filter, claimFilter, applySummary]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setSelected(new Set()); setExpanded(new Set()); }, [filter, view]);
+
+  /** 일괄 처리 뒤: 숫자까지 새로 받고 목록을 처음부터 다시 받는다. */
+  const reloadAll = () => {
+    summaryLoaded.current = false;
+    setSelected(new Set());
+    void load();
+  };
+
+  const exportExcel = async (only?: StoreOrder[]) => {
+    setExporting(true);
+    try {
+      let list = only;
+      if (!list) {
+        const res = await affiliateStoreService.brandOrdersExport(businessUsername, filter);
+        if (res.error) { window.alert(res.error); return; }
+        list = res.orders || [];
+        if (res.hasMore) window.alert('주문이 많아 최근 3,000건만 내려받아요. 필터를 나눠 받아 주세요.');
+      }
+      if (!list.length) { window.alert('내려받을 주문이 없어요.'); return; }
+      const label = FILTERS.find(f => f.key === filter)?.label.replace(/\s*·\s*/g, '_') || '주문';
+      await downloadOrdersExcel(list, `주문목록_${only ? '선택' : label}_${stamp()}.xlsx`);
+    } catch {
+      window.alert('엑셀 파일을 만들지 못했어요.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const bulkPrepare = async (ids: string[]) => {
+    if (!ids.length) return;
+    if (!window.confirm(`결제 완료 주문 ${ids.length}건을 배송 준비로 바꿀까요? 구매자에게 알림이 가요.`)) return;
+    setBulkBusy(true);
+    let failed = 0;
+    let lastError = '';
+    for (let i = 0; i < ids.length; i += 100) {
+      const res = await affiliateStoreService.bulkOrderAction(businessUsername, 'bulk_prepare', { ids: ids.slice(i, i + 100) });
+      if (res.error) { failed += Math.min(100, ids.length - i); lastError = res.error; continue; }
+      (res.results || []).forEach(r => { if (!r.ok) { failed++; lastError = r.error || ''; } });
+    }
+    setBulkBusy(false);
+    if (failed) window.alert(`${ids.length - failed}건 처리 · ${failed}건 실패${lastError ? `(${lastError})` : ''}`);
+    reloadAll();
+  };
 
   /** 처리한 주문 한 줄만 새로 받는다. 지금 필터에 더는 맞지 않으면 목록에서 뺀다. 숫자도 함께 새로 받는다. */
   const refreshOrder = async (id: string) => {
@@ -250,6 +316,67 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
     );
   };
 
+  const orderCard = (o: StoreOrder) => (
+                <div key={o.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${o.status === 'return_requested' ? 'border-orange-200' : 'border-slate-100'}`}>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded ${STYLE[o.status]}`}>{ORDER_STATUS_LABEL[o.status]}</span>
+                        {o.status === 'cancelled' && o.cancelledBy && (
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded ${CANCEL_BY_STYLE[o.cancelledBy] || 'bg-slate-100 text-slate-500'}`}>{CANCEL_BY[o.cancelledBy] || o.cancelledBy}</span>
+                        )}
+                        {o.returnRequest && <span className="text-[10px] font-black px-2 py-0.5 rounded bg-orange-50 text-orange-600">{RETURN_LABEL[o.returnRequest.status]}</span>}
+                        {o.isNew && <span className="text-[9px] font-black text-red-500">NEW</span>}
+                      </div>
+                      <p className="text-sm font-black text-slate-900 mt-1 truncate">{o.productName}{o.optionName ? ` · ${o.optionName}` : ''} × {o.quantity}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{dt(o.paidAt || o.createdAt)} · {o.id}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-black text-slate-900">{won(o.totalAmount)}</p>
+                      <p className="text-[11px] text-slate-400">
+                        <a href={`/${o.influencerUsername}`} target="_blank" rel="noreferrer" className="font-bold text-blue-600">@{o.influencerUsername}</a>{' '}
+                        수수료 {o.commissionStatus === 'cancelled' ? <s>{won(o.commissionAmount)}</s> : won(o.commissionAmount)}
+                      </p>
+                      {o.commissionStatus && (
+                        <p className="text-[10px] mt-0.5">
+                          <span className={`font-black px-1.5 py-0.5 rounded ${COMMISSION_STATUS_STYLE[o.commissionStatus]}`}>{COMMISSION_STATUS_LABEL[o.commissionStatus]}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 주문별 정산 내역. 수수료율은 주문 시점에 고정된 값이다. */}
+                  {o.settlement && (
+                    <div className={`mt-3 grid grid-cols-2 md:grid-cols-5 gap-1.5 text-[11px] rounded-xl p-2.5 ${o.settlement.included ? 'bg-blue-50/50' : 'bg-slate-50 text-slate-400'}`}>
+                      <div><p className="text-slate-400">결제 금액</p><p className="font-black">{won(o.settlement.payment)}</p><p className="text-[10px] text-slate-400">상품 {won(o.settlement.product)} + 배송 {won(o.settlement.shipping)}</p></div>
+                      <div><p className="text-slate-400">인플루언서 수수료</p><p className="font-black">−{won(o.settlement.commission)}</p><p className="text-[10px] text-slate-400">상품 금액의 {o.commissionRate}%</p></div>
+                      <div><p className="text-slate-400">PG 수수료(결제 금액 기준, 배송비 포함)</p><p className="font-black">−{won(o.settlement.pgFee)}</p><p className="text-[10px] text-slate-400">{o.payMethod === 'KAKAOPAY' ? '카카오페이' : '카드'} {o.pgRate}% · 배송비 포함</p></div>
+                      <div><p className="text-slate-400">플랫폼 수수료</p><p className="font-black">−{won(o.settlement.platformFee)}</p><p className="text-[10px] text-slate-400">상품 금액의 {o.platformRate}%</p></div>
+                      <div><p className="text-slate-400">정산 예정액</p><p className={`font-black ${o.settlement.included ? 'text-blue-700' : ''}`}>{won(o.settlement.amount)}</p><p className="text-[10px] text-slate-400">{!o.settlement.included ? '취소 · 환불로 정산 제외' : o.settlement.partialRefund ? `반품 환불 ${won(o.settlement.partialRefund)} 제외 · 남은 배송비 정산` : ''}</p></div>
+                    </div>
+                  )}
+
+                  <div className="grid md:grid-cols-2 gap-2 mt-3 text-xs">
+                    <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
+                      <p className="text-[10px] font-black text-slate-400">받는 분</p>
+                      <p className="font-bold text-slate-800">{o.recipientName} · {o.recipientPhone}</p>
+                      <p className="text-slate-600">{o.postcode ? `(${o.postcode}) ` : ''}{o.address1} {o.address2}</p>
+                      {o.deliveryMemo && <p className="text-slate-500">메모: {o.deliveryMemo}</p>}
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
+                      <p className="text-[10px] font-black text-slate-400">주문자</p>
+                      <p className="font-bold text-slate-800">{o.buyerName} · {o.buyerPhone}</p>
+                      {o.trackingNumber && (
+                        <p className="text-slate-600 pt-1">송장 {o.trackingCompany} {o.trackingNumber} {o.trackingUrl && <a href={o.trackingUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold">조회</a>}</p>
+                      )}
+                      {o.status === 'cancelled' && <p className="text-red-500 pt-1">취소 사유: {o.cancelReason}{o.cancelMemo ? ` · ${o.cancelMemo}` : ''} · 환불 {won(o.refundAmount || 0)}</p>}
+                    </div>
+                  </div>
+                  {o.returnRequest && <p className="mt-2 text-[11px] font-bold text-orange-600">반품 내용과 처리는 '취소·반품 현황' 탭에서 확인해 주세요.</p>}
+                  {actions(o)}
+                </div>
+  );
+
   return (
     <>
       <div className="flex items-start justify-between gap-3 mb-4">
@@ -318,6 +445,36 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
             })}
           </div>
 
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+              <button onClick={() => setDensity('compact')} className={`h-7 px-2.5 rounded-md text-[11px] font-black flex items-center gap-1 ${density === 'compact' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><List className="w-3.5 h-3.5" />간단히</button>
+              <button onClick={() => setDensity('detail')} className={`h-7 px-2.5 rounded-md text-[11px] font-black flex items-center gap-1 ${density === 'detail' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><Rows3 className="w-3.5 h-3.5" />자세히</button>
+            </div>
+            <div className="flex gap-1.5">
+              <button disabled={exporting} onClick={() => { void exportExcel(); }} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-[11px] font-black text-slate-600 flex items-center gap-1.5 disabled:opacity-50">
+                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}엑셀 다운로드
+              </button>
+              <button onClick={() => setBulkOpen(true)} className="h-8 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-black flex items-center gap-1.5">
+                <FileSpreadsheet className="w-3.5 h-3.5" />엑셀로 송장 일괄 등록
+              </button>
+            </div>
+          </div>
+
+          {density === 'compact' && selected.size > 0 && (() => {
+            const picked = visible.filter(o => selected.has(o.id));
+            const payable = picked.filter(o => o.status === 'paid').map(o => o.id);
+            return (
+              <div className="sticky top-2 z-20 mb-2 flex items-center gap-2 flex-wrap rounded-xl bg-slate-900 text-white px-3 py-2 text-[11px] shadow-lg">
+                <span className="font-black">{picked.length}건 선택</span>
+                <button disabled={bulkBusy || payable.length === 0} onClick={() => { void bulkPrepare(payable); }} className="h-7 px-2.5 rounded-md bg-white text-slate-900 font-black disabled:opacity-40 flex items-center gap-1">
+                  {bulkBusy && <Loader2 className="w-3 h-3 animate-spin" />}배송 준비로 변경{payable.length ? ` ${payable.length}건` : ''}
+                </button>
+                <button disabled={exporting} onClick={() => { void exportExcel(picked); }} className="h-7 px-2.5 rounded-md bg-white/10 font-black disabled:opacity-40">선택 엑셀 다운로드</button>
+                <button onClick={() => setSelected(new Set())} className="ml-auto text-slate-300 font-bold">선택 해제</button>
+              </div>
+            );
+          })()}
+
           {loading ? listSpinner : visible.length === 0 ? (
             !loadError && (
               <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
@@ -326,68 +483,59 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
               </div>
             )
           ) : (
-            <div className="space-y-2.5">
-              {visible.map(o => (
-                <div key={o.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${o.status === 'return_requested' ? 'border-orange-200' : 'border-slate-100'}`}>
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded ${STYLE[o.status]}`}>{ORDER_STATUS_LABEL[o.status]}</span>
-                        {o.status === 'cancelled' && o.cancelledBy && (
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded ${CANCEL_BY_STYLE[o.cancelledBy] || 'bg-slate-100 text-slate-500'}`}>{CANCEL_BY[o.cancelledBy] || o.cancelledBy}</span>
-                        )}
-                        {o.returnRequest && <span className="text-[10px] font-black px-2 py-0.5 rounded bg-orange-50 text-orange-600">{RETURN_LABEL[o.returnRequest.status]}</span>}
-                        {o.isNew && <span className="text-[9px] font-black text-red-500">NEW</span>}
-                      </div>
-                      <p className="text-sm font-black text-slate-900 mt-1 truncate">{o.productName}{o.optionName ? ` · ${o.optionName}` : ''} × {o.quantity}</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{dt(o.paidAt || o.createdAt)} · {o.id}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-black text-slate-900">{won(o.totalAmount)}</p>
-                      <p className="text-[11px] text-slate-400">
-                        <a href={`/${o.influencerUsername}`} target="_blank" rel="noreferrer" className="font-bold text-blue-600">@{o.influencerUsername}</a>{' '}
-                        수수료 {o.commissionStatus === 'cancelled' ? <s>{won(o.commissionAmount)}</s> : won(o.commissionAmount)}
-                      </p>
-                      {o.commissionStatus && (
-                        <p className="text-[10px] mt-0.5">
-                          <span className={`font-black px-1.5 py-0.5 rounded ${COMMISSION_STATUS_STYLE[o.commissionStatus]}`}>{COMMISSION_STATUS_LABEL[o.commissionStatus]}</span>
-                        </p>
-                      )}
-                    </div>
+            <>
+              {density === 'compact' && (
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="hidden md:grid grid-cols-[28px_minmax(0,1fr)_110px_90px_120px_130px_20px] gap-2 items-center px-3 py-2 bg-slate-50 text-[10px] font-black text-slate-400">
+                    <input type="checkbox" aria-label="전체 선택" checked={visible.length > 0 && visible.every(o => selected.has(o.id))} onChange={e => setSelected(e.target.checked ? new Set(visible.map(o => o.id)) : new Set())} className="w-3.5 h-3.5" />
+                    <span>상품 · 주문번호</span><span>받는 분</span><span className="text-right">결제 금액</span><span>주문일시</span><span className="text-right">처리</span><span />
                   </div>
-
-                  {/* 주문별 정산 내역. 수수료율은 주문 시점에 고정된 값이다. */}
-                  {o.settlement && (
-                    <div className={`mt-3 grid grid-cols-2 md:grid-cols-5 gap-1.5 text-[11px] rounded-xl p-2.5 ${o.settlement.included ? 'bg-blue-50/50' : 'bg-slate-50 text-slate-400'}`}>
-                      <div><p className="text-slate-400">결제 금액</p><p className="font-black">{won(o.settlement.payment)}</p><p className="text-[10px] text-slate-400">상품 {won(o.settlement.product)} + 배송 {won(o.settlement.shipping)}</p></div>
-                      <div><p className="text-slate-400">인플루언서 수수료</p><p className="font-black">−{won(o.settlement.commission)}</p><p className="text-[10px] text-slate-400">상품 금액의 {o.commissionRate}%</p></div>
-                      <div><p className="text-slate-400">PG 수수료(결제 금액 기준, 배송비 포함)</p><p className="font-black">−{won(o.settlement.pgFee)}</p><p className="text-[10px] text-slate-400">{o.payMethod === 'KAKAOPAY' ? '카카오페이' : '카드'} {o.pgRate}% · 배송비 포함</p></div>
-                      <div><p className="text-slate-400">플랫폼 수수료</p><p className="font-black">−{won(o.settlement.platformFee)}</p><p className="text-[10px] text-slate-400">상품 금액의 {o.platformRate}%</p></div>
-                      <div><p className="text-slate-400">정산 예정액</p><p className={`font-black ${o.settlement.included ? 'text-blue-700' : ''}`}>{won(o.settlement.amount)}</p><p className="text-[10px] text-slate-400">{!o.settlement.included ? '취소 · 환불로 정산 제외' : o.settlement.partialRefund ? `반품 환불 ${won(o.settlement.partialRefund)} 제외 · 남은 배송비 정산` : ''}</p></div>
-                    </div>
-                  )}
-
-                  <div className="grid md:grid-cols-2 gap-2 mt-3 text-xs">
-                    <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
-                      <p className="text-[10px] font-black text-slate-400">받는 분</p>
-                      <p className="font-bold text-slate-800">{o.recipientName} · {o.recipientPhone}</p>
-                      <p className="text-slate-600">{o.postcode ? `(${o.postcode}) ` : ''}{o.address1} {o.address2}</p>
-                      {o.deliveryMemo && <p className="text-slate-500">메모: {o.deliveryMemo}</p>}
-                    </div>
-                    <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
-                      <p className="text-[10px] font-black text-slate-400">주문자</p>
-                      <p className="font-bold text-slate-800">{o.buyerName} · {o.buyerPhone}</p>
-                      {o.trackingNumber && (
-                        <p className="text-slate-600 pt-1">송장 {o.trackingCompany} {o.trackingNumber} {o.trackingUrl && <a href={o.trackingUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold">조회</a>}</p>
-                      )}
-                      {o.status === 'cancelled' && <p className="text-red-500 pt-1">취소 사유: {o.cancelReason}{o.cancelMemo ? ` · ${o.cancelMemo}` : ''} · 환불 {won(o.refundAmount || 0)}</p>}
-                    </div>
+                  <div className="divide-y divide-slate-100">
+                    {visible.map(o => {
+                      const open = expanded.has(o.id);
+                      const toggle = () => setExpanded(prev => { const n = new Set(prev); if (n.has(o.id)) n.delete(o.id); else n.add(o.id); return n; });
+                      return (
+                        <div key={o.id} className={o.status === 'return_requested' ? 'bg-orange-50/40' : ''}>
+                          <div className="grid grid-cols-[28px_minmax(0,1fr)_auto_20px] md:grid-cols-[28px_minmax(0,1fr)_110px_90px_120px_130px_20px] gap-2 items-center px-3 py-2 hover:bg-slate-50/70">
+                            <input
+                              type="checkbox"
+                              aria-label="주문 선택"
+                              checked={selected.has(o.id)}
+                              onChange={e => setSelected(prev => { const n = new Set(prev); if (e.target.checked) n.add(o.id); else n.delete(o.id); return n; })}
+                              className="w-3.5 h-3.5"
+                            />
+                            <button onClick={toggle} className="min-w-0 text-left">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded ${STYLE[o.status]}`}>{ORDER_STATUS_LABEL[o.status]}</span>
+                                {o.isNew && <span className="shrink-0 text-[9px] font-black text-red-500">NEW</span>}
+                                {o.returnRequest && <span className="shrink-0 text-[9px] font-black text-orange-600">반품</span>}
+                                <span className="text-xs font-black text-slate-900 truncate">{o.productName}{o.optionName ? ` · ${o.optionName}` : ''} × {o.quantity}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 truncate">
+                                {o.id}
+                                <span className="md:hidden"> · {o.recipientName} · {won(o.totalAmount)}</span>
+                                {o.trackingNumber ? ` · ${o.trackingCompany} ${o.trackingNumber}` : ''}
+                              </p>
+                            </button>
+                            <span className="hidden md:block text-xs text-slate-700 truncate">{o.recipientName}</span>
+                            <span className="hidden md:block text-xs font-black text-slate-900 text-right">{won(o.totalAmount)}</span>
+                            <span className="hidden md:block text-[11px] text-slate-400">{dt(o.paidAt || o.createdAt)}</span>
+                            <div className="flex justify-end">
+                              {o.status === 'paid' && <button disabled={busy === o.id} onClick={() => quick('prepare', o)} className="h-7 px-2.5 rounded-md border border-slate-200 text-slate-600 text-[10px] font-black whitespace-nowrap">배송 준비</button>}
+                              {o.status === 'preparing' && <button onClick={() => openDialog('ship', o)} className="h-7 px-2.5 rounded-md bg-blue-600 text-white text-[10px] font-black whitespace-nowrap">송장 입력</button>}
+                              {o.status === 'shipped' && <button disabled={busy === o.id || (!!o.deliverableAt && new Date(o.deliverableAt).getTime() > now)} onClick={() => quick('deliver', o)} className="h-7 px-2.5 rounded-md bg-emerald-600 text-white text-[10px] font-black whitespace-nowrap disabled:opacity-40">배송 완료</button>}
+                            </div>
+                            <button onClick={toggle} aria-label={open ? '접기' : '펼치기'} className="text-slate-400"><ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} /></button>
+                          </div>
+                          {open && <div className="px-3 pb-3">{orderCard(o)}</div>}
+                        </div>
+                      );
+                    })}
                   </div>
-                  {o.returnRequest && <p className="mt-2 text-[11px] font-bold text-orange-600">반품 내용과 처리는 '취소·반품 현황' 탭에서 확인해 주세요.</p>}
-                  {actions(o)}
                 </div>
-              ))}
-            </div>
+              )}
+              {density === 'detail' && <div className="space-y-2.5">{visible.map(o => orderCard(o))}</div>}
+            </>
           )}
         </>
       )}
@@ -486,6 +634,8 @@ const BrandAffiliateOrders: React.FC<Props> = ({ businessUsername, view, onCount
           )}
         </div>
       )}
+
+      {bulkOpen && <BulkShipDialog businessUsername={businessUsername} onClose={() => setBulkOpen(false)} onDone={reloadAll} />}
 
       {dialog && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
