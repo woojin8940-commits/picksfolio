@@ -8,6 +8,9 @@ import {
   REQUEST_STATUS_LABEL,
   SALE_STATE_LABEL,
   SALE_STATE_STYLE,
+  SHIPPING_STATUS_LABEL,
+  SHIPPING_STATUS_STYLE,
+  DIRECT_DEAL_AGREEMENT_REQUIRED,
   salePeriodText,
   type BrandInfo,
   type CategoryNode,
@@ -21,6 +24,8 @@ import CreatorApplicationGate from '../CreatorApplicationGate';
 import { apiService } from '../../services/apiService';
 import { useCloseOnBack } from '../../hooks/useCloseOnBack';
 import AffiliatePayouts from './AffiliatePayouts';
+import SelectionShippingSheet from './SelectionShippingSheet';
+import DirectDealAgreement from './DirectDealAgreement';
 
 /**
  * 인플루언서 어필리에이트 메뉴.
@@ -29,7 +34,8 @@ import AffiliatePayouts from './AffiliatePayouts';
  *           카테고리와 검색어(상품명 · 브랜드명)로 판매중인 상품을 찾는다.
  *   브랜드  입점한 브랜드 전체. 수천 개가 될 것이라 검색 + 더 보기로 나눠 읽는다.
  *           브랜드를 누르면 그 브랜드의 상품만 본다.
- *   내 신청 브랜드의 선정 · 반려 결과. 선정되면 바로 전용 링크가 열린다.
+ *   내 신청 브랜드의 선정 · 반려 결과. 선정되면 협찬 상품 배송정보를 입력해 협업을 진행하거나
+ *           반려한다(협업 진행 안 함). 브랜드가 송장번호를 입력하면 송장이 보이고 전용 링크가 열린다.
  *
  * 상품을 누르면 캠페인처럼 큰 상세 화면으로 들어간다. 수수료율 · 개당 수수료는 상세 화면에서 보인다
  * (목록에는 보이지 않는다). 선정되면 MY 어필리에이트에서 전용 링크와 판매 성과를 확인한다.
@@ -94,7 +100,7 @@ const MoreButton: React.FC<{ loading: boolean; onClick: () => void; label?: stri
 interface ProductListProps {
   taxonomy: CategoryNode[];
   onTaxonomy: (t: CategoryNode[]) => void;
-  requestByProduct: Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>>;
+  requestByProduct: Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus' | 'shippingStatus'>>;
   onOpen: (p: StoreProduct) => void;
   /** 이 브랜드의 상품만 본다(브랜드 페이지). */
   brand?: string;
@@ -303,13 +309,14 @@ const BrandList: React.FC<{ onOpen: (b: StoreBrand) => void }> = ({ onOpen }) =>
 /** 판매 신청 이후 흐름. 상세 화면에 그대로 보여 준다. */
 const FLOW_STEPS = [
   { title: '판매 신청', desc: '상품을 보고 판매 신청을 보내요.' },
-  { title: '브랜드 선정', desc: '브랜드가 신청을 확인하고 함께할 크리에이터를 선정해요.' },
-  { title: '판매 시작', desc: '선정되면 바로 MY 어필리에이트에서 전용 링크가 열려요.' },
+  { title: '브랜드 선정', desc: '브랜드가 신청을 확인하고 함께할 크리에이터를 선정해요. 선정되면 알려 드려요.' },
+  { title: '배송정보 입력', desc: '내 신청에서 협찬 상품을 받을 배송정보를 입력하면 협업이 진행돼요. 진행하지 않으려면 반려할 수 있어요.' },
+  { title: '판매 시작', desc: '브랜드가 상품을 보내고 송장번호를 입력하면 MY 어필리에이트에서 전용 판매 링크가 열려요.' },
 ];
 
 interface DetailProps {
   product: StoreProduct;
-  request?: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>;
+  request?: Pick<StoreRequest, 'productId' | 'status' | 'managerStatus' | 'shippingStatus'>;
   onBack: () => void;
   onApply: () => void;
   onMine: () => void;
@@ -545,13 +552,21 @@ const ProductDetailPage: React.FC<DetailProps> = ({
                   <p className="text-sm font-black text-slate-700">이미 판매 신청한 상품이에요</p>
                   <div className="flex gap-1.5">
                     <span className={`px-2 py-1 rounded-md text-[11px] font-black ${REQUEST_STATUS_STYLE[request.status]}`}>{REQUEST_STATUS_LABEL[request.status]}</span>
-                    {request.status === 'approved' && request.managerStatus && (
+                    {request.status === 'approved' && request.shippingStatus ? (
+                      <span className={`px-2 py-1 rounded-md text-[11px] font-black ${SHIPPING_STATUS_STYLE[request.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[request.shippingStatus]}</span>
+                    ) : request.status === 'approved' && request.managerStatus && (
                       <span className={`px-2 py-1 rounded-md text-[11px] font-black ${MANAGER_STATUS_STYLE[request.managerStatus]}`}>{MANAGER_STATUS_LABEL[request.managerStatus]}</span>
                     )}
                   </div>
                 </div>
-                {request.status === 'approved' && request.managerStatus !== 'done' && (
-                  <p className="text-xs text-blue-600 font-bold mt-2">브랜드에 선정되었어요. MY 어필리에이트에서 전용 링크를 확인하세요.</p>
+                {request.status === 'approved' && request.shippingStatus === 'awaiting_info' && (
+                  <p className="text-xs text-blue-600 font-bold mt-2">브랜드에 선정되었어요! 내 신청에서 협찬 상품 배송정보를 입력하면 협업이 진행돼요.</p>
+                )}
+                {request.status === 'approved' && request.shippingStatus === 'info_submitted' && (
+                  <p className="text-xs text-blue-600 font-bold mt-2">협업이 진행 중이에요. 브랜드가 송장번호를 입력하면 전용 판매 링크가 열려요.</p>
+                )}
+                {request.status === 'approved' && request.managerStatus === 'done' && request.shippingStatus !== 'declined' && request.shippingStatus !== 'info_submitted' && (
+                  <p className="text-xs text-emerald-600 font-bold mt-2">MY 어필리에이트에서 전용 판매 링크를 확인하세요.</p>
                 )}
                 <button onClick={onMine} className="mt-3 text-xs font-black text-slate-600 underline">내 신청 보기</button>
               </div>
@@ -562,7 +577,7 @@ const ProductDetailPage: React.FC<DetailProps> = ({
             ) : (
               <>
                 <h3 className="text-base font-black text-slate-900 mb-1">판매 신청</h3>
-                <p className="text-xs text-slate-500">아래 지원하기를 누르면 연동한 인스타그램 계정으로 바로 지원돼요. 브랜드가 선정하면 바로 전용 판매 링크가 열려요.</p>
+                <p className="text-xs text-slate-500">아래 지원하기를 누르면 연동한 인스타그램 계정으로 바로 지원돼요. 브랜드가 선정하면 배송정보를 입력해 협업을 시작해요.</p>
               </>
             )}
           </div>
@@ -621,13 +636,16 @@ interface ApplySheetProps {
   notice: string;
   /** 연동 직후 돌아왔을 때 콜백이 실어 보낸 아이디. 서버 응답 전 첫 화면을 채운다. */
   initialHandle?: string;
+  /** 직거래 금지 안내에 이미 동의했는지. 아니면 지원할 때 체크받는다. */
+  directDealAgreed: boolean;
   onClose: () => void;
-  onSubmit: (channelUrl: string) => void;
+  onSubmit: (channelUrl: string, directDealAgreement: boolean) => void;
 }
 
 const ApplySheet: React.FC<ApplySheetProps> = ({
-  userName, product, sending, sendError, notice, initialHandle, onClose, onSubmit,
+  userName, product, sending, sendError, notice, initialHandle, directDealAgreed, onClose, onSubmit,
 }) => {
+  const [agreeDirectDeal, setAgreeDirectDeal] = useState(false);
   const [ig, setIg] = useState<IgState>(
     initialHandle ? { status: 'linked', handle: initialHandle, followers: 0 } : { status: 'loading', handle: '', followers: 0 },
   );
@@ -726,7 +744,8 @@ const ApplySheet: React.FC<ApplySheetProps> = ({
                 <span className="px-2 py-1 rounded-md text-[10px] font-black bg-emerald-50 text-emerald-600 shrink-0">연동됨</span>
               </div>
               <p className="text-xs text-slate-500 leading-relaxed">브랜드는 이 계정의 프로필과 최근 릴스 3편을 보고 함께할 크리에이터를 선정해요.</p>
-              <p className="text-[11px] text-slate-400">브랜드가 선정하면 바로 전용 판매 링크가 열려요.</p>
+              <p className="text-[11px] text-slate-400">브랜드가 선정하면 협찬 상품 배송정보를 입력해 협업을 시작해요.</p>
+              {!directDealAgreed && <DirectDealAgreement checked={agreeDirectDeal} onChange={setAgreeDirectDeal} />}
               {sendError && <p className="text-xs font-bold text-red-500">{sendError}</p>}
             </>
           )}
@@ -753,8 +772,8 @@ const ApplySheet: React.FC<ApplySheetProps> = ({
           <button onClick={onClose} className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 shrink-0">취소</button>
           {linked ? (
             <button
-              onClick={() => onSubmit(channelUrl)}
-              disabled={sending}
+              onClick={() => onSubmit(channelUrl, agreeDirectDeal)}
+              disabled={sending || (!directDealAgreed && !agreeDirectDeal)}
               className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2 shadow-[0_10px_24px_-10px_rgba(37,99,235,0.75)]"
             >
               {sending && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -790,8 +809,11 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
   const [tab, setTab] = useState<'products' | 'brands' | 'my' | 'mine' | 'payouts'>('products');
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
   // 화면에 나온 상품의 내 신청 상태(상품 id → 상태)와 "내 신청" 전체 건수(서버가 센 값).
-  const [requestStatusMap, setRequestStatusMap] = useState<Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus'>>>(new Map());
+  const [requestStatusMap, setRequestStatusMap] = useState<Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus' | 'shippingStatus'>>>(new Map());
   const [requestTotal, setRequestTotal] = useState(0);
+  const [awaitingShippingCount, setAwaitingShippingCount] = useState(0);
+  const [directDealAgreed, setDirectDealAgreed] = useState(true);
+  const [shippingFor, setShippingFor] = useState<StoreRequest | null>(null);
   const [mineRequests, setMineRequests] = useState<StoreRequest[]>([]);
   const [mineCursor, setMineCursor] = useState<ListCursor | null>(null);
   const [mineHasMore, setMineHasMore] = useState(false);
@@ -848,6 +870,8 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
       const res = await affiliateStoreService.myRequestStatuses(ids);
       if (res.error) continue;
       setRequestTotal(res.total);
+      setAwaitingShippingCount(res.awaitingShippingCount || 0);
+      if (typeof res.directDealAgreed === 'boolean') setDirectDealAgreed(res.directDealAgreed);
       if (ids.length === 0) continue;
       setRequestStatusMap(prev => {
         const next = new Map(prev);
@@ -909,13 +933,18 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     setDetailError('');
   };
 
-  const send = async (channelUrl: string) => {
+  const send = async (channelUrl: string, directDealAgreement: boolean) => {
     if (!detail) return;
     setSending(true);
     setSendError('');
-    const res = await affiliateStoreService.request(detail.id, '', channelUrl);
+    const res = await affiliateStoreService.request(detail.id, '', channelUrl, directDealAgreement || undefined);
     setSending(false);
-    if (res.error) { setSendError(res.error); return; }
+    if (res.error) {
+      if (res.code === DIRECT_DEAL_AGREEMENT_REQUIRED) setDirectDealAgreed(false);
+      setSendError(res.error);
+      return;
+    }
+    if (directDealAgreement) setDirectDealAgreed(true);
     setApplyOpen(false);
     setApplyNotice('');
     await loadRequestStatuses([detail.id]);
@@ -933,6 +962,13 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
       setMineRequests(prev => prev.filter(x => x.id !== r.id));
       await loadRequestStatuses([r.productId]);
     }
+  };
+
+  /** 배송정보 입력 · 반려 뒤 그 신청 한 건과 상태 · 숫자만 고친다. */
+  const shippingDone = async (updated: StoreRequest) => {
+    setShippingFor(null);
+    setMineRequests(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated, productName: x.productName, productImage: x.productImage, brandName: x.brandName, productState: x.productState } : x));
+    await loadRequestStatuses([updated.productId]);
   };
 
   const switchTab = (t: typeof tab) => { setTab(t); setBrandPage(null); setBrandInfo(null); };
@@ -960,9 +996,13 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
           sendError={sendError}
           notice={applyNotice}
           initialHandle={returnedHandle}
+          directDealAgreed={directDealAgreed}
           onClose={closeApply}
           onSubmit={send}
         />
+      )}
+      {shippingFor && (
+        <SelectionShippingSheet request={shippingFor} onClose={() => setShippingFor(null)} onDone={shippingDone} />
       )}
       {/* 상세를 보는 동안 목록은 숨겨 두기만 한다 — 돌아왔을 때 검색어 · 카테고리 · 더 보기가 그대로 남게. */}
       <div className={detail ? 'hidden' : ''}>
@@ -971,6 +1011,16 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
         <h2 className="text-xl md:text-3xl font-black text-slate-900">어필리에이트</h2>
         <p className="text-xs md:text-sm text-slate-500 mt-1">브랜드 상품을 골라 판매 신청하고, 판매한 만큼 수수료를 받으세요.</p>
       </header>
+
+      {awaitingShippingCount > 0 && tab !== 'mine' && (
+        <button
+          onClick={() => switchTab('mine')}
+          className="w-full mb-4 flex items-center justify-between gap-3 rounded-2xl bg-blue-600 text-white px-4 py-3.5 text-left shadow-lg shadow-blue-600/20"
+        >
+          <span className="text-sm font-black">브랜드에 선정된 협업이 {awaitingShippingCount}건 있어요! 배송정보를 입력해 협업을 시작하세요.</span>
+          <ChevronRight className="w-4 h-4 shrink-0" />
+        </button>
+      )}
 
       <div className="flex gap-1 mb-5 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
         {([
@@ -1068,18 +1118,37 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
                   )}
                   {r.status === 'rejected' && r.brandNote && <p className="text-[11px] text-red-500 mt-0.5 line-clamp-2">반려 사유: {r.brandNote}</p>}
                   {r.status === 'approved' && (
-                    r.managerStatus === 'done'
-                      ? <p className="text-[11px] text-emerald-600 font-bold mt-0.5">브랜드에 선정되었어요! MY 어필리에이트에서 전용 링크를 받아 판매를 시작하세요.</p>
-                      : <p className="text-[11px] text-blue-600 font-bold mt-0.5">브랜드에 선정되었어요! 전용 링크를 준비하고 있어요.</p>
+                    r.shippingStatus === 'awaiting_info'
+                      ? <p className="text-[11px] text-blue-600 font-bold mt-0.5">브랜드에 선정되었어요! 배송정보를 입력하면 협업이 진행돼요.</p>
+                      : r.shippingStatus === 'declined'
+                        ? <p className="text-[11px] text-slate-400 font-bold mt-0.5">협업을 반려했어요. 이 협업은 진행되지 않아요.</p>
+                        : r.shippingStatus === 'shipped'
+                          ? <p className="text-[11px] text-emerald-600 font-bold mt-0.5">협찬 상품이 발송되었어요 · {r.trackingCompany} {r.trackingNumber} · MY 어필리에이트에서 전용 링크가 열렸어요.</p>
+                          : r.shippingStatus === 'info_submitted'
+                            ? <p className="text-[11px] text-emerald-600 font-bold mt-0.5">배송정보를 보냈어요. 브랜드가 송장번호를 입력하면 전용 판매 링크가 열려요.</p>
+                            : r.managerStatus === 'done'
+                              ? <p className="text-[11px] text-emerald-600 font-bold mt-0.5">브랜드에 선정되었어요! MY 어필리에이트에서 전용 링크를 받아 판매를 시작하세요.</p>
+                              : <p className="text-[11px] text-blue-600 font-bold mt-0.5">브랜드에 선정되었어요! 전용 링크를 준비하고 있어요.</p>
                   )}
                 </div>
                 </button>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                   <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
-                  {r.status === 'approved' && r.managerStatus && (
+                  {r.status === 'approved' && r.shippingStatus ? (
+                    <span className={`px-2 py-1 rounded-md text-[10px] font-black ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
+                  ) : r.status === 'approved' && r.managerStatus && (
                     <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
                   )}
                   {r.status === 'pending' && <button onClick={() => cancel(r)} className="text-[11px] font-bold text-slate-400 hover:text-red-500">신청 취소</button>}
+                  {r.status === 'approved' && r.shippingStatus === 'awaiting_info' && (
+                    <button onClick={() => setShippingFor(r)} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black">배송정보 입력</button>
+                  )}
+                  {r.status === 'approved' && r.shippingStatus === 'info_submitted' && (
+                    <button onClick={() => setShippingFor(r)} className="text-[11px] font-bold text-slate-500 hover:text-blue-600">배송정보 수정</button>
+                  )}
+                  {r.status === 'approved' && r.shippingStatus === 'shipped' && r.trackingUrl && (
+                    <a href={r.trackingUrl} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-blue-600 inline-flex items-center gap-0.5">배송 조회 <ExternalLink className="w-3 h-3" /></a>
+                  )}
                 </div>
               </div>
               );

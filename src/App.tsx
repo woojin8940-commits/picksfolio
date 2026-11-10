@@ -122,6 +122,8 @@ const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   timeline: 'business',
   campaigns: 'campaigns',
   collab: 'my-collabs',
+  // 어필리에이트 선정 · 협찬 발송 푸시가 여는 화면.
+  affiliate: 'affiliate-store',
 };
 
 /** 주소 첫 칸이 그대로 화면 이름이 되는 경로. */

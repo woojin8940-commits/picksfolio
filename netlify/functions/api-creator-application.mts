@@ -8,7 +8,7 @@ import { cleanCreatorName, readCreatorAccess } from "./_shared/creator-access.mt
  * 크리에이터 지원 · 승인.
  *
  *   GET  /api/creator-application                 본인: 승인 상태 + 내 지원서
- *   POST /api/creator-application { action: 'apply', name, contact, instagramUrl, privacyConsent: true }
+ *   POST /api/creator-application { action: 'apply', name, contact, instagramUrl, privacyConsent: true, directDealAgreement: true }
  *   GET  /api/creator-application?scope=admin     운영자: 지원서 목록(기존 계정 제외)
  *   POST /api/creator-application { action: 'review', username, decision, reason }  운영자
  *
@@ -29,6 +29,7 @@ function shape(r: any) {
     contact: r.contact,
     instagramUrl: r.instagram_url,
     privacyConsentedAt: r.privacy_consented_at || null,
+    directDealAgreedAt: r.direct_deal_agreed_at || null,
     status: r.status,
     rejectReason: r.reject_reason,
     reviewedBy: r.reviewed_by,
@@ -71,13 +72,16 @@ async function apply(db: any, username: string, body: any) {
   if (!/^[0-9\-+\s]{8,20}$/.test(contact)) return err("연락처를 정확히 입력해 주세요.");
   if (!instagramUrl || !isUrl(instagramUrl)) return err("인스타그램 프로필 링크를 https:// 로 시작하는 주소로 입력해 주세요.");
   if (body.privacyConsent !== true) return err("개인정보 수집·이용에 동의해 주세요.");
+  if (body.directDealAgreement !== true) {
+    return err("직거래 금지 안내에 동의해 주세요. 픽스폴리오를 거치지 않은 직거래가 확인되면 바로 서비스 이용이 제한됩니다.");
+  }
 
   const rows = (await db.sql`
-    INSERT INTO creator_applications (username, source, name, contact, instagram_url, privacy_consented_at, status)
-    VALUES (${username}, 'application', ${name}, ${contact}, ${instagramUrl}, NOW(), 'pending')
+    INSERT INTO creator_applications (username, source, name, contact, instagram_url, privacy_consented_at, direct_deal_agreed_at, status)
+    VALUES (${username}, 'application', ${name}, ${contact}, ${instagramUrl}, NOW(), NOW(), 'pending')
     ON CONFLICT (username) DO UPDATE SET
       name = EXCLUDED.name, contact = EXCLUDED.contact, instagram_url = EXCLUDED.instagram_url,
-      privacy_consented_at = NOW(),
+      privacy_consented_at = NOW(), direct_deal_agreed_at = NOW(),
       status = 'pending', reject_reason = '', reviewed_by = '', reviewed_at = NULL, updated_at = NOW()
     WHERE creator_applications.status IN ('rejected', 'pending') AND creator_applications.source = 'application'
     RETURNING *

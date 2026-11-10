@@ -35,6 +35,7 @@ const applicationInput = (brandName: string) => ({
   channelUrl: "https://example.com", categories: ["뷰티"], contactName: "담당자", contactPosition: "팀장",
   contactPhone: "010-0000-0000", contactEmail: "brand@example.com", ceoName: "대표", businessAddress: "서울시",
   csPhone: "02-000-0000", mailOrderNumber: "2026-서울-0000", inquiryUrl: "https://example.com/qna",
+  directDealAgreement: true,
 });
 
 const productInput = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -173,6 +174,13 @@ after(async () => {
 // ─────────────────────────── A. 입점 · 상품 ───────────────────────────
 
 describe("A. 입점 · 상품 관리", () => {
+  test("입점 신청은 직거래 금지 동의가 없으면 막힌다", async () => {
+    const { directDealAgreement: _a, ...rest } = applicationInput("동의안함");
+    const r = await call(h.store, "brand_noagree", "POST", "/api/affiliate-store", { action: "apply", ...rest });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /직거래/);
+  });
+
   test("브랜드 입점 신청 → 운영자 승인, 승인 뒤에는 반려할 수 없다", async () => {
     const id = await approvedBrand(BRAND, "브랜드원");
     const reject = await call(h.store, ADMIN, "POST", "/api/affiliate-store", { action: "review_application", id, decision: "reject", reason: "x" });
@@ -292,13 +300,22 @@ describe("B. 판매 신청 · 선정", () => {
       return { items: r.body.products, hasMore: r.body.hasMore, nextCursor: r.body.nextCursor };
     });
     productIds = ids(list).slice(0, 33);
-    for (const id of productIds) {
-      const r = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "request", productId: id, message: "신청합니다", channelUrl: "" });
+    // 기존(자동 승인) 크리에이터는 첫 판매 신청 때 직거래 금지 안내에 동의해야 한다.
+    const before = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-request-status");
+    assert.equal(before.body.directDealAgreed, false);
+    const blocked = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "request", productId: productIds[0], message: "", channelUrl: "" });
+    assert.equal(blocked.status, 400);
+    assert.equal(blocked.body.code, "DIRECT_DEAL_AGREEMENT_REQUIRED");
+    for (const [i, id] of productIds.entries()) {
+      const r = await call(h.store, INF2, "POST", "/api/affiliate-store", {
+        action: "request", productId: id, message: "신청합니다", channelUrl: "", ...(i === 0 ? { directDealAgreement: true } : {}),
+      });
       assert.equal(r.status, 201, JSON.stringify(r.body));
       requestIds.push(r.body.request.id);
     }
     const none = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-request-status");
     assert.equal(none.body.total, 33);
+    assert.equal(none.body.directDealAgreed, true, "한 번 동의하면 다음 신청부터는 묻지 않는다");
     assert.equal(none.body.requests.length, 0, "ids 없이 부르면 건수만");
     const some = await call(h.store, INF2, "GET", `/api/affiliate-store?scope=my-request-status&ids=${[productIds[0], productIds[1], list[40]?.id || "nope"].join(",")}`);
     assert.equal(some.body.total, 33);
@@ -328,14 +345,104 @@ describe("B. 판매 신청 · 선정", () => {
     assert.equal("requestTotal" in more.body, false);
   });
 
-  test("브랜드가 선정하면 바로 전용 링크가 열린다", async () => {
+  test("브랜드가 선정하면 배송정보 입력을 기다리고, 인플루언서가 입력하면 협업이 진행된다", async () => {
     const r = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "review_request", id: requestIds[0], decision: "approve" });
-    assert.equal(r.status, 200);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.request.status, "approved");
-    assert.equal(r.body.request.managerStatus, "done");
-    assert.match(r.body.request.linkCode, /^[A-Za-z0-9]{10}$/);
+    assert.equal(r.body.request.shippingStatus, "awaiting_info");
+    assert.equal(r.body.request.managerStatus, "waiting");
+    assert.equal(r.body.request.linkCode, "", "배송정보 입력 전에는 링크가 열리지 않는다");
+    // 선정하는 순간 운영 콘솔에 새 선정으로 올라온다.
+    const opsNew = await call(h.store, ADMIN, "GET", "/api/affiliate-store?scope=selections&countOnly=1");
+    assert.equal(opsNew.body.newCount, 1);
+    const opsList = await call(h.store, ADMIN, "GET", "/api/affiliate-store?scope=selections");
+    const fresh = opsList.body.selections.find((x: any) => x.id === requestIds[0]);
+    assert.equal(fresh.shippingStatus, "awaiting_info");
+    assert.equal(fresh.operatorUnseen, true);
+    const seen = await call(h.store, ADMIN, "POST", "/api/affiliate-store", { action: "manager_mark_seen", ids: [requestIds[0]] });
+    assert.equal(seen.body.newCount, 0);
     const counts = await call(h.store, BRAND, "GET", "/api/affiliate-store?scope=brand&section=counts");
     assert.equal(counts.body.pendingRequestCount, 32);
+
+    const status = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-request-status");
+    assert.equal(status.body.awaitingShippingCount, 1);
+    const mineBefore = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    assert.equal(mineBefore.body.items.length, 0, "협업 진행 전에는 MY 어필리에이트에 없다");
+
+    // 다른 사람은 배송정보를 넣을 수 없다.
+    const other = await call(h.store, INF, "POST", "/api/affiliate-store", {
+      action: "submit_shipping", id: requestIds[0], recipientName: "받는분", recipientPhone: "010-0000-0000", address1: "서울시", address2: "1호",
+    });
+    assert.equal(other.status, 404);
+    const missing = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "submit_shipping", id: requestIds[0], recipientName: "받는분" });
+    assert.equal(missing.status, 400);
+    // 송장은 배송정보가 들어오기 전에는 넣을 수 없다.
+    const early = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "ship_selection", id: requestIds[0], trackingCompany: "CJ대한통운", trackingNumber: "123456789" });
+    assert.equal(early.status, 404);
+
+    const sub = await call(h.store, INF2, "POST", "/api/affiliate-store", {
+      action: "submit_shipping", id: requestIds[0], recipientName: "받는분", recipientPhone: "010-0000-0000",
+      postcode: "06000", address1: "서울시 강남구", address2: "101호", memo: "문 앞",
+    });
+    assert.equal(sub.status, 200, JSON.stringify(sub.body));
+    assert.equal(sub.body.request.shippingStatus, "info_submitted");
+    assert.equal(sub.body.request.managerStatus, "waiting");
+    assert.equal(sub.body.request.linkCode, "", "송장 입력 전에는 판매 링크가 열리지 않는다");
+    const mineWaiting = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    assert.equal(mineWaiting.body.items.length, 0);
+
+    // 협업이 진행 중이면 브랜드는 반려할 수 없다.
+    const rej = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "review_request", id: requestIds[0], decision: "reject" });
+    assert.equal(rej.status, 409);
+
+    const brandList = await call(h.store, BRAND, "GET", `/api/affiliate-store?scope=brand&section=requests&status=approved`);
+    const row = brandList.body.requests.find((x: any) => x.id === requestIds[0]);
+    assert.equal(row.shipping.address1, "서울시 강남구");
+    const brandCounts = await call(h.store, BRAND, "GET", "/api/affiliate-store?scope=brand&section=counts");
+    assert.equal(brandCounts.body.shipPendingCount, 1);
+
+    const shipped = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "ship_selection", id: requestIds[0], trackingCompany: "CJ대한통운", trackingNumber: "1234 5678 9012" });
+    assert.equal(shipped.status, 200, JSON.stringify(shipped.body));
+    assert.equal(shipped.body.request.shippingStatus, "shipped");
+    assert.equal(shipped.body.request.trackingNumber, "123456789012");
+    assert.ok(shipped.body.request.trackingUrl);
+    assert.equal(shipped.body.request.managerStatus, "done");
+    assert.match(shipped.body.request.linkCode, /^[A-Za-z0-9]{10}$/, "송장을 입력하면 판매 링크가 열린다");
+    const mine = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    assert.equal(mine.body.items.length, 1);
+    const again = await call(h.store, INF2, "POST", "/api/affiliate-store", {
+      action: "submit_shipping", id: requestIds[0], recipientName: "받는분", recipientPhone: "010-0000-0000", address1: "서울시", address2: "1호",
+    });
+    assert.equal(again.status, 404, "발송 뒤에는 배송정보를 고칠 수 없다");
+
+    // 운영 콘솔: 배송정보가 들어온 협업을 배송지 · 송장과 함께 본다.
+    const ops = await call(h.store, ADMIN, "GET", "/api/affiliate-store?scope=selections");
+    assert.equal(ops.status, 200, JSON.stringify(ops.body));
+    const sel = ops.body.selections.find((x: any) => x.id === requestIds[0]);
+    assert.equal(sel.shippingStatus, "shipped");
+    assert.equal(sel.shipping.recipientName, "받는분");
+    assert.equal(sel.trackingCompany, "CJ대한통운");
+  });
+
+  test("인플루언서가 배송정보 대신 반려하면 협업은 진행되지 않는다", async () => {
+    const id = requestIds[2];
+    const ok = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "review_request", id, decision: "approve" });
+    assert.equal(ok.status, 200);
+    const d = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "decline_selection", id, reason: "일정이 맞지 않아요" });
+    assert.equal(d.status, 200, JSON.stringify(d.body));
+    assert.equal(d.body.request.shippingStatus, "declined");
+    assert.equal(d.body.request.linkCode, "");
+    const sub = await call(h.store, INF2, "POST", "/api/affiliate-store", {
+      action: "submit_shipping", id, recipientName: "받는분", recipientPhone: "010-0000-0000", address1: "서울시", address2: "1호",
+    });
+    assert.equal(sub.status, 404, "반려한 뒤에는 배송정보를 넣을 수 없다");
+    const reapprove = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "review_request", id, decision: "approve" });
+    assert.equal(reapprove.status, 409);
+    const mine = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    assert.equal(mine.body.items.length, 1, "반려한 협업은 MY 어필리에이트에 없다");
+    const shop = (await import("../../netlify/functions/api-affiliate-shop.mts")).default as any;
+    const code = (await pg.query(`SELECT link_code FROM affiliate_store_requests WHERE id = $1`, [id])).rows[0]?.link_code;
+    if (code) assert.notEqual((await call(shop, null, "GET", `/api/affiliate-shop?code=${code}`)).status, 200);
   });
 
   test("대기 중 신청 취소 → 건수가 줄고 목록에서 빠진다", async () => {
@@ -630,7 +737,7 @@ describe("G. 상품별 판매 신청 · 판매기간 · 판매중지", () => {
     pA = await saveProduct(BRAND3, "묶음 상품 A");
     pB = await saveProduct(BRAND3, "묶음 상품 B");
     for (const [inf, p] of [[INF, pA], [INF2, pA], [INF, pB]] as const) {
-      const r = await call(h.store, inf, "POST", "/api/affiliate-store", { action: "request", productId: p.id, message: "", channelUrl: "" });
+      const r = await call(h.store, inf, "POST", "/api/affiliate-store", { action: "request", productId: p.id, message: "", channelUrl: "", directDealAgreement: true });
       assert.equal(r.status, 201, JSON.stringify(r.body));
     }
     const counts = await call(h.store, BRAND3, "GET", "/api/affiliate-store?scope=brand&section=counts");
@@ -639,7 +746,7 @@ describe("G. 상품별 판매 신청 · 판매기간 · 판매중지", () => {
     const grouped = await call(h.store, BRAND3, "GET", "/api/affiliate-store?scope=brand&section=request-products");
     assert.equal(grouped.status, 200);
     const byId = new Map(grouped.body.products.map((p: any) => [p.id, p]));
-    assert.deepEqual((byId.get(pA.id) as any).requestCounts, { pending: 2, approved: 0, rejected: 0, unseen: 2 });
+    assert.deepEqual((byId.get(pA.id) as any).requestCounts, { pending: 2, approved: 0, rejected: 0, unseen: 2, toShip: 0 });
     assert.equal((byId.get(pB.id) as any).requestCounts.unseen, 1);
 
     const onlyA = await call(h.store, BRAND3, "GET", `/api/affiliate-store?scope=brand&section=requests&productId=${pA.id}`);
@@ -650,8 +757,13 @@ describe("G. 상품별 판매 신청 · 판매기간 · 판매중지", () => {
     assert.equal(seen.status, 200);
     assert.equal(seen.body.newRequestCount, 1);
 
+    // 동의 제도 전에 승인된 브랜드는 처음 선정할 때 직거래 금지 안내에 동의해야 한다.
+    await pg.query(`UPDATE affiliate_store_applications SET direct_deal_agreed_at = NULL WHERE business_username = $1`, [BRAND3]);
+    const noAgree = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "review_request", id: onlyA.body.requests[0].id, decision: "approve" });
+    assert.equal(noAgree.status, 400);
+    assert.equal(noAgree.body.code, "DIRECT_DEAL_AGREEMENT_REQUIRED");
     // 선정하면 상태 칸으로 거른 목록에 나온다.
-    const approve = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "review_request", id: onlyA.body.requests[0].id, decision: "approve" });
+    const approve = await call(h.store, BRAND3, "POST", "/api/affiliate-store", { action: "review_request", id: onlyA.body.requests[0].id, decision: "approve", directDealAgreement: true });
     assert.equal(approve.status, 200);
     const approved = await call(h.store, BRAND3, "GET", `/api/affiliate-store?scope=brand&section=requests&productId=${pA.id}&status=approved`);
     assert.equal(approved.body.requests.length, 1);
