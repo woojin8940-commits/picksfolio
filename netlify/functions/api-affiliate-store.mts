@@ -4,7 +4,7 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager, requireOperator } from "./_shared/manager-auth.mts";
 import { CREATOR_APPROVAL_REQUIRED_MESSAGE, readCreatorAccess } from "./_shared/creator-access.mts";
 import { randomBytes } from "node:crypto";
-import { SALE_STATUSES, currentFeeRates, notify, trackingUrl } from "./_shared/affiliate-store-orders.mts";
+import { SALE_STATUSES, SHIPPING_COMPANIES, currentFeeRates, notify, trackingUrl } from "./_shared/affiliate-store-orders.mts";
 import { canUseStore } from "./_shared/store-testers.mts";
 import { buildSnapshots, withoutRegisteredPrices } from "./_shared/campaign-listup.mts";
 import { syncApplicantChannels, withinTime } from "./_shared/applicant-channel-sync.mts";
@@ -790,7 +790,7 @@ async function brandReviewRequest(db: any, username: string, body: any) {
   return Response.json({ request: shapeRequest(rows[0]) });
 }
 
-const TRACKING_COMPANIES = ["CJ대한통운", "한진택배", "롯데택배", "우체국택배", "로젠택배", "경동택배", "기타"];
+const TRACKING_COMPANIES = SHIPPING_COMPANIES;
 
 /** 브랜드: 인플루언서가 입력한 배송지로 협찬 상품을 보내고 송장번호를 입력한다(고칠 수도 있다). */
 async function brandShipSelection(db: any, username: string, body: any) {

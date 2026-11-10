@@ -41,7 +41,32 @@ export const SHIPPING_STATUS_STYLE: Record<ShippingStatus, string> = {
 };
 
 /** 협찬 상품 택배사(서버 목록과 같다). */
-export const SHIPPING_COURIERS = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배', '경동택배', '기타'];
+/** 국내 택배사 코드(두 자리 · 01~06 주요 택배사, 07~ 중소 · 편의점 택배). 송장 입력 선택지와 엑셀 '택배사 코드' 칸이 같이 쓴다. 한번 정한 번호는 바꾸지 않고 새 택배사는 뒤에 붙인다. 엑셀의 '택배사 코드' 칸에 이 숫자를 적는다. */
+export const COURIER_CODES: { code: string; name: string }[] = [
+  { code: '01', name: 'CJ대한통운' },
+  { code: '02', name: '한진택배' },
+  { code: '03', name: '롯데택배' },
+  { code: '04', name: '우체국택배' },
+  { code: '05', name: '로젠택배' },
+  { code: '06', name: '경동택배' },
+  { code: '07', name: '대신택배' },
+  { code: '08', name: '일양로지스' },
+  { code: '09', name: '합동택배' },
+  { code: '10', name: '천일택배' },
+  { code: '11', name: '건영택배' },
+  { code: '12', name: 'CU 편의점택배' },
+  { code: '13', name: 'GS25 편의점택배' },
+  { code: '14', name: '한의사랑택배' },
+  { code: '15', name: 'SLX택배' },
+  { code: '16', name: '홈픽' },
+  { code: '17', name: '우리택배' },
+  { code: '18', name: '용마로지스' },
+  { code: '19', name: '농협택배' },
+  { code: '20', name: '세방택배' },
+];
+/** 택배사 이름 목록(송장 입력 선택지). '기타' 없이 코드표의 택배사만 쓴다. */
+export const SHIPPING_COURIERS = COURIER_CODES.map(c => c.name);
+export const courierCodeOf = (name?: string | null) => COURIER_CODES.find(c => c.name === name)?.code || '';
 
 export interface SelectionShipping {
   recipientName: string;
@@ -168,12 +193,13 @@ export interface BrandInfo { username: string; brandName: string; channelUrl: st
 export interface ProductQuery { category?: string; sub?: string; q?: string; brand?: string }
 
 /** 목록 커서(최신순). 서버 응답의 nextCursor 를 그대로 다음 요청에 넘긴다. */
-export interface ListCursor { cursorAt: string; cursorId: string }
+export interface ListCursor { cursorAt: string; cursorId: string; cursorAmount?: number }
 
 const withCursor = (p: URLSearchParams, cursor?: ListCursor | null) => {
   if (cursor) {
     p.set('cursorAt', cursor.cursorAt);
     p.set('cursorId', cursor.cursorId);
+    if (cursor.cursorAmount !== undefined) p.set('cursorAmount', String(cursor.cursorAmount));
   }
   return p;
 };
@@ -197,7 +223,15 @@ export interface BrandOpsSummary {
   settlement: { payment: number; commission: number; pgFee: number; platformFee: number; amount: number; confirmedAmount: number };
 }
 
-export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all';
+export interface BulkResult { id: string; ok: boolean; skipped?: boolean; error?: string }
+export type BrandOrderSort = 'latest' | 'oldest' | 'amount_desc' | 'amount_asc';
+export const BRAND_ORDER_SORTS: { key: BrandOrderSort; label: string }[] = [
+  { key: 'latest', label: '주문일 최신순' },
+  { key: 'oldest', label: '주문일 오래된순' },
+  { key: 'amount_desc', label: '금액 높은순' },
+  { key: 'amount_asc', label: '금액 낮은순' },
+];
+export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all' | 'to_ship';
 export type BrandClaimFilter = 'all' | 'cancel' | 'return' | 'action';
 
 export interface StoreProduct {
@@ -513,6 +547,7 @@ export const affiliateStoreService = {
     view?: 'orders' | 'claims';
     filter?: BrandOrderFilter;
     claim?: BrandClaimFilter;
+    sort?: BrandOrderSort;
     cursor?: ListCursor | null;
     orderId?: string;
     summary?: boolean;
@@ -520,6 +555,7 @@ export const affiliateStoreService = {
     const p = withCursor(new URLSearchParams({ scope: 'brand', view: opt.view || 'orders' }), opt.cursor);
     if (opt.filter) p.set('filter', opt.filter);
     if (opt.claim) p.set('claim', opt.claim);
+    if (opt.sort) p.set('sort', opt.sort);
     if (opt.orderId) p.set('orderId', opt.orderId);
     if (opt.summary === false) p.set('summary', '0');
     return call<{
@@ -532,6 +568,15 @@ export const affiliateStoreService = {
   },
   orderAction(account: string, action: string, payload: Record<string, unknown>) {
     return call<{ ok: true }>('POST', OPS, { action, ...payload }, { account });
+  },
+  /** 엑셀 내려받기용: 고른 필터의 주문 전부(최대 3,000건). hasMore 면 잘린 것. */
+  brandOrdersExport(account: string, filter: BrandOrderFilter, sort: BrandOrderSort = 'latest') {
+    const p = new URLSearchParams({ scope: 'brand', view: 'orders', filter, sort, export: '1' });
+    return call<{ orders: StoreOrder[]; hasMore: boolean }>('GET', `${OPS}?${p.toString()}`, undefined, { account });
+  },
+  /** 일괄 처리(한 번에 100건까지 · 줄마다 결과). */
+  bulkOrderAction(account: string, action: 'bulk_ship' | 'bulk_prepare', payload: { items?: { id: string; trackingCompany: string; trackingNumber: string }[]; ids?: string[] }) {
+    return call<{ ok: true; results: BulkResult[] }>('POST', OPS, { action, ...payload }, { account });
   },
 
   // 운영자 미처리 목록

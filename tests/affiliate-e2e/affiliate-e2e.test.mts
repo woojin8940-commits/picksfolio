@@ -570,6 +570,59 @@ describe("D. 주문 관리 · 취소·반품", () => {
     assert.equal(ship.status, 200);
   });
 
+  test("엑셀 일괄 처리: 내려받기 · 일괄 배송 준비 · 송장 일괄 등록(줄마다 결과)", async () => {
+    const OPS_POST = "/api/affiliate-store-ops";
+    const toShip = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=to_ship&export=1`);
+    assert.equal(toShip.status, 200);
+    assert.equal("summary" in toShip.body, false, "내려받기는 목록만");
+    assert.ok(toShip.body.orders.length > 0);
+    assert.ok(toShip.body.orders.every((o: any) => o.status === "paid" || o.status === "preparing"));
+    const all = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all&export=1`);
+    const first = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all`);
+    assert.equal(all.body.orders.length, first.body.summary.orderCounts.all, "내려받기는 40건 페이지가 아니라 전부");
+
+    const paid = toShip.body.orders.filter((o: any) => o.status === "paid").slice(0, 2);
+    const shippedOrder = all.body.orders.find((o: any) => o.status === "delivered");
+    const prep = await call(h.ops, BRAND, "POST", OPS_POST, { action: "bulk_prepare", ids: [...paid.map((o: any) => o.id), shippedOrder.id] });
+    assert.equal(prep.status, 200);
+    assert.deepEqual(prep.body.results.map((r: any) => r.ok), [...paid.map(() => true), false]);
+
+    const items = paid.map((o: any, i: number) => ({ id: o.id, trackingCompany: "한진택배", trackingNumber: `55500000${i}` }));
+    const ship = await call(h.ops, BRAND, "POST", OPS_POST, { action: "bulk_ship", items: [...items, { id: shippedOrder.id, trackingCompany: "CJ대한통운", trackingNumber: "1" }] });
+    assert.equal(ship.status, 200);
+    assert.deepEqual(ship.body.results.map((r: any) => r.ok), [...items.map(() => true), false]);
+    const again = await call(h.ops, BRAND, "POST", OPS_POST, { action: "bulk_ship", items });
+    assert.ok(again.body.results.every((r: any) => r.ok && r.skipped), "같은 송장은 건너뛴다");
+    const one = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&orderId=${paid[0].id}`);
+    assert.equal(one.body.orders[0].status, "shipped");
+    assert.equal(one.body.orders[0].trackingNumber, "555000000");
+    const unknown = await call(h.ops, BRAND, "POST", OPS_POST, { action: "bulk_ship", items: [{ id: paid[0].id, trackingCompany: "기타", trackingNumber: "777" }] });
+    assert.equal(unknown.body.results[0].ok, false, "코드표에 없는 택배사('기타')는 받지 않는다");
+    const other = await call(h.ops, BRAND2, "POST", OPS_POST, { action: "bulk_ship", items: [{ id: paid[0].id, trackingCompany: "CJ대한통운", trackingNumber: "9" }] });
+    assert.equal(other.body.results?.[0]?.ok ?? false, false, "다른 브랜드 주문은 처리되지 않는다");
+  });
+
+  test("주문 정렬: 금액 · 주문일 순으로 커서를 이어도 겹치지 않고, 내려받기도 같은 순서", async () => {
+    const sorted = (list: any[], key: (o: any) => number, asc: boolean) =>
+      list.every((o, i) => i === 0 || (asc ? key(list[i - 1]) <= key(o) : key(list[i - 1]) >= key(o)));
+    for (const [sort, key, asc] of [
+      ["amount_desc", (o: any) => Number(o.totalAmount), false],
+      ["amount_asc", (o: any) => Number(o.totalAmount), true],
+      ["oldest", (o: any) => Date.parse(o.createdAt), true],
+      ["latest", (o: any) => Date.parse(o.createdAt), false],
+    ] as const) {
+      const all = await readAll(async (c) => {
+        const extra = c?.cursorAmount !== undefined ? `&cursorAmount=${c.cursorAmount}` : "";
+        const r = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all&sort=${sort}${qs(c)}${extra}`);
+        return { items: r.body.orders, hasMore: r.body.hasMore, nextCursor: r.body.nextCursor };
+      });
+      assertUnique(ids(all), sort);
+      assert.ok(sorted(all, key, asc), `${sort} 순서`);
+      const exp = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all&sort=${sort}&export=1`);
+      assert.deepEqual(ids(exp.body.orders), ids(all), `${sort} 내려받기 순서`);
+    }
+  });
+
   test("다른 브랜드의 주문은 보이지 않는다", async () => {
     const list = await call(h.ops, BRAND, "GET", `${OPS}&view=orders&filter=all`);
     const other = await call(h.ops, BRAND2, "GET", `${OPS}&view=orders&orderId=${list.body.orders[0].id}`);

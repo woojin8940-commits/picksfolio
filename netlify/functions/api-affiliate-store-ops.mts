@@ -20,6 +20,7 @@ import {
   logEvent,
   notify,
   trackingUrl,
+  SHIPPING_COMPANIES,
 } from "./_shared/affiliate-store-orders.mts";
 import { queryRows } from "./_shared/affiliate-payouts.mts";
 import { pageOf, readCursor } from "./_shared/list-cursor.mts";
@@ -31,9 +32,13 @@ import { pageOf, readCursor } from "./_shared/list-cursor.mts";
  *                              &view=orders&filter=new|preparing|shipped|delivered|all
  *                              &view=claims&claim=all|cancel|return|action
  *                              &cursorAt&cursorId(다음 페이지 · 목록만) &orderId(한 건) &summary=0(목록만)
+ *                              &sort=latest|oldest|amount_desc|amount_asc(주문 목록 · 내려받기 정렬)
+ *                              &export=1(엑셀 내려받기용 · 고른 필터의 주문 전부, 최대 BRAND_EXPORT_MAX건 · 목록만)
  *   GET  ?scope=admin-issues   운영자: 3영업일 넘게 처리되지 않은 반품 + 처리 기록
  *   POST { action, ... }
  *     브랜드  prepare · ship · deliver · cancel · return_approve · return_reject · return_refund
+ *             · bulk_prepare { ids } · bulk_ship { items: [{ id, trackingCompany, trackingNumber }] }
+ *               (엑셀 일괄 처리 · 한 번에 BRAND_BULK_MAX건 · 줄마다 결과를 돌려준다)
  *             · answer_inquiry(예전 문의 답변 · 화면에서는 숨김) · read_notifications · mark_seen
  *     운영자  admin_refund · admin_return_reject · admin_remind · set_fee_rates
  *
@@ -55,6 +60,8 @@ const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const OVERDUE_BUSINESS_DAYS = 3;
 const BRAND_ORDER_PAGE_SIZE = 40;
+const BRAND_EXPORT_MAX = 3000;
+const BRAND_BULK_MAX = 100;
 
 const BRAND_LINK = "/business-admin?tab=affiliate";
 
@@ -138,8 +145,12 @@ const ORDER_FILTERS: Record<string, string[] | null> = {
   preparing: ["preparing"],
   shipped: ["shipped"],
   delivered: ["delivered", "confirmed"],
+  // 엑셀 송장 양식용(화면 필터 버튼에는 없다): 아직 발송하지 않은 주문.
+  to_ship: ["paid", "preparing"],
   all: null,
 };
+/** 주문 정렬: latest 주문일 최신순 · oldest 주문일 오래된순 · amount_desc 금액 높은순 · amount_asc 금액 낮은순. */
+const ORDER_SORTS = ["latest", "oldest", "amount_desc", "amount_asc"] as const;
 /** 취소·반품 필터: all 전체 · cancel 주문취소(반품 없음) · return 반품 · action 처리 필요. */
 const CLAIM_FILTERS = ["all", "cancel", "return", "action"] as const;
 
@@ -172,7 +183,11 @@ async function brandGet(db: any, brand: string, url: URL) {
   const claimParam = String(url.searchParams.get("claim") || "all");
   const claim = (CLAIM_FILTERS as readonly string[]).includes(claimParam) ? claimParam : "all";
   const { hasCursor, cursorAt, cursorId } = readCursor(url);
-  const withSummary = !hasCursor && url.searchParams.get("summary") !== "0";
+  const exporting = url.searchParams.get("export") === "1";
+  const sortParam = String(url.searchParams.get("sort") || "latest");
+  const sort = (ORDER_SORTS as readonly string[]).includes(sortParam) ? sortParam : "latest";
+  const cursorAmount = Number(url.searchParams.get("cursorAmount"));
+  const withSummary = !hasCursor && !exporting && url.searchParams.get("summary") !== "0";
 
   const params: unknown[] = [brand];
   const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
@@ -193,15 +208,23 @@ async function brandGet(db: any, brand: string, url: URL) {
     order = `${CLAIM_AT} DESC, o.id DESC`;
   } else {
     if (statuses) where.push(`o.status = ANY(${p(statuses)}::text[])`);
-    if (hasCursor) {
+    // 정렬: 금액순은 (금액, id), 주문일순은 (주문 시각, id)로 커서를 이어 간다.
+    const amountSort = sort === "amount_desc" || sort === "amount_asc";
+    const asc = sort === "oldest" || sort === "amount_asc";
+    const cmp = asc ? ">" : "<";
+    const dir = asc ? "ASC" : "DESC";
+    if (hasCursor && amountSort && Number.isFinite(cursorAmount)) {
+      const amt = p(cursorAmount);
+      where.push(`(o.total_amount ${cmp} ${amt} OR (o.total_amount = ${amt} AND o.id ${cmp} ${p(cursorId)}))`);
+    } else if (hasCursor && !amountSort) {
       const at = p(cursorAt);
-      where.push(`(o.created_at < ${at}::timestamptz OR (o.created_at = ${at}::timestamptz AND o.id < ${p(cursorId)}))`);
+      where.push(`(o.created_at ${cmp} ${at}::timestamptz OR (o.created_at = ${at}::timestamptz AND o.id ${cmp} ${p(cursorId)}))`);
     }
-    order = "o.created_at DESC, o.id DESC";
+    order = amountSort ? `o.total_amount ${dir}, o.id ${dir}` : `o.created_at ${dir}, o.id ${dir}`;
   }
 
   const [orders, metrics, notifications] = await Promise.all([
-    queryRows(db, `${BRAND_ORDER_SELECT} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ${orderId ? 1 : BRAND_ORDER_PAGE_SIZE + 1}`, params),
+    queryRows(db, `${BRAND_ORDER_SELECT} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ${orderId ? 1 : exporting ? BRAND_EXPORT_MAX + 1 : BRAND_ORDER_PAGE_SIZE + 1}`, params),
     withSummary ? queryRows(db, `
       WITH base AS (
         SELECT o.status, o.commission_status, r.order_id AS return_order_id, r.status AS ret_status,
@@ -238,7 +261,13 @@ async function brandGet(db: any, brand: string, url: URL) {
   ]);
   const { page: pageOrders, hasMore, nextCursor } = orderId
     ? { page: orders, hasMore: false, nextCursor: null }
+    : exporting
+    ? { page: orders.slice(0, BRAND_EXPORT_MAX), hasMore: orders.length > BRAND_EXPORT_MAX, nextCursor: null }
     : pageOf(orders, BRAND_ORDER_PAGE_SIZE, (o: any) => view === "claims" ? o.ret_requested_at || o.cancelled_at || o.created_at : o.created_at);
+  const lastOrder = pageOrders[pageOrders.length - 1];
+  const cursorOut = nextCursor && view === "orders" && (sort === "amount_desc" || sort === "amount_asc") && lastOrder
+    ? { ...nextCursor, cursorAmount: Number(lastOrder.total_amount) || 0 }
+    : nextCursor;
   const m = metrics[0] || {};
   const summary = {
     orderCounts: {
@@ -271,7 +300,7 @@ async function brandGet(db: any, brand: string, url: URL) {
   return Response.json({
     orders: pageOrders.map(shapeBrandOrder),
     hasMore,
-    nextCursor,
+    nextCursor: cursorOut,
     ...(withSummary ? { summary, notifications } : {}),
   });
 }
@@ -335,6 +364,27 @@ async function rejectReturn(
   return null;
 }
 
+/** 송장 입력(발송). 단건 · 엑셀 일괄이 같이 쓴다. 성공하면 "", 실패하면 오류 문구. */
+async function shipOne(db: any, brand: string, id: string, companyIn: unknown, numberIn: unknown): Promise<string> {
+  const company = clip(companyIn, 40);
+  const number = clip(numberIn, 60);
+  if (!company || !number) return "택배사와 송장번호를 입력해 주세요.";
+  if (!SHIPPING_COMPANIES.includes(company)) return "택배사 코드표에 있는 택배사를 골라 주세요.";
+  const rows = (await db.sql`
+    UPDATE affiliate_store_orders SET status = 'shipped', tracking_company = ${company}, tracking_number = ${number},
+      shipped_at = COALESCE(shipped_at, NOW()), updated_at = NOW()
+    WHERE id = ${id} AND business_username = ${brand} AND status IN ('paid', 'preparing', 'shipped')
+      AND cancel_lock_at IS NULL
+    RETURNING *
+  `) as any[];
+  const o = rows[0];
+  if (!o) return "송장을 입력할 수 없는 주문입니다.";
+  await logEvent(db, id, "brand", brand, "shipped", `${company} ${number}`);
+  await notifyBuyer(db, o.buyer_user_id, "shipped", "상품이 발송되었어요", `${o.product_name} · ${company} ${number}`, id);
+  await sendBuyerSms(o, `${o.product_name} 상품이 발송되었습니다. ${company} 송장번호 ${number}`, orderLink(id));
+  return "";
+}
+
 async function brandAction(db: any, brand: string, body: any) {
   const id = clip(body.id, 120);
   const action = String(body.action || "");
@@ -348,22 +398,49 @@ async function brandAction(db: any, brand: string, body: any) {
   }
 
   if (action === "ship") {
-    const company = clip(body.trackingCompany, 40);
-    const number = clip(body.trackingNumber, 60);
-    if (!company || !number) return err("택배사와 송장번호를 입력해 주세요.");
-    const rows = (await db.sql`
-      UPDATE affiliate_store_orders SET status = 'shipped', tracking_company = ${company}, tracking_number = ${number},
-        shipped_at = COALESCE(shipped_at, NOW()), updated_at = NOW()
-      WHERE id = ${id} AND business_username = ${brand} AND status IN ('paid', 'preparing', 'shipped')
-        AND cancel_lock_at IS NULL
-      RETURNING *
-    `) as any[];
-    const o = rows[0];
-    if (!o) return err("송장을 입력할 수 없는 주문입니다.");
-    await logEvent(db, id, "brand", brand, "shipped", `${company} ${number}`);
-    await notifyBuyer(db, o.buyer_user_id, "shipped", "상품이 발송되었어요", `${o.product_name} · ${company} ${number}`, id);
-    await sendBuyerSms(o, `${o.product_name} 상품이 발송되었습니다. ${company} 송장번호 ${number}`, orderLink(id));
+    const e = await shipOne(db, brand, id, body.trackingCompany, body.trackingNumber);
+    if (e) return err(e);
     return Response.json({ ok: true });
+  }
+
+  if (action === "bulk_prepare") {
+    const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map((v: unknown) => clip(v, 120)).filter(Boolean))] as string[];
+    if (!ids.length) return err("처리할 주문을 골라 주세요.");
+    if (ids.length > BRAND_BULK_MAX) return err(`한 번에 ${BRAND_BULK_MAX}건까지 처리할 수 있어요.`);
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const oid of ids) {
+      const o = await setStatus(db, brand, oid, ["paid"], "preparing", "preparing");
+      if (!o) { results.push({ id: oid, ok: false, error: "결제 완료 주문만 배송 준비로 바꿀 수 있어요." }); continue; }
+      await logEvent(db, oid, "brand", brand, "preparing", "배송 준비(일괄)");
+      await notifyBuyer(db, o.buyer_user_id, "preparing", "상품을 준비하고 있어요", o.product_name, oid);
+      results.push({ id: oid, ok: true });
+    }
+    return Response.json({ ok: true, results });
+  }
+
+  if (action === "bulk_ship") {
+    const raw = Array.isArray(body.items) ? body.items : [];
+    if (!raw.length) return err("송장을 입력한 주문이 없어요.");
+    if (raw.length > BRAND_BULK_MAX) return err(`한 번에 ${BRAND_BULK_MAX}건까지 처리할 수 있어요. 파일을 나눠 올려 주세요.`);
+    const results: { id: string; ok: boolean; skipped?: boolean; error?: string }[] = [];
+    const done = new Set<string>();
+    for (const item of raw) {
+      const oid = clip(item?.id, 120);
+      if (!oid) continue;
+      if (done.has(oid)) { results.push({ id: oid, ok: false, error: "같은 주문번호가 두 번 있어요." }); continue; }
+      done.add(oid);
+      const company = clip(item?.trackingCompany, 40);
+      const number = clip(item?.trackingNumber, 60);
+      // 이미 같은 송장으로 발송한 주문은 건너뛴다(구매자에게 발송 문자가 다시 가지 않게).
+      const cur = ((await db.sql`SELECT status, tracking_company, tracking_number FROM affiliate_store_orders WHERE id = ${oid} AND business_username = ${brand}`) as any[])[0];
+      if (cur?.status === "shipped" && cur.tracking_company === company && cur.tracking_number === number) {
+        results.push({ id: oid, ok: true, skipped: true });
+        continue;
+      }
+      const e = await shipOne(db, brand, oid, company, number);
+      results.push(e ? { id: oid, ok: false, error: e } : { id: oid, ok: true });
+    }
+    return Response.json({ ok: true, results });
   }
 
   if (action === "deliver") {
