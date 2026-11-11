@@ -308,6 +308,14 @@ export interface StoreRequest {
   shippedAt?: string | null;
   declinedReason?: string;
   declinedAt?: string | null;
+  /** 협찬 상품 수령 시각(인플루언서 수령 확인 · 송장 조회 배송 완료 · 발송 5일 뒤 자동). */
+  deliveredAt?: string | null;
+  /** 업로드 마감(수령 + 10일). 수령 전이면 null. */
+  uploadDeadline?: string | null;
+  /** 인플루언서가 올린 콘텐츠 링크 · 브랜디드 콘텐츠 파트너십 코드. */
+  contentUrl?: string;
+  partnershipCode?: string;
+  contentSubmittedAt?: string | null;
   /** 브랜드 화면에서만 온다 — 지원한 인플루언서의 인스타 프로필 · 최근 릴스(캠페인 지원자와 같은 스냅샷). */
   insights?: Record<string, any> | null;
 }
@@ -406,6 +414,46 @@ export interface StoreOrder {
   address2?: string;
   deliveryMemo?: string;
 }
+
+/** 상품을 받은 뒤 콘텐츠를 올려 판매를 시작해야 하는 기한(일). 서버(UPLOAD_DAYS)와 같다. */
+export const UPLOAD_DAYS = 10;
+
+/** 업로드 일정 한 줄. 수령 전 · D-n · 오늘 마감 · n일 지남 · 업로드 완료. */
+export function uploadScheduleOf(r: Pick<StoreRequest, 'shippingStatus' | 'deliveredAt' | 'uploadDeadline' | 'contentUrl' | 'shippedAt'>, now = Date.now()) {
+  if (r.contentUrl) return { tone: 'done' as const, label: '업로드 완료' };
+  if (!r.uploadDeadline) {
+    if (r.shippingStatus === 'shipped') return { tone: 'wait' as const, label: `수령 후 ${UPLOAD_DAYS}일 이내 업로드` };
+    return { tone: 'wait' as const, label: '상품 발송 전' };
+  }
+  const left = Math.ceil((new Date(r.uploadDeadline).getTime() - now) / 86_400_000);
+  if (left > 0) return { tone: left <= 3 ? 'soon' as const : 'ok' as const, label: `업로드 마감 D-${left}` };
+  if (left === 0) return { tone: 'soon' as const, label: '오늘 업로드 마감' };
+  return { tone: 'late' as const, label: `업로드 마감 ${-left}일 지남` };
+}
+export const UPLOAD_TONE_STYLE: Record<'done' | 'wait' | 'ok' | 'soon' | 'late', string> = {
+  done: 'bg-emerald-50 text-emerald-600',
+  wait: 'bg-slate-100 text-slate-500',
+  ok: 'bg-blue-50 text-blue-600',
+  soon: 'bg-amber-50 text-amber-600',
+  late: 'bg-red-50 text-red-500',
+};
+export const shortDate = (iso?: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' });
+};
+
+export interface ProductSalesRow {
+  influencerUsername: string;
+  clicks: number;
+  contentUrl: string;
+  orders: number;
+  units: number;
+  sales: number;
+  commission: number;
+  lastOrderAt: string | null;
+}
+export interface ProductSalesTotals { clicks: number; orders: number; units: number; sales: number; commission: number; sellers: number }
 
 export interface MyAffiliateItem extends StoreRequest {
   salePrice: number;
@@ -529,6 +577,16 @@ export const affiliateStoreService = {
   reviewRequest(account: string, id: string, decision: 'approve' | 'reject', note = '', directDealAgreement?: boolean) {
     return call<{ request: StoreRequest; code?: string }>('POST', URL_BASE, { action: 'review_request', id, decision, note, directDealAgreement }, { account });
   },
+  /** 진행관리 › 진행 단계: 선정된 인플루언서의 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드. */
+  getBrandProgress(account: string, productId: string) {
+    const p = new URLSearchParams({ scope: 'brand', section: 'progress', productId });
+    return call<{ requests: StoreRequest[] }>('GET', `${URL_BASE}?${p.toString()}`, undefined, { account });
+  },
+  /** 진행관리 › 판매 현황: 인플루언서별 판매 · 상품 전체 판매(픽스폴리오 전용 링크). */
+  getBrandSales(account: string, productId: string) {
+    const p = new URLSearchParams({ scope: 'brand', section: 'sales', productId });
+    return call<{ influencers: ProductSalesRow[]; totals: ProductSalesTotals }>('GET', `${URL_BASE}?${p.toString()}`, undefined, { account });
+  },
   /** 인플루언서가 입력한 배송지로 협찬 상품을 보내고 송장번호를 입력한다(다시 부르면 고친다). */
   shipSelection(account: string, id: string, trackingCompany: string, trackingNumber: string) {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'ship_selection', id, trackingCompany, trackingNumber }, { account });
@@ -641,6 +699,14 @@ export const affiliateStoreService = {
   /** 선정된 협업 반려(배송정보 입력 전만). 협업은 진행되지 않는다. */
   declineSelection(id: string, reason: string) {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'decline_selection', id, reason });
+  },
+  /** 협찬 상품 수령 확인. 이때부터 10일 안에 콘텐츠를 올려 판매를 시작한다. */
+  confirmReceived(id: string) {
+    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'confirm_received', id });
+  },
+  /** 업로드한 콘텐츠 링크 · 파트너십 코드 올리기(고치기). */
+  submitContent(id: string, contentUrl: string, partnershipCode: string) {
+    return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'submit_content', id, contentUrl, partnershipCode });
   },
   cancelRequest(id: string) {
     return call<{ ok: true }>('POST', URL_BASE, { action: 'cancel_request', id });

@@ -34,7 +34,9 @@ import { sendPushToUser } from "./_shared/push.mts";
  *   POST /api/affiliate-store  { action, ... }
  *     브랜드    apply · save_product · delete_product · review_request · ship_selection · update_seller_info · mark_requests_seen
  *     (주문 · 취소 · 반품 · 문의는 api-affiliate-store-ops)
- *     인플루언서 request · cancel_request · submit_shipping · decline_selection
+ *     인플루언서 request · cancel_request · submit_shipping · decline_selection · confirm_received · submit_content
+ *   GET  /api/affiliate-store?scope=brand&section=progress&productId=  브랜드 진행관리: 선정 인플루언서의 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드
+ *   GET  /api/affiliate-store?scope=brand&section=sales&productId=     브랜드 진행관리: 인플루언서별 판매 현황 · 상품 전체 판매
  *     운영자    review_application
  *     담당자    manager_update · manager_mark_seen  (GET scope=selections: 브랜드가 선정한 신청 — 선정 즉시 보이는 담당자 조율 큐, &countOnly=1 새 선정 수)
  *
@@ -219,6 +221,27 @@ function shapeShipping(r: any) {
     shippedAt: r.shipped_at || null,
     declinedReason: r.declined_reason || "",
     declinedAt: r.declined_at || null,
+    ...shapeContent(r),
+  };
+}
+
+/** 상품 수령 뒤 콘텐츠를 올려 판매를 시작해야 하는 기한(일). 화면 안내 문구와 같다. */
+const UPLOAD_DAYS = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 수령 · 업로드 단계. 수령 시각(ship_delivered_at) + 10일이 업로드 마감이다.
+ * 콘텐츠 링크 · 파트너십 코드는 그 협업의 브랜드 · 인플루언서 본인 · 운영자 화면에만 내려간다.
+ */
+function shapeContent(r: any) {
+  if (r.content_url === undefined) return {};
+  const deliveredAt = r.ship_delivered_at ? new Date(r.ship_delivered_at) : null;
+  return {
+    deliveredAt: deliveredAt ? deliveredAt.toISOString() : null,
+    uploadDeadline: deliveredAt ? new Date(deliveredAt.getTime() + UPLOAD_DAYS * DAY_MS).toISOString() : null,
+    contentUrl: r.content_url || "",
+    partnershipCode: r.partnership_code || "",
+    contentSubmittedAt: r.content_submitted_at || null,
   };
 }
 
@@ -359,6 +382,8 @@ async function brandGet(db: any, username: string, url: URL, context?: Context) 
   if (section === "counts") return Response.json(await brandCounts(db, username));
 
   if (section === "request-products") return await brandRequestProducts(db, username);
+  if (section === "progress") return await brandProgress(db, username, url);
+  if (section === "sales") return await brandSales(db, username, url);
 
   const { hasCursor, cursorAt, cursorId } = readCursor(url);
   if (section === "requests") {
@@ -373,6 +398,7 @@ async function brandGet(db: any, username: string, url: URL, context?: Context) 
                r.shipping_status, r.ship_recipient_name, r.ship_recipient_phone, r.ship_postcode, r.ship_address1,
                r.ship_address2, r.ship_memo, r.ship_info_at, r.ship_tracking_company, r.ship_tracking_number,
                r.shipped_at, r.declined_reason, r.declined_at,
+               r.ship_delivered_at, r.content_url, r.partnership_code, r.content_submitted_at,
                p.name AS product_name, p.image_urls, a.brand_name
         FROM affiliate_store_requests r
         JOIN affiliate_store_products p ON p.id = r.product_id
@@ -457,6 +483,87 @@ async function brandGet(db: any, username: string, url: URL, context?: Context) 
     taxonomy: TAXONOMY,
     feeRates,
   });
+}
+
+/**
+ * 진행관리 › 진행 단계. 상품 한 개의 선정된 인플루언서 전부(최대 300명)와
+ * 배송 현황(배송지 · 송장) · 업로드 일정(수령일 + 10일) · 업로드 링크 · 파트너십 코드.
+ * 인스타 스냅샷은 싣지 않는다(지원 현황 카드에서 본다).
+ */
+async function brandProgress(db: any, username: string, url: URL) {
+  const productId = clip(url.searchParams.get("productId"), 60);
+  if (!productId) return err("상품을 골라 주세요.");
+  const rows = (await db.sql`
+    SELECT r.id, r.product_id, r.influencer_username, r.message, r.channel_url, r.status,
+           r.brand_note, r.manager_status, r.link_code, r.click_count, r.created_at, r.updated_at,
+           r.shipping_status, r.ship_recipient_name, r.ship_recipient_phone, r.ship_postcode, r.ship_address1,
+           r.ship_address2, r.ship_memo, r.ship_info_at, r.ship_tracking_company, r.ship_tracking_number,
+           r.shipped_at, r.declined_reason, r.declined_at,
+           r.ship_delivered_at, r.content_url, r.partnership_code, r.content_submitted_at,
+           p.name AS product_name, p.image_urls, a.brand_name
+    FROM affiliate_store_requests r
+    JOIN affiliate_store_products p ON p.id = r.product_id
+    LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
+    WHERE r.business_username = ${username} AND r.product_id = ${productId} AND r.status = 'approved'
+    ORDER BY r.updated_at DESC, r.id DESC
+    LIMIT 300
+  `) as any[];
+  return Response.json({ requests: rows.map(shapeRequest) });
+}
+
+/**
+ * 진행관리 › 판매 현황. 이 상품이 픽스폴리오(인플루언서 전용 링크)를 통해 얼마나 팔렸는지,
+ * 인플루언서별로 얼마나 팔았는지. 결제 완료 이후 주문만 세고, 취소 · 환불은 뺀다(MY 어필리에이트와 같은 기준).
+ */
+async function brandSales(db: any, username: string, url: URL) {
+  const productId = clip(url.searchParams.get("productId"), 60);
+  if (!productId) return err("상품을 골라 주세요.");
+  const [rows, reqs] = await Promise.all([
+    db.sql`
+      SELECT influencer_username, COUNT(*)::int AS orders, COALESCE(SUM(quantity), 0)::int AS units,
+             COALESCE(SUM(GREATEST(0, total_amount - shipping_fee - refund_amount)), 0)::bigint AS sales,
+             COALESCE(SUM(commission_amount), 0)::bigint AS commission,
+             MAX(COALESCE(paid_at, created_at)) AS last_order_at
+      FROM affiliate_store_orders
+      WHERE business_username = ${username} AND product_id = ${productId}
+        AND status = ANY(${SALE_STATUSES}::text[])
+        AND commission_status IN ('pending', 'confirmed')
+      GROUP BY influencer_username
+    ` as Promise<any[]>,
+    db.sql`
+      SELECT influencer_username, click_count, content_url
+      FROM affiliate_store_requests
+      WHERE business_username = ${username} AND product_id = ${productId} AND status = 'approved'
+    ` as Promise<any[]>,
+  ]);
+  const byUser = new Map<string, any>();
+  for (const q of reqs) {
+    byUser.set(q.influencer_username, {
+      influencerUsername: q.influencer_username, clicks: Number(q.click_count) || 0, contentUrl: q.content_url || "",
+      orders: 0, units: 0, sales: 0, commission: 0, lastOrderAt: null,
+    });
+  }
+  for (const r of rows) {
+    const cur = byUser.get(r.influencer_username) || {
+      influencerUsername: r.influencer_username, clicks: 0, contentUrl: "", orders: 0, units: 0, sales: 0, commission: 0, lastOrderAt: null,
+    };
+    cur.orders = Number(r.orders) || 0;
+    cur.units = Number(r.units) || 0;
+    cur.sales = Number(r.sales) || 0;
+    cur.commission = Number(r.commission) || 0;
+    cur.lastOrderAt = r.last_order_at || null;
+    byUser.set(r.influencer_username, cur);
+  }
+  const influencers = [...byUser.values()].sort((a, b) => b.sales - a.sales || b.orders - a.orders || b.clicks - a.clicks);
+  const totals = influencers.reduce(
+    (t, i) => ({
+      clicks: t.clicks + i.clicks, orders: t.orders + i.orders, units: t.units + i.units,
+      sales: t.sales + i.sales, commission: t.commission + i.commission,
+      sellers: t.sellers + (i.orders > 0 ? 1 : 0),
+    }),
+    { clicks: 0, orders: 0, units: 0, sales: 0, commission: 0, sellers: 0 },
+  );
+  return Response.json({ influencers, totals });
 }
 
 const REQUEST_PRODUCTS_LIMIT = 200;
@@ -814,7 +921,7 @@ async function brandShipSelection(db: any, username: string, body: any) {
   if (!rows[0]) return err("인플루언서가 배송정보를 입력한 선정에만 송장을 등록할 수 있어요.", 404);
   if (rows[0].manager_status === "done" && !rows[0].link_code) rows[0].link_code = await ensureLinkCode(db, rows[0].id);
   notifyCreator(rows[0].influencer_username, "협찬 상품이 발송되었어요",
-    `'${String(rows[0].product_name || "").slice(0, 60)}' · ${company} ${number} · MY 어필리에이트에서 전용 판매 링크가 열렸어요.`);
+    `'${String(rows[0].product_name || "").slice(0, 60)}' · ${company} ${number} · MY 어필리에이트에서 전용 판매 링크가 열렸어요. 상품을 받은 뒤 ${UPLOAD_DAYS}일 이내에 콘텐츠를 올려 판매를 시작해 주세요.`);
   return Response.json({ request: shapeRequest(rows[0]) });
 }
 
@@ -1106,6 +1213,7 @@ async function creatorRequests(db: any, username: string, url: URL) {
            r.shipping_status, r.ship_recipient_name, r.ship_recipient_phone, r.ship_postcode, r.ship_address1,
            r.ship_address2, r.ship_memo, r.ship_info_at, r.ship_tracking_company, r.ship_tracking_number,
            r.shipped_at, r.declined_reason, r.declined_at,
+           r.ship_delivered_at, r.content_url, r.partnership_code, r.content_submitted_at,
            p.name AS product_name, p.image_urls, a.brand_name,
            p.status AS product_status, p.deleted_at AS product_deleted_at, p.stock AS product_stock,
            p.sale_start_date, p.sale_end_date
@@ -1235,6 +1343,55 @@ async function creatorDeclineSelection(db: any, username: string, body: any) {
     body: `@${username} 님이 '${String(row.product_name || "").slice(0, 60)}' 협업을 진행하지 않기로 했어요.${reason ? ` 사유: ${reason.slice(0, 120)}` : ""}`,
     link: "/business-admin?tab=affiliate",
   });
+  return Response.json({ request: shapeRequest(row) });
+}
+
+/** 인플루언서: 협찬 상품을 받았다고 확인한다. 이때부터 10일 안에 콘텐츠를 올려 판매를 시작한다. */
+async function creatorConfirmReceived(db: any, username: string, body: any) {
+  const id = clip(body.id, 60);
+  const rows = (await db.sql`
+    UPDATE affiliate_store_requests SET ship_delivered_at = COALESCE(ship_delivered_at, NOW()), updated_at = NOW()
+    WHERE id = ${id} AND influencer_username = ${username} AND status = 'approved' AND shipping_status = 'shipped'
+    RETURNING *
+  `) as any[];
+  if (!rows[0]) return err("발송된 협찬 상품만 수령 확인할 수 있어요.", 404);
+  return Response.json({ request: shapeRequest(rows[0]) });
+}
+
+/**
+ * 인플루언서: 업로드한 콘텐츠 링크 · 브랜디드 콘텐츠 파트너십 코드를 올린다(언제든 고칠 수 있다).
+ * 판매 링크가 열린 협업(MY 어필리에이트에 보이는 협업)에만 올린다. 브랜드에게 알린다.
+ */
+async function creatorSubmitContent(db: any, username: string, body: any) {
+  const id = clip(body.id, 60);
+  const contentUrl = clip(body.contentUrl, 500);
+  const partnershipCode = clip(body.partnershipCode, 300);
+  if (!contentUrl) return err("업로드한 콘텐츠 링크를 입력해 주세요.");
+  if (!/^https:\/\/[^\s/?#]+\.[^\s]+$/i.test(contentUrl)) return err("콘텐츠 링크는 https:// 로 시작하는 주소로 입력해 주세요.");
+  const prev = (await db.sql`
+    SELECT content_url FROM affiliate_store_requests
+    WHERE id = ${id} AND influencer_username = ${username} AND status = 'approved' AND manager_status = 'done'
+  `) as any[];
+  if (!prev[0]) return err("진행 중인 어필리에이트 협업에만 콘텐츠를 올릴 수 있어요.", 404);
+  const rows = (await db.sql`
+    UPDATE affiliate_store_requests SET content_url = ${contentUrl}, partnership_code = ${partnershipCode},
+      content_submitted_at = COALESCE(content_submitted_at, NOW()), content_updated_at = NOW(),
+      ship_delivered_at = CASE WHEN shipping_status = 'shipped' THEN COALESCE(ship_delivered_at, NOW()) ELSE ship_delivered_at END,
+      updated_at = NOW()
+    WHERE id = ${id} AND influencer_username = ${username} AND status = 'approved' AND manager_status = 'done'
+    RETURNING *, (SELECT name FROM affiliate_store_products WHERE id = affiliate_store_requests.product_id) AS product_name
+  `) as any[];
+  const row = rows[0];
+  if (!row) return err("진행 중인 어필리에이트 협업에만 콘텐츠를 올릴 수 있어요.", 404);
+  const first = !prev[0].content_url;
+  await notify(db, {
+    recipientType: "brand",
+    recipient: row.business_username,
+    kind: "selection_content",
+    title: first ? "인플루언서가 콘텐츠를 업로드했어요" : "인플루언서가 콘텐츠 정보를 수정했어요",
+    body: `@${username} 님이 '${String(row.product_name || "").slice(0, 60)}' 콘텐츠 링크${partnershipCode ? " · 파트너십 코드" : ""}를 올렸어요. 진행관리와 캠페인 이력에서 확인할 수 있어요.`,
+    link: "/business-admin?tab=affiliate",
+  }).catch(() => {});
   return Response.json({ request: shapeRequest(row) });
 }
 
@@ -1409,7 +1566,8 @@ export default async (req: Request, context: Context) => {
 
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
   const creatorScope = ["creator", "product-detail", "brands", "my-request-status", "my-requests", "my-affiliate", "my-affiliate-orders"].includes(String(scope || ""))
-    || action === "request" || action === "cancel_request" || action === "submit_shipping" || action === "decline_selection";
+    || action === "request" || action === "cancel_request" || action === "submit_shipping" || action === "decline_selection"
+    || action === "confirm_received" || action === "submit_content";
   if (creatorScope && !caller.isAdmin) {
     const creator = await readCreatorAccess(username);
     if (!creator) return err("크리에이터 승인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
@@ -1445,6 +1603,8 @@ export default async (req: Request, context: Context) => {
       case "cancel_request": return await creatorCancel(db, username, body);
       case "submit_shipping": return await creatorSubmitShipping(db, username, body);
       case "decline_selection": return await creatorDeclineSelection(db, username, body);
+      case "confirm_received": return await creatorConfirmReceived(db, username, body);
+      case "submit_content": return await creatorSubmitContent(db, username, body);
       default: return err("알 수 없는 요청입니다.");
     }
   } catch (e) {

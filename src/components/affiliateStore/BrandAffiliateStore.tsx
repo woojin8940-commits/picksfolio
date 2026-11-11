@@ -11,8 +11,9 @@ import {
   SALE_STATE_STYLE,
   SHIPPING_STATUS_LABEL,
   SHIPPING_STATUS_STYLE,
-  SHIPPING_COURIERS,
   DIRECT_DEAL_AGREEMENT_REQUIRED,
+  UPLOAD_TONE_STYLE,
+  uploadScheduleOf,
   salePeriodText,
   sellerInfoMissing,
   type CategoryNode,
@@ -30,7 +31,7 @@ import BrandSellerInfo from './BrandSellerInfo';
 import AffiliatePayouts from './AffiliatePayouts';
 import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
 import DirectDealAgreement from './DirectDealAgreement';
-import { formatPhone } from '../../utils/formatters';
+import { AffiliateProgressBoard, AffiliateSalesBoard } from './BrandAffiliateProgress';
 
 /**
  * 브랜드 어필리에이트 메뉴(ZVZO 방식).
@@ -38,6 +39,10 @@ import { formatPhone } from '../../utils/formatters';
  *   신청서 없음 · 반려 → 입점 신청서
  *   검토 중            → 대기 안내
  *   승인               → 상품 관리 · 판매 신청 관리
+ *
+ * 진행관리(예전 '판매 신청')는 캠페인 협업처럼 진행 중인 어필리에이트(신청을 받은 상품)를 카드로 깔고,
+ * 하나를 누르면 지원 현황 · 선정 인플루언서 · 진행 단계(배송 현황 · 업로드 일정 · 업로드 링크 · 파트너십 코드)
+ * · 판매 현황 탭이 열린다(진행 단계 · 판매 현황은 BrandAffiliateProgress).
  *
  * 판매 신청은 상품별로 묶어 본다. 상품마다 대기 · 선정 · 반려 수와 "새 신청"(아직 확인 안 함) 알림을 보여 주고,
  * 상품을 누르면 광고비 지급형 캠페인 지원자처럼 인플루언서 카드(인스타 프로필 · 팔로워 · 최근 릴스)로 신청자를 본다.
@@ -88,6 +93,8 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [requestProductsError, setRequestProductsError] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<StoreProduct | null>(null);
   const [requestFilter, setRequestFilter] = useState<'' | 'pending' | 'approved' | 'rejected'>('');
+  /** 고른 상품 안의 탭: 지원 현황 · 선정 인플루언서 · 진행 단계 · 판매 현황. */
+  const [productTab, setProductTab] = useState<'applicants' | 'selected' | 'progress' | 'sales'>('applicants');
   const [productCursor, setProductCursor] = useState<ListCursor | null>(null);
   const [productHasMore, setProductHasMore] = useState(false);
   const [productsMoreLoading, setProductsMoreLoading] = useState(false);
@@ -111,8 +118,6 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   /** 직거래 금지 동의 전에 선정하려는 신청(동의 창). */
   const [agreeFor, setAgreeFor] = useState<StoreRequest | null>(null);
   const [agreeChecked, setAgreeChecked] = useState(false);
-  /** 카드별 송장 입력값. */
-  const [trackingDraft, setTrackingDraft] = useState<Record<string, { company: string; number: string; editing?: boolean }>>({});
 
   const applyCounts = useCallback((c: Partial<BrandCounts>) => {
     if (c.productTotal !== undefined) setProductTotal(c.productTotal);
@@ -208,7 +213,10 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     setRequestsLoaded(false);
     setRequestsHasMore(false);
     setRequestsCursor(null);
-    void loadRequests(null, p.id, '');
+    // 보낼 협찬 상품이 있으면 진행 단계부터, 아니면 지원 현황부터 연다.
+    const startTab = (p.requestCounts?.toShip || 0) > 0 && !(p.requestCounts?.unseen || 0) ? 'progress' : 'applicants';
+    setProductTab(startTab);
+    if (startTab === 'applicants') void loadRequests(null, p.id, '');
     window.scrollTo({ top: 0 });
     if ((p.requestCounts?.unseen || 0) > 0) {
       const clearUnseen = (x: StoreProduct) => x.id === p.id && x.requestCounts ? { ...x, requestCounts: { ...x.requestCounts, unseen: 0 } } : x;
@@ -233,6 +241,19 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     setRequests([]);
     setRequestsHasMore(false);
     void loadRequests(null, selectedProduct.id, f);
+  };
+  /** 상품 안의 탭을 바꾼다. 지원 현황 · 선정 인플루언서는 신청자 목록을 상태로 걸러 받는다. */
+  const changeProductTab = (t: typeof productTab) => {
+    if (!selectedProduct) return;
+    setProductTab(t);
+    if (t === 'applicants' || t === 'selected') {
+      const f = t === 'selected' ? 'approved' : '';
+      setRequestFilter(f);
+      setRequests([]);
+      setRequestsLoaded(false);
+      setRequestsHasMore(false);
+      void loadRequests(null, selectedProduct.id, f);
+    }
   };
 
   /** 상품 "더 보기": 목록만 받아 뒤에 붙인다. 실패하면 목록은 두고 아래에 오류만 보여 준다. */
@@ -430,29 +451,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     }
   };
 
-  /** 인플루언서가 입력한 배송지로 보낸 송장번호를 등록(고치기)한다. */
-  const ship = async (r: StoreRequest) => {
-    const d = trackingDraft[r.id] || { company: r.trackingCompany || SHIPPING_COURIERS[0], number: r.trackingNumber || '' };
-    const company = d.company || SHIPPING_COURIERS[0];
-    if (!d.number.trim()) { window.alert('송장번호를 입력해 주세요.'); return; }
-    setBusyId(r.id);
-    const res = await affiliateStoreService.shipSelection(businessUsername, r.id, company, d.number.trim());
-    setBusyId('');
-    if (res.error) { window.alert(res.error); return; }
-    setRequests(prev => prev.map(x => x.id === r.id ? {
-      ...x, shippingStatus: res.request.shippingStatus, trackingCompany: res.request.trackingCompany,
-      trackingNumber: res.request.trackingNumber, trackingUrl: res.request.trackingUrl, shippedAt: res.request.shippedAt,
-    } : x));
-    setTrackingDraft(prev => { const n = { ...prev }; delete n[r.id]; return n; });
-    void refreshCounts();
-  };
-
-  /** 선정된 카드 아래 협찬 배송 단계. */
-  const shippingPanel = (r: StoreRequest) => {
-    if (r.status !== 'approved' || !r.shippingStatus) return null;
-    if (r.shippingStatus === 'awaiting_info') {
-      return <p className="rounded-xl bg-amber-50 text-amber-700 text-[11px] font-bold px-3 py-2.5">인플루언서가 협찬 상품 배송정보를 입력하면 여기에 배송지가 보여요.</p>;
-    }
+  /** 선정 카드 아래 한 줄 — 배송 · 업로드 단계 요약(입력은 진행 단계 탭에서). */
+  const progressSummary = (r: StoreRequest) => {
+    if (r.status !== 'approved') return null;
     if (r.shippingStatus === 'declined') {
       return (
         <div className="rounded-xl bg-slate-50 text-slate-500 text-[11px] font-bold px-3 py-2.5">
@@ -461,54 +462,21 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         </div>
       );
     }
-    const a = r.shipping;
-    const draft = trackingDraft[r.id];
-    const editing = r.shippingStatus === 'info_submitted' || !!draft?.editing;
+    const schedule = uploadScheduleOf(r);
     return (
-      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2 text-[11px]">
-        <p className="font-black text-slate-500">협찬 상품 배송지</p>
-        {a && (
-          <div className="text-slate-700 space-y-0.5">
-            <p className="font-black text-slate-900">{a.recipientName} · {formatPhone(a.recipientPhone)}</p>
-            <p>{a.postcode ? `(${a.postcode}) ` : ''}{a.address1} {a.address2}</p>
-            {a.memo && <p className="text-slate-500">메모: {a.memo}</p>}
-          </div>
-        )}
-        {editing ? (
-          <div className="flex gap-1.5 pt-1">
-            <select
-              value={draft?.company || r.trackingCompany || SHIPPING_COURIERS[0]}
-              onChange={e => setTrackingDraft(p => ({ ...p, [r.id]: { company: e.target.value, number: p[r.id]?.number ?? r.trackingNumber ?? '', editing: p[r.id]?.editing } }))}
-              className="h-9 px-2 rounded-lg border border-slate-200 bg-white text-xs font-bold shrink-0"
-            >
-              {SHIPPING_COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <input
-              value={draft?.number ?? r.trackingNumber ?? ''}
-              onChange={e => setTrackingDraft(p => ({ ...p, [r.id]: { company: p[r.id]?.company || r.trackingCompany || SHIPPING_COURIERS[0], number: e.target.value, editing: p[r.id]?.editing } }))}
-              placeholder="송장번호"
-              inputMode="numeric"
-              className="h-9 min-w-0 flex-1 px-2.5 rounded-lg border border-slate-200 bg-white text-xs focus:outline-none focus:border-blue-600"
-            />
-            <button disabled={busyId === r.id} onClick={() => ship(r)} className="h-9 px-3 rounded-lg bg-slate-900 text-white text-xs font-black shrink-0 disabled:opacity-50">
-              {r.shippingStatus === 'shipped' ? '저장' : '발송 완료'}
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <p className="font-black text-emerald-600 truncate">
-              {r.trackingCompany} {r.trackingNumber}
-              {r.trackingUrl && <a href={r.trackingUrl} target="_blank" rel="noreferrer" className="ml-1.5 text-blue-600 underline">배송 조회</a>}
-            </p>
-            <button
-              onClick={() => setTrackingDraft(p => ({ ...p, [r.id]: { company: r.trackingCompany || SHIPPING_COURIERS[0], number: r.trackingNumber || '', editing: true } }))}
-              className="text-slate-400 font-bold hover:text-slate-700 shrink-0"
-            >
-              송장 수정
-            </button>
-          </div>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => changeProductTab('progress')}
+        className="w-full text-left rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2.5 text-[11px] flex items-center gap-2"
+      >
+        <span className="flex-1 min-w-0">
+          <span className="font-black text-slate-700">
+            {r.shippingStatus === 'info_submitted' ? '배송정보 도착 · 협찬 상품을 보내고 송장을 입력해 주세요' : r.shippingStatus === 'awaiting_info' ? '인플루언서 배송정보 입력 대기' : r.contentUrl ? '콘텐츠 업로드 완료' : '콘텐츠 업로드 대기'}
+          </span>
+          <span className={`ml-1.5 inline-block px-1.5 py-0.5 rounded font-black text-[10px] ${UPLOAD_TONE_STYLE[schedule.tone]}`}>{schedule.label}</span>
+        </span>
+        <span className="text-blue-600 font-black shrink-0">진행 단계 <ChevronRight className="inline w-3 h-3" /></span>
+      </button>
     );
   };
 
@@ -593,7 +561,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
         {([
           { key: 'products', label: '상품 관리', icon: Package },
-          { key: 'requests', label: '판매 신청', icon: Users, badge: newRequestCount },
+          { key: 'requests', label: '진행관리', icon: Users, badge: newRequestCount + shipPendingCount },
           { key: 'orders', label: '주문 관리', icon: Truck, badge: opsCounts.newOrders },
           { key: 'claims', label: '취소·반품 현황', icon: RotateCcw, badge: opsCounts.claimsNeedAction },
           { key: 'seller', label: '판매자 정보', icon: Store, badge: sellerMissing.length > 0 ? 1 : 0 },
@@ -716,13 +684,14 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : requestProducts.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
             <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm font-black text-slate-700">아직 받은 판매 신청이 없어요</p>
+            <p className="text-sm font-black text-slate-700">아직 진행 중인 어필리에이트가 없어요</p>
             <p className="text-xs text-slate-400 mt-1">상품을 '판매중'으로 두면 인플루언서에게 노출됩니다.</p>
           </div>
         ) : (
           <div className="space-y-2.5">
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
-              상품을 누르면 판매를 신청한 인플루언서를 볼 수 있어요. 선정하면 인플루언서에게 알림이 가고, 인플루언서가 배송정보를 입력하면 협찬 상품을 보내고 송장번호를 입력해 주세요. 송장번호를 입력하면 인플루언서의 전용 판매 링크가 열립니다.
+              진행 중인 어필리에이트예요. 상품을 누르면 인플루언서 지원 현황 · 선정된 인플루언서 · 진행 단계(배송 현황 · 업로드 일정 · 업로드 링크 · 파트너십 코드) · 판매 현황을 볼 수 있어요.
+              선정하면 인플루언서가 배송정보를 입력하고, 협찬 상품을 보내 송장번호를 입력하면 전용 판매 링크가 열려요. 인플루언서는 상품 수령 후 10일 이내에 콘텐츠를 업로드하고 판매를 시작해요.
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {requestProducts.map(p => {
@@ -766,7 +735,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       {tab === 'requests' && selectedProduct && (
         <div className="space-y-3">
           <button onClick={closeProductRequests} className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900">
-            <ArrowLeft className="w-4 h-4" /> 상품별 판매 신청
+            <ArrowLeft className="w-4 h-4" /> 진행 중인 어필리에이트
           </button>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5 flex items-center gap-4">
             <img src={selectedProduct.imageUrls[0]} alt="" className="w-16 h-16 md:w-20 md:h-20 rounded-xl object-cover bg-slate-100 shrink-0" />
@@ -780,11 +749,32 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               </p>
             </div>
           </div>
+          <div className="flex gap-4 border-b border-slate-200 overflow-x-auto">
+            {([
+              { key: 'applicants', label: `지원 현황 ${(selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0)}`, badge: selectedProduct.requestCounts?.unseen || 0 },
+              { key: 'selected', label: `선정 인플루언서 ${selectedProduct.requestCounts?.approved || 0}`, badge: 0 },
+              { key: 'progress', label: '진행 단계', badge: selectedProduct.requestCounts?.toShip || 0 },
+              { key: 'sales', label: '판매 현황', badge: 0 },
+            ] as const).map(t => (
+              <button
+                key={t.key}
+                onClick={() => changeProductTab(t.key)}
+                className={`pb-2.5 text-sm font-black border-b-2 -mb-px whitespace-nowrap flex items-center gap-1 ${productTab === t.key ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}
+              >
+                {t.label}
+                {t.badge > 0 && <span className="bg-red-500 text-white text-[9px] min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center">{t.badge}</span>}
+              </button>
+            ))}
+          </div>
+          {productTab === 'progress' && (
+            <AffiliateProgressBoard key={selectedProduct.id} businessUsername={businessUsername} productId={selectedProduct.id} onShipped={() => { void refreshCounts(); }} />
+          )}
+          {productTab === 'sales' && <AffiliateSalesBoard key={selectedProduct.id} businessUsername={businessUsername} productId={selectedProduct.id} />}
+          {productTab === 'applicants' && (
           <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
             {([
               { key: '', label: '전체', n: (selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0) },
               { key: 'pending', label: '검토 대기', n: selectedProduct.requestCounts?.pending || 0 },
-              { key: 'approved', label: '선정', n: selectedProduct.requestCounts?.approved || 0 },
               { key: 'rejected', label: '반려', n: selectedProduct.requestCounts?.rejected || 0 },
             ] as const).map(f => (
               <button
@@ -796,6 +786,8 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               </button>
             ))}
           </div>
+          )}
+          {(productTab === 'applicants' || productTab === 'selected') && (<>
           {requestsLoading && requests.length === 0 ? (
             <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
           ) : requestsError ? (
@@ -835,7 +827,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                     </>
                   }
                 >
-                  {shippingPanel(r)}
+                  {progressSummary(r)}
                   <div className="flex items-center gap-2 pt-1 justify-end">
                     {r.status !== 'approved' && (
                       <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-9 flex-1 px-3 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-50">선정</button>
@@ -858,6 +850,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               )}
             </>
           )}
+          </>)}
         </div>
       )}
 

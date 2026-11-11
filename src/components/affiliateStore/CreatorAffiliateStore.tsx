@@ -797,16 +797,33 @@ const ApplySheet: React.FC<ApplySheetProps> = ({
 
 // ───────────────────────────── 화면 ─────────────────────────────
 
-const CreatorAffiliateStore: React.FC<{ userName: string }> = ({ userName }) => (
+type StoreTab = 'products' | 'brands' | 'my' | 'mine' | 'payouts';
+/**
+ * 메뉴가 둘로 나뉜다.
+ *   store(어필리에이트)   브랜드들이 올린 상품 · 브랜드만 본다.
+ *   my(MY 어필리에이트)   진행 중인 어필리에이트(전용 링크 · 수령 · 콘텐츠 업로드 · 판매) · 내 신청 · 정산.
+ * 한쪽 메뉴에서 다른 쪽 탭으로 가야 할 때(예: 상품 상세의 "내 신청 보기")는 onNavigate 로 메뉴를 바꾼다.
+ */
+type StoreMode = 'store' | 'my';
+const MODE_TABS: Record<StoreMode, StoreTab[]> = { store: ['products', 'brands'], my: ['my', 'mine', 'payouts'] };
+
+interface CreatorAffiliateStoreProps {
+  userName: string;
+  mode?: StoreMode;
+  initialTab?: StoreTab;
+  onNavigate?: (mode: StoreMode, tab: StoreTab) => void;
+}
+
+const CreatorAffiliateStore: React.FC<CreatorAffiliateStoreProps> = ({ userName, mode = 'store', initialTab, onNavigate }) => (
   <main className="p-4 md:p-14 w-full">
     <CreatorApplicationGate feature="어필리에이트">
-      <AffiliateStoreBody userName={userName} />
+      <AffiliateStoreBody key={`${mode}:${initialTab || ''}`} userName={userName} mode={mode} initialTab={initialTab} onNavigate={onNavigate} />
     </CreatorApplicationGate>
   </main>
 );
 
-const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
-  const [tab, setTab] = useState<'products' | 'brands' | 'my' | 'mine' | 'payouts'>('products');
+const AffiliateStoreBody: React.FC<CreatorAffiliateStoreProps & { mode: StoreMode }> = ({ userName, mode, initialTab, onNavigate }) => {
+  const [tab, setTab] = useState<StoreTab>(initialTab && MODE_TABS[mode].includes(initialTab) ? initialTab : MODE_TABS[mode][0]);
   const [taxonomy, setTaxonomy] = useState<CategoryNode[]>([]);
   // 화면에 나온 상품의 내 신청 상태(상품 id → 상태)와 "내 신청" 전체 건수(서버가 센 값).
   const [requestStatusMap, setRequestStatusMap] = useState<Map<string, Pick<StoreRequest, 'productId' | 'status' | 'managerStatus' | 'shippingStatus'>>>(new Map());
@@ -971,7 +988,13 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
     await loadRequestStatuses([updated.productId]);
   };
 
-  const switchTab = (t: typeof tab) => { setTab(t); setBrandPage(null); setBrandInfo(null); };
+  const switchTab = (t: typeof tab) => {
+    // 다른 메뉴의 탭이면 그 메뉴로 옮긴다(상품 상세의 "내 신청 보기" · 선정 안내 배너 등).
+    if (!MODE_TABS[mode].includes(t)) {
+      if (onNavigate) { onNavigate(mode === 'store' ? 'my' : 'store', t); return; }
+    }
+    setTab(t); setBrandPage(null); setBrandInfo(null);
+  };
   const detailRequest = detail ? requestByProduct.get(detail.id) : undefined;
 
   return (
@@ -1007,9 +1030,13 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
       {/* 상세를 보는 동안 목록은 숨겨 두기만 한다 — 돌아왔을 때 검색어 · 카테고리 · 더 보기가 그대로 남게. */}
       <div className={detail ? 'hidden' : ''}>
       <header className="mb-5">
-        <p className="text-[10px] font-black tracking-[0.2em] text-blue-500 uppercase mb-1">Affiliate</p>
-        <h2 className="text-xl md:text-3xl font-black text-slate-900">어필리에이트</h2>
-        <p className="text-xs md:text-sm text-slate-500 mt-1">브랜드 상품을 골라 판매 신청하고, 판매한 만큼 수수료를 받으세요.</p>
+        <p className="text-[10px] font-black tracking-[0.2em] text-blue-500 uppercase mb-1">{mode === 'my' ? 'My Affiliate' : 'Affiliate'}</p>
+        <h2 className="text-xl md:text-3xl font-black text-slate-900">{mode === 'my' ? 'MY 어필리에이트' : '어필리에이트'}</h2>
+        <p className="text-xs md:text-sm text-slate-500 mt-1">
+          {mode === 'my'
+            ? '진행 중인 어필리에이트의 전용 링크 · 콘텐츠 업로드 · 판매 성과와 내 신청 · 정산을 확인하세요.'
+            : '브랜드들이 올린 상품을 골라 판매 신청하고, 판매한 만큼 수수료를 받으세요.'}
+        </p>
       </header>
 
       {awaitingShippingCount > 0 && tab !== 'mine' && (
@@ -1026,10 +1053,10 @@ const AffiliateStoreBody: React.FC<{ userName: string }> = ({ userName }) => {
         {([
           { key: 'products', label: '상품' },
           { key: 'brands', label: '브랜드' },
-          { key: 'my', label: 'MY 어필리에이트' },
+          { key: 'my', label: '진행 중인 어필리에이트' },
           { key: 'mine', label: `내 신청 ${requestTotal.toLocaleString('ko-KR')}` },
           { key: 'payouts', label: '정산' },
-        ] as const).map(t => (
+        ] as const).filter(t => MODE_TABS[mode].includes(t.key)).map(t => (
           <button key={t.key} onClick={() => switchTab(t.key)} className={`h-9 px-4 rounded-lg text-xs font-black whitespace-nowrap ${tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
             {t.label}
           </button>

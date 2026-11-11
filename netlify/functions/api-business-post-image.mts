@@ -88,8 +88,14 @@ export default async (req: Request, context: Context) => {
   if (!collabId) return Response.json({ error: "collabId는 필수입니다." }, { status: 400 });
 
   const db = getDatabase();
-  // 이 브랜드가 연 캠페인의 협업만 본다 — 다른 브랜드의 협업 게시물을 열 수 없게.
-  const rows = (await db.sql`
+  // 어필리에이트 협업(asr_…)은 인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크가 기준이다.
+  // 이 브랜드가 올린 상품의 협업만 본다.
+  const rows = collabId.startsWith("asr_") ? (await db.sql`
+    SELECT r.content_url AS upload_url, r.influencer_username AS creator_username, NULL AS media_id
+    FROM affiliate_store_requests r
+    WHERE r.id = ${collabId} AND r.business_username = ${username} AND r.status = 'approved'
+    LIMIT 1
+  `) as any[] : (await db.sql`
     SELECT cc.upload_url, cc.creator_username, m.media_id
     FROM campaign_collabs cc
     JOIN campaigns c ON c.id = cc.campaign_id

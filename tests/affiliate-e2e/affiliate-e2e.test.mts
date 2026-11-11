@@ -445,6 +445,50 @@ describe("B. 판매 신청 · 선정", () => {
     if (code) assert.notEqual((await call(shop, null, "GET", `/api/affiliate-shop?code=${code}`)).status, 200);
   });
 
+  test("발송 뒤 수령 확인 → 업로드 마감(수령 + 10일) · 콘텐츠 링크 · 파트너십 코드가 브랜드 진행 단계에 보인다", async () => {
+    const id = requestIds[0];
+    const before = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    const item = before.body.items.find((x: any) => x.id === id);
+    assert.equal(item.deliveredAt, null);
+    assert.equal(item.uploadDeadline, null);
+    assert.equal(item.contentUrl, "");
+
+    const other = await call(h.store, INF, "POST", "/api/affiliate-store", { action: "confirm_received", id });
+    assert.equal(other.status, 404, "다른 사람은 수령 확인할 수 없다");
+    const got = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "confirm_received", id });
+    assert.equal(got.status, 200, JSON.stringify(got.body));
+    assert.ok(got.body.request.deliveredAt);
+    const days = (Date.parse(got.body.request.uploadDeadline) - Date.parse(got.body.request.deliveredAt)) / 86_400_000;
+    assert.equal(days, 10);
+
+    const bad = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "submit_content", id, contentUrl: "instagram.com/reel/x" });
+    assert.equal(bad.status, 400);
+    const otherContent = await call(h.store, INF, "POST", "/api/affiliate-store", { action: "submit_content", id, contentUrl: "https://www.instagram.com/reel/ABC123/" });
+    assert.equal(otherContent.status, 404);
+    const declined = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "submit_content", id: requestIds[2], contentUrl: "https://www.instagram.com/reel/ABC123/" });
+    assert.equal(declined.status, 404, "반려한 협업에는 콘텐츠를 올릴 수 없다");
+    const up = await call(h.store, INF2, "POST", "/api/affiliate-store", {
+      action: "submit_content", id, contentUrl: "https://www.instagram.com/reel/ABC123/", partnershipCode: "PARTNER-CODE-1",
+    });
+    assert.equal(up.status, 200, JSON.stringify(up.body));
+    assert.equal(up.body.request.contentUrl, "https://www.instagram.com/reel/ABC123/");
+    assert.equal(up.body.request.partnershipCode, "PARTNER-CODE-1");
+    assert.ok(up.body.request.contentSubmittedAt);
+
+    const productId = (await pg.query(`SELECT product_id FROM affiliate_store_requests WHERE id = $1`, [id])).rows[0].product_id;
+    const progress = await call(h.store, BRAND, "GET", `/api/affiliate-store?scope=brand&section=progress&productId=${productId}`);
+    assert.equal(progress.status, 200, JSON.stringify(progress.body));
+    const row = progress.body.requests.find((x: any) => x.id === id);
+    assert.equal(row.shippingStatus, "shipped");
+    assert.equal(row.shipping.recipientName, "받는분");
+    assert.equal(row.partnershipCode, "PARTNER-CODE-1");
+    assert.ok(row.uploadDeadline);
+    const sales = await call(h.store, BRAND, "GET", `/api/affiliate-store?scope=brand&section=sales&productId=${productId}`);
+    assert.equal(sales.status, 200, JSON.stringify(sales.body));
+    assert.ok(sales.body.influencers.some((x: any) => x.influencerUsername === INF2));
+    assert.equal(typeof sales.body.totals.sales, "number");
+  });
+
   test("대기 중 신청 취소 → 건수가 줄고 목록에서 빠진다", async () => {
     const r = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "cancel_request", id: requestIds[1] });
     assert.equal(r.status, 200);

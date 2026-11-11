@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Loader2, PartyPopper, X } from 'lucide-react';
-import { affiliateStoreService, type StoreRequest } from '../../services/affiliateStoreService';
+import { CalendarClock, Loader2, PartyPopper, X } from 'lucide-react';
+import { affiliateStoreService, UPLOAD_DAYS, type StoreRequest } from '../../services/affiliateStoreService';
 import { openPostcodeSearch } from '../../utils/daumPostcode';
 import { formatPhoneInput } from '../../utils/formatters';
 import { useCloseOnBack } from '../../hooks/useCloseOnBack';
@@ -103,6 +103,13 @@ const SelectionShippingSheet: React.FC<Props> = ({ request, onClose, onDone }) =
             협찬 상품을 받을 배송정보를 입력하면 협업이 진행돼요. 브랜드가 상품을 보내고 송장번호를 입력하면 MY 어필리에이트에서 전용 판매 링크가 열려요.
             {canDecline && <><br /><span className="text-slate-500">진행하지 않으려면 아래 <b>협업 반려</b>를 눌러 주세요.</span></>}
           </p>
+          <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3">
+            <CalendarClock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-xs leading-relaxed text-amber-800">
+              <p className="font-black">상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해야 해요.</p>
+              <p className="mt-0.5 text-amber-700">업로드한 뒤에는 MY 어필리에이트에서 콘텐츠 링크와 파트너십 코드를 올려 주세요. 브랜드가 확인할 수 있어요.</p>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <input className={inputCls} placeholder="받는 분 이름" value={form.recipientName} onChange={e => set('recipientName', e.target.value)} maxLength={50} />
             <input className={inputCls} placeholder="휴대폰 번호" inputMode="tel" value={form.recipientPhone} onChange={e => set('recipientPhone', formatPhoneInput(e.target.value))} />
