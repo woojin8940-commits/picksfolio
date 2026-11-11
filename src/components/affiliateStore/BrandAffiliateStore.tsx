@@ -689,37 +689,38 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               진행 중인 어필리에이트예요. 상품을 누르면 지원 · 선정 인플루언서(한 화면) · 진행 단계(배송 현황 · 업로드 링크 · 파트너십 코드) · 판매 현황을 볼 수 있어요.
               선정하면 인플루언서가 배송정보를 입력하고, 협찬 상품을 보내 송장번호를 입력하면 전용 판매 링크가 열려요. 업로드 일정은 픽스폴리오 담당자가 양쪽과 조율해요.
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
               {requestProducts.map(p => {
                 const c = p.requestCounts || { pending: 0, approved: 0, rejected: 0, unseen: 0 };
                 const unseen = c.unseen || 0;
+                const toShip = c.toShip || 0;
                 const state = p.saleState || (p.status === 'on_sale' ? 'on_sale' : 'paused');
                 return (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => openProductRequests(p)}
-                    className={`relative text-left bg-white rounded-2xl border shadow-sm p-4 flex items-center gap-3 hover:border-blue-300 transition-colors ${unseen > 0 ? 'border-red-200' : (c.toShip || 0) > 0 ? 'border-blue-200' : 'border-slate-100'}`}
+                    className={`text-left bg-white rounded-2xl border shadow-sm overflow-hidden hover:-translate-y-0.5 hover:shadow-md transition-all ${unseen > 0 ? 'border-red-200' : toShip > 0 ? 'border-blue-200' : 'border-slate-100'}`}
                   >
-                    {unseen > 0 && (
-                      <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center shadow">{unseen}</span>
-                    )}
-                    <img src={p.imageUrls[0]} alt="" className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${SALE_STATE_STYLE[state]}`}>{SALE_STATE_LABEL[state]}</span>
-                        {unseen > 0 && <span className="text-[10px] font-black text-red-500 flex items-center gap-0.5"><Bell className="w-3 h-3" /> 새 신청 {unseen}명</span>}
-                      </div>
-                      <p className="text-sm font-black text-slate-900 truncate">{p.name}</p>
-                      <p className="text-[10px] text-slate-400 font-bold truncate">{salePeriodText(p.saleStartDate, p.saleEndDate)} · 수수료 {p.commissionRate}%</p>
-                      <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1 text-[11px] font-bold">
-                        <span className="text-amber-600">검토 대기 {c.pending || 0}</span>
-                        <span className="text-emerald-600">선정 {c.approved || 0}</span>
-                        <span className="text-slate-400">반려 {c.rejected || 0}</span>
-                        {(c.toShip || 0) > 0 && <span className="text-blue-600 flex items-center gap-0.5"><Truck className="w-3 h-3" /> 발송 대기 {c.toShip}</span>}
-                      </div>
+                    <div className="relative aspect-square bg-slate-100">
+                      {p.imageUrls[0] && <img src={p.imageUrls[0]} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                      <span className={`absolute top-2 left-2 text-[10px] font-black px-2 py-1 rounded-lg ${SALE_STATE_STYLE[state]}`}>{SALE_STATE_LABEL[state]}</span>
+                      {unseen > 0 ? (
+                        <span className="absolute top-2 right-2 text-[10px] font-black px-2 py-1 rounded-lg bg-red-500 text-white flex items-center gap-0.5"><Bell className="w-3 h-3" /> 새 신청 {unseen}</span>
+                      ) : toShip > 0 ? (
+                        <span className="absolute top-2 right-2 text-[10px] font-black px-2 py-1 rounded-lg bg-blue-600 text-white flex items-center gap-0.5"><Truck className="w-3 h-3" /> 발송 대기 {toShip}</span>
+                      ) : null}
                     </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                    <div className="p-3">
+                      <p className="text-[10px] font-bold text-slate-400 truncate">{salePeriodText(p.saleStartDate, p.saleEndDate)}</p>
+                      <p className="text-xs md:text-sm font-black text-slate-900 line-clamp-2 min-h-[2.5em]">{p.name}</p>
+                      <p className="text-[11px] text-slate-500 mt-1 truncate">
+                        {won(p.salePrice)} · 수수료 <b className="text-blue-600">{p.commissionRate}%</b>
+                      </p>
+                      <p className="text-[10px] font-bold text-slate-400 mt-0.5 truncate">
+                        <span className="text-amber-600">대기 {c.pending || 0}</span> · <span className="text-emerald-600">선정 {c.approved || 0}</span> · 반려 {c.rejected || 0}
+                      </p>
+                    </div>
                   </button>
                 );
               })}
