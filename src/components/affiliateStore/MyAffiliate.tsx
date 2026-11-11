@@ -428,7 +428,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                         <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${saleStyle}`}>{saleLabel}</span>
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${stage.style}`}>{stage.label}</span>
-                        {i.hiddenAt && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-900 text-white">목록에서 삭제</span>}
+                        {i.hiddenAt && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-400">삭제된 상품</span>}
                       </div>
                       <p className="text-sm font-black text-slate-900 truncate mt-0.5">{i.productName}</p>
                       <p className="text-[11px] text-slate-400 font-bold truncate">

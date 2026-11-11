@@ -3414,6 +3414,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "CPV순": "CPV",
   "상태 필터를 풀고 다시 확인해 보세요.": "Try clearing the status filter and checking again.",
   "목록에서 삭제": "Remove from list",
+  "삭제된 상품": "Removed product",
   "코드 없음": "No code",
   "인플루언서가 업로드 단계에 파트너십 코드를 남기면 광고로 돌릴 수 있습니다.": "Once the influencer leaves a partnership code at the upload stage, you can run it as an ad.",
   "답하지 않은 채 시작일이 지난 제안은 자동으로 숨겨지고, 수락한 제안은 계속 남습니다. 거절한 제안은 '거절됨'에서만 볼 수 있습니다": "Offers you never answered are hidden automatically once the start date passes, while accepted offers stay. Rejected offers are only visible under 'Rejected'",
