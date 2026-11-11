@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, Check, Copy, ExternalLink, Link2, Loader2, PackageCheck, Upload } from 'lucide-react';
+import { Check, Copy, ExternalLink, Link2, Loader2 } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -9,19 +9,21 @@ import {
   COMMISSION_STATUS_STYLE,
   SALE_STATE_LABEL,
   SALE_STATE_STYLE,
-  UPLOAD_DAYS,
-  UPLOAD_TONE_STYLE,
-  shortDate,
-  uploadScheduleOf,
   type MyAffiliateItem,
   type StoreOrder,
+  type StoreRequest,
 } from '../../services/affiliateStoreService';
+import AffiliateStepBoard from './AffiliateStepBoard';
+import SelectionShippingSheet from './SelectionShippingSheet';
 
 /**
  * MY 어필리에이트 — 선정(승인)된 상품과 인플루언서 전용 링크.
  *
  * 링크(/shop/<코드>)를 개인페이지 · 콘텐츠에 올리면, 그 링크로 들어온 고객이 픽스폴리오에서
  * 결제한 주문이 이 인플루언서 판매로 잡힌다. 방문 · 주문 · 판매액 · 예상 수수료를 상품별로 본다.
+ *
+ * 상품마다 진행 단계(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드)가 캠페인 진행사항과 같은 모양으로 붙는다.
+ * 선정됐지만 아직 협찬 상품이 나가기 전인 협업(배송정보 입력 · 발송 대기)도 맨 위에 함께 보여, 여기서 배송정보를 입력한다.
  */
 
 const ORDER_STYLE: Record<string, string> = {
@@ -50,109 +52,10 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/**
- * 진행 단계: 협찬 상품 수령 → 수령 후 10일 이내 콘텐츠 업로드 · 판매 시작 → 콘텐츠 링크 · 파트너십 코드 올리기.
- * 올린 링크 · 코드는 브랜드의 진행관리 · 캠페인 이력에 보이고, 브랜드가 그 게시물을 2차 광고로 돌릴 수 있다.
- */
-const ContentPanel: React.FC<{ item: MyAffiliateItem; onUpdated: (patch: Partial<MyAffiliateItem>) => void }> = ({ item, onUpdated }) => {
-  const [editing, setEditing] = useState(!item.contentUrl);
-  const [url, setUrl] = useState(item.contentUrl || '');
-  const [code, setCode] = useState(item.partnershipCode || '');
-  const [busy, setBusy] = useState<'' | 'receive' | 'save'>('');
-  const [error, setError] = useState('');
-  const schedule = uploadScheduleOf(item);
-  const awaitingReceipt = item.shippingStatus === 'shipped' && !item.deliveredAt;
-
-  const receive = async () => {
-    setBusy('receive'); setError('');
-    const res = await affiliateStoreService.confirmReceived(item.id);
-    setBusy('');
-    if (res.error || !res.request) { setError(res.error || '수령 확인을 하지 못했어요.'); return; }
-    onUpdated({ deliveredAt: res.request.deliveredAt, uploadDeadline: res.request.uploadDeadline });
-  };
-  const save = async () => {
-    if (!/^https:\/\/\S+\.\S+/i.test(url.trim())) { setError('콘텐츠 링크는 https:// 로 시작하는 주소로 입력해 주세요.'); return; }
-    setBusy('save'); setError('');
-    const res = await affiliateStoreService.submitContent(item.id, url.trim(), code.trim());
-    setBusy('');
-    if (res.error || !res.request) { setError(res.error || '저장하지 못했어요.'); return; }
-    onUpdated({
-      contentUrl: res.request.contentUrl, partnershipCode: res.request.partnershipCode, contentSubmittedAt: res.request.contentSubmittedAt,
-      deliveredAt: res.request.deliveredAt, uploadDeadline: res.request.uploadDeadline,
-    });
-    setEditing(false);
-  };
-
-  return (
-    <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2.5">
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <CalendarClock className="w-3.5 h-3.5 text-slate-400" />
-        <span className="font-black text-slate-600">업로드 일정</span>
-        <span className={`px-1.5 py-0.5 rounded font-black text-[10px] ${UPLOAD_TONE_STYLE[schedule.tone]}`}>{schedule.label}</span>
-        {item.deliveredAt && <span className="text-slate-400 font-bold">수령 {shortDate(item.deliveredAt)} · 마감 {shortDate(item.uploadDeadline)}</span>}
-      </div>
-      {!item.contentUrl && (
-        <p className="text-[11px] text-amber-700 font-bold bg-amber-50 rounded-lg px-2.5 py-2">
-          상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해 주세요. 업로드한 뒤 아래에 콘텐츠 링크와 파트너십 코드를 올려 주세요.
-        </p>
-      )}
-      {awaitingReceipt && (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-slate-500 min-w-0">
-            협찬 상품 발송됨{item.trackingCompany ? ` · ${item.trackingCompany} ${item.trackingNumber}` : ''}
-            {item.trackingUrl && <a href={item.trackingUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 font-bold underline">배송 조회</a>}
-          </p>
-          <button disabled={!!busy} onClick={receive} className="h-8 px-3 rounded-lg bg-slate-900 text-white text-[11px] font-black shrink-0 flex items-center gap-1 disabled:opacity-50">
-            {busy === 'receive' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PackageCheck className="w-3.5 h-3.5" />} 상품 수령 확인
-          </button>
-        </div>
-      )}
-      {editing ? (
-        <div className="space-y-1.5">
-          <input
-            value={url}
-            onChange={e => setUrl(e.target.value)}
-            placeholder="업로드한 콘텐츠 링크 (https://www.instagram.com/reel/...)"
-            className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs focus:outline-none focus:border-blue-600"
-            maxLength={500}
-          />
-          <input
-            value={code}
-            onChange={e => setCode(e.target.value)}
-            placeholder="브랜디드 콘텐츠 파트너십 코드 (광고 코드)"
-            className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-mono focus:outline-none focus:border-blue-600"
-            maxLength={300}
-          />
-          <p className="text-[10px] text-slate-400">파트너십 코드를 올리면 브랜드가 이 콘텐츠를 2차 광고로 돌릴 수 있어요. 인스타그램 게시물 › 파트너십 광고 코드에서 복사해 주세요.</p>
-          <div className="flex justify-end gap-1.5">
-            {item.contentUrl && <button onClick={() => { setEditing(false); setUrl(item.contentUrl || ''); setCode(item.partnershipCode || ''); setError(''); }} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-[11px] font-bold text-slate-500">취소</button>}
-            <button disabled={!!busy} onClick={save} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black flex items-center gap-1 disabled:opacity-50">
-              {busy === 'save' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {item.contentUrl ? '저장' : '업로드 링크 올리기'}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-1 text-[11px]">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-black text-slate-500 shrink-0">업로드 링크</span>
-            <a href={item.contentUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold truncate">{item.contentUrl}</a>
-          </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-black text-slate-500 shrink-0">파트너십 코드</span>
-            {item.partnershipCode ? <span className="font-mono text-slate-800 truncate">{item.partnershipCode}</span> : <span className="text-amber-600 font-bold">미입력</span>}
-          </div>
-          <div className="flex justify-end">
-            <button onClick={() => setEditing(true)} className="text-[11px] font-bold text-slate-400 hover:text-slate-700">수정</button>
-          </div>
-        </div>
-      )}
-      {error && <p className="text-[11px] font-bold text-red-500">{error}</p>}
-    </div>
-  );
-};
-
 const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const [items, setItems] = useState<MyAffiliateItem[]>([]);
+  const [preparing, setPreparing] = useState<MyAffiliateItem[]>([]);
+  const [shippingFor, setShippingFor] = useState<StoreRequest | null>(null);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [orderCount, setOrderCount] = useState(0);
   const [totals, setTotals] = useState({ clicks: 0, orders: 0, sales: 0, commission: 0, pending: 0, confirmed: 0, cancelled: 0 });
@@ -172,6 +75,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     if (res.error) { setError(res.error); return; }
     setError('');
     setItems(res.items || []);
+    setPreparing(res.preparing || []);
     setOrderCount(res.orderCount || 0);
     setTotals(res.totals);
   }, []);
@@ -208,7 +112,62 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   if (loading) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
   if (error) return <p className="text-sm font-bold text-red-500 py-6">{error}</p>;
 
+  const patchItem = (id: string, patch: Partial<MyAffiliateItem>) =>
+    setItems(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
+
+  const stepHandlers = (i: MyAffiliateItem) => ({
+    onEditShipping: () => setShippingFor(i),
+    onConfirmReceived: async () => {
+      const res = await affiliateStoreService.confirmReceived(i.id);
+      if (res.error || !res.request) return res.error || '수령 확인을 하지 못했어요.';
+      patchItem(i.id, { deliveredAt: res.request.deliveredAt, uploadDeadline: res.request.uploadDeadline });
+    },
+    onSubmitContent: async (url: string, code: string) => {
+      const res = await affiliateStoreService.submitContent(i.id, url, code);
+      if (res.error || !res.request) return res.error || '저장하지 못했어요.';
+      patchItem(i.id, {
+        contentUrl: res.request.contentUrl, partnershipCode: res.request.partnershipCode, contentSubmittedAt: res.request.contentSubmittedAt,
+        deliveredAt: res.request.deliveredAt, uploadDeadline: res.request.uploadDeadline,
+      });
+    },
+  });
+
+  const shippingSheet = shippingFor && (
+    <SelectionShippingSheet
+      request={shippingFor}
+      onClose={() => setShippingFor(null)}
+      onDone={r => {
+        setShippingFor(null);
+        if (r.shippingStatus === 'declined') setPreparing(prev => prev.filter(x => x.id !== r.id));
+        else setPreparing(prev => prev.map(x => (x.id === r.id ? { ...x, ...r, productName: x.productName, productImage: x.productImage, brandName: x.brandName } : x)));
+      }}
+    />
+  );
+
+  /** 선정됐지만 협찬 상품이 나가기 전 — 진행 단계 1(제품 배송)에서 배송정보를 입력한다. */
+  const preparingList = preparing.length > 0 && (
+    <div className="space-y-2.5 mb-5">
+      <p className="text-sm font-black text-slate-900 px-0.5">시작 대기 중인 어필리에이트 {preparing.length}</p>
+      {preparing.map(i => (
+        <div key={i.id} className="bg-white rounded-2xl border border-blue-100 shadow-sm p-4">
+          <div className="flex gap-3 mb-3">
+            {i.productImage && <img src={i.productImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0" />}
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
+              <p className="text-sm font-black text-slate-900 truncate">{i.productName}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b> · 협찬 상품이 발송되면 전용 판매 링크가 열려요
+              </p>
+            </div>
+          </div>
+          <AffiliateStepBoard role="influencer" request={i} {...stepHandlers(i)} />
+        </div>
+      ))}
+    </div>
+  );
+
   if (items.length === 0) {
+    if (preparing.length > 0) return <>{shippingSheet}{preparingList}</>;
     return (
       <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
         <Link2 className="w-8 h-8 text-slate-300 mx-auto mb-3" />
@@ -221,6 +180,8 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
 
   return (
     <>
+      {shippingSheet}
+      {preparingList}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
         {[
           { label: '링크 방문', value: `${totals.clicks.toLocaleString('ko-KR')}회` },
@@ -304,10 +265,10 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                 )}
               </div>
 
-              <ContentPanel
-                item={i}
-                onUpdated={patch => setItems(prev => prev.map(x => (x.id === i.id ? { ...x, ...patch } : x)))}
-              />
+              {/* 진행 단계 — 캠페인 진행사항과 같은 모양(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드). */}
+              <div className="mt-3">
+                <AffiliateStepBoard role="influencer" request={i} {...stepHandlers(i)} />
+              </div>
 
               <div className="grid grid-cols-4 gap-2 mt-3 text-center">
                 {[

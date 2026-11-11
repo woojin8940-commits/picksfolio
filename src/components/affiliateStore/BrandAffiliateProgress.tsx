@@ -1,27 +1,24 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, Check, Copy, ExternalLink, Loader2, Truck, Users } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, CalendarClock, Check, CheckCircle2, Loader2, Truck, Upload, Users } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
-  shortDate,
-  uploadScheduleOf,
   SHIPPING_COURIERS,
-  SHIPPING_STATUS_LABEL,
-  SHIPPING_STATUS_STYLE,
   UPLOAD_DAYS,
-  UPLOAD_TONE_STYLE,
   type ProductSalesRow,
   type ProductSalesTotals,
   type StoreRequest,
 } from '../../services/affiliateStoreService';
 import { formatPhone } from '../../utils/formatters';
-import { copyText } from '../../utils/clipboard';
+import { csvCell } from '../../utils/csv';
+import AffiliateStepBoard, { type AffiliateStepKey } from './AffiliateStepBoard';
 
 /**
  * 브랜드 어필리에이트 › 진행관리 › 상품 › 진행 단계 · 판매 현황.
  *
- * 진행 단계는 광고비 지급형 캠페인의 진행사항처럼 선정된 인플루언서 한 명당 한 줄이다.
- * 어필리에이트라 단계는 셋이다.
+ * 진행 단계는 캠페인 진행사항 보드와 같은 모양이다 — 단계를 가로로 늘어놓은 칸에 인플루언서 카드가 들어가고,
+ * 카드를 누르면 그 사람의 진행 단계(AffiliateStepBoard)가 그 단계가 펼쳐진 채로 열린다.
+ * 어필리에이트라 단계는 셋이다(+ 진행 완료 칸).
  *   배송 현황      인플루언서가 입력한 배송지 → 브랜드가 협찬 상품을 보내고 송장번호 입력
  *   업로드 일정    상품 수령일 + 10일까지 콘텐츠 업로드 · 판매 시작
  *   업로드 링크    인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크 · 파트너십 코드(캠페인 이력에서 2차 광고로 돌린다)
@@ -29,7 +26,65 @@ import { copyText } from '../../utils/clipboard';
  * 판매 현황은 이 상품이 픽스폴리오(인플루언서 전용 링크)를 통해 얼마나 팔렸는지와 인플루언서별 판매.
  */
 
-const cellLabel = 'text-[10px] font-black text-slate-400 mb-1 md:hidden';
+type ColumnKey = 'shipping' | 'schedule' | 'content' | 'done';
+
+type Column = {
+  key: ColumnKey;
+  title: string;
+  focus: AffiliateStepKey;
+  reviewLabel?: string;
+  emptyLabel: string;
+  icon: React.ReactNode;
+};
+
+/** 보드의 칸 — 캠페인 진행사항 보드와 같은 모양. 마지막 칸은 세 단계를 다 지난 사람이 서는 자리다. */
+const COLUMNS: Column[] = [
+  { key: 'shipping', title: '제품 배송', focus: 'shipping', reviewLabel: '발송 처리', emptyLabel: '배송을 기다리는 인플루언서가 없습니다.', icon: <Truck className="w-4 h-4" /> },
+  { key: 'schedule', title: '업로드 일정', focus: 'schedule', emptyLabel: '수령 · 업로드를 기다리는 인플루언서가 없습니다.', icon: <CalendarClock className="w-4 h-4" /> },
+  { key: 'content', title: '업로드 링크 · 코드', focus: 'content', emptyLabel: '파트너십 코드를 기다리는 인플루언서가 없습니다.', icon: <Upload className="w-4 h-4" /> },
+  { key: 'done', title: '진행 완료', focus: 'content', emptyLabel: '링크와 파트너십 코드가 모두 올라오면 이 칸으로 넘어옵니다.', icon: <CheckCircle2 className="w-4 h-4" /> },
+];
+const ORDER: ColumnKey[] = ['shipping', 'schedule', 'content', 'done'];
+
+/** 이 협업이 지금 서 있는 칸. */
+const columnOf = (r: StoreRequest): ColumnKey => {
+  const st = r.shippingStatus || '';
+  if (st === 'awaiting_info' || st === 'info_submitted') return 'shipping';
+  if (!r.contentUrl) return 'schedule';
+  if (!r.partnershipCode) return 'content';
+  return 'done';
+};
+
+const korDate = (iso?: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+};
+
+const InstagramMark: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="2" y="2" width="20" height="20" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const identityOf = (r: StoreRequest) => {
+  const ins = (r.insights || {}) as { profileImage?: string; instagramHandle?: string; instagramUrl?: string; followers?: number };
+  const handle = String(ins.instagramHandle || '').replace(/^@/, '');
+  return {
+    image: ins.profileImage || '',
+    title: `@${handle || r.influencerUsername}`,
+    sub: Number(ins.followers) > 0 ? `팔로워 ${Number(ins.followers).toLocaleString('ko-KR')}` : '',
+    instagramUrl: ins.instagramUrl || r.channelUrl || '',
+  };
+};
+
+const Avatar: React.FC<{ src: string; label: string; size: string }> = ({ src, label, size }) => (
+  src
+    ? <img src={src} alt="" className={`${size} rounded-full object-cover bg-slate-100 flex-shrink-0`} />
+    : <span className={`${size} rounded-full bg-slate-100 text-slate-400 text-[11px] font-black flex items-center justify-center flex-shrink-0`}>{label.replace(/^@/, '').slice(0, 1).toUpperCase()}</span>
+);
 
 export const AffiliateProgressBoard: React.FC<{ businessUsername: string; productId: string; onShipped?: () => void }> = ({
   businessUsername, productId, onShipped,
@@ -37,9 +92,7 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
   const [rows, setRows] = useState<StoreRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState('');
-  const [copied, setCopied] = useState('');
-  const [draft, setDraft] = useState<Record<string, { company: string; number: string; editing?: boolean }>>({});
+  const [detail, setDetail] = useState<{ id: string; focus: AffiliateStepKey } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,24 +104,23 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
   }, [businessUsername, productId]);
   useEffect(() => { void load(); }, [load]);
 
-  const ship = async (r: StoreRequest) => {
-    const d = draft[r.id] || { company: r.trackingCompany || SHIPPING_COURIERS[0], number: r.trackingNumber || '' };
-    if (!d.number.trim()) { window.alert('송장번호를 입력해 주세요.'); return; }
-    setBusyId(r.id);
-    const res = await affiliateStoreService.shipSelection(businessUsername, r.id, d.company || SHIPPING_COURIERS[0], d.number.trim());
-    setBusyId('');
-    if (res.error) { window.alert(res.error); return; }
-    setRows(prev => prev.map(x => (x.id === r.id ? { ...x, ...res.request, productName: x.productName, productImage: x.productImage, brandName: x.brandName } : x)));
-    setDraft(prev => { const n = { ...prev }; delete n[r.id]; return n; });
+  const ship = async (r: StoreRequest, company: string, number: string): Promise<string | void> => {
+    const res = await affiliateStoreService.shipSelection(businessUsername, r.id, company || SHIPPING_COURIERS[0], number);
+    if (res.error) return res.error;
+    setRows(prev => prev.map(x => (x.id === r.id ? { ...x, ...res.request, productName: x.productName, productImage: x.productImage, brandName: x.brandName, insights: x.insights } : x)));
     onShipped?.();
   };
 
-  const copy = async (key: string, text: string) => {
-    if (await copyText(text)) {
-      setCopied(key);
-      window.setTimeout(() => setCopied(c => (c === key ? '' : c)), 1600);
-    }
-  };
+  const active = useMemo(() => rows.filter(r => r.shippingStatus !== 'declined'), [rows]);
+  const declined = useMemo(() => rows.filter(r => r.shippingStatus === 'declined'), [rows]);
+  const board = useMemo(() => COLUMNS.map(column => {
+    const idx = ORDER.indexOf(column.key);
+    const cards = active.filter(r => columnOf(r) === column.key);
+    // 이 칸을 이미 지나간 사람은 아래쪽 '완료' 줄에 이름만 남긴다(마지막 칸 제외).
+    const doneCards = column.key === 'done' ? [] : active.filter(r => ORDER.indexOf(columnOf(r)) > idx);
+    const reviewCount = column.key === 'shipping' ? cards.filter(r => r.shippingStatus === 'info_submitted').length : 0;
+    return { column, cards, doneCards, reviewCount };
+  }), [active]);
 
   if (loading && rows.length === 0) return <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
   if (error) {
@@ -84,146 +136,238 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
       <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
         <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
         <p className="text-sm font-black text-slate-700">아직 선정된 인플루언서가 없어요</p>
-        <p className="text-xs text-slate-400 mt-1">지원 현황에서 인플루언서를 선정하면 여기서 배송 · 업로드 일정 · 업로드 링크를 관리해요.</p>
+        <p className="text-xs text-slate-400 mt-1">지원 · 선정 인플루언서에서 인플루언서를 선정하면 여기서 제품 배송 · 업로드 일정 · 업로드 링크를 관리해요.</p>
       </div>
     );
   }
 
-  const shippingCell = (r: StoreRequest) => {
-    const st = r.shippingStatus || '';
-    if (!st) return <p className="text-[11px] text-slate-400 font-bold">예전 방식 선정(배송 단계 없음)</p>;
-    if (st === 'awaiting_info') return <p className="text-[11px] text-amber-700 font-bold">인플루언서 배송정보 입력 대기</p>;
-    if (st === 'declined') {
-      return (
-        <p className="text-[11px] text-slate-500 font-bold">
-          인플루언서가 협업을 반려했어요.
-          {r.declinedReason && <span className="block text-slate-400 font-medium">사유: {r.declinedReason}</span>}
-        </p>
-      );
-    }
-    const a = r.shipping;
-    const d = draft[r.id];
-    const editing = st === 'info_submitted' || !!d?.editing;
+  // ── 한 사람의 진행 단계(캠페인 진행사항 상세와 같은 화면) ──
+  const opened = detail ? rows.find(r => r.id === detail.id) : null;
+  if (detail && opened) {
+    const who = identityOf(opened);
+    const col = opened.shippingStatus === 'declined' ? null : COLUMNS.find(c => c.key === columnOf(opened));
     return (
-      <div className="space-y-1.5 text-[11px]">
-        {a && (
-          <div className="text-slate-700">
-            <p className="font-black text-slate-900">{a.recipientName} · {formatPhone(a.recipientPhone)}</p>
-            <p className="leading-snug">{a.postcode ? `(${a.postcode}) ` : ''}{a.address1} {a.address2}</p>
-            {a.memo && <p className="text-slate-400">메모: {a.memo}</p>}
+      <div className="space-y-3">
+        <button
+          onClick={() => setDetail(null)}
+          className="inline-flex items-center gap-1.5 text-xs font-black text-slate-500 hover:text-slate-900 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> 진행 보드로
+        </button>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <Avatar src={who.image} label={who.title} size="w-10 h-10" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-black text-slate-900 truncate flex items-center gap-1.5">
+                {who.title}
+                {who.instagramUrl && (
+                  <a href={who.instagramUrl} target="_blank" rel="noreferrer" className="text-pink-500 hover:text-pink-600 flex-shrink-0" aria-label="인스타그램 열기">
+                    <InstagramMark />
+                  </a>
+                )}
+              </p>
+              <p className="text-xs text-slate-400 font-bold truncate">{opened.productName}{who.sub ? ` · ${who.sub}` : ''}</p>
+            </div>
+            <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-black flex-shrink-0">
+              {col ? col.title : '반려'}
+            </span>
           </div>
-        )}
-        {editing ? (
-          <div className="flex gap-1">
-            <select
-              value={d?.company || r.trackingCompany || SHIPPING_COURIERS[0]}
-              onChange={e => setDraft(p => ({ ...p, [r.id]: { company: e.target.value, number: p[r.id]?.number ?? r.trackingNumber ?? '', editing: p[r.id]?.editing } }))}
-              className="h-8 px-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold shrink-0 max-w-[110px]"
-            >
-              {SHIPPING_COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <input
-              value={d?.number ?? r.trackingNumber ?? ''}
-              onChange={e => setDraft(p => ({ ...p, [r.id]: { company: p[r.id]?.company || r.trackingCompany || SHIPPING_COURIERS[0], number: e.target.value, editing: p[r.id]?.editing } }))}
-              placeholder="송장번호"
-              inputMode="numeric"
-              className="h-8 min-w-0 flex-1 px-2 rounded-lg border border-slate-200 bg-white text-[11px] focus:outline-none focus:border-blue-600"
-            />
-            <button disabled={busyId === r.id} onClick={() => ship(r)} className="h-8 px-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black shrink-0 disabled:opacity-50">
-              {st === 'shipped' ? '저장' : '발송 완료'}
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-black text-emerald-600 truncate">
-              {r.trackingCompany} {r.trackingNumber}
-              {r.trackingUrl && <a href={r.trackingUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 underline">조회</a>}
-            </p>
-            <button
-              onClick={() => setDraft(p => ({ ...p, [r.id]: { company: r.trackingCompany || SHIPPING_COURIERS[0], number: r.trackingNumber || '', editing: true } }))}
-              className="text-slate-400 font-bold hover:text-slate-700 shrink-0"
-            >
-              송장 수정
-            </button>
-          </div>
-        )}
+          <AffiliateStepBoard
+            key={opened.id}
+            role="brand"
+            request={opened}
+            focusStep={detail.focus}
+            onShip={(company, number) => ship(opened, company, number)}
+          />
+        </div>
       </div>
     );
-  };
+  }
 
-  const shipCount = rows.filter(r => r.shippingStatus === 'info_submitted').length;
-  const uploadedCount = rows.filter(r => r.contentUrl).length;
+  const shipWaiting = active.filter(r => r.shippingStatus === 'info_submitted');
+  const uploadedCount = active.filter(r => r.contentUrl).length;
+  const downloadAddresses = () => {
+    if (shipWaiting.length === 0) return;
+    const lines = [
+      ['인스타 계정', '받는 분', '연락처', '우편번호', '주소', '상세주소', '요청사항'].map(csvCell).join(','),
+      ...shipWaiting.map(r => [
+        identityOf(r).title.replace(/^@/, ''),
+        r.shipping?.recipientName || '',
+        formatPhone(r.shipping?.recipientPhone),
+        r.shipping?.postcode || '',
+        r.shipping?.address1 || '',
+        r.shipping?.address2 || '',
+        r.shipping?.memo || '',
+      ].map(csvCell).join(',')),
+    ];
+    const blob = new Blob([`﻿${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = `배송지_${shipWaiting.length}건.csv`;
+    a.click();
+    URL.revokeObjectURL(href);
+  };
 
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold leading-relaxed">
-        배송정보를 확인하고 협찬 상품을 보낸 뒤 송장번호를 입력해 주세요. 인플루언서는 상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해요.
-        업로드한 콘텐츠 링크와 파트너십 코드는 여기와 캠페인 이력에서 확인하고, 캠페인 이력에서 2차 광고로 돌릴 수 있어요.
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1">
+        <p className="text-base md:text-lg font-black text-slate-900">진행 중 인플루언서 {active.length}명</p>
+        <span className="text-slate-300 font-black">·</span>
+        <p className="text-base md:text-lg font-black text-slate-900">업로드 완료 {uploadedCount}명</p>
+        {shipWaiting.length > 0 && (
+          <span className="px-2.5 py-1 rounded-md bg-slate-900 text-white text-[11px] font-black">확인 필요 {shipWaiting.length}건</span>
+        )}
+        {shipWaiting.length > 0 && (
+          <button onClick={downloadAddresses} className="ml-auto px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-black text-slate-700 transition-colors flex-shrink-0">
+            주소지 일괄 다운로드 {shipWaiting.length}건
+          </button>
+        )}
       </div>
-      <div className="flex flex-wrap gap-2 text-[11px] font-black">
-        <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-100 text-slate-600">선정 {rows.length}명</span>
-        <span className={`px-2.5 py-1 rounded-lg ${shipCount > 0 ? 'bg-blue-600 text-white' : 'bg-white border border-slate-100 text-slate-600'}`}>발송 대기 {shipCount}</span>
-        <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-100 text-slate-600">업로드 완료 {uploadedCount}</span>
-      </div>
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="hidden md:grid grid-cols-[170px_1.3fr_170px_1.2fr] gap-4 px-5 py-3 text-[10px] font-black text-slate-400 border-b border-slate-100">
-          <span>인플루언서</span>
-          <span className="flex items-center gap-1"><Truck className="w-3 h-3" /> 배송 현황</span>
-          <span className="flex items-center gap-1"><CalendarClock className="w-3 h-3" /> 업로드 일정</span>
-          <span>업로드 링크 · 파트너십 코드</span>
-        </div>
-        {rows.map(r => {
-          const schedule = uploadScheduleOf(r);
-          return (
-            <div key={r.id} className="grid grid-cols-1 md:grid-cols-[170px_1.3fr_170px_1.2fr] gap-3 md:gap-4 px-4 md:px-5 py-4 border-b border-slate-50 last:border-0">
-              <div className="min-w-0">
-                <p className="text-sm font-black text-slate-900 truncate">@{r.influencerUsername}</p>
-                {r.shippingStatus && (
-                  <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-black ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
-                )}
-                {r.channelUrl && (
-                  <a href={r.channelUrl} target="_blank" rel="noreferrer" className="block mt-1 text-[10px] font-bold text-blue-600 truncate">채널 보기</a>
+      <p className="px-1 text-xs text-slate-400 font-medium">
+        인플루언서는 상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해요. 카드를 누르면 그 인플루언서의 진행 단계가 열려요.
+      </p>
+
+      <div className="-mx-1 overflow-x-auto pb-2">
+        <div className="flex gap-3 items-start px-1 min-w-max">
+          {board.map(({ column, cards, doneCards, reviewCount }) => (
+            <section key={column.key} className="w-[268px] flex-shrink-0 rounded-2xl border border-slate-100 bg-slate-50/80">
+              <div className="px-3 py-2.5 flex items-center gap-2 border-b border-slate-100">
+                <span className="text-slate-400 flex-shrink-0">{column.icon}</span>
+                <p className="text-sm font-black text-slate-900 flex-shrink-0">{column.title}</p>
+                <span className="px-1.5 py-0.5 rounded-md bg-white text-[11px] font-black text-slate-500 flex-shrink-0">{cards.length}</span>
+                {doneCards.length > 0 && <span className="text-[11px] font-black text-emerald-600 flex-shrink-0">완료 {doneCards.length}</span>}
+                {reviewCount > 0 && (
+                  <span className="ml-auto px-2 py-0.5 rounded-md bg-slate-900 text-white text-[11px] font-black flex-shrink-0">확인 {reviewCount}</span>
                 )}
               </div>
-              <div className="min-w-0">
-                <p className={cellLabel}>배송 현황</p>
-                {shippingCell(r)}
-              </div>
-              <div className="min-w-0">
-                <p className={cellLabel}>업로드 일정</p>
-                <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-black ${UPLOAD_TONE_STYLE[schedule.tone]}`}>{schedule.label}</span>
-                <p className="text-[10px] text-slate-400 font-bold mt-1 leading-snug">
-                  {r.shippedAt && <>발송 {shortDate(r.shippedAt)}<br /></>}
-                  {r.deliveredAt ? <>수령 {shortDate(r.deliveredAt)} · 마감 {shortDate(r.uploadDeadline)}</> : r.shippingStatus === 'shipped' ? '수령 확인 대기' : ''}
-                  {r.contentSubmittedAt && <><br />업로드 {shortDate(r.contentSubmittedAt)}</>}
-                </p>
-              </div>
-              <div className="min-w-0 text-[11px]">
-                <p className={cellLabel}>업로드 링크 · 파트너십 코드</p>
-                {r.contentUrl ? (
-                  <div className="space-y-1">
-                    <a href={r.contentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 font-bold min-w-0">
-                      <ExternalLink className="w-3 h-3 shrink-0" /><span className="truncate">{r.contentUrl}</span>
-                    </a>
-                    {r.partnershipCode ? (
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-mono text-slate-700 truncate">{r.partnershipCode}</span>
-                        <button onClick={() => copy(r.id, r.partnershipCode || '')} className="shrink-0 text-slate-400 hover:text-slate-700" aria-label="파트너십 코드 복사">
-                          {copied === r.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+              <div className="p-2 space-y-2 max-h-[520px] overflow-y-auto overscroll-contain">
+                {cards.length === 0 && doneCards.length === 0 ? (
+                  <p className="px-1.5 py-4 text-[11px] text-slate-400 font-bold leading-relaxed">{column.emptyLabel}</p>
+                ) : cards.map(r => {
+                  const who = identityOf(r);
+                  const review = column.key === 'shipping' && r.shippingStatus === 'info_submitted';
+                  const left = r.uploadDeadline && column.key === 'schedule'
+                    ? Math.ceil((new Date(r.uploadDeadline).getTime() - Date.now()) / 86_400_000) : null;
+                  const urgency = left === null ? '' : left < 0 ? 'over' : left <= 2 ? 'soon' : left <= 5 ? 'near' : '';
+                  const frame = urgency === 'over' || urgency === 'soon' ? 'border-red-200' : urgency === 'near' ? 'border-amber-200' : 'border-slate-200/70';
+                  const working = column.key === 'shipping'
+                    ? (r.shippingStatus === 'awaiting_info' ? '배송정보 입력 대기' : '발송 대기')
+                    : column.key === 'schedule'
+                      ? (!r.shippingStatus ? '업로드 대기' : r.deliveredAt ? '콘텐츠 제작 중' : '상품 수령 대기')
+                      : column.key === 'content' ? '파트너십 코드 대기' : '진행 완료';
+                  return (
+                    <div key={r.id} className={`rounded-xl border bg-white ${frame}`}>
+                      <button type="button" onClick={() => setDetail({ id: r.id, focus: column.focus })} className="w-full text-left px-2.5 pt-2.5 pb-2">
+                        <div className="flex items-center gap-2.5">
+                          <Avatar src={who.image} label={who.title} size="w-9 h-9" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1 min-w-0">
+                              <p className="text-sm font-black text-slate-900 truncate">{who.title}</p>
+                              {who.instagramUrl && <span className="text-pink-500 flex-shrink-0"><InstagramMark className="w-3 h-3" /></span>}
+                            </div>
+                            {who.sub && <p className="text-[11px] text-slate-400 font-bold truncate">{who.sub}</p>}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-1.5">
+                          {column.key === 'done' || column.key === 'content' ? (
+                            <p className="text-[11px] font-bold text-slate-500 truncate">
+                              {r.contentSubmittedAt ? `업로드 ${korDate(r.contentSubmittedAt)}` : '업로드 완료'}
+                            </p>
+                          ) : column.key === 'schedule' ? (
+                            <>
+                              <p className={`text-[11px] font-bold ${urgency === 'over' || urgency === 'soon' ? 'text-red-500' : 'text-slate-400'}`}>
+                                {r.uploadDeadline ? `업로드 ${korDate(r.uploadDeadline)}` : r.shippedAt ? `발송 ${korDate(r.shippedAt)} · 수령 후 ${UPLOAD_DAYS}일` : '업로드 일정 미정'}
+                              </p>
+                              {urgency && (
+                                <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-black flex-shrink-0 ${urgency === 'near' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500'}`}>
+                                  {urgency === 'over' ? `${-(left ?? 0)}일 지남` : urgency === 'soon' ? '시급' : '임박'}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-[11px] font-bold text-slate-400 truncate">
+                              {r.shippingStatus === 'info_submitted' && r.shipping?.submittedAt ? `배송정보 ${korDate(r.shipping.submittedAt)}` : `선정 ${korDate(r.updatedAt)}`}
+                            </p>
+                          )}
+                        </div>
+                        {(column.key === 'content' || column.key === 'done') && (
+                          <p className={`mt-1.5 text-[11px] font-black truncate ${r.partnershipCode ? 'text-slate-600' : 'text-amber-600'}`}>
+                            {r.partnershipCode ? `파트너십 코드 ${r.partnershipCode}` : '파트너십 코드 대기'}
+                          </p>
+                        )}
+                      </button>
+                      {review ? (
+                        <div className="px-2.5 pb-2.5">
+                          <button onClick={() => setDetail({ id: r.id, focus: column.focus })} className="w-full px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-black hover:bg-slate-700 transition-colors">
+                            {column.reviewLabel}
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="px-2.5 pb-2.5 text-[11px] font-bold text-slate-400 truncate">{working}</p>
+                      )}
+                      {review && r.shipping && (
+                        <div className="mx-2 mb-2 rounded-lg bg-emerald-50/70 border border-emerald-100 px-2.5 py-2">
+                          <p className="text-[11px] font-black text-emerald-700 break-words">{r.shipping.recipientName} · {formatPhone(r.shipping.recipientPhone)}</p>
+                          <p className="text-[11px] font-bold text-slate-600 break-words mt-0.5">{r.shipping.postcode ? `(${r.shipping.postcode}) ` : ''}{r.shipping.address1} {r.shipping.address2}</p>
+                          {r.shipping.memo && <p className="text-[10px] font-bold text-slate-400 break-words mt-0.5">요청사항: {r.shipping.memo}</p>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {doneCards.length > 0 && (
+                  <div className="pt-1 space-y-1">
+                    <div className="flex items-center gap-1.5 px-0.5 pb-0.5">
+                      <span className="h-px flex-1 bg-slate-200" />
+                      <span className="text-[10px] font-black text-slate-400 flex-shrink-0">완료 {doneCards.length}명</span>
+                      <span className="h-px flex-1 bg-slate-200" />
+                    </div>
+                    {doneCards.map(r => {
+                      const who = identityOf(r);
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => setDetail({ id: r.id, focus: column.focus })}
+                          className="w-full flex items-center gap-2 rounded-lg border border-slate-100 bg-white/70 px-2 py-1.5 text-left hover:bg-white transition-colors"
+                        >
+                          <Avatar src={who.image} label={who.title} size="w-6 h-6" />
+                          <p className="min-w-0 flex-1 text-[11px] font-black text-slate-500 truncate">{who.title}</p>
+                          <span className="flex items-center gap-0.5 text-[10px] font-black text-emerald-600 flex-shrink-0">
+                            <Check className="w-3 h-3" strokeWidth={3} /> 완료
+                          </span>
                         </button>
-                      </div>
-                    ) : (
-                      <p className="text-amber-600 font-bold">파트너십 코드 미입력</p>
-                    )}
+                      );
+                    })}
                   </div>
-                ) : (
-                  <p className="text-slate-400 font-bold">아직 업로드 전</p>
                 )}
               </div>
-            </div>
-          );
-        })}
+            </section>
+          ))}
+        </div>
       </div>
+
+      {declined.length > 0 && (
+        <div className="rounded-2xl border border-slate-100 bg-white shadow-sm p-4 md:p-5">
+          <p className="text-sm font-black text-slate-900 mb-2.5">반려된 협업</p>
+          <div className="space-y-1.5">
+            {declined.map(r => {
+              const who = identityOf(r);
+              return (
+                <button key={r.id} type="button" onClick={() => setDetail({ id: r.id, focus: 'shipping' })} className="w-full flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors">
+                  <Avatar src={who.image} label={who.title} size="w-8 h-8" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-black text-slate-900 truncate">{who.title}</p>
+                    {r.declinedReason && <p className="text-xs text-slate-400 font-bold truncate">사유: {r.declinedReason}</p>}
+                  </div>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-black flex-shrink-0 bg-red-50 text-red-500">인플루언서 반려</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
