@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Check, Copy, ExternalLink, Link2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Copy, ExternalLink, History, Link2, Loader2, Trash2, Undo2 } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -25,7 +25,18 @@ import SelectionShippingSheet from './SelectionShippingSheet';
  * 진행 상품은 어필리에이트 상품 목록처럼 작은 카드로 늘어놓고(지금 단계 배지), 카드를 누르면 그 상품의
  * 진행 단계(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드)와 전용 링크 · 판매 수치가 안에서 열린다.
  * 선정됐지만 아직 협찬 상품이 나가기 전인 협업(배송정보 입력 · 발송 대기)도 카드로 함께 보여, 상세에서 배송정보를 입력한다.
+ *
+ * 브랜드가 판매를 중지했거나 판매가 끝난 상품은 '진행 상품'에서 지울 수 있다(기록은 남는다).
+ * '진행 이력' 탭에는 지금까지 진행한 협업이 지운 것까지 모두 남는다.
  */
+
+/** 진행 상품에서 지울 수 있는 협업 — 지금 이 링크로 살 수 없는(판매 중지 · 기간 종료 · 삭제) 상품. */
+function canHide(i: MyAffiliateItem): boolean {
+  if (i.live) return false;
+  return i.productState === 'paused' || i.productState === 'draft' || i.productState === 'deleted' || i.productState === 'ended';
+}
+
+const dateText = (v?: string | null) => (v ? new Date(v).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }) : '');
 
 const ORDER_STYLE: Record<string, string> = {
   paid: 'bg-blue-50 text-blue-600',
@@ -79,7 +90,8 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const [ordersHasMore, setOrdersHasMore] = useState(false);
   const [ordersCursor, setOrdersCursor] = useState<{ cursorAt: string; cursorId: string } | null>(null);
   const [copied, setCopied] = useState('');
-  const [view, setView] = useState<'products' | 'orders'>('products');
+  const [view, setView] = useState<'products' | 'history' | 'orders'>('products');
+  const [hidingId, setHidingId] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -110,7 +122,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     setOrdersLoaded(true);
   }, []);
 
-  const selectView = (next: 'products' | 'orders') => {
+  const selectView = (next: 'products' | 'history' | 'orders') => {
     setView(next);
     if (next === 'orders' && !ordersLoaded && !ordersLoading) void loadOrders();
   };
@@ -127,6 +139,19 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
 
   const patchItem = (id: string, patch: Partial<MyAffiliateItem>) =>
     setItems(prev => prev.map(x => (x.id === id ? { ...x, ...patch } : x)));
+
+  /** 판매 중지 · 종료된 상품을 진행 상품에서 지운다(hidden=false 면 다시 보이게). 진행 이력에는 남는다. */
+  const setHidden = async (i: MyAffiliateItem, hidden: boolean) => {
+    if (hidden && !window.confirm(`'${i.productName || '이 상품'}'을(를) 진행 상품에서 삭제할까요?\n진행 이력 탭에서는 계속 볼 수 있어요.`)) return;
+    setHidingId(i.id);
+    const res = await affiliateStoreService.hideMyAffiliate(i.id, hidden);
+    setHidingId('');
+    if (res.error) { window.alert(res.error); return; }
+    const patch = { hiddenAt: hidden ? res.hiddenAt || new Date().toISOString() : null };
+    setItems(prev => prev.map(x => (x.id === i.id ? { ...x, ...patch } : x)));
+    setPreparing(prev => prev.map(x => (x.id === i.id ? { ...x, ...patch } : x)));
+    if (hidden) setOpenId(null);
+  };
 
   const stepHandlers = (i: MyAffiliateItem) => ({
     onEditShipping: () => setShippingFor(i),
@@ -161,6 +186,9 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     ...preparing.map(item => ({ item, waiting: true })),
     ...items.map(item => ({ item, waiting: false })),
   ];
+  // 진행 상품 = 지우지 않은 협업. 진행 이력 = 지금까지 진행한 협업 전부(지운 것 포함 · 최근 순).
+  const active = all.filter(x => !x.item.hiddenAt);
+  const history = [...all].sort((a, b) => String(b.item.updatedAt || b.item.createdAt).localeCompare(String(a.item.updatedAt || a.item.createdAt)));
 
   if (all.length === 0) {
     return (
@@ -187,6 +215,22 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
         >
           <ArrowLeft className="w-3.5 h-3.5" /> MY 어필리에이트로
         </button>
+        {(i.hiddenAt || canHide(i)) && (
+          <div className="flex items-center justify-between gap-3 bg-white border border-slate-100 rounded-xl px-3 py-2.5">
+            <p className="text-[11px] font-bold text-slate-500 leading-snug">
+              {i.hiddenAt ? '진행 상품 목록에 다시 보이게 할 수 있어요.' : '판매가 중지된 상품이에요. 진행 상품에서 삭제해도 진행 이력 · 판매 내역은 남아요.'}
+            </p>
+            <button
+              type="button"
+              disabled={hidingId === i.id}
+              onClick={() => setHidden(i, !i.hiddenAt)}
+              className={`h-8 px-3 rounded-lg border text-[11px] font-black flex items-center gap-1 shrink-0 disabled:opacity-50 ${i.hiddenAt ? 'border-slate-200 text-slate-600 hover:bg-slate-50' : 'border-red-200 text-red-500 hover:bg-red-50'}`}
+            >
+              {hidingId === i.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : i.hiddenAt ? <Undo2 className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
+              {i.hiddenAt ? '다시 표시' : '목록에서 삭제'}
+            </button>
+          </div>
+        )}
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:p-5 space-y-3">
           <div className="flex gap-3">
             {i.productImage && <img src={i.productImage} alt="" className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" />}
@@ -204,6 +248,9 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                 <p className="text-[11px] text-red-500 font-bold mt-0.5">
                   {i.productState === 'ended' ? '판매기간이 끝나 지금은 이 링크로 구매할 수 없어요.' : '브랜드가 판매를 중지한 상품이에요. 지금은 이 링크로 구매할 수 없어요.'}
                 </p>
+              )}
+              {i.hiddenAt && (
+                <p className="text-[11px] text-slate-400 font-bold mt-0.5">진행 상품에서 삭제한 협업이에요. 진행 이력에서만 보여요.</p>
               )}
               <p className="text-[11px] text-slate-500 mt-0.5">
                 {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b> (개당 {won(Math.floor(i.salePrice * i.commissionRate / 100))})
@@ -296,27 +343,40 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
       )}
 
       <div className="flex gap-7 md:gap-10 border-b border-slate-200 mb-4">
-        {([['products', `진행 상품 ${all.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
+        {([['products', `진행 상품 ${active.length}`], ['history', `진행 이력 ${history.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
           <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
         ))}
       </div>
 
       {view === 'products' ? (
         <>
-          <p className="text-[11px] text-slate-400 mb-3">상품을 누르면 진행 단계와 전용 링크를 볼 수 있어요.</p>
+          {active.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
+              <p className="text-sm font-black text-slate-700">진행 중인 상품이 없어요</p>
+              <p className="text-xs text-slate-400 mt-1">지금까지 진행한 협업은 진행 이력 탭에서 볼 수 있어요.</p>
+              <button onClick={onBrowse} className="mt-4 h-10 px-5 rounded-xl bg-slate-900 text-white text-xs font-black">상품 둘러보기</button>
+            </div>
+          ) : (
+          <>
+          <p className="text-[11px] text-slate-400 mb-3">상품을 누르면 진행 단계와 전용 링크를 볼 수 있어요. 판매가 중지된 상품은 목록에서 삭제할 수 있어요.</p>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-            {all.map(({ item: i, waiting }) => {
+            {active.map(({ item: i, waiting }) => {
               const stage = stageOf(i, waiting);
+              const stopped = canHide(i);
               return (
+                <div key={i.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col ${stopped ? 'border-slate-200' : 'border-slate-100'}`}>
                 <button
-                  key={i.id}
                   onClick={() => setOpenId(i.id)}
-                  className="text-left bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:-translate-y-0.5 hover:shadow-md transition-all"
+                  className="text-left flex-1 hover:bg-slate-50/60 transition-colors"
                 >
                   <div className="relative aspect-square bg-slate-100">
                     {i.productImage && <img src={i.productImage} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                    {stopped && <div className="absolute inset-0 bg-white/40" />}
                     <span className={`absolute top-2 left-2 text-[10px] font-black px-2 py-1 rounded-lg ${stage.style}`}>{stage.label}</span>
                     {stage.action && <span className="absolute top-2 right-2 text-[10px] font-black px-2 py-1 rounded-lg bg-red-500 text-white">내 차례</span>}
+                    {stopped && i.productState && (
+                      <span className={`absolute bottom-2 left-2 text-[10px] font-black px-2 py-1 rounded-lg ${SALE_STATE_STYLE[i.productState]}`}>{SALE_STATE_LABEL[i.productState]}</span>
+                    )}
                   </div>
                   <div className="p-3">
                     <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
@@ -331,9 +391,81 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                     )}
                   </div>
                 </button>
+                {stopped && (
+                  <button
+                    type="button"
+                    disabled={hidingId === i.id}
+                    onClick={() => setHidden(i, true)}
+                    className="h-9 border-t border-slate-100 text-[11px] font-black text-red-500 hover:bg-red-50 flex items-center justify-center gap-1 disabled:opacity-50"
+                  >
+                    {hidingId === i.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    목록에서 삭제
+                  </button>
+                )}
+                </div>
               );
             })}
           </div>
+          </>
+          )}
+        </>
+      ) : view === 'history' ? (
+        <>
+          <p className="text-[11px] text-slate-400 mb-3">지금까지 진행한 어필리에이트예요. 진행 상품에서 삭제한 협업도 여기에 남아요.</p>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
+            {history.map(({ item: i, waiting }) => {
+              const stage = stageOf(i, waiting);
+              const saleLabel = waiting ? '발송 전' : i.live ? '판매중' : i.productState && i.productState !== 'on_sale' ? SALE_STATE_LABEL[i.productState] : '판매 중지 · 품절';
+              const saleStyle = waiting ? 'bg-blue-50 text-blue-600' : i.live ? 'bg-emerald-50 text-emerald-600' : i.productState ? SALE_STATE_STYLE[i.productState] : 'bg-slate-100 text-slate-500';
+              return (
+                <div key={i.id} className="p-3 md:p-4 flex items-center gap-3">
+                  <button onClick={() => setOpenId(i.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                    {i.productImage
+                      ? <img src={i.productImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0" loading="lazy" />
+                      : <div className="w-14 h-14 rounded-xl bg-slate-100 shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${saleStyle}`}>{saleLabel}</span>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${stage.style}`}>{stage.label}</span>
+                        {i.hiddenAt && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-900 text-white">목록에서 삭제</span>}
+                      </div>
+                      <p className="text-sm font-black text-slate-900 truncate mt-0.5">{i.productName}</p>
+                      <p className="text-[11px] text-slate-400 font-bold truncate">
+                        {dateText(i.createdAt)} 신청
+                        {i.contentUrl ? ' · 콘텐츠 업로드 완료' : ''}
+                        {!waiting && <> · 주문 {i.stats.orders}건 · <span className="text-blue-600">수수료 {won(i.stats.commission)}</span></>}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {i.contentUrl && (
+                      <a href={i.contentUrl} target="_blank" rel="noreferrer" className="h-8 w-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50" aria-label="콘텐츠 열기">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                    {i.hiddenAt && (
+                      <button
+                        type="button"
+                        disabled={hidingId === i.id}
+                        onClick={() => setHidden(i, false)}
+                        className="h-8 px-2.5 rounded-lg border border-slate-200 text-[11px] font-black text-slate-600 hover:bg-slate-50 flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {hidingId === i.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                        <span className="hidden sm:inline">다시 표시</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {history.length === 0 && (
+            <div className="py-10 text-center">
+              <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-black text-slate-700">아직 진행한 어필리에이트가 없어요</p>
+            </div>
+          )}
         </>
       ) : ordersLoading && orders.length === 0 ? (
         <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>

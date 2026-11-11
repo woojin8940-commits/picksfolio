@@ -116,7 +116,7 @@ export default async (req: Request, context: Context) => {
   if (!username) {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
-  if (req.method !== "GET") {
+  if (req.method !== "GET" && req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
@@ -124,6 +124,37 @@ export default async (req: Request, context: Context) => {
   if (!auth.ok) return auth.response;
 
   const db = getDatabase();
+
+  // 어필리에이트 이력에서 판매가 끝난(판매 중지 · 종료 · 삭제) 상품을 지운다. 주문 · 수수료 기록은 그대로 두고 이력 화면에서만 내린다.
+  if (req.method === "POST") {
+    const body = await req.json().catch(() => ({}));
+    if (body?.action !== "hide_affiliate") return Response.json({ error: "알 수 없는 요청입니다." }, { status: 400 });
+    const productId = String(body?.productId || "").trim().slice(0, 60);
+    if (!productId) return Response.json({ error: "상품을 찾을 수 없습니다." }, { status: 400 });
+    try {
+      const rows = (await db.sql`
+        SELECT id, status, deleted_at, stock, sale_start_date, sale_end_date
+        FROM affiliate_store_products WHERE id = ${productId} AND business_username = ${username}
+      `) as any[];
+      const p = rows[0];
+      if (!p) return Response.json({ error: "상품을 찾을 수 없습니다." }, { status: 404 });
+      const state = saleStateOf({
+        status: p.status, deleted_at: p.deleted_at, stock: p.stock,
+        sale_start_date: p.sale_start_date, sale_end_date: p.sale_end_date,
+      });
+      if (state === "on_sale" || state === "sold_out" || state === "scheduled") {
+        return Response.json({ error: "판매 중인 상품은 이력에서 삭제할 수 없어요. 먼저 판매를 중지해 주세요." }, { status: 409 });
+      }
+      await db.sql`
+        UPDATE affiliate_store_products SET brand_history_hidden_at = COALESCE(brand_history_hidden_at, NOW())
+        WHERE id = ${productId} AND business_username = ${username}
+      `;
+      return Response.json({ ok: true });
+    } catch (err: any) {
+      console.error("[business-campaign-history] 어필리에이트 이력 삭제 실패:", err);
+      return Response.json({ error: "이력에서 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요." }, { status: 500 });
+    }
+  }
 
   if (new URL(req.url).searchParams.get("source") === "affiliate") {
     try {
@@ -371,6 +402,7 @@ async function affiliateHistory(db: any, username: string) {
            p.sale_start_date, p.sale_end_date, p.created_at
     FROM affiliate_store_products p
     WHERE p.business_username = ${username}
+      AND p.brand_history_hidden_at IS NULL
       AND EXISTS (SELECT 1 FROM affiliate_store_requests r WHERE r.product_id = p.id AND r.status = 'approved')
     ORDER BY p.created_at DESC, p.id DESC
   `) as any[];
@@ -492,6 +524,7 @@ async function affiliateHistory(db: any, username: string) {
       type: "affiliate",
       status: state === "on_sale" || state === "sold_out" || state === "scheduled" ? "active" : "closed",
       removed: Boolean(p.deleted_at),
+      saleState: state,
       rewardMode: "affiliate",
       thumbnailUrl: Array.isArray(p.image_urls) ? String(p.image_urls[0] || "") : "",
       startDate: dateOnly(p.sale_start_date) || dateOf(p.created_at),

@@ -997,6 +997,8 @@ async function creatorMyAffiliate(db: any, username: string) {
         status: r.product_status, deleted_at: r.product_deleted_at, stock: r.stock,
         sale_start_date: r.sale_start_date, sale_end_date: r.sale_end_date,
       }) === "on_sale",
+      /** 인플루언서가 '진행 상품'에서 내린 시각. 내린 협업은 진행 이력 탭에만 보인다. */
+      hiddenAt: r.creator_hidden_at || null,
       stats: {
         orders: st?.orders || 0,
         units: st?.units || 0,
@@ -1037,6 +1039,7 @@ async function creatorMyAffiliate(db: any, username: string) {
     salePrice: Number(r.sale_price) || 0,
     commissionRate: Number(r.commission_rate) || 0,
     live: false,
+    hiddenAt: r.creator_hidden_at || null,
     stats: { orders: 0, units: 0, sales: 0, commission: 0, pending: 0, confirmed: 0 },
   }));
   return Response.json({ items, preparing, totals, orderCount: Number(orderCountRows[0]?.n) || 0 });
@@ -1383,6 +1386,43 @@ async function creatorDeclineSelection(db: any, username: string, body: any) {
 }
 
 /** 인플루언서: 협찬 상품을 받았다고 확인한다. 이때부터 10일 안에 콘텐츠를 올려 판매를 시작한다. */
+/**
+ * 인플루언서: 브랜드가 판매를 중지했거나 판매가 끝난 상품을 MY 어필리에이트 '진행 상품'에서 내린다(hidden=false 면 되돌린다).
+ * 협업 · 주문 · 수수료 기록은 그대로이고, 진행 이력 탭에는 계속 남는다. 판매 중인 상품은 내릴 수 없다.
+ */
+async function creatorHideAffiliate(db: any, username: string, body: any) {
+  const id = clip(body.id, 60);
+  const hidden = body.hidden !== false;
+  const rows = (await db.sql`
+    SELECT r.id, p.status AS product_status, p.deleted_at AS product_deleted_at, p.stock AS product_stock,
+           p.sale_start_date, p.sale_end_date
+    FROM affiliate_store_requests r
+    JOIN affiliate_store_products p ON p.id = r.product_id
+    WHERE r.id = ${id} AND r.influencer_username = ${username} AND r.status = 'approved'
+  `) as any[];
+  const cur = rows[0];
+  if (!cur) return err("협업을 찾을 수 없어요.", 404);
+  if (hidden) {
+    const state = saleStateOf({
+      status: cur.product_status, deleted_at: cur.product_deleted_at, stock: cur.product_stock,
+      sale_start_date: cur.sale_start_date, sale_end_date: cur.sale_end_date,
+    });
+    if (state === "on_sale" || state === "sold_out" || state === "scheduled") {
+      return err("판매 중인 상품은 목록에서 삭제할 수 없어요.", 409);
+    }
+  }
+  const updated = hidden
+    ? (await db.sql`
+      UPDATE affiliate_store_requests SET creator_hidden_at = COALESCE(creator_hidden_at, NOW())
+      WHERE id = ${id} AND influencer_username = ${username} RETURNING creator_hidden_at
+    `) as any[]
+    : (await db.sql`
+      UPDATE affiliate_store_requests SET creator_hidden_at = NULL
+      WHERE id = ${id} AND influencer_username = ${username} RETURNING creator_hidden_at
+    `) as any[];
+  return Response.json({ ok: true, hiddenAt: updated[0]?.creator_hidden_at || null });
+}
+
 async function creatorConfirmReceived(db: any, username: string, body: any) {
   const id = clip(body.id, 60);
   const rows = (await db.sql`
@@ -1606,7 +1646,7 @@ export default async (req: Request, context: Context) => {
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
   const creatorScope = ["creator", "product-detail", "brands", "my-request-status", "my-requests", "my-affiliate", "my-affiliate-orders"].includes(String(scope || ""))
     || action === "request" || action === "cancel_request" || action === "submit_shipping" || action === "decline_selection"
-    || action === "confirm_received" || action === "submit_content";
+    || action === "confirm_received" || action === "submit_content" || action === "hide_my_affiliate";
   if (creatorScope && !caller.isAdmin) {
     const creator = await readCreatorAccess(username);
     if (!creator) return err("크리에이터 승인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
@@ -1644,6 +1684,7 @@ export default async (req: Request, context: Context) => {
       case "decline_selection": return await creatorDeclineSelection(db, username, body);
       case "confirm_received": return await creatorConfirmReceived(db, username, body);
       case "submit_content": return await creatorSubmitContent(db, username, body);
+      case "hide_my_affiliate": return await creatorHideAffiliate(db, username, body);
       default: return err("알 수 없는 요청입니다.");
     }
   } catch (e) {

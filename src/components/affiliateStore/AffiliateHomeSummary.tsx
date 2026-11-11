@@ -34,7 +34,7 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
 
   // 업로드가 남은 협업(업로드 일정은 담당자가 조율한다).
   const todo = (items || [])
-    .filter(i => !i.contentUrl && i.shippingStatus !== 'declined')
+    .filter(i => !i.contentUrl && i.shippingStatus !== 'declined' && !i.hiddenAt)
     .slice(0, 3);
 
   return (
