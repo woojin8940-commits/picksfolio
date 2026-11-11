@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CalendarClock, Loader2, PartyPopper, X } from 'lucide-react';
-import { affiliateStoreService, UPLOAD_DAYS, type StoreRequest } from '../../services/affiliateStoreService';
+import { affiliateStoreService, type StoreRequest } from '../../services/affiliateStoreService';
 import { openPostcodeSearch } from '../../utils/daumPostcode';
 import { formatPhoneInput } from '../../utils/formatters';
 import { useCloseOnBack } from '../../hooks/useCloseOnBack';
@@ -106,7 +106,7 @@ const SelectionShippingSheet: React.FC<Props> = ({ request, onClose, onDone }) =
           <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3">
             <CalendarClock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="text-xs leading-relaxed text-amber-800">
-              <p className="font-black">상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해야 해요.</p>
+              <p className="font-black">업로드 일정은 픽스폴리오 담당자가 연락드려 함께 조율해요.</p>
               <p className="mt-0.5 text-amber-700">업로드한 뒤에는 MY 어필리에이트에서 콘텐츠 링크와 파트너십 코드를 올려 주세요. 브랜드가 확인할 수 있어요.</p>
             </div>
           </div>

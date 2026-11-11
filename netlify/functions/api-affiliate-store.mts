@@ -937,7 +937,7 @@ async function brandShipSelection(db: any, username: string, body: any) {
   if (!rows[0]) return err("인플루언서가 배송정보를 입력한 선정에만 송장을 등록할 수 있어요.", 404);
   if (rows[0].manager_status === "done" && !rows[0].link_code) rows[0].link_code = await ensureLinkCode(db, rows[0].id);
   notifyCreator(rows[0].influencer_username, "협찬 상품이 발송되었어요",
-    `'${String(rows[0].product_name || "").slice(0, 60)}' · ${company} ${number} · MY 어필리에이트에서 전용 판매 링크가 열렸어요. 상품을 받은 뒤 ${UPLOAD_DAYS}일 이내에 콘텐츠를 올려 판매를 시작해 주세요.`);
+    `'${String(rows[0].product_name || "").slice(0, 60)}' · ${company} ${number} · MY 어필리에이트에서 전용 판매 링크가 열렸어요. 업로드 일정은 픽스폴리오 담당자가 연락드려 조율해요.`);
   return Response.json({ request: shapeRequest(rows[0]) });
 }
 
@@ -1502,7 +1502,7 @@ async function managerSelections(db: any, url: URL) {
   const rows = (await db.sql`
     SELECT r.*, p.name AS product_name, p.image_urls, p.sale_price, p.commission_rate,
            a.brand_name, a.contact_name AS brand_contact_name, a.contact_phone AS brand_contact_phone,
-           a.contact_email AS brand_contact_email,
+           a.contact_email AS brand_contact_email, a.cs_phone AS brand_cs_phone,
            c.name AS creator_name, c.contact AS creator_contact, c.instagram_url AS creator_instagram
     FROM affiliate_store_requests r
     JOIN affiliate_store_products p ON p.id = r.product_id
@@ -1528,7 +1528,10 @@ async function managerSelections(db: any, url: URL) {
       managerUpdatedAt: r.manager_updated_at,
       /** 운영자가 아직 확인하지 않은 새 선정. */
       operatorUnseen: !!r.shipping_status && !r.operator_seen_at,
-      brandContact: { name: r.brand_contact_name || "", phone: r.brand_contact_phone || "", email: r.brand_contact_email || "" },
+      brandContact: {
+        name: r.brand_contact_name || "", phone: r.brand_contact_phone || "", email: r.brand_contact_email || "",
+        csPhone: r.brand_cs_phone || "",
+      },
       creatorContact: { name: r.creator_name || "", phone: r.creator_contact || "", instagramUrl: r.creator_instagram || "" },
     })),
   });

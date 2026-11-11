@@ -2,10 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import {
   SHIPPING_COURIERS,
-  UPLOAD_DAYS,
-  UPLOAD_TONE_STYLE,
-  shortDate,
-  uploadScheduleOf,
   type StoreRequest,
 } from '../../services/affiliateStoreService';
 import { formatPhone } from '../../utils/formatters';
@@ -15,15 +11,16 @@ import { copyText } from '../../utils/clipboard';
  * 어필리에이트 진행 단계 — 캠페인 진행사항(CampaignProcessBoard)과 같은 모양의 한 화면.
  *
  *   1. 제품 배송                    인플루언서가 배송지를 적고, 브랜드가 보내고 송장을 입력한다
- *   2. 업로드 일정                  상품 수령 → 수령 후 10일 이내 콘텐츠 업로드 · 판매 시작
- *   3. 업로드 링크 · 파트너십 코드   인플루언서가 올린 콘텐츠 링크와 브랜디드 콘텐츠 파트너십 코드
+ *   2. 업로드 링크 · 파트너십 코드   인플루언서가 올린 콘텐츠 링크와 브랜디드 콘텐츠 파트너십 코드
+ *
+ * 업로드 일정은 단계로 두지 않는다 — 선정 뒤 운영 담당자가 브랜드 · 인플루언서 사이에서 직접 조율한다.
  *
  * 브랜드(진행관리)와 인플루언서(MY 어필리에이트)가 같은 컴포넌트를 쓴다 — 같은 단계를
  * 같은 이름 · 같은 순서로 본다. 맨 위 줄은 "지금 내가 할 일"이거나 "누구를 기다리는 중인지"다.
  * 펼침은 한 번에 하나, 기본은 지금 단계.
  */
 
-export type AffiliateStepKey = 'shipping' | 'schedule' | 'content';
+export type AffiliateStepKey = 'shipping' | 'content';
 type Role = 'brand' | 'influencer';
 
 type StepState = {
@@ -62,7 +59,7 @@ const korDate = (iso?: string | null) => {
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
 };
 
-/** 이 협업의 세 단계 상태. 보드(칸 배치)와 상세가 같은 계산을 쓴다. */
+/** 이 협업의 단계 상태. 보드(칸 배치)와 상세가 같은 계산을 쓴다. */
 export function affiliateSteps(r: StoreRequest, role: Role): StepState[] {
   const st = r.shippingStatus || '';
   const legacy = !st; // 예전 흐름: 선정 즉시 링크 발급, 배송 단계 없음
@@ -89,36 +86,11 @@ export function affiliateSteps(r: StoreRequest, role: Role): StepState[] {
             ? isInf ? '배송정보 제출 완료 · 브랜드 발송 대기' : '배송지가 들어왔어요 · 송장 입력 대기'
             : isInf ? '협찬 상품을 받을 배송정보를 입력해 주세요' : '인플루언서 배송정보 입력 대기',
     todo: isInf
-      ? `협찬 상품을 받을 배송정보를 입력해 주세요. 상품 수령 후 ${UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해야 해요.`
+      ? '협찬 상품을 받을 배송정보를 입력해 주세요. 업로드 일정은 픽스폴리오 담당자가 연락드려 조율해요.'
       : '배송지를 확인하고 협찬 상품을 보낸 뒤 송장번호를 입력해 주세요.',
     waitingNote: st === 'awaiting_info'
       ? '인플루언서가 배송정보를 입력하면 배송지가 여기에 나와요.'
       : '브랜드가 송장번호를 입력하면 전용 판매 링크가 열려요.',
-  };
-
-  const received = !!r.deliveredAt;
-  const scheduleDone = legacy || received || !!r.contentUrl;
-  const sched = uploadScheduleOf(r);
-  const schedule: StepState = {
-    key: 'schedule',
-    title: '업로드 일정',
-    done: scheduleDone,
-    submitted: false,
-    current: shipDone && !scheduleDone && !declined,
-    action: isInf && st === 'shipped' && !received && !r.contentUrl,
-    revision: false,
-    owner: 'influencer',
-    status: legacy
-      ? '예전 방식 선정 · 업로드 일정 없음'
-      : r.contentUrl
-        ? `업로드 완료${r.contentSubmittedAt ? ` · ${korDate(r.contentSubmittedAt)}` : ''}`
-        : received
-          ? `수령 ${korDate(r.deliveredAt)} · ${sched.label}`
-          : shipDone
-            ? `상품 수령 대기 · 수령 후 ${UPLOAD_DAYS}일 이내 업로드`
-            : '협찬 상품이 발송되면 시작돼요',
-    todo: `상품을 받으면 수령 확인을 눌러 주세요. 수령일로부터 ${UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해야 해요.`,
-    waitingNote: `인플루언서가 상품을 받으면 수령일로부터 ${UPLOAD_DAYS}일 이내에 콘텐츠를 올려요. 수령 확인이 없으면 발송 5일 뒤를 수령일로 봐요.`,
   };
 
   const contentDone = !!r.contentUrl && !!r.partnershipCode;
@@ -127,7 +99,7 @@ export function affiliateSteps(r: StoreRequest, role: Role): StepState[] {
     title: '업로드 링크 · 파트너십 코드',
     done: contentDone,
     submitted: false,
-    current: shipDone && scheduleDone && !contentDone && !declined,
+    current: shipDone && !contentDone && !declined,
     action: isInf && shipDone && !declined && !contentDone,
     revision: !!r.contentUrl && !r.partnershipCode,
     owner: 'influencer',
@@ -142,8 +114,7 @@ export function affiliateSteps(r: StoreRequest, role: Role): StepState[] {
     waitingNote: '인플루언서가 콘텐츠를 업로드하면 링크와 파트너십 코드가 여기에 나와요. 캠페인 이력에서 2차 광고로 돌릴 수 있어요.',
   };
 
-  // 인플루언서는 상품 수령 확인 전에도 콘텐츠를 올릴 수 있다 — 그때는 지금 단계가 업로드 일정이고, 업로드 칸도 열려 있다.
-  return [shipping, schedule, content];
+  return [shipping, content];
 }
 
 const Section: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
@@ -247,7 +218,7 @@ const AffiliateStepBoard: React.FC<{
           <div className="space-y-2.5">
             <p className="rounded-lg bg-blue-50 px-3 py-2.5 text-xs font-bold text-blue-700 leading-relaxed">
               브랜드에 선정되었어요! 협찬 상품을 받을 배송정보를 입력하면 협업이 진행돼요.
-              <span className="block text-amber-700 mt-1">상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해야 해요.</span>
+              <span className="block text-slate-500 mt-1">업로드 일정은 픽스폴리오 담당자가 연락드려 함께 조율해요.</span>
             </p>
             <button type="button" onClick={onEditShipping} className="w-full h-10 rounded-lg bg-blue-600 text-white text-xs font-black hover:bg-blue-500">배송정보 입력</button>
           </div>
@@ -261,7 +232,12 @@ const AffiliateStepBoard: React.FC<{
               <p className="text-[11px] font-bold text-slate-500">브랜드가 송장번호를 입력하면 전용 판매 링크가 열려요.</p>
               <button type="button" onClick={onEditShipping} className="shrink-0 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-black text-slate-700">배송정보 수정</button>
             </div>
-          ) : trackingLine()}
+          ) : (
+            <>
+              {trackingLine()}
+              {receiptLine()}
+            </>
+          )}
         </div>
       );
     }
@@ -298,51 +274,33 @@ const AffiliateStepBoard: React.FC<{
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-2">
-            {trackingLine()}
-            <button type="button" onClick={() => setShipEditing(true)} className="shrink-0 text-[11px] font-black text-slate-400 hover:text-slate-700">송장 수정</button>
-          </div>
+          <>
+            <div className="flex items-center justify-between gap-2">
+              {trackingLine()}
+              <button type="button" onClick={() => setShipEditing(true)} className="shrink-0 text-[11px] font-black text-slate-400 hover:text-slate-700">송장 수정</button>
+            </div>
+            {receiptLine()}
+          </>
         )}
       </div>
     );
   };
 
-  const renderSchedule = () => {
-    const sched = uploadScheduleOf(r);
-    const awaitingReceipt = r.shippingStatus === 'shipped' && !r.deliveredAt && !r.contentUrl;
+  /** 발송 뒤 수령 여부 한 줄. 인플루언서는 여기서 수령 확인을 누른다. */
+  const receiptLine = () => {
+    if (r.shippingStatus !== 'shipped') return null;
+    if (r.deliveredAt) return <p className="text-[11px] font-bold text-slate-500">상품 수령 {korDate(r.deliveredAt)}</p>;
+    if (role !== 'influencer') return <p className="text-[11px] font-bold text-slate-400">인플루언서 상품 수령 대기</p>;
     return (
-      <div className="space-y-2.5">
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            ['발송일', r.shippedAt ? korDate(r.shippedAt) : '-'],
-            ['수령일', r.deliveredAt ? korDate(r.deliveredAt) : '-'],
-            ['업로드 마감', r.uploadDeadline ? korDate(r.uploadDeadline) : '-'],
-          ].map(([l, v]) => (
-            <div key={l} className="rounded-xl bg-white border border-slate-100 px-3 py-2">
-              <p className="text-[10px] font-black text-slate-400">{l}</p>
-              <p className="text-sm font-black text-slate-900">{v}</p>
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`px-2 py-0.5 rounded-md text-[11px] font-black ${UPLOAD_TONE_STYLE[sched.tone]}`}>{sched.label}</span>
-          {r.contentSubmittedAt && <span className="text-[11px] font-bold text-slate-400">업로드 {shortDate(r.contentSubmittedAt)}</span>}
-        </div>
-        <p className="text-[11px] font-bold text-slate-400 leading-relaxed">
-          상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해요. 수령 확인이 없으면 송장 조회의 배송 완료나 발송 5일 뒤를 수령일로 봐요.
-        </p>
-        {role === 'influencer' && awaitingReceipt && (
-          <button
-            type="button"
-            disabled={busy === 'receive'}
-            onClick={() => { void run('receive', () => onConfirmReceived ? onConfirmReceived() : Promise.resolve()); }}
-            className="w-full h-10 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-50 inline-flex items-center justify-center gap-1"
-          >
-            {busy === 'receive' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            상품 수령 확인
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        disabled={busy === 'receive'}
+        onClick={() => { void run('receive', () => onConfirmReceived ? onConfirmReceived() : Promise.resolve()); }}
+        className="w-full h-10 rounded-lg bg-white border border-blue-200 text-blue-700 text-xs font-black disabled:opacity-50 inline-flex items-center justify-center gap-1 hover:bg-blue-50"
+      >
+        {busy === 'receive' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        상품 수령 확인
+      </button>
     );
   };
 
@@ -412,7 +370,7 @@ const AffiliateStepBoard: React.FC<{
     );
   };
 
-  const renderStep = (k: AffiliateStepKey) => (k === 'shipping' ? renderShipping() : k === 'schedule' ? renderSchedule() : renderContent());
+  const renderStep = (k: AffiliateStepKey) => (k === 'shipping' ? renderShipping() : renderContent());
 
   const banner = () => {
     if (declined) {

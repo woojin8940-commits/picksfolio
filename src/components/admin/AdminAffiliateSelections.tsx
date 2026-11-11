@@ -10,6 +10,7 @@ import {
   type ManagerStatus,
 } from '../../services/affiliateStoreService';
 import { formatPhone } from '../../utils/formatters';
+import { copyText } from '../../utils/clipboard';
 
 /**
  * 어필리에이트 협업 진행 — 브랜드가 선정한 판매 신청. 선정되는 순간부터 여기에 보인다.
@@ -32,6 +33,47 @@ const FILTER_LABEL: Record<Filter, string> = {
 /** 진행 중 = 브랜드가 선정한 뒤 인플루언서가 반려하지 않은 건(배송정보 대기 · 발송 대기 · 발송 완료 · 예전 흐름). */
 const isActive = (r: ManagerSelection) => r.shippingStatus !== 'declined';
 const dateTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '');
+
+const digits = (v: string) => v.replace(/[^0-9+]/g, '');
+
+const CopyButton: React.FC<{ text: string }> = ({ text }) => {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => { if (await copyText(text)) { setDone(true); window.setTimeout(() => setDone(false), 1500); } }}
+      className="px-2 py-1 rounded-md bg-white border border-slate-200 text-[10px] font-black text-slate-500 hover:bg-slate-100"
+    >
+      {done ? '복사됨' : '복사'}
+    </button>
+  );
+};
+
+/** 전화번호 한 줄 — 누르면 바로 전화 · 문자, 복사. */
+const ContactPhone: React.FC<{ label: string; phone: string }> = ({ label, phone }) => {
+  if (!phone) return null;
+  const tel = digits(phone);
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[10px] font-black text-slate-400 w-14 shrink-0 truncate">{label}</span>
+      <a href={`tel:${tel}`} className="font-black text-slate-900 hover:text-blue-600">{formatPhone(phone)}</a>
+      <a href={`tel:${tel}`} className="px-2 py-1 rounded-md bg-blue-600 text-white text-[10px] font-black hover:bg-blue-500">전화</a>
+      <a href={`sms:${tel}`} className="px-2 py-1 rounded-md bg-white border border-slate-200 text-[10px] font-black text-slate-600 hover:bg-slate-100">문자</a>
+      <CopyButton text={formatPhone(phone)} />
+    </div>
+  );
+};
+
+const ContactEmail: React.FC<{ email: string }> = ({ email }) => {
+  if (!email) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[10px] font-black text-slate-400 w-14 shrink-0">이메일</span>
+      <a href={`mailto:${email}`} className="font-bold text-slate-700 hover:text-blue-600 break-all">{email}</a>
+      <CopyButton text={email} />
+    </div>
+  );
+};
 
 const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n: number) => void }> = ({ token, onNewCountChange }) => {
   const [rows, setRows] = useState<ManagerSelection[]>([]);
@@ -84,7 +126,7 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
       <div className="flex items-end justify-between gap-2 flex-wrap">
         <div>
           <h3 className="text-sm font-black text-slate-900">어필리에이트 협업 진행</h3>
-          <p className="text-[10px] font-bold text-slate-400 mt-0.5">브랜드가 선정한 협업이 선정 즉시 여기에 올라옵니다. 인플루언서 배송정보 입력 → 브랜드 송장 입력(판매 링크 열림)까지 양쪽 연락처를 보고 중간에서 조율해 주세요. 문제가 있으면 링크를 잠시 닫을 수 있습니다.</p>
+          <p className="text-[10px] font-bold text-slate-400 mt-0.5">브랜드가 선정한 협업이 선정 즉시 여기에 올라옵니다. 브랜드 · 인플루언서 연락처를 바로 눌러 전화 · 문자로 연락하고, 배송 · 업로드 일정을 중간에서 조율해 주세요. 문제가 있으면 링크를 잠시 닫을 수 있습니다.</p>
         </div>
         <button onClick={load} className="px-3 py-1.5 rounded-lg bg-slate-100 text-[11px] font-black text-slate-600 hover:bg-slate-200">새로고침</button>
       </div>
@@ -147,21 +189,36 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-3 mt-4 text-xs">
-                  <div className="bg-slate-50 rounded-xl p-3 space-y-1">
-                    <p className="text-[10px] font-black text-slate-400">브랜드 담당자</p>
-                    <p className="font-bold text-slate-800">{r.brandContact.name || '-'} <span className="text-slate-400 font-bold">biz/{r.businessUsername}</span></p>
-                    {r.brandContact.phone && <p className="text-slate-600">{formatPhone(r.brandContact.phone)}</p>}
-                    {r.brandContact.email && <p className="text-slate-600 break-all">{r.brandContact.email}</p>}
+                  <div className="bg-slate-50 rounded-xl p-3 space-y-1.5">
+                    <p className="text-[10px] font-black text-slate-400">브랜드 연락처</p>
+                    <p className="font-bold text-slate-800">
+                      {r.brandName || '-'}{r.brandContact.name ? ` · ${r.brandContact.name}` : ''}
+                      <span className="ml-1 text-slate-400 font-bold">biz/{r.businessUsername}</span>
+                    </p>
+                    <ContactPhone label="담당자" phone={r.brandContact.phone} />
+                    {r.brandContact.csPhone && r.brandContact.csPhone.replace(/\D/g, '') !== r.brandContact.phone.replace(/\D/g, '') && (
+                      <ContactPhone label="고객센터" phone={r.brandContact.csPhone} />
+                    )}
+                    <ContactEmail email={r.brandContact.email} />
+                    {!r.brandContact.phone && !r.brandContact.csPhone && !r.brandContact.email && (
+                      <p className="text-[11px] font-bold text-amber-600">입점 신청서에 등록된 연락처가 없습니다.</p>
+                    )}
                   </div>
-                  <div className="bg-slate-50 rounded-xl p-3 space-y-1">
-                    <p className="text-[10px] font-black text-slate-400">인플루언서</p>
+                  <div className="bg-slate-50 rounded-xl p-3 space-y-1.5">
+                    <p className="text-[10px] font-black text-slate-400">인플루언서 연락처</p>
                     <p className="font-bold text-slate-800">
                       <a href={`/${r.influencerUsername}`} target="_blank" rel="noreferrer" className="hover:text-blue-600">@{r.influencerUsername}</a>
                       {r.creatorContact.name ? ` · ${r.creatorContact.name}` : ''}
                     </p>
-                    {r.creatorContact.phone && <p className="text-slate-600">{formatPhone(r.creatorContact.phone)}</p>}
+                    <ContactPhone label="연락처" phone={r.creatorContact.phone} />
+                    {r.shipping?.recipientPhone && r.shipping.recipientPhone.replace(/\D/g, '') !== r.creatorContact.phone.replace(/\D/g, '') && (
+                      <ContactPhone label={`배송지${r.shipping.recipientName ? ` (${r.shipping.recipientName})` : ''}`} phone={r.shipping.recipientPhone} />
+                    )}
                     {(r.channelUrl || r.creatorContact.instagramUrl) && (
                       <a href={r.channelUrl || r.creatorContact.instagramUrl} target="_blank" rel="noreferrer" className="block text-blue-600 font-bold truncate">{r.channelUrl || r.creatorContact.instagramUrl}</a>
+                    )}
+                    {!r.creatorContact.phone && !r.shipping?.recipientPhone && (
+                      <p className="text-[11px] font-bold text-amber-600">등록된 연락처가 없습니다. 배송정보를 입력하면 배송지 연락처가 표시됩니다 — 그 전에는 인스타그램 DM으로 연락해 주세요.</p>
                     )}
                     {r.message && <p className="text-slate-500 whitespace-pre-wrap line-clamp-3">"{r.message}"</p>}
                   </div>
@@ -188,6 +245,23 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
                     )}
                     {r.shippingStatus === 'declined' && (
                       <p className="font-bold text-slate-500">인플루언서가 협업을 반려했어요 · {dateTime(r.declinedAt || null)}{r.declinedReason ? ` · 사유: ${r.declinedReason}` : ''}</p>
+                    )}
+                  </div>
+                )}
+
+                {(r.shippingStatus === 'shipped' || !r.shippingStatus) && (
+                  <div className="mt-3 bg-slate-50 rounded-xl p-3 text-xs space-y-1">
+                    <p className="text-[10px] font-black text-slate-400">콘텐츠 업로드</p>
+                    {r.contentUrl ? (
+                      <>
+                        <a href={r.contentUrl} target="_blank" rel="noreferrer" className="block text-blue-600 font-bold truncate">{r.contentUrl}</a>
+                        <p className={`font-bold ${r.partnershipCode ? 'text-slate-600' : 'text-amber-600'}`}>
+                          {r.partnershipCode ? `파트너십 코드 ${r.partnershipCode}` : '파트너십 코드 미입력'}
+                          {r.contentSubmittedAt ? ` · 업로드 ${dateTime(r.contentSubmittedAt)}` : ''}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="font-bold text-slate-400">아직 업로드 전 · 업로드 일정은 담당자가 양쪽과 조율해 주세요.</p>
                     )}
                   </div>
                 )}
