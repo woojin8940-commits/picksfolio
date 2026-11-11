@@ -647,7 +647,7 @@ export const affiliateStoreService = {
 
   // 인플루언서
   myAffiliate() {
-    return call<{ items: MyAffiliateItem[]; totals: { clicks: number; orders: number; sales: number; commission: number; pending: number; confirmed: number; cancelled: number }; orderCount: number }>(
+    return call<{ items: MyAffiliateItem[]; preparing?: MyAffiliateItem[]; totals: { clicks: number; orders: number; sales: number; commission: number; pending: number; confirmed: number; cancelled: number }; orderCount: number }>(
       'GET', `${URL_BASE}?scope=my-affiliate`,
     );
   },

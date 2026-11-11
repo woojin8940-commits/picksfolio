@@ -1039,9 +1039,9 @@ const AffiliateStoreBody: React.FC<CreatorAffiliateStoreProps & { mode: StoreMod
         </p>
       </header>
 
-      {awaitingShippingCount > 0 && tab !== 'mine' && (
+      {awaitingShippingCount > 0 && tab !== 'mine' && tab !== 'my' && (
         <button
-          onClick={() => switchTab('mine')}
+          onClick={() => switchTab('my')}
           className="w-full mb-4 flex items-center justify-between gap-3 rounded-2xl bg-blue-600 text-white px-4 py-3.5 text-left shadow-lg shadow-blue-600/20"
         >
           <span className="text-sm font-black">브랜드에 선정된 협업이 {awaitingShippingCount}건 있어요! 배송정보를 입력해 협업을 시작하세요.</span>

@@ -368,6 +368,9 @@ describe("B. 판매 신청 · 선정", () => {
     assert.equal(status.body.awaitingShippingCount, 1);
     const mineBefore = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
     assert.equal(mineBefore.body.items.length, 0, "협업 진행 전에는 MY 어필리에이트에 없다");
+    assert.equal(mineBefore.body.preparing.length, 1, "선정 직후에는 시작 대기(배송정보 입력)로 보인다");
+    assert.equal(mineBefore.body.preparing[0].shippingStatus, "awaiting_info");
+    assert.equal(mineBefore.body.preparing[0].linkCode, "", "시작 대기 중에는 판매 링크가 없다");
 
     // 다른 사람은 배송정보를 넣을 수 없다.
     const other = await call(h.store, INF, "POST", "/api/affiliate-store", {
@@ -390,6 +393,8 @@ describe("B. 판매 신청 · 선정", () => {
     assert.equal(sub.body.request.linkCode, "", "송장 입력 전에는 판매 링크가 열리지 않는다");
     const mineWaiting = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
     assert.equal(mineWaiting.body.items.length, 0);
+    assert.equal(mineWaiting.body.preparing[0].shippingStatus, "info_submitted");
+    assert.equal(mineWaiting.body.preparing[0].shipping.address1, "서울시 강남구");
 
     // 협업이 진행 중이면 브랜드는 반려할 수 없다.
     const rej = await call(h.store, BRAND, "POST", "/api/affiliate-store", { action: "review_request", id: requestIds[0], decision: "reject" });
@@ -410,6 +415,7 @@ describe("B. 판매 신청 · 선정", () => {
     assert.match(shipped.body.request.linkCode, /^[A-Za-z0-9]{10}$/, "송장을 입력하면 판매 링크가 열린다");
     const mine = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
     assert.equal(mine.body.items.length, 1);
+    assert.equal(mine.body.preparing.length, 0, "발송되면 시작 대기에서 빠진다");
     const again = await call(h.store, INF2, "POST", "/api/affiliate-store", {
       action: "submit_shipping", id: requestIds[0], recipientName: "받는분", recipientPhone: "010-0000-0000", address1: "서울시", address2: "1호",
     });

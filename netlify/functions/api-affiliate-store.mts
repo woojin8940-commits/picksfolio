@@ -508,7 +508,23 @@ async function brandProgress(db: any, username: string, url: URL) {
     ORDER BY r.updated_at DESC, r.id DESC
     LIMIT 300
   `) as any[];
-  return Response.json({ requests: rows.map(shapeRequest) });
+  // 진행 보드 카드에 붙는 인스타 프로필(사진 · 아이디 · 팔로워). 캠페인 진행사항 보드와 같은 신원 표시다.
+  const snapshots = await buildSnapshots(db, rows.map((r) => r.influencer_username))
+    .catch((e) => { console.error("[affiliate-store] progress snapshot load failed", e); return new Map(); });
+  return Response.json({
+    requests: rows.map((r) => {
+      const snap: any = snapshots.get(norm(r.influencer_username)) || null;
+      return {
+        ...shapeRequest(r),
+        insights: snap ? {
+          profileImage: snap.profileImage || "",
+          instagramHandle: snap.instagramHandle || "",
+          instagramUrl: snap.instagramUrl || "",
+          followers: Number(snap.followers) || 0,
+        } : null,
+      };
+    }),
+  });
 }
 
 /**
@@ -1003,7 +1019,27 @@ async function creatorMyAffiliate(db: any, username: string) {
     }),
     { clicks: 0, orders: 0, sales: 0, commission: 0, pending: 0, confirmed: 0, cancelled: Number(cancelledRows[0]?.n || 0) },
   );
-  return Response.json({ items, totals, orderCount: Number(orderCountRows[0]?.n) || 0 });
+  // 선정됐지만 아직 협찬 상품이 나가기 전인 협업(배송정보 입력 · 발송 대기). 판매 링크는 닫혀 있고 판매 성과도 없지만,
+  // MY 어필리에이트의 진행 단계(1. 제품 배송)에서 배송정보를 입력하고 진행 상황을 보도록 따로 싣는다.
+  const preparingRows = (await db.sql`
+    SELECT r.*, p.name AS product_name, p.image_urls, p.sale_price, p.commission_rate, p.status AS product_status,
+           p.deleted_at AS product_deleted_at, p.stock AS product_stock, p.sale_start_date, p.sale_end_date, a.brand_name
+    FROM affiliate_store_requests r
+    JOIN affiliate_store_products p ON p.id = r.product_id
+    LEFT JOIN affiliate_store_applications a ON a.business_username = r.business_username
+    WHERE r.influencer_username = ${username} AND r.status = 'approved' AND COALESCE(r.manager_status, '') <> 'done'
+      AND r.shipping_status IN ('awaiting_info', 'info_submitted')
+    ORDER BY r.updated_at DESC
+    LIMIT 50
+  `) as any[];
+  const preparing = preparingRows.map((r) => ({
+    ...shapeRequest(r),
+    salePrice: Number(r.sale_price) || 0,
+    commissionRate: Number(r.commission_rate) || 0,
+    live: false,
+    stats: { orders: 0, units: 0, sales: 0, commission: 0, pending: 0, confirmed: 0 },
+  }));
+  return Response.json({ items, preparing, totals, orderCount: Number(orderCountRows[0]?.n) || 0 });
 }
 
 const PAGE_SIZE = 40;

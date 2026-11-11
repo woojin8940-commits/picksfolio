@@ -93,8 +93,8 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [requestProductsError, setRequestProductsError] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<StoreProduct | null>(null);
   const [requestFilter, setRequestFilter] = useState<'' | 'pending' | 'approved' | 'rejected'>('');
-  /** 고른 상품 안의 탭: 지원 현황 · 선정 인플루언서 · 진행 단계 · 판매 현황. */
-  const [productTab, setProductTab] = useState<'applicants' | 'selected' | 'progress' | 'sales'>('applicants');
+  /** 고른 상품 안의 탭: 지원 · 선정 인플루언서(한 화면) · 진행 단계 · 판매 현황. */
+  const [productTab, setProductTab] = useState<'applicants' | 'progress' | 'sales'>('applicants');
   const [productCursor, setProductCursor] = useState<ListCursor | null>(null);
   const [productHasMore, setProductHasMore] = useState(false);
   const [productsMoreLoading, setProductsMoreLoading] = useState(false);
@@ -242,12 +242,12 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     setRequestsHasMore(false);
     void loadRequests(null, selectedProduct.id, f);
   };
-  /** 상품 안의 탭을 바꾼다. 지원 현황 · 선정 인플루언서는 신청자 목록을 상태로 걸러 받는다. */
+  /** 상품 안의 탭을 바꾼다. 지원 · 선정 인플루언서 탭은 신청자 전체를 받아 선정 / 지원으로 나눠 그린다. */
   const changeProductTab = (t: typeof productTab) => {
     if (!selectedProduct) return;
     setProductTab(t);
-    if (t === 'applicants' || t === 'selected') {
-      const f = t === 'selected' ? 'approved' : '';
+    if (t === 'applicants') {
+      const f = '';
       setRequestFilter(f);
       setRequests([]);
       setRequestsLoaded(false);
@@ -690,7 +690,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : (
           <div className="space-y-2.5">
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
-              진행 중인 어필리에이트예요. 상품을 누르면 인플루언서 지원 현황 · 선정된 인플루언서 · 진행 단계(배송 현황 · 업로드 일정 · 업로드 링크 · 파트너십 코드) · 판매 현황을 볼 수 있어요.
+              진행 중인 어필리에이트예요. 상품을 누르면 지원 · 선정 인플루언서(한 화면) · 진행 단계(배송 현황 · 업로드 일정 · 업로드 링크 · 파트너십 코드) · 판매 현황을 볼 수 있어요.
               선정하면 인플루언서가 배송정보를 입력하고, 협찬 상품을 보내 송장번호를 입력하면 전용 판매 링크가 열려요. 인플루언서는 상품 수령 후 10일 이내에 콘텐츠를 업로드하고 판매를 시작해요.
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -751,8 +751,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
           </div>
           <div className="flex gap-4 border-b border-slate-200 overflow-x-auto">
             {([
-              { key: 'applicants', label: `지원 현황 ${(selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0)}`, badge: selectedProduct.requestCounts?.unseen || 0 },
-              { key: 'selected', label: `선정 인플루언서 ${selectedProduct.requestCounts?.approved || 0}`, badge: 0 },
+              { key: 'applicants', label: `지원 · 선정 인플루언서 ${(selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0)}`, badge: selectedProduct.requestCounts?.unseen || 0 },
               { key: 'progress', label: '진행 단계', badge: selectedProduct.requestCounts?.toShip || 0 },
               { key: 'sales', label: '판매 현황', badge: 0 },
             ] as const).map(t => (
@@ -774,6 +773,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
           <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
             {([
               { key: '', label: '전체', n: (selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0) },
+              { key: 'approved', label: '선정', n: selectedProduct.requestCounts?.approved || 0 },
               { key: 'pending', label: '검토 대기', n: selectedProduct.requestCounts?.pending || 0 },
               { key: 'rejected', label: '반려', n: selectedProduct.requestCounts?.rejected || 0 },
             ] as const).map(f => (
@@ -787,7 +787,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
             ))}
           </div>
           )}
-          {(productTab === 'applicants' || productTab === 'selected') && (<>
+          {productTab === 'applicants' && (<>
           {requestsLoading && requests.length === 0 ? (
             <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
           ) : requestsError ? (
@@ -802,43 +802,73 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
             </div>
           ) : (
             <>
-              {/* 지원자는 광고비 지급형 캠페인 지원자와 같은 카드로 본다 — 인스타 프로필 · 팔로워 · 최근 릴스 3편. */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
-              {requests.map(r => (
-                <InfluencerCandidateCard
-                  key={r.id}
-                  data={{
-                    ...(r.insights || {}),
-                    username: r.influencerUsername,
-                    instagramUrl: r.insights?.instagramUrl || r.channelUrl || '',
-                  }}
-                  mediaMode="reels"
-                  hidePrice
-                  badges={
-                    <>
-                      {r.unseen && <span className="px-2 py-1 rounded-md text-[10px] font-black bg-red-500 text-white">NEW</span>}
-                      <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
-                      {r.status === 'approved' && r.shippingStatus ? (
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-black ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
-                      ) : r.status === 'approved' && r.managerStatus && (
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
+              {/* 지원자와 선정된 인플루언서를 한 화면에서 본다. 위는 선정 인플루언서, 아래는 지원(검토 대기 · 반려) 인플루언서.
+                  카드는 광고비 지급형 캠페인 지원자와 같다 — 인스타 프로필 · 팔로워 · 최근 릴스 3편. */}
+              {(() => {
+                const renderCard = (r: StoreRequest) => (
+                  <InfluencerCandidateCard
+                    key={r.id}
+                    data={{
+                      ...(r.insights || {}),
+                      username: r.influencerUsername,
+                      instagramUrl: r.insights?.instagramUrl || r.channelUrl || '',
+                    }}
+                    mediaMode="reels"
+                    hidePrice
+                    badges={
+                      <>
+                        {r.unseen && <span className="px-2 py-1 rounded-md text-[10px] font-black bg-red-500 text-white">NEW</span>}
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-black ${REQUEST_STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
+                        {r.status === 'approved' && r.shippingStatus ? (
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-black ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
+                        ) : r.status === 'approved' && r.managerStatus && (
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-black ${MANAGER_STATUS_STYLE[r.managerStatus]}`}>{MANAGER_STATUS_LABEL[r.managerStatus]}</span>
+                        )}
+                        <span className="text-[11px] text-slate-300 font-bold">{dateText(r.createdAt)}</span>
+                      </>
+                    }
+                  >
+                    {progressSummary(r)}
+                    <div className="flex items-center gap-2 pt-1 justify-end">
+                      {r.status !== 'approved' && (
+                        <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-9 flex-1 px-3 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-50">선정</button>
                       )}
-                      <span className="text-[11px] text-slate-300 font-bold">{dateText(r.createdAt)}</span>
-                    </>
-                  }
-                >
-                  {progressSummary(r)}
-                  <div className="flex items-center gap-2 pt-1 justify-end">
-                    {r.status !== 'approved' && (
-                      <button disabled={busyId === r.id} onClick={() => review(r, 'approve')} className="h-9 flex-1 px-3 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-50">선정</button>
-                    )}
-                    {r.status !== 'rejected' && r.shippingStatus !== 'info_submitted' && r.shippingStatus !== 'shipped' && r.shippingStatus !== 'declined' && (
-                      <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-9 flex-1 px-3 rounded-lg border border-slate-200 text-slate-600 text-xs font-black disabled:opacity-50">반려</button>
-                    )}
+                      {r.status !== 'rejected' && r.shippingStatus !== 'info_submitted' && r.shippingStatus !== 'shipped' && r.shippingStatus !== 'declined' && (
+                        <button disabled={busyId === r.id} onClick={() => review(r, 'reject')} className="h-9 flex-1 px-3 rounded-lg border border-slate-200 text-slate-600 text-xs font-black disabled:opacity-50">반려</button>
+                      )}
+                    </div>
+                  </InfluencerCandidateCard>
+                );
+                const grid = (list: StoreRequest[]) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">{list.map(renderCard)}</div>
+                );
+                if (requestFilter) return grid(requests);
+                const chosen = requests.filter(r => r.status === 'approved');
+                const applied = requests.filter(r => r.status !== 'approved');
+                return (
+                  <div className="space-y-6">
+                    <section>
+                      <div className="flex items-center gap-2 mb-2.5 px-0.5">
+                        <p className="text-sm font-black text-slate-900">선정 인플루언서</p>
+                        <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[11px] font-black">{selectedProduct.requestCounts?.approved || 0}</span>
+                      </div>
+                      {chosen.length > 0 ? grid(chosen) : (
+                        <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-xs font-bold text-slate-400 text-center">아직 선정한 인플루언서가 없어요. 아래 지원 인플루언서에서 선정해 주세요.</p>
+                      )}
+                    </section>
+                    <section>
+                      <div className="flex items-center gap-2 mb-2.5 px-0.5">
+                        <p className="text-sm font-black text-slate-900">지원 인플루언서</p>
+                        <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-black">{(selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.rejected || 0)}</span>
+                        <span className="text-[11px] font-bold text-slate-400">검토 대기 {selectedProduct.requestCounts?.pending || 0} · 반려 {selectedProduct.requestCounts?.rejected || 0}</span>
+                      </div>
+                      {applied.length > 0 ? grid(applied) : (
+                        <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-xs font-bold text-slate-400 text-center">검토할 지원자가 없어요.</p>
+                      )}
+                    </section>
                   </div>
-                </InfluencerCandidateCard>
-              ))}
-              </div>
+                );
+              })()}
               {requestsHasMore && (
                 <div className="flex flex-col items-center gap-2 mt-5">
                   {requestsMoreError && <p className="text-xs font-bold text-red-500">{requestsMoreError}</p>}
