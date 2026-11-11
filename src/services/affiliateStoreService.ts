@@ -460,6 +460,8 @@ export interface MyAffiliateItem extends StoreRequest {
   commissionRate: number;
   /** 지금 구매할 수 있는지(판매중 · 재고 있음). */
   live: boolean;
+  /** 인플루언서가 '진행 상품'에서 내린 시각(진행 이력 탭에만 보인다). */
+  hiddenAt?: string | null;
   stats: { orders: number; units: number; sales: number; commission: number; pending: number; confirmed: number };
 }
 
@@ -705,6 +707,10 @@ export const affiliateStoreService = {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'confirm_received', id });
   },
   /** 업로드한 콘텐츠 링크 · 파트너십 코드 올리기(고치기). */
+  /** 판매 중지 · 종료된 상품을 MY 어필리에이트 진행 상품에서 내린다(hidden=false 면 다시 보이게). */
+  hideMyAffiliate(id: string, hidden = true) {
+    return call<{ ok: true; hiddenAt: string | null }>('POST', URL_BASE, { action: 'hide_my_affiliate', id, hidden });
+  },
   submitContent(id: string, contentUrl: string, partnershipCode: string) {
     return call<{ request: StoreRequest }>('POST', URL_BASE, { action: 'submit_content', id, contentUrl, partnershipCode });
   },

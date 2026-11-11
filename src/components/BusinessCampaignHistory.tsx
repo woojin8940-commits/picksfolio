@@ -115,6 +115,8 @@ type HistoryCampaign = {
   /** 어필리에이트: 이 상품이 픽스폴리오를 통해 팔린 금액 · 주문 수. */
   sales?: number;
   orders?: number;
+  /** 어필리에이트: 상품의 지금 판매 상태(on_sale · paused · ended · deleted …). */
+  saleState?: string;
   posts: HistoryPost[];
 };
 
@@ -240,6 +242,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const [status, setStatus] = useState<StatusFilter>('');
   const [sort, setSort] = useState<SortKey>('recent');
   const [openId, setOpenId] = useState<string | null>(null);
+  /** 이력에서 삭제 중인 어필리에이트 상품. */
+  const [removingId, setRemovingId] = useState('');
   /** 부스팅 창을 연 게시물. 창이 캠페인 제목·인플루언서·썸네일을 그대로 받아 쓴다. */
   const [boostTarget, setBoostTarget] = useState<{ campaign: HistoryCampaign; post: HistoryPost } | null>(null);
   // 광고 현황에서 연동한 메타 계정·광고 계정. 연동 전이면 아래 광고·페이지 칸을 그리지 않는다.
@@ -267,6 +271,38 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   }, [cleanUsername, cacheKey, affiliate]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  // 판매가 끝난(판매 중지 · 종료 · 삭제) 어필리에이트 상품을 이력에서 내린다. 주문 · 정산 기록은 그대로 남는다.
+  const removeFromHistory = async (c: HistoryCampaign) => {
+    if (!window.confirm(`'${c.title || '이 상품'}'을(를) 어필리에이트 이력에서 삭제할까요?\n주문 · 정산 기록은 그대로 남습니다.`)) return;
+    setRemovingId(c.id);
+    try {
+      const res = await fetch(`/api/business/campaign-history/${encodeURIComponent(cleanUsername)}`, {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'hide_affiliate', productId: c.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(data?.error || '이력에서 삭제하지 못했습니다.');
+        return;
+      }
+      setOpenId(null);
+      setCampaigns((prev) => {
+        const next = prev.filter((x) => x.id !== c.id);
+        try {
+          const raw = localStorage.getItem(cacheKey);
+          if (raw) localStorage.setItem(cacheKey, JSON.stringify({ ...JSON.parse(raw), campaigns: next }));
+        } catch {}
+        return next;
+      });
+      void fetchHistory();
+    } catch {
+      window.alert('네트워크 상태를 확인해 주세요.');
+    } finally {
+      setRemovingId('');
+    }
+  };
 
   const visible = useMemo(() => {
     const rows = campaigns.filter((c) => {
@@ -495,7 +531,11 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           {visible.map((c) => {
             const open = openId === c.id;
             const badge = affiliate
-              ? (c.status === 'active' ? { label: '판매중', cls: 'bg-emerald-50 text-emerald-600' } : { label: '판매 종료', cls: 'bg-slate-100 text-slate-500' })
+              ? (c.status === 'active'
+                ? { label: '판매중', cls: 'bg-emerald-50 text-emerald-600' }
+                : c.saleState === 'paused' || c.saleState === 'draft'
+                  ? { label: '판매 중지', cls: 'bg-red-50 text-red-500' }
+                  : { label: '판매 종료', cls: 'bg-slate-100 text-slate-500' })
               : STATUS_LABEL[c.status] || { label: c.status || '상태 미정', cls: 'bg-slate-100 text-slate-500' };
             return (
               <div key={c.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -570,6 +610,21 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
                 {open && (
                   <div className="border-t border-slate-100 p-4 md:p-5 bg-slate-50/50">
+                    {affiliate && c.status !== 'active' && (
+                      <div className="flex items-center justify-between gap-3 mb-3 bg-white border border-slate-100 rounded-xl px-3 py-2.5">
+                        <p className="text-[11px] text-slate-500 font-bold leading-snug">
+                          판매가 끝난 상품이에요. 이력에서 삭제해도 주문 · 정산 기록은 그대로 남아요.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={removingId === c.id}
+                          onClick={() => removeFromHistory(c)}
+                          className="h-8 px-3 rounded-lg border border-red-200 text-[11px] font-black text-red-500 hover:bg-red-50 disabled:opacity-50 flex-shrink-0"
+                        >
+                          {removingId === c.id ? '삭제 중…' : '이력에서 삭제'}
+                        </button>
+                      </div>
+                    )}
                     {c.posts.length === 0 ? (
                       <p className="text-[11px] text-slate-400 font-bold text-center py-4">
                         {affiliate ? '아직 선정된 인플루언서가 없습니다.' : '아직 확정된 협업이 없습니다.'}

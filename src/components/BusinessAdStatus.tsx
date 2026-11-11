@@ -908,7 +908,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             )}
           </div>
           <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
-            캠페인 이력에서 고른 콘텐츠와 직접 올린 소재로 돌린 광고 현황을 확인합니다
+            어필리에이트 이력에서 고른 인플루언서 콘텐츠와 직접 올린 소재로 돌린 광고 현황을 확인합니다
           </p>
         </div>
 
@@ -1262,7 +1262,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
                 <>
                   <p className="text-sm text-slate-400 font-bold">이 광고 계정으로 집행한 광고가 아직 없습니다.</p>
                   <p className="text-[11px] text-slate-400 font-medium mt-1">
-                    캠페인 이력에서 성과가 좋았던 콘텐츠를 골라 부스팅하거나, '새 광고 만들기'로 직접
+                    어필리에이트 이력에서 성과가 좋았던 인플루언서 콘텐츠를 골라 2차 광고로 돌리거나, '새 광고 만들기'로 직접
                     올린 소재를 집행하면 여기에 올라옵니다.
                   </p>
                 </>

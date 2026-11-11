@@ -907,4 +907,26 @@ describe("G. 상품별 판매 신청 · 판매기간 · 판매중지", () => {
     const kept = await saveProduct(BRAND3, "판매 예정 상품", { ...rest, summary: "수정" });
     assert.equal(kept.saleEndDate, day(10));
   });
+  test("판매 중지된 상품은 인플루언서가 진행 상품에서 지우고(진행 이력엔 남는다), 판매 중인 상품은 지울 수 없다", async () => {
+    const mine = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    const item = mine.body.items.find((i: any) => i.live);
+    assert.ok(item, "판매 중인 진행 상품이 있다");
+    const blocked = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "hide_my_affiliate", id: item.id });
+    assert.equal(blocked.status, 409);
+
+    const db = getDatabase();
+    await db.sql`UPDATE affiliate_store_products SET status = 'paused' WHERE id = ${item.productId}`;
+    const other = await call(h.store, INF, "POST", "/api/affiliate-store", { action: "hide_my_affiliate", id: item.id });
+    assert.equal(other.status, 404, "남의 협업은 지울 수 없다");
+    const hidden = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "hide_my_affiliate", id: item.id });
+    assert.equal(hidden.status, 200);
+    assert.ok(hidden.body.hiddenAt);
+    const after = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-affiliate");
+    assert.ok(after.body.items.find((i: any) => i.id === item.id).hiddenAt, "기록은 남고 숨김 표시만 붙는다");
+
+    const restored = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "hide_my_affiliate", id: item.id, hidden: false });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.hiddenAt, null);
+    await db.sql`UPDATE affiliate_store_products SET status = 'on_sale' WHERE id = ${item.productId}`;
+  });
 });
