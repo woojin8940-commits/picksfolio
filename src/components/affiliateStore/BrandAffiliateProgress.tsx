@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarClock, Check, CheckCircle2, Loader2, Truck, Upload, Users } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, Loader2, Truck, Upload, Users } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
   SHIPPING_COURIERS,
-  UPLOAD_DAYS,
   type ProductSalesRow,
   type ProductSalesTotals,
   type StoreRequest,
@@ -18,15 +17,14 @@ import AffiliateStepBoard, { type AffiliateStepKey } from './AffiliateStepBoard'
  *
  * 진행 단계는 캠페인 진행사항 보드와 같은 모양이다 — 단계를 가로로 늘어놓은 칸에 인플루언서 카드가 들어가고,
  * 카드를 누르면 그 사람의 진행 단계(AffiliateStepBoard)가 그 단계가 펼쳐진 채로 열린다.
- * 어필리에이트라 단계는 셋이다(+ 진행 완료 칸).
+ * 어필리에이트라 단계는 둘이다(+ 진행 완료 칸). 업로드 일정은 운영 담당자가 양쪽 사이에서 조율한다.
  *   배송 현황      인플루언서가 입력한 배송지 → 브랜드가 협찬 상품을 보내고 송장번호 입력
- *   업로드 일정    상품 수령일 + 10일까지 콘텐츠 업로드 · 판매 시작
  *   업로드 링크    인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크 · 파트너십 코드(캠페인 이력에서 2차 광고로 돌린다)
  *
  * 판매 현황은 이 상품이 픽스폴리오(인플루언서 전용 링크)를 통해 얼마나 팔렸는지와 인플루언서별 판매.
  */
 
-type ColumnKey = 'shipping' | 'schedule' | 'content' | 'done';
+type ColumnKey = 'shipping' | 'content' | 'done';
 
 type Column = {
   key: ColumnKey;
@@ -40,18 +38,16 @@ type Column = {
 /** 보드의 칸 — 캠페인 진행사항 보드와 같은 모양. 마지막 칸은 세 단계를 다 지난 사람이 서는 자리다. */
 const COLUMNS: Column[] = [
   { key: 'shipping', title: '제품 배송', focus: 'shipping', reviewLabel: '발송 처리', emptyLabel: '배송을 기다리는 인플루언서가 없습니다.', icon: <Truck className="w-4 h-4" /> },
-  { key: 'schedule', title: '업로드 일정', focus: 'schedule', emptyLabel: '수령 · 업로드를 기다리는 인플루언서가 없습니다.', icon: <CalendarClock className="w-4 h-4" /> },
-  { key: 'content', title: '업로드 링크 · 코드', focus: 'content', emptyLabel: '파트너십 코드를 기다리는 인플루언서가 없습니다.', icon: <Upload className="w-4 h-4" /> },
+  { key: 'content', title: '업로드 링크 · 코드', focus: 'content', emptyLabel: '업로드 · 파트너십 코드를 기다리는 인플루언서가 없습니다.', icon: <Upload className="w-4 h-4" /> },
   { key: 'done', title: '진행 완료', focus: 'content', emptyLabel: '링크와 파트너십 코드가 모두 올라오면 이 칸으로 넘어옵니다.', icon: <CheckCircle2 className="w-4 h-4" /> },
 ];
-const ORDER: ColumnKey[] = ['shipping', 'schedule', 'content', 'done'];
+const ORDER: ColumnKey[] = ['shipping', 'content', 'done'];
 
 /** 이 협업이 지금 서 있는 칸. */
 const columnOf = (r: StoreRequest): ColumnKey => {
   const st = r.shippingStatus || '';
   if (st === 'awaiting_info' || st === 'info_submitted') return 'shipping';
-  if (!r.contentUrl) return 'schedule';
-  if (!r.partnershipCode) return 'content';
+  if (!r.contentUrl || !r.partnershipCode) return 'content';
   return 'done';
 };
 
@@ -136,7 +132,7 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
       <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
         <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
         <p className="text-sm font-black text-slate-700">아직 선정된 인플루언서가 없어요</p>
-        <p className="text-xs text-slate-400 mt-1">지원 · 선정 인플루언서에서 인플루언서를 선정하면 여기서 제품 배송 · 업로드 일정 · 업로드 링크를 관리해요.</p>
+        <p className="text-xs text-slate-400 mt-1">지원 · 선정 인플루언서에서 인플루언서를 선정하면 여기서 제품 배송 · 업로드 링크를 관리해요.</p>
       </div>
     );
   }
@@ -225,7 +221,7 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
         )}
       </div>
       <p className="px-1 text-xs text-slate-400 font-medium">
-        인플루언서는 상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해요. 카드를 누르면 그 인플루언서의 진행 단계가 열려요.
+        업로드 일정은 픽스폴리오 담당자가 브랜드 · 인플루언서와 조율해요. 카드를 누르면 그 인플루언서의 진행 단계가 열려요.
       </p>
 
       <div className="-mx-1 overflow-x-auto pb-2">
@@ -247,15 +243,12 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
                 ) : cards.map(r => {
                   const who = identityOf(r);
                   const review = column.key === 'shipping' && r.shippingStatus === 'info_submitted';
-                  const left = r.uploadDeadline && column.key === 'schedule'
-                    ? Math.ceil((new Date(r.uploadDeadline).getTime() - Date.now()) / 86_400_000) : null;
-                  const urgency = left === null ? '' : left < 0 ? 'over' : left <= 2 ? 'soon' : left <= 5 ? 'near' : '';
-                  const frame = urgency === 'over' || urgency === 'soon' ? 'border-red-200' : urgency === 'near' ? 'border-amber-200' : 'border-slate-200/70';
+                  const frame = 'border-slate-200/70';
                   const working = column.key === 'shipping'
                     ? (r.shippingStatus === 'awaiting_info' ? '배송정보 입력 대기' : '발송 대기')
-                    : column.key === 'schedule'
-                      ? (!r.shippingStatus ? '업로드 대기' : r.deliveredAt ? '콘텐츠 제작 중' : '상품 수령 대기')
-                      : column.key === 'content' ? '파트너십 코드 대기' : '진행 완료';
+                    : column.key === 'content'
+                      ? (r.contentUrl ? '파트너십 코드 대기' : r.deliveredAt ? '콘텐츠 제작 중' : r.shippingStatus ? '상품 수령 대기' : '업로드 대기')
+                      : '진행 완료';
                   return (
                     <div key={r.id} className={`rounded-xl border bg-white ${frame}`}>
                       <button type="button" onClick={() => setDetail({ id: r.id, focus: column.focus })} className="w-full text-left px-2.5 pt-2.5 pb-2">
@@ -272,26 +265,17 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
                         <div className="mt-2 flex items-center gap-1.5">
                           {column.key === 'done' || column.key === 'content' ? (
                             <p className="text-[11px] font-bold text-slate-500 truncate">
-                              {r.contentSubmittedAt ? `업로드 ${korDate(r.contentSubmittedAt)}` : '업로드 완료'}
+                              {r.contentUrl
+                                ? (r.contentSubmittedAt ? `업로드 ${korDate(r.contentSubmittedAt)}` : '업로드 완료')
+                                : r.shippedAt ? `발송 ${korDate(r.shippedAt)} · 업로드 전` : '업로드 전'}
                             </p>
-                          ) : column.key === 'schedule' ? (
-                            <>
-                              <p className={`text-[11px] font-bold ${urgency === 'over' || urgency === 'soon' ? 'text-red-500' : 'text-slate-400'}`}>
-                                {r.uploadDeadline ? `업로드 ${korDate(r.uploadDeadline)}` : r.shippedAt ? `발송 ${korDate(r.shippedAt)} · 수령 후 ${UPLOAD_DAYS}일` : '업로드 일정 미정'}
-                              </p>
-                              {urgency && (
-                                <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-black flex-shrink-0 ${urgency === 'near' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500'}`}>
-                                  {urgency === 'over' ? `${-(left ?? 0)}일 지남` : urgency === 'soon' ? '시급' : '임박'}
-                                </span>
-                              )}
-                            </>
                           ) : (
                             <p className="text-[11px] font-bold text-slate-400 truncate">
                               {r.shippingStatus === 'info_submitted' && r.shipping?.submittedAt ? `배송정보 ${korDate(r.shipping.submittedAt)}` : `선정 ${korDate(r.updatedAt)}`}
                             </p>
                           )}
                         </div>
-                        {(column.key === 'content' || column.key === 'done') && (
+                        {(column.key === 'content' || column.key === 'done') && r.contentUrl && (
                           <p className={`mt-1.5 text-[11px] font-black truncate ${r.partnershipCode ? 'text-slate-600' : 'text-amber-600'}`}>
                             {r.partnershipCode ? `파트너십 코드 ${r.partnershipCode}` : '파트너십 코드 대기'}
                           </p>

@@ -46,7 +46,6 @@ function stageOf(i: MyAffiliateItem, waiting: boolean): { label: string; style: 
   const cur = steps.find(s => !s.done);
   if (!cur) return { label: '진행 완료', style: 'bg-emerald-500 text-white', action };
   if (waiting || cur.key === 'shipping') return { label: '제품 배송', style: 'bg-blue-600 text-white', action };
-  if (cur.key === 'schedule') return { label: '업로드 일정', style: 'bg-amber-400 text-slate-900', action };
   return { label: '링크 · 코드', style: 'bg-slate-900 text-white', action };
 }
 

@@ -92,7 +92,7 @@ export interface ManagerSelection extends StoreRequest {
   managerUpdatedAt: string | null;
   /** 운영자가 아직 확인하지 않은 새 선정. */
   operatorUnseen?: boolean;
-  brandContact: { name: string; phone: string; email: string };
+  brandContact: { name: string; phone: string; email: string; csPhone?: string };
   creatorContact: { name: string; phone: string; instagramUrl: string };
 }
 

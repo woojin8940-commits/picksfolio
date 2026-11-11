@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
-import { affiliateStoreService, won, uploadScheduleOf, UPLOAD_TONE_STYLE, type MyAffiliateItem } from '../../services/affiliateStoreService';
+import { affiliateStoreService, won, type MyAffiliateItem } from '../../services/affiliateStoreService';
 
 /**
  * 인플루언서 대시보드 홈의 어필리에이트 요약(예전 캠페인 지원 · 협업 캠페인 자리).
@@ -32,10 +32,9 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
     return () => { alive = false; };
   }, []);
 
-  // 업로드가 남은 협업 중 마감이 가까운 순.
+  // 업로드가 남은 협업(업로드 일정은 담당자가 조율한다).
   const todo = (items || [])
     .filter(i => !i.contentUrl && i.shippingStatus !== 'declined')
-    .sort((a, b) => (a.uploadDeadline ? Date.parse(a.uploadDeadline) : Infinity) - (b.uploadDeadline ? Date.parse(b.uploadDeadline) : Infinity))
     .slice(0, 3);
 
   return (
@@ -86,7 +85,7 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
           {todo.length > 0 ? (
             <div className="mt-3 divide-y divide-slate-50">
               {todo.map(i => {
-                const s = uploadScheduleOf(i);
+                const s = i.shippingStatus === 'awaiting_info' ? '배송정보 입력' : i.shippingStatus === 'info_submitted' ? '발송 대기' : '업로드 전';
                 return (
                   <button key={i.id} onClick={onMyAffiliate} className="w-full flex items-center gap-3 py-2.5 text-left">
                     {i.productImage && <img src={i.productImage} alt="" className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0" />}
@@ -94,11 +93,11 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
                       <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
                       <p className="text-xs font-black text-slate-900 truncate">{i.productName}</p>
                     </div>
-                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-black ${UPLOAD_TONE_STYLE[s.tone]}`}>{s.label}</span>
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-black bg-slate-100 text-slate-600">{s}</span>
                   </button>
                 );
               })}
-              <p className="pt-2 text-[11px] text-slate-400">상품 수령 후 10일 이내에 콘텐츠를 업로드하고, MY 어필리에이트에 업로드 링크 · 파트너십 코드를 올려 주세요.</p>
+              <p className="pt-2 text-[11px] text-slate-400">업로드 일정은 픽스폴리오 담당자가 연락드려 조율해요. 업로드한 뒤 MY 어필리에이트에 업로드 링크 · 파트너십 코드를 올려 주세요.</p>
             </div>
           ) : items.length === 0 ? (
             <p className="mt-3 text-xs text-slate-400">아직 진행 중인 어필리에이트가 없어요. 상품을 둘러보고 판매 신청해 보세요.</p>
