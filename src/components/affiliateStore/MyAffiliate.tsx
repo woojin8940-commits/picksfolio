@@ -295,7 +295,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
         </>
       )}
 
-      <div className="flex gap-4 border-b border-slate-200 mb-4">
+      <div className="flex gap-7 md:gap-10 border-b border-slate-200 mb-4">
         {([['products', `진행 상품 ${all.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
           <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
         ))}
