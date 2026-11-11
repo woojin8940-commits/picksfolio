@@ -14,13 +14,58 @@ import { loadCompanyCodes, lookupTracking, resolveCompanyCode, trackingApiKey } 
 
 const MAX_PER_RUN = 1000;
 
+/** 협찬 상품이 발송된 뒤 이 날수가 지나도 수령 확인이 없으면 받은 것으로 본다(업로드 일정 기준일). */
+const SELECTION_AUTO_RECEIVED_DAYS = 5;
+
+/**
+ * 어필리에이트 협찬 상품(선정된 인플루언서에게 보낸 샘플)의 수령일.
+ * 인플루언서가 직접 수령 확인하지 않았으면 송장을 조회해 배송 완료 시각을 넣고,
+ * 조회가 안 되면 발송 5일 뒤를 수령일로 둔다. 업로드 마감 = 수령일 + 10일.
+ */
+async function checkSelectionDeliveries(db: any, key: string) {
+  const auto = (await db.sql`
+    UPDATE affiliate_store_requests
+    SET ship_delivered_at = shipped_at + (${SELECTION_AUTO_RECEIVED_DAYS} * INTERVAL '1 day'), updated_at = NOW()
+    WHERE shipping_status = 'shipped' AND ship_delivered_at IS NULL AND shipped_at IS NOT NULL
+      AND shipped_at < NOW() - (${SELECTION_AUTO_RECEIVED_DAYS} * INTERVAL '1 day')
+    RETURNING id
+  `) as any[];
+  let tracked = 0;
+  if (key) {
+    const rows = (await db.sql`
+      SELECT id, ship_tracking_company, ship_tracking_number FROM affiliate_store_requests
+      WHERE shipping_status = 'shipped' AND ship_delivered_at IS NULL AND ship_tracking_number <> ''
+      ORDER BY shipped_at LIMIT ${MAX_PER_RUN}
+    `) as any[];
+    if (rows.length) {
+      const list = await loadCompanyCodes(key);
+      if (!list.keyInvalid) {
+        for (const r of rows) {
+          const code = resolveCompanyCode(r.ship_tracking_company, list);
+          if (!code) continue;
+          const t = await lookupTracking(key, code, r.ship_tracking_number);
+          if (!t.ok || !t.delivered) continue;
+          const at = t.deliveredAt && !Number.isNaN(t.deliveredAt.getTime()) ? t.deliveredAt.toISOString() : new Date().toISOString();
+          await db.sql`
+            UPDATE affiliate_store_requests SET ship_delivered_at = ${at}::timestamptz, updated_at = NOW()
+            WHERE id = ${r.id} AND ship_delivered_at IS NULL
+          `;
+          tracked++;
+        }
+      }
+    }
+  }
+  console.log("[tracking-check] selections", JSON.stringify({ autoReceived: auto.length, tracked }));
+}
+
 export default async () => {
   const key = trackingApiKey();
+  const db = getDatabase();
+  await checkSelectionDeliveries(db, key).catch((e) => console.error("[tracking-check] selections failed", e));
   if (!key) {
     console.warn("[tracking-check] SWEETTRACKER_API_KEY not set · skipped");
     return;
   }
-  const db = getDatabase();
   const rows = (await db.sql`
     SELECT id, tracking_company, tracking_number FROM affiliate_store_orders
     WHERE status = 'shipped' AND tracking_number <> '' AND shipped_at IS NOT NULL

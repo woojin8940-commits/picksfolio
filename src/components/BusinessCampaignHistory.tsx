@@ -34,6 +34,12 @@ interface BusinessCampaignHistoryProps {
   companyName: string;
   /** 부스팅 요청 뒤 광고 현황으로 넘어갈 수 있게 해 준다. */
   onViewAdStatus?: () => void;
+  /**
+   * 'affiliate' 면 어필리에이트 이력만 보여 준다(캠페인 메뉴가 없어져 브랜드 이력은 어필리에이트뿐이다).
+   * 상품 하나 = 이력 한 건, 선정된 인플루언서 한 명 = 게시물 한 건. 게시물 주소 · 코드는 인플루언서가
+   * MY 어필리에이트에 올린 업로드 링크 · 파트너십 코드이고, 광고비 · CPV 대신 판매액을 보여 준다.
+   */
+  source?: 'campaign' | 'affiliate';
 }
 
 type PostMetric = {
@@ -74,6 +80,9 @@ type HistoryPost = {
   cleanFileName: string;
   metrics: PostMetric | null;
   reason: string;
+  /** 어필리에이트: 이 인플루언서 전용 링크의 판매액 · 주문 수(취소 · 환불 제외). */
+  sales?: number;
+  orders?: number;
 };
 
 type HistoryCampaign = {
@@ -103,6 +112,9 @@ type HistoryCampaign = {
   /** CPV 의 분자 — 지표가 맞춰진 게시물의 지급액만. spend 는 확정 지급액 전부다. */
   measuredSpend: number;
   cpv: number;
+  /** 어필리에이트: 이 상품이 픽스폴리오를 통해 팔린 금액 · 주문 수. */
+  sales?: number;
+  orders?: number;
   posts: HistoryPost[];
 };
 
@@ -119,6 +131,8 @@ type HistoryTotals = {
   spend: number;
   measuredSpend: number;
   cpv: number;
+  sales?: number;
+  orders?: number;
 };
 
 const EMPTY_TOTALS: HistoryTotals = {
@@ -171,7 +185,7 @@ type StatusFilter = '' | 'open' | 'closed';
  * 좋아요를 댓글과 묶어 보던 축은 댓글과 공유로 나눴다. 좋아요는 스쳐 가며 누르는
  * 반응이라 콘텐츠가 대화를 만들었는지(댓글), 남에게 퍼졌는지(공유)를 가려 주지 못한다.
  */
-type SortKey = 'recent' | 'views' | 'comments' | 'shares' | 'cpv';
+type SortKey = 'recent' | 'views' | 'comments' | 'shares' | 'cpv' | 'sales';
 
 const SORT_TABS: [SortKey, string][] = [
   ['recent', '최신순'],
@@ -179,6 +193,14 @@ const SORT_TABS: [SortKey, string][] = [
   ['comments', '댓글순'],
   ['shares', '공유순'],
   ['cpv', 'CPV순'],
+];
+/** 어필리에이트 이력은 광고비가 없어 CPV 대신 판매액순으로 본다. */
+const AFFILIATE_SORT_TABS: [SortKey, string][] = [
+  ['recent', '최신순'],
+  ['sales', '판매액순'],
+  ['views', '조회수순'],
+  ['comments', '댓글순'],
+  ['shares', '공유순'],
 ];
 
 const Kpi: React.FC<{ label: string; value: string; unit?: string; hint?: string; pending?: boolean }> = ({
@@ -199,9 +221,10 @@ const Kpi: React.FC<{ label: string; value: string; unit?: string; hint?: string
   </div>
 );
 
-const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ businessUsername, onViewAdStatus }) => {
+const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ businessUsername, onViewAdStatus, source = 'campaign' }) => {
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
-  const cacheKey = `picks_biz_campaign_history_${cleanUsername}`;
+  const affiliate = source === 'affiliate';
+  const cacheKey = `picks_biz_${affiliate ? 'affiliate' : 'campaign'}_history_${cleanUsername}`;
 
   const cached = useMemo(() => {
     try {
@@ -224,7 +247,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
   const fetchHistory = useCallback(async () => {
     try {
-      const res = await fetch(`/api/business/campaign-history/${encodeURIComponent(cleanUsername)}`, {
+      const res = await fetch(`/api/business/campaign-history/${encodeURIComponent(cleanUsername)}${affiliate ? '?source=affiliate' : ''}`, {
         headers: await authHeaders(),
       });
       const data = await res.json();
@@ -241,7 +264,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     } finally {
       setLoading(false);
     }
-  }, [cleanUsername, cacheKey]);
+  }, [cleanUsername, cacheKey, affiliate]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
@@ -255,7 +278,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     // 집계 전(0)인 캠페인은 성과순 정렬에서 아래로 내린다. 0 을 '가장 저렴한 CPV' 로
     // 읽히게 두면 아직 숫자가 없는 캠페인이 제일 잘한 것처럼 맨 위에 올라온다.
     const score = (c: HistoryCampaign) =>
-      sort === 'views'
+      sort === 'sales'
+        ? c.sales ?? 0
+        : sort === 'views'
         ? c.views
         : sort === 'comments'
           ? c.comments
@@ -288,6 +313,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       base.sharesMatched += c.sharesMatched ?? 0;
       base.spend += c.spend;
       base.measuredSpend += c.measuredSpend ?? 0;
+      base.sales = (base.sales ?? 0) + (c.sales ?? 0);
+      base.orders = (base.orders ?? 0) + (c.orders ?? 0);
     }
     // 서버와 같은 기준으로 나눈다 — 집계된 게시물의 지급액 ÷ 그 게시물의 조회수.
     base.cpv =
@@ -321,7 +348,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       <div className="mb-6 md:mb-10">
         <h2 className="text-xl md:text-3xl font-black text-slate-900">캠페인 이력</h2>
         <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
-          지금까지 진행한 캠페인과 인플루언서 게시물의 성과를 확인합니다
+          {affiliate
+            ? '지금까지 진행한 어필리에이트와 인플루언서가 올린 콘텐츠 · 파트너십 코드 · 판매 성과를 확인하고, 콘텐츠를 2차 광고로 돌릴 수 있습니다'
+            : '지금까지 진행한 캠페인과 인플루언서 게시물의 성과를 확인합니다'}
         </p>
       </div>
 
@@ -339,10 +368,10 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Kpi
-          label={filtered ? '캠페인 (필터)' : '진행한 캠페인'}
+          label={affiliate ? (filtered ? '어필리에이트 (필터)' : '진행한 어필리에이트') : (filtered ? '캠페인 (필터)' : '진행한 캠페인')}
           value={formatNumberWithCommas(shown.campaigns)}
           unit="건"
-          hint={`확정 협업 ${formatNumberWithCommas(shown.collabs)}명 · 업로드 ${formatNumberWithCommas(shown.uploaded)}건`}
+          hint={`${affiliate ? '선정 인플루언서' : '확정 협업'} ${formatNumberWithCommas(shown.collabs)}명 · 업로드 ${formatNumberWithCommas(shown.uploaded)}건`}
         />
         <Kpi
           label="전체 조회수"
@@ -365,6 +394,15 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           pending={shown.sharesMatched === 0}
           hint={shareCoverage || '인플루언서 채널 인사이트에서 받아옵니다'}
         />
+        {affiliate ? (
+        <Kpi
+          label="픽스폴리오 판매액"
+          value={(shown.sales ?? 0) > 0 ? formatNumberWithCommas(shown.sales ?? 0) : '—'}
+          unit={(shown.sales ?? 0) > 0 ? '원' : undefined}
+          pending={(shown.sales ?? 0) === 0}
+          hint={`인플루언서 전용 링크 주문 ${formatNumberWithCommas(shown.orders ?? 0)}건 · 취소 · 환불 제외`}
+        />
+        ) : (
         <Kpi
           label="평균 CPV"
           value={shown.cpv > 0 ? formatNumberWithCommas(shown.cpv) : '—'}
@@ -376,6 +414,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
               : '확정 광고비가 등록되면 계산됩니다'
           }
         />
+        )}
       </div>
 
       {/* 필터를 걸면 위 숫자가 그 조건만의 합계로 바뀐다. 전체 기준을 잃어버리지
@@ -405,7 +444,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
       {/* 상태 · 정렬. 이력을 훑는 동작이라 한 줄에 둔다. */}
       <div className="mt-6 flex flex-wrap items-center gap-1.5">
-        {SORT_TABS.map(([key, label]) => (
+        {(affiliate ? AFFILIATE_SORT_TABS : SORT_TABS).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setSort(key)}
@@ -419,7 +458,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           </button>
         ))}
         <span className="w-px h-5 bg-slate-200 mx-1" />
-        {([['', '전체 상태'], ['open', '모집중'], ['closed', '마감']] as [StatusFilter, string][]).map(
+        {([['', '전체 상태'], ['open', affiliate ? '판매중' : '모집중'], ['closed', affiliate ? '판매 종료' : '마감']] as [StatusFilter, string][]).map(
           ([key, label]) => (
             <button
               key={key || 'any'}
@@ -439,11 +478,15 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       {visible.length === 0 ? (
         <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 text-center">
           <p className="text-sm text-slate-400 font-bold">
-            {campaigns.length === 0 ? '아직 진행한 캠페인이 없습니다.' : '이 조건에 맞는 캠페인이 없습니다.'}
+            {campaigns.length === 0
+              ? (affiliate ? '아직 진행한 어필리에이트가 없습니다.' : '아직 진행한 캠페인이 없습니다.')
+              : (affiliate ? '이 조건에 맞는 어필리에이트가 없습니다.' : '이 조건에 맞는 캠페인이 없습니다.')}
           </p>
           <p className="text-[11px] text-slate-400 font-medium mt-1">
             {campaigns.length === 0
-              ? '캠페인 협업에서 캠페인을 등록하면 진행 이력이 이 화면에 쌓입니다.'
+              ? (affiliate
+                ? '어필리에이트 › 진행관리에서 인플루언서를 선정하면 진행 이력이 이 화면에 쌓입니다.'
+                : '캠페인 협업에서 캠페인을 등록하면 진행 이력이 이 화면에 쌓입니다.')
               : '상태 필터를 풀고 다시 확인해 보세요.'}
           </p>
         </div>
@@ -451,7 +494,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         <div className="mt-4 space-y-3">
           {visible.map((c) => {
             const open = openId === c.id;
-            const badge = STATUS_LABEL[c.status] || { label: c.status || '상태 미정', cls: 'bg-slate-100 text-slate-500' };
+            const badge = affiliate
+              ? (c.status === 'active' ? { label: '판매중', cls: 'bg-emerald-50 text-emerald-600' } : { label: '판매 종료', cls: 'bg-slate-100 text-slate-500' })
+              : STATUS_LABEL[c.status] || { label: c.status || '상태 미정', cls: 'bg-slate-100 text-slate-500' };
             return (
               <div key={c.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                 <button
@@ -485,7 +530,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                       <p className="text-[11px] text-slate-400 font-bold mt-0.5">
                         {c.startDate || '기간 미정'}
                         {c.endDate ? ` ~ ${c.endDate}` : ''}
-                        {` · 협업 ${c.collabs}명 · 업로드 ${c.uploaded}건`}
+                        {affiliate
+                          ? ` · 선정 ${c.collabs}명 · 업로드 ${c.uploaded}건`
+                          : ` · 협업 ${c.collabs}명 · 업로드 ${c.uploaded}건`}
                       </p>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
@@ -498,9 +545,15 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                         <span className="text-[11px] font-bold text-slate-500">
                           공유 {(c.sharesMatched ?? 0) > 0 ? formatNumberWithCommas(c.shares ?? 0) : '—'}
                         </span>
+                        {affiliate ? (
+                          <span className="text-[11px] font-black text-blue-600">
+                            판매 {(c.sales ?? 0) > 0 ? `${formatNumberWithCommas(c.sales ?? 0)}원 · ${c.orders ?? 0}건` : '—'}
+                          </span>
+                        ) : (
                         <span className="text-[11px] font-bold text-slate-500">
                           CPV {c.cpv > 0 ? `${formatNumberWithCommas(c.cpv)}원` : '—'}
                         </span>
+                        )}
                         {c.uploaded > 0 && c.matched < c.uploaded && (
                           <span className="text-[10px] font-black text-amber-600">
                             {c.uploaded - c.matched}건 집계 전
@@ -519,7 +572,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                   <div className="border-t border-slate-100 p-4 md:p-5 bg-slate-50/50">
                     {c.posts.length === 0 ? (
                       <p className="text-[11px] text-slate-400 font-bold text-center py-4">
-                        아직 확정된 협업이 없습니다.
+                        {affiliate ? '아직 선정된 인플루언서가 없습니다.' : '아직 확정된 협업이 없습니다.'}
                       </p>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -557,6 +610,11 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                 {p.followers > 0 ? `팔로워 ${formatNumberWithCommas(p.followers)}` : '팔로워 미등록'}
                                 {p.fee > 0 ? ` · ${formatKoreanWon(p.fee)}` : ''}
                               </p>
+                              {affiliate && (
+                                <p className="text-[10px] font-black text-blue-600">
+                                  판매 {(p.sales ?? 0) > 0 ? `${formatKoreanWon(p.sales ?? 0)} · ${p.orders ?? 0}건` : '아직 없음'}
+                                </p>
+                              )}
 
                               {p.metrics ? (
                                 <div className="mt-1.5 space-y-0.5">
@@ -578,11 +636,11 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                               ) : (
                                 <p className="mt-1.5 text-[10px] text-slate-400 font-bold leading-relaxed">
                                   {p.reason === 'not_uploaded'
-                                    ? '업로드가 확인되면 지표가 붙습니다.'
+                                    ? (affiliate ? '인플루언서가 MY 어필리에이트에 업로드 링크를 올리면 지표가 붙습니다.' : '업로드가 확인되면 지표가 붙습니다.')
                                     : p.reason === 'not_linked'
                                       ? '이 인플루언서의 채널이 메타에 연동되면 지표가 붙습니다.'
                                       : p.reason === 'cancelled'
-                                        ? '중간에 취소된 협업입니다.'
+                                        ? (affiliate ? '인플루언서가 반려한 협업입니다.' : '중간에 취소된 협업입니다.')
                                         : '메타 최근 게시물 목록에서 밀려나 아직 맞추지 못했습니다.'}
                                 </p>
                               )}
@@ -615,7 +673,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                   {/* 클린본은 코드 옆에 파일 한 줄로. 광고로 돌릴 때
                                       브랜드가 챙기는 것은 이 두 개이고, 지금까지 이
                                       파일은 카카오톡 대화방에만 있었다. */}
-                                  {p.cleanFileUrl ? (
+                                  {affiliate ? null : p.cleanFileUrl ? (
                                     <a
                                       href={downloadHref(p.cleanFileUrl, p.cleanFileName || '클린본 영상')}
                                       download={p.cleanFileName || '클린본 영상'}
@@ -642,18 +700,20 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                       : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                                   }`}
                                 >
-                                  메타 광고로 부스팅
+                                  {affiliate ? '2차 광고로 돌리기 (메타 부스팅)' : '메타 광고로 부스팅'}
                                 </button>
 
                                 {!p.partnershipCode && !p.cancelled && (
                                   <p className="text-[9px] text-slate-400 font-medium mt-1 leading-tight">
-                                    인플루언서가 업로드 단계에 파트너십 코드를 남기면 광고로 돌릴 수 있습니다.
+                                    {affiliate
+                                      ? '인플루언서가 MY 어필리에이트에 파트너십 코드를 올리면 2차 광고로 돌릴 수 있습니다.'
+                                      : '인플루언서가 업로드 단계에 파트너십 코드를 남기면 광고로 돌릴 수 있습니다.'}
                                   </p>
                                 )}
 
                                 {/* 코드는 있는데 클린본이 없는 경우. 부스팅 자체는 되므로
                                     버튼을 잠그지 않고, 무엇이 없어서 무엇을 못 하는지만 적는다. */}
-                                {p.partnershipCode && !p.cleanFileUrl && !p.cancelled && (
+                                {!affiliate && p.partnershipCode && !p.cleanFileUrl && !p.cancelled && (
                                   <p className="text-[9px] text-slate-400 font-medium mt-1 leading-tight">
                                     게시물 그대로 부스팅은 가능합니다. 새 광고 소재로 편집하려면 인플루언서에게
                                     클린본을 요청해 주세요.
@@ -666,7 +726,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                       </div>
                     )}
 
-                    {c.budgetKrw > 0 && (
+                    {!affiliate && c.budgetKrw > 0 && (
                       <p className="text-[10px] text-slate-400 font-medium mt-3">
                         등록 예산 {formatKoreanWon(c.budgetKrw)}
                         {c.spend > 0 ? ` · 광고비 합계 ${formatKoreanWon(c.spend)}` : ' · 광고비는 담당자가 조건을 확정하면 채워집니다'}

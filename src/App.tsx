@@ -101,10 +101,11 @@ const clearAllLinkCacheLazy = () => {
 };
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
-type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs' | 'affiliate-store';
+type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs' | 'affiliate-store' | 'my-affiliate';
 
 /** 다시 뜬 페이지가 되살려도 되는 탭(utils/resumeTab). */
-const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'campaigns', 'my-collabs', 'affiliate-store'];
+// 캠페인 · 협업 캠페인은 메뉴에서 빠졌다 — 새로고침으로 그 화면에 되돌아가지 않게 목록에서 뺀다(예전 알림 링크로는 열린다).
+const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'affiliate-store', 'my-affiliate'];
 
 const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   dashboard: 'dashboard',
@@ -122,8 +123,9 @@ const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   timeline: 'business',
   campaigns: 'campaigns',
   collab: 'my-collabs',
-  // 어필리에이트 선정 · 협찬 발송 푸시가 여는 화면.
-  affiliate: 'affiliate-store',
+  // 어필리에이트 선정 · 협찬 발송 푸시가 여는 화면(내 신청 · 진행 중인 어필리에이트가 있는 MY 어필리에이트).
+  affiliate: 'my-affiliate',
+  store: 'affiliate-store',
 };
 
 /** 주소 첫 칸이 그대로 화면 이름이 되는 경로. */
@@ -285,6 +287,8 @@ const App: React.FC = () => {
   const initialPublicUserRef = useRef<string>(launchViewRef.current ? '' : initialPublicProfileUsername());
   const [view, setView] = useState<View>(() => launchViewRef.current ?? (initialPublicUserRef.current ? 'user-page' : 'home'));
   // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
+  /** 어필리에이트 ↔ MY 어필리에이트로 넘어갈 때 열 탭(예: 상품 상세의 "내 신청 보기"). */
+  const [affiliateTab, setAffiliateTab] = useState<'' | 'products' | 'brands' | 'my' | 'mine' | 'payouts'>('');
   const [subView, setSubViewState] = useState<SubView>(() => resumedTab('creator', 'picksSubView', SUBVIEWS) ?? 'dashboard');
   const subViewRef = useRef(subView);
   subViewRef.current = subView;
@@ -1583,8 +1587,7 @@ const App: React.FC = () => {
     later(700, () => import('./components/DmAutomation').catch(() => {}));
     later(1000, () => import('./components/CreatorInsights').catch(() => {}));
     later(1300, () => import('./components/BusinessCalendar').catch(() => {}));
-    later(1600, () => import('./components/UserCampaignBrowse').catch(() => {}));
-    later(1900, () => import('./components/CreatorCampaignCollabs').catch(() => {}));
+    later(1600, () => import('./components/affiliateStore/CreatorAffiliateStore').catch(() => {}));
     later(2500, () => import('./components/UserSettlement').catch(() => {}));
     later(2800, () => import('./components/BusinessDashboard').catch(() => {}));
     later(1200, () => {
@@ -2201,8 +2204,18 @@ const App: React.FC = () => {
       case 'my-collabs':
         subComponent = <CreatorCampaignCollabs userName={userName} initialCollabId={collabFocusId || undefined} />;
         break;
+      // 어필리에이트(브랜드들이 올린 상품 · 브랜드)와 MY 어필리에이트(진행 중인 어필리에이트 · 내 신청 · 정산).
+      // 캠페인 · 협업 캠페인 메뉴 자리를 이 둘이 대신한다.
       case 'affiliate-store':
-        subComponent = canSeeAffiliateStore(userName) ? <CreatorAffiliateStore userName={userName} /> : null;
+      case 'my-affiliate':
+        subComponent = canSeeAffiliateStore(userName) ? (
+          <CreatorAffiliateStore
+            userName={userName}
+            mode={subView === 'my-affiliate' ? 'my' : 'store'}
+            initialTab={affiliateTab || undefined}
+            onNavigate={(mode, tab) => { setAffiliateTab(tab); setSubView(mode === 'my' ? 'my-affiliate' : 'affiliate-store'); }}
+          />
+        ) : null;
         break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
@@ -2253,7 +2266,8 @@ const App: React.FC = () => {
         onNavigateMembership={() => setSubView('membership')}
         onNavigateCampaigns={() => setSubView('campaigns')}
         onNavigateMyCollabs={() => setSubView('my-collabs')}
-        onNavigateAffiliateStore={canSeeAffiliateStore(userName) ? () => setSubView('affiliate-store') : undefined}
+        onNavigateAffiliateStore={canSeeAffiliateStore(userName) ? () => { setAffiliateTab(''); setSubView('affiliate-store'); } : undefined}
+        onNavigateMyAffiliate={canSeeAffiliateStore(userName) ? () => { setAffiliateTab(''); setSubView('my-affiliate'); } : undefined}
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>

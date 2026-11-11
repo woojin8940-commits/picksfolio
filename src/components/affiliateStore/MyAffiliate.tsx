@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, Link2, Loader2 } from 'lucide-react';
+import { CalendarClock, Check, Copy, ExternalLink, Link2, Loader2, PackageCheck, Upload } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -9,6 +9,10 @@ import {
   COMMISSION_STATUS_STYLE,
   SALE_STATE_LABEL,
   SALE_STATE_STYLE,
+  UPLOAD_DAYS,
+  UPLOAD_TONE_STYLE,
+  shortDate,
+  uploadScheduleOf,
   type MyAffiliateItem,
   type StoreOrder,
 } from '../../services/affiliateStoreService';
@@ -45,6 +49,107 @@ async function copyText(text: string): Promise<boolean> {
     return ok;
   }
 }
+
+/**
+ * 진행 단계: 협찬 상품 수령 → 수령 후 10일 이내 콘텐츠 업로드 · 판매 시작 → 콘텐츠 링크 · 파트너십 코드 올리기.
+ * 올린 링크 · 코드는 브랜드의 진행관리 · 캠페인 이력에 보이고, 브랜드가 그 게시물을 2차 광고로 돌릴 수 있다.
+ */
+const ContentPanel: React.FC<{ item: MyAffiliateItem; onUpdated: (patch: Partial<MyAffiliateItem>) => void }> = ({ item, onUpdated }) => {
+  const [editing, setEditing] = useState(!item.contentUrl);
+  const [url, setUrl] = useState(item.contentUrl || '');
+  const [code, setCode] = useState(item.partnershipCode || '');
+  const [busy, setBusy] = useState<'' | 'receive' | 'save'>('');
+  const [error, setError] = useState('');
+  const schedule = uploadScheduleOf(item);
+  const awaitingReceipt = item.shippingStatus === 'shipped' && !item.deliveredAt;
+
+  const receive = async () => {
+    setBusy('receive'); setError('');
+    const res = await affiliateStoreService.confirmReceived(item.id);
+    setBusy('');
+    if (res.error || !res.request) { setError(res.error || '수령 확인을 하지 못했어요.'); return; }
+    onUpdated({ deliveredAt: res.request.deliveredAt, uploadDeadline: res.request.uploadDeadline });
+  };
+  const save = async () => {
+    if (!/^https:\/\/\S+\.\S+/i.test(url.trim())) { setError('콘텐츠 링크는 https:// 로 시작하는 주소로 입력해 주세요.'); return; }
+    setBusy('save'); setError('');
+    const res = await affiliateStoreService.submitContent(item.id, url.trim(), code.trim());
+    setBusy('');
+    if (res.error || !res.request) { setError(res.error || '저장하지 못했어요.'); return; }
+    onUpdated({
+      contentUrl: res.request.contentUrl, partnershipCode: res.request.partnershipCode, contentSubmittedAt: res.request.contentSubmittedAt,
+      deliveredAt: res.request.deliveredAt, uploadDeadline: res.request.uploadDeadline,
+    });
+    setEditing(false);
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        <CalendarClock className="w-3.5 h-3.5 text-slate-400" />
+        <span className="font-black text-slate-600">업로드 일정</span>
+        <span className={`px-1.5 py-0.5 rounded font-black text-[10px] ${UPLOAD_TONE_STYLE[schedule.tone]}`}>{schedule.label}</span>
+        {item.deliveredAt && <span className="text-slate-400 font-bold">수령 {shortDate(item.deliveredAt)} · 마감 {shortDate(item.uploadDeadline)}</span>}
+      </div>
+      {!item.contentUrl && (
+        <p className="text-[11px] text-amber-700 font-bold bg-amber-50 rounded-lg px-2.5 py-2">
+          상품 수령 후 {UPLOAD_DAYS}일 이내에 콘텐츠를 업로드하고 판매를 시작해 주세요. 업로드한 뒤 아래에 콘텐츠 링크와 파트너십 코드를 올려 주세요.
+        </p>
+      )}
+      {awaitingReceipt && (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-slate-500 min-w-0">
+            협찬 상품 발송됨{item.trackingCompany ? ` · ${item.trackingCompany} ${item.trackingNumber}` : ''}
+            {item.trackingUrl && <a href={item.trackingUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 font-bold underline">배송 조회</a>}
+          </p>
+          <button disabled={!!busy} onClick={receive} className="h-8 px-3 rounded-lg bg-slate-900 text-white text-[11px] font-black shrink-0 flex items-center gap-1 disabled:opacity-50">
+            {busy === 'receive' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PackageCheck className="w-3.5 h-3.5" />} 상품 수령 확인
+          </button>
+        </div>
+      )}
+      {editing ? (
+        <div className="space-y-1.5">
+          <input
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            placeholder="업로드한 콘텐츠 링크 (https://www.instagram.com/reel/...)"
+            className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs focus:outline-none focus:border-blue-600"
+            maxLength={500}
+          />
+          <input
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            placeholder="브랜디드 콘텐츠 파트너십 코드 (광고 코드)"
+            className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-mono focus:outline-none focus:border-blue-600"
+            maxLength={300}
+          />
+          <p className="text-[10px] text-slate-400">파트너십 코드를 올리면 브랜드가 이 콘텐츠를 2차 광고로 돌릴 수 있어요. 인스타그램 게시물 › 파트너십 광고 코드에서 복사해 주세요.</p>
+          <div className="flex justify-end gap-1.5">
+            {item.contentUrl && <button onClick={() => { setEditing(false); setUrl(item.contentUrl || ''); setCode(item.partnershipCode || ''); setError(''); }} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-[11px] font-bold text-slate-500">취소</button>}
+            <button disabled={!!busy} onClick={save} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-black flex items-center gap-1 disabled:opacity-50">
+              {busy === 'save' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {item.contentUrl ? '저장' : '업로드 링크 올리기'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1 text-[11px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-black text-slate-500 shrink-0">업로드 링크</span>
+            <a href={item.contentUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold truncate">{item.contentUrl}</a>
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-black text-slate-500 shrink-0">파트너십 코드</span>
+            {item.partnershipCode ? <span className="font-mono text-slate-800 truncate">{item.partnershipCode}</span> : <span className="text-amber-600 font-bold">미입력</span>}
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => setEditing(true)} className="text-[11px] font-bold text-slate-400 hover:text-slate-700">수정</button>
+          </div>
+        </div>
+      )}
+      {error && <p className="text-[11px] font-bold text-red-500">{error}</p>}
+    </div>
+  );
+};
 
 const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const [items, setItems] = useState<MyAffiliateItem[]>([]);
@@ -198,6 +303,11 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                   </>
                 )}
               </div>
+
+              <ContentPanel
+                item={i}
+                onUpdated={patch => setItems(prev => prev.map(x => (x.id === i.id ? { ...x, ...patch } : x)))}
+              />
 
               <div className="grid grid-cols-4 gap-2 mt-3 text-center">
                 {[

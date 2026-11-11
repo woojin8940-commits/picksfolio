@@ -1,6 +1,8 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { dateOnly, saleStateOf } from "./_shared/affiliate-sale-period.mts";
+import { SALE_STATUSES } from "./_shared/affiliate-store-orders.mts";
 
 /**
  * 비즈니스 계정의 캠페인 이력 — 지난 캠페인에서 올라간 게시물의 성과.
@@ -44,6 +46,10 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  * 실제로 나가는 돈이 실제보다 적게 보인다.
  *
  *   GET /api/business/campaign-history/:username
+ *   GET /api/business/campaign-history/:username?source=affiliate
+ *       어필리에이트 이력 — 상품 하나가 캠페인 한 건, 선정된 인플루언서 한 명이 게시물 한 건이다.
+ *       게시물 주소는 인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크, 코드는 파트너십 코드다.
+ *       광고비 대신 그 인플루언서의 전용 링크 판매액(취소 · 환불 제외)을 함께 보낸다.
  */
 
 const norm = (raw: unknown) => String(raw ?? "").trim().toLowerCase();
@@ -118,6 +124,15 @@ export default async (req: Request, context: Context) => {
   if (!auth.ok) return auth.response;
 
   const db = getDatabase();
+
+  if (new URL(req.url).searchParams.get("source") === "affiliate") {
+    try {
+      return Response.json(await affiliateHistory(db, username));
+    } catch (err: any) {
+      console.error("[business-campaign-history] 어필리에이트 이력 조회 실패:", err);
+      return Response.json({ error: "어필리에이트 이력을 불러오지 못했습니다." }, { status: 500 });
+    }
+  }
 
   try {
     // 삭제한 캠페인도 읽는다(deleted_at 을 조건으로 걸지 않는다).
@@ -345,6 +360,163 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "캠페인 이력을 불러오지 못했습니다." }, { status: 500 });
   }
 };
+
+/**
+ * 어필리에이트 이력. 선정된 인플루언서가 한 명 이상인 상품(삭제한 상품 포함 · 기록이므로)과
+ * 그 인플루언서의 콘텐츠 링크 · 파트너십 코드 · 게시물 지표 · 판매액.
+ */
+async function affiliateHistory(db: any, username: string) {
+  const productRows = (await db.sql`
+    SELECT p.id, p.name, p.category, p.status, p.deleted_at, p.stock, p.image_urls,
+           p.sale_start_date, p.sale_end_date, p.created_at
+    FROM affiliate_store_products p
+    WHERE p.business_username = ${username}
+      AND EXISTS (SELECT 1 FROM affiliate_store_requests r WHERE r.product_id = p.id AND r.status = 'approved')
+    ORDER BY p.created_at DESC, p.id DESC
+  `) as any[];
+  if (!productRows.length) return { totals: emptyTotals(), campaigns: [], categories: [] };
+  const productIds = productRows.map((p) => String(p.id));
+
+  const [requestRows, salesRows] = await Promise.all([
+    db.sql`
+      SELECT id, product_id, influencer_username, channel_url, shipping_status, manager_status,
+             content_url, partnership_code, content_submitted_at, shipped_at, ship_delivered_at, created_at
+      FROM affiliate_store_requests
+      WHERE product_id = ANY(${productIds}) AND status = 'approved'
+      ORDER BY created_at ASC
+    ` as Promise<any[]>,
+    db.sql`
+      SELECT request_id, COUNT(*)::int AS orders,
+             COALESCE(SUM(GREATEST(0, total_amount - shipping_fee - refund_amount)), 0)::bigint AS sales
+      FROM affiliate_store_orders
+      WHERE business_username = ${username} AND product_id = ANY(${productIds})
+        AND status = ANY(${SALE_STATUSES}::text[]) AND commission_status IN ('pending', 'confirmed')
+      GROUP BY request_id
+    ` as Promise<any[]>,
+  ]);
+  const salesByRequest = new Map(salesRows.map((r) => [String(r.request_id), r]));
+
+  const creatorNames = Array.from(new Set(requestRows.map((r) => norm(r.influencer_username)).filter(Boolean)));
+  const channelRows = creatorNames.length
+    ? ((await db.sql`
+        SELECT username, instagram_handle, followers, avg_views, metrics_source,
+               connected, recent_reels, recent_feed, synced_at
+        FROM creator_channels
+        WHERE username = ANY(${creatorNames})
+      `) as any[])
+    : [];
+  const channelByUser = new Map<string, any>();
+  const mediaByUser = new Map<string, Record<string, PostMetric>>();
+  for (const row of channelRows) {
+    const key = norm(row.username);
+    channelByUser.set(key, row);
+    mediaByUser.set(key, mediaIndexOf(row));
+  }
+
+  const byProduct = new Map<string, any[]>();
+  for (const r of requestRows) {
+    const key = String(r.product_id);
+    if (!byProduct.has(key)) byProduct.set(key, []);
+    byProduct.get(key)!.push(r);
+  }
+
+  const totals: any = { ...emptyTotals(), sales: 0, orders: 0 };
+  const categories = new Set<string>();
+  const dateOf = (d: any) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+
+  const campaigns = productRows.map((p) => {
+    if (p.category) categories.add(String(p.category));
+    const list = byProduct.get(String(p.id)) || [];
+    let views = 0, likes = 0, comments = 0, shares = 0, sharesMatched = 0, matched = 0, uploaded = 0, sales = 0, orders = 0;
+    const posts = list.map((r) => {
+      const creator = norm(r.influencer_username);
+      const channel = channelByUser.get(creator);
+      const uploadUrl = String(r.content_url || "");
+      const code = shortcodeOf(uploadUrl);
+      const metric = code ? mediaByUser.get(creator)?.[code] : undefined;
+      const cancelled = r.shipping_status === "declined";
+      const st = salesByRequest.get(String(r.id));
+      const postSales = Number(st?.sales || 0);
+      const postOrders = Number(st?.orders || 0);
+      if (!cancelled) {
+        if (uploadUrl) uploaded++;
+        sales += postSales;
+        orders += postOrders;
+        if (metric) {
+          if (metric.from === "reels") { matched++; views += metric.views; }
+          likes += metric.likes;
+          comments += metric.comments;
+          if (metric.shares !== null) { shares += metric.shares; sharesMatched++; }
+        }
+      }
+      return {
+        collabId: String(r.id),
+        creatorUsername: creator,
+        instagramHandle: String(channel?.instagram_handle || ""),
+        status: String(r.shipping_status || r.manager_status || ""),
+        cancelled,
+        uploadUrl,
+        partnershipCode: String(r.partnership_code || "").trim(),
+        cleanFileUrl: "",
+        cleanFileName: "",
+        fee: 0,
+        sales: postSales,
+        orders: postOrders,
+        contentSubmittedAt: r.content_submitted_at || null,
+        followers: intOf(channel?.followers),
+        metricsSource: String(channel?.metrics_source || ""),
+        metrics: metric || null,
+        reason: metric ? "" : cancelled ? "cancelled" : !uploadUrl ? "not_uploaded" : !channel?.connected ? "not_linked" : "out_of_window",
+      };
+    });
+    const state = saleStateOf({
+      status: p.status, deleted_at: p.deleted_at, stock: p.stock,
+      sale_start_date: p.sale_start_date, sale_end_date: p.sale_end_date,
+    });
+    const collabs = list.filter((r) => r.shipping_status !== "declined").length;
+    totals.campaigns++;
+    totals.collabs += collabs;
+    totals.uploaded += uploaded;
+    totals.matched += matched;
+    totals.views += views;
+    totals.reactions += likes + comments;
+    totals.comments += comments;
+    totals.shares += shares;
+    totals.sharesMatched += sharesMatched;
+    totals.sales += sales;
+    totals.orders += orders;
+    return {
+      id: String(p.id),
+      title: String(p.name || ""),
+      category: String(p.category || ""),
+      type: "affiliate",
+      status: state === "on_sale" || state === "sold_out" || state === "scheduled" ? "active" : "closed",
+      removed: Boolean(p.deleted_at),
+      rewardMode: "affiliate",
+      thumbnailUrl: Array.isArray(p.image_urls) ? String(p.image_urls[0] || "") : "",
+      startDate: dateOnly(p.sale_start_date) || dateOf(p.created_at),
+      endDate: dateOnly(p.sale_end_date),
+      budgetKrw: 0,
+      createdAt: p.created_at || null,
+      collabs,
+      uploaded,
+      matched,
+      views,
+      likes,
+      comments,
+      shares,
+      sharesMatched,
+      spend: 0,
+      measuredSpend: 0,
+      cpv: 0,
+      sales,
+      orders,
+      posts,
+    };
+  });
+
+  return { totals, campaigns, categories: Array.from(categories).sort() };
+}
 
 function emptyTotals() {
   return {
