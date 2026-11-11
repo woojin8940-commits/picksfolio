@@ -562,8 +562,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                         {/* 협업 메뉴에서 내린 캠페인. 이력은 기록이라 남겨 두지만,
                             "협업 메뉴에 없는데 여기 있다"가 화면에서 설명되어야 한다. */}
                         {c.removed && (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10px] font-black">
-                            목록에서 삭제
+                          <span className="px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-400 text-[10px] font-bold">
+                            삭제된 상품
                           </span>
                         )}
                       </div>
