@@ -746,7 +746,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
               </p>
             </div>
           </div>
-          <div className="flex gap-4 border-b border-slate-200 overflow-x-auto">
+          <div className="flex gap-7 md:gap-10 border-b border-slate-200 overflow-x-auto">
             {([
               { key: 'applicants', label: `지원 · 선정 인플루언서 ${(selectedProduct.requestCounts?.pending || 0) + (selectedProduct.requestCounts?.approved || 0) + (selectedProduct.requestCounts?.rejected || 0)}`, badge: selectedProduct.requestCounts?.unseen || 0 },
               { key: 'progress', label: '진행 단계', badge: selectedProduct.requestCounts?.toShip || 0 },

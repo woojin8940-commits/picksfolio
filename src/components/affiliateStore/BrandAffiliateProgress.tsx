@@ -225,9 +225,9 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
       </p>
 
       <div className="-mx-1 overflow-x-auto pb-2">
-        <div className="flex gap-3 items-start px-1 min-w-max">
+        <div className="flex gap-3 items-start px-1">
           {board.map(({ column, cards, doneCards, reviewCount }) => (
-            <section key={column.key} className="w-[268px] flex-shrink-0 rounded-2xl border border-slate-100 bg-slate-50/80">
+            <section key={column.key} className="flex-1 basis-0 min-w-[240px] rounded-2xl border border-slate-100 bg-slate-50/80">
               <div className="px-3 py-2.5 flex items-center gap-2 border-b border-slate-100">
                 <span className="text-slate-400 flex-shrink-0">{column.icon}</span>
                 <p className="text-sm font-black text-slate-900 flex-shrink-0">{column.title}</p>
