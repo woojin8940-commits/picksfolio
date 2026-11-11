@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, Link2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Copy, ExternalLink, Link2, Loader2 } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -13,7 +13,7 @@ import {
   type StoreOrder,
   type StoreRequest,
 } from '../../services/affiliateStoreService';
-import AffiliateStepBoard from './AffiliateStepBoard';
+import AffiliateStepBoard, { affiliateSteps } from './AffiliateStepBoard';
 import SelectionShippingSheet from './SelectionShippingSheet';
 
 /**
@@ -22,8 +22,9 @@ import SelectionShippingSheet from './SelectionShippingSheet';
  * 링크(/shop/<코드>)를 개인페이지 · 콘텐츠에 올리면, 그 링크로 들어온 고객이 픽스폴리오에서
  * 결제한 주문이 이 인플루언서 판매로 잡힌다. 방문 · 주문 · 판매액 · 예상 수수료를 상품별로 본다.
  *
- * 상품마다 진행 단계(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드)가 캠페인 진행사항과 같은 모양으로 붙는다.
- * 선정됐지만 아직 협찬 상품이 나가기 전인 협업(배송정보 입력 · 발송 대기)도 맨 위에 함께 보여, 여기서 배송정보를 입력한다.
+ * 진행 상품은 어필리에이트 상품 목록처럼 작은 카드로 늘어놓고(지금 단계 배지), 카드를 누르면 그 상품의
+ * 진행 단계(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드)와 전용 링크 · 판매 수치가 안에서 열린다.
+ * 선정됐지만 아직 협찬 상품이 나가기 전인 협업(배송정보 입력 · 발송 대기)도 카드로 함께 보여, 상세에서 배송정보를 입력한다.
  */
 
 const ORDER_STYLE: Record<string, string> = {
@@ -36,6 +37,18 @@ const ORDER_STYLE: Record<string, string> = {
   cancelled: 'bg-slate-100 text-slate-400',
   pending_payment: 'bg-slate-100 text-slate-400',
 };
+
+/** 카드 · 상세에 붙는 지금 단계 표시. */
+function stageOf(i: MyAffiliateItem, waiting: boolean): { label: string; style: string; action: boolean } {
+  if (i.shippingStatus === 'declined') return { label: '반려', style: 'bg-slate-100 text-slate-500', action: false };
+  const steps = affiliateSteps(i, 'influencer');
+  const action = steps.some(s => s.action);
+  const cur = steps.find(s => !s.done);
+  if (!cur) return { label: '진행 완료', style: 'bg-emerald-500 text-white', action };
+  if (waiting || cur.key === 'shipping') return { label: '제품 배송', style: 'bg-blue-600 text-white', action };
+  if (cur.key === 'schedule') return { label: '업로드 일정', style: 'bg-amber-400 text-slate-900', action };
+  return { label: '링크 · 코드', style: 'bg-slate-900 text-white', action };
+}
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -68,6 +81,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const [ordersCursor, setOrdersCursor] = useState<{ cursorAt: string; cursorId: string } | null>(null);
   const [copied, setCopied] = useState('');
   const [view, setView] = useState<'products' | 'orders'>('products');
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await affiliateStoreService.myAffiliate();
@@ -144,30 +158,12 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     />
   );
 
-  /** 선정됐지만 협찬 상품이 나가기 전 — 진행 단계 1(제품 배송)에서 배송정보를 입력한다. */
-  const preparingList = preparing.length > 0 && (
-    <div className="space-y-2.5 mb-5">
-      <p className="text-sm font-black text-slate-900 px-0.5">시작 대기 중인 어필리에이트 {preparing.length}</p>
-      {preparing.map(i => (
-        <div key={i.id} className="bg-white rounded-2xl border border-blue-100 shadow-sm p-4">
-          <div className="flex gap-3 mb-3">
-            {i.productImage && <img src={i.productImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0" />}
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
-              <p className="text-sm font-black text-slate-900 truncate">{i.productName}</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b> · 협찬 상품이 발송되면 전용 판매 링크가 열려요
-              </p>
-            </div>
-          </div>
-          <AffiliateStepBoard role="influencer" request={i} {...stepHandlers(i)} />
-        </div>
-      ))}
-    </div>
-  );
+  const all: { item: MyAffiliateItem; waiting: boolean }[] = [
+    ...preparing.map(item => ({ item, waiting: true })),
+    ...items.map(item => ({ item, waiting: false })),
+  ];
 
-  if (items.length === 0) {
-    if (preparing.length > 0) return <>{shippingSheet}{preparingList}</>;
+  if (all.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
         <Link2 className="w-8 h-8 text-slate-300 mx-auto mb-3" />
@@ -178,79 +174,51 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     );
   }
 
-  return (
-    <>
-      {shippingSheet}
-      {preparingList}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
-        {[
-          { label: '링크 방문', value: `${totals.clicks.toLocaleString('ko-KR')}회` },
-          { label: '주문', value: `${totals.orders.toLocaleString('ko-KR')}건` },
-          { label: '판매액', value: won(totals.sales) },
-          { label: '수수료 (예정 + 확정)', value: won(totals.commission), accent: true },
-        ].map(s => (
-          <div key={s.label} className={`rounded-2xl border p-4 ${s.accent ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-100 shadow-sm'}`}>
-            <p className={`text-[10px] font-black ${s.accent ? 'text-blue-100' : 'text-slate-400'}`}>{s.label}</p>
-            <p className="text-lg md:text-2xl font-black mt-0.5">{s.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* 정산 상태(표시만 · 지급은 별도). 예정 = 구매확정 전, 확정 = 구매확정, 취소 = 취소 · 환불된 판매 */}
-      <div className="grid grid-cols-3 gap-2 mb-5">
-        {[
-          ['pending', '정산 예정', totals.pending],
-          ['confirmed', '정산 확정', totals.confirmed],
-          ['cancelled', '정산 취소', totals.cancelled],
-        ].map(([k, label, v]) => (
-          <div key={k as string} className={`rounded-xl p-3 ${COMMISSION_STATUS_STYLE[k as string]}`}>
-            <p className="text-[10px] font-black opacity-80">{label as string}</p>
-            <p className="text-sm md:text-base font-black">{won(v as number)}</p>
-          </div>
-        ))}
-      </div>
-      <p className="text-[11px] text-slate-400 -mt-3 mb-5">구매확정(배송 완료 7일 뒤 자동)되면 예정 → 확정으로 바뀌어요. 지급 일정은 별도로 안내됩니다.</p>
-
-      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-5 text-xs text-blue-700 leading-relaxed">
-        <b>전용 링크를 개인페이지에 올려 주세요.</b> 링크 관리 메뉴에서 새 링크로 붙여 넣으면 돼요.
-        이 링크로 들어온 고객이 결제하면 내 판매로 잡히고, 판매가 기준 수수료가 쌓입니다.
-      </div>
-
-      <div className="flex gap-4 border-b border-slate-200 mb-4">
-        {([['products', `진행 상품 ${items.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
-        ))}
-      </div>
-
-      {view === 'products' ? (
-        <div className="space-y-2.5">
-          {items.map(i => (
-            <div key={i.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-              <div className="flex gap-3">
-                {i.productImage && <img src={i.productImage} alt="" className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
-                    {!i.live && (
-                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${i.productState ? SALE_STATE_STYLE[i.productState] : 'bg-slate-100 text-slate-500'}`}>
-                        {i.productState && i.productState !== 'on_sale' ? SALE_STATE_LABEL[i.productState] : '판매 중지 · 품절'}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm font-black text-slate-900 truncate">{i.productName}</p>
-                  {!i.live && (i.productState === 'paused' || i.productState === 'draft' || i.productState === 'deleted' || i.productState === 'ended') && (
-                    <p className="text-[11px] text-red-500 font-bold mt-0.5">
-                      {i.productState === 'ended' ? '판매기간이 끝나 지금은 이 링크로 구매할 수 없어요.' : '브랜드가 판매를 중지한 상품이에요. 지금은 이 링크로 구매할 수 없어요.'}
-                    </p>
-                  )}
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b> (개당 {won(Math.floor(i.salePrice * i.commissionRate / 100))})
-                  </p>
-                </div>
+  // ── 상품 하나의 진행 상황(브랜드 진행관리에서 카드를 눌러 여는 화면과 같은 방식) ──
+  const opened = openId ? all.find(x => x.item.id === openId) : null;
+  if (opened) {
+    const i = opened.item;
+    const stage = stageOf(i, opened.waiting);
+    return (
+      <div className="space-y-3">
+        {shippingSheet}
+        <button
+          onClick={() => setOpenId(null)}
+          className="inline-flex items-center gap-1.5 text-xs font-black text-slate-500 hover:text-slate-900 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> MY 어필리에이트로
+        </button>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:p-5 space-y-3">
+          <div className="flex gap-3">
+            {i.productImage && <img src={i.productImage} alt="" className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" />}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
+                {!opened.waiting && !i.live && (
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${i.productState ? SALE_STATE_STYLE[i.productState] : 'bg-slate-100 text-slate-500'}`}>
+                    {i.productState && i.productState !== 'on_sale' ? SALE_STATE_LABEL[i.productState] : '판매 중지 · 품절'}
+                  </span>
+                )}
               </div>
+              <p className="text-sm font-black text-slate-900 truncate">{i.productName}</p>
+              {!opened.waiting && !i.live && (i.productState === 'paused' || i.productState === 'draft' || i.productState === 'deleted' || i.productState === 'ended') && (
+                <p className="text-[11px] text-red-500 font-bold mt-0.5">
+                  {i.productState === 'ended' ? '판매기간이 끝나 지금은 이 링크로 구매할 수 없어요.' : '브랜드가 판매를 중지한 상품이에요. 지금은 이 링크로 구매할 수 없어요.'}
+                </p>
+              )}
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b> (개당 {won(Math.floor(i.salePrice * i.commissionRate / 100))})
+              </p>
+            </div>
+            <span className={`self-start px-2.5 py-1 rounded-lg text-[11px] font-black shrink-0 ${stage.style}`}>{stage.label}</span>
+          </div>
 
+          {opened.waiting ? (
+            <p className="text-[11px] font-bold text-blue-600 bg-blue-50 rounded-xl px-3 py-2">협찬 상품이 발송되면 전용 판매 링크가 열려요.</p>
+          ) : (
+            <>
               {/* 인플루언서 전용 링크 */}
-              <div className="mt-3 flex items-center gap-2 bg-slate-50 rounded-xl p-2 pl-3">
+              <div className="flex items-center gap-2 bg-white border border-slate-100 rounded-xl p-2 pl-3">
                 <Link2 className="w-4 h-4 text-slate-400 shrink-0" />
                 <p className="flex-1 min-w-0 text-xs font-mono text-slate-700 truncate">{i.linkCode ? shopLink(i.linkCode) : '링크 준비 중'}</p>
                 {i.linkCode && (
@@ -264,13 +232,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                   </>
                 )}
               </div>
-
-              {/* 진행 단계 — 캠페인 진행사항과 같은 모양(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드). */}
-              <div className="mt-3">
-                <AffiliateStepBoard role="influencer" request={i} {...stepHandlers(i)} />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2 mt-3 text-center">
+              <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-xl py-2.5">
                 {[
                   ['방문', `${i.clickCount.toLocaleString('ko-KR')}`],
                   ['주문', `${i.stats.orders}`],
@@ -283,9 +245,97 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
                   </div>
                 ))}
               </div>
-            </div>
-          ))}
+            </>
+          )}
+
+          {/* 진행 단계 — 캠페인 진행사항과 같은 모양(제품 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드). */}
+          <AffiliateStepBoard key={i.id} role="influencer" request={i} {...stepHandlers(i)} />
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {shippingSheet}
+      {items.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
+            {[
+              { label: '링크 방문', value: `${totals.clicks.toLocaleString('ko-KR')}회` },
+              { label: '주문', value: `${totals.orders.toLocaleString('ko-KR')}건` },
+              { label: '판매액', value: won(totals.sales) },
+              { label: '수수료 (예정 + 확정)', value: won(totals.commission), accent: true },
+            ].map(s => (
+              <div key={s.label} className={`rounded-2xl border p-4 ${s.accent ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-100 shadow-sm'}`}>
+                <p className={`text-[10px] font-black ${s.accent ? 'text-blue-100' : 'text-slate-400'}`}>{s.label}</p>
+                <p className="text-lg md:text-2xl font-black mt-0.5">{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* 정산 상태(표시만 · 지급은 별도). 예정 = 구매확정 전, 확정 = 구매확정, 취소 = 취소 · 환불된 판매 */}
+          <div className="grid grid-cols-3 gap-2 mb-5">
+            {[
+              ['pending', '정산 예정', totals.pending],
+              ['confirmed', '정산 확정', totals.confirmed],
+              ['cancelled', '정산 취소', totals.cancelled],
+            ].map(([k, label, v]) => (
+              <div key={k as string} className={`rounded-xl p-3 ${COMMISSION_STATUS_STYLE[k as string]}`}>
+                <p className="text-[10px] font-black opacity-80">{label as string}</p>
+                <p className="text-sm md:text-base font-black">{won(v as number)}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 -mt-3 mb-5">구매확정(배송 완료 7일 뒤 자동)되면 예정 → 확정으로 바뀌어요. 지급 일정은 별도로 안내됩니다.</p>
+
+          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-5 text-xs text-blue-700 leading-relaxed">
+            <b>전용 링크를 개인페이지에 올려 주세요.</b> 링크 관리 메뉴에서 새 링크로 붙여 넣으면 돼요.
+            이 링크로 들어온 고객이 결제하면 내 판매로 잡히고, 판매가 기준 수수료가 쌓입니다.
+          </div>
+        </>
+      )}
+
+      <div className="flex gap-4 border-b border-slate-200 mb-4">
+        {([['products', `진행 상품 ${all.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
+          <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
+        ))}
+      </div>
+
+      {view === 'products' ? (
+        <>
+          <p className="text-[11px] text-slate-400 mb-3">상품을 누르면 진행 단계와 전용 링크를 볼 수 있어요.</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
+            {all.map(({ item: i, waiting }) => {
+              const stage = stageOf(i, waiting);
+              return (
+                <button
+                  key={i.id}
+                  onClick={() => setOpenId(i.id)}
+                  className="text-left bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:-translate-y-0.5 hover:shadow-md transition-all"
+                >
+                  <div className="relative aspect-square bg-slate-100">
+                    {i.productImage && <img src={i.productImage} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                    <span className={`absolute top-2 left-2 text-[10px] font-black px-2 py-1 rounded-lg ${stage.style}`}>{stage.label}</span>
+                    {stage.action && <span className="absolute top-2 right-2 text-[10px] font-black px-2 py-1 rounded-lg bg-red-500 text-white">내 차례</span>}
+                  </div>
+                  <div className="p-3">
+                    <p className="text-[10px] font-bold text-slate-400 truncate">{i.brandName}</p>
+                    <p className="text-xs md:text-sm font-black text-slate-900 line-clamp-2 min-h-[2.5em]">{i.productName}</p>
+                    <p className="text-[11px] text-slate-500 mt-1 truncate">
+                      {won(i.salePrice)} · 수수료 <b className="text-blue-600">{i.commissionRate}%</b>
+                    </p>
+                    {!waiting && (
+                      <p className="text-[10px] font-bold text-slate-400 mt-0.5 truncate">
+                        주문 {i.stats.orders}건 · <span className="text-blue-600">{won(i.stats.commission)}</span>
+                      </p>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </>
       ) : ordersLoading && orders.length === 0 ? (
         <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
       ) : ordersError && orders.length === 0 ? (
