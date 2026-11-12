@@ -19,6 +19,8 @@ interface Props {
   data: any | null;
   loading?: boolean;
   onNavigate?: (tab: string) => void;
+  /** 가입 계정 칸만 보인다(캠페인 · 브랜드 매칭 칸은 서비스가 내려가 숨긴다). */
+  accountsOnly?: boolean;
 }
 
 /** 팔로워처럼 자릿수가 큰 수는 만/억으로 줄여 읽는다. */
@@ -95,7 +97,7 @@ const DIR_STATUS: Record<string, { label: string; cls: string }> = {
   archived: { label: '보류', cls: 'bg-slate-100 text-slate-500' },
 };
 
-const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate }) => {
+const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate, accountsOnly = false }) => {
   if (loading && !data) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
@@ -144,6 +146,7 @@ const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate }) =
         </div>
       </Section>
 
+      {!accountsOnly && (<>
       {/* 2. 브랜드 매칭 지원 인플루언서 */}
       <Section
         title="브랜드 매칭 지원 인플루언서"
@@ -289,6 +292,7 @@ const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate }) =
           </p>
         </div>
       </Section>
+      </>)}
     </div>
   );
 };
