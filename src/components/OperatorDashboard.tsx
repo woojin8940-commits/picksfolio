@@ -28,23 +28,23 @@ import AdminAffiliateSelections from './admin/AdminAffiliateSelections';
 import AdminCreatorApplications from './admin/AdminCreatorApplications';
 import AdminSalesLinks from './admin/AdminSalesLinks';
 import AdminCommerceCampaigns from './admin/AdminCommerceCampaigns';
+import AdminAffiliateTodo from './admin/AdminAffiliateTodo';
 import { isTestProposal } from '../utils/testData';
 
 /**
- * 운영자 대시보드 — 탭을 일하는 순서대로 묶는다.
+ * 운영자 대시보드 — 지금 돌아가는 서비스(어필리에이트) 중심으로 탭을 묶는다.
  *
- * 탭이 13개까지 늘어나 두 줄로 접히면서, 무엇이 매일 보는 화면이고 무엇이 어쩌다
- * 한 번 여는 화면인지 구분이 사라졌다. 그래서 네 묶음으로 나눴다.
+ *   홈          — 지금 처리할 일(어필리에이트 단계별 대기 건수) · 가입 현황 · 1:1 제안
+ *   어필리에이트 — 크리에이터 지원 → 입점 신청 → 협업 조율 → 취소·반품 → 정산 (일이 흐르는 순서)
+ *   모집        — 인플루언서 DB, 광고로 들어온 인플루언서 · 브랜드 신청자
+ *   운영        — 회원 관리, 담당자 계정, DM 발송
  *
- *   현황     — 전체 현황 (하루를 여기서 시작한다)
- *   캠페인   — 승인 → 리스트업 → 캠페인 관리 (돈이 흐르는 순서 그대로)
- *   인플루언서 — 인플루언서 DB, 브랜드 매칭 지원자, 인플루언서 지원자(광고 모집)
- *   운영     — 회원 관리, 담당자 계정, 정산·매출
- *
- * 준비중이거나 다른 탭과 겹치던 화면(라이브 운영·라이브 승인·제안 워크플로·
- * 인플루언서별·일정 캘린더)은 없앴다. 1:1 다이렉트 제안은 전체 현황 아래의 목록에서
- * 그대로 볼 수 있으므로 별도 탭이 필요하지 않다.
+ * 캠페인(승인 · 배정 · 관리 · 커머스)과 캠페인 정산 · 브랜드 매칭 · 영업 링크는 인플루언서 ·
+ * 브랜드 화면에서 내려간 서비스라 메뉴에서 숨겼다. 화면 코드는 남겨 두었으므로
+ * CAMPAIGN_MENUS_HIDDEN 을 false 로 바꾸면 그대로 다시 보인다.
  */
+const CAMPAIGN_MENUS_HIDDEN = true;
+const HIDDEN_TABS = new Set<string>(['campaigns', 'listup', 'collabs', 'commerce', 'directory', 'saleslinks', 'settlement']);
 
 type OperatorTab =
   | 'overview'
@@ -114,6 +114,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<OperatorTab>('overview');
+  // 새로고침을 누를 때마다 바뀌어 홈의 "지금 처리할 일" 건수를 다시 센다.
+  const [refreshKey, setRefreshKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // Operators work against real accounts by default; seed/QA data is hidden
@@ -223,7 +225,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   // 그 뒤로는 하루 한 번 점심(한국 시간 12시)에 다시 센다. 브랜드 선정은 하루에 몇 건이라
   // 자주 물어볼 이유가 없다. 탭을 열면 그 화면이 직접 세어 배지를 맞춘다.
   useEffect(() => {
-    if (!adminToken) return;
+    if (!adminToken || CAMPAIGN_MENUS_HIDDEN) return;
     let alive = true;
     let timer = 0;
     const load = async () => {
@@ -338,8 +340,19 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   // 급한 것이 무엇인지 다시 알 수 없게 된다.
   const pendingCampaigns = overview?.campaigns?.pendingApproval || 0;
   const pendingDirectory = overview?.directory?.influencer?.pending || 0;
-  const navGroups: { group: string; tabs: { key: OperatorTab; label: string; badge?: number }[] }[] = [
-    { group: '현황', tabs: [{ key: 'overview', label: '전체 현황' }] },
+  const allNavGroups: { group: string; tabs: { key: OperatorTab; label: string; badge?: number }[] }[] = [
+    { group: '홈', tabs: [{ key: 'overview', label: '홈 · 할 일' }] },
+    {
+      // 일이 흐르는 순서: 인플루언서 · 브랜드 승인 → 선정되면 담당자 조율 → 주문 사고 처리 → 지급.
+      group: '어필리에이트',
+      tabs: [
+        { key: 'creator-applications', label: '1. 크리에이터 지원' },
+        { key: 'affiliate-store', label: '2. 브랜드 입점 신청' },
+        { key: 'affiliate-selections', label: '3. 협업 조율', badge: newAffiliateSelections },
+        { key: 'affiliate-issues', label: '4. 취소·반품' },
+        { key: 'affiliate-payouts', label: '5. 정산 지급' },
+      ],
+    },
     {
       group: '캠페인',
       tabs: [
@@ -350,27 +363,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       ],
     },
     {
-      group: '인플루언서',
+      group: '모집',
       tabs: [
         { key: 'influencerdb', label: '인플루언서 DB' },
-        { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
         { key: 'applicants', label: '인플루언서 지원자' },
-        // 새로 가입한 인플루언서의 크리에이터 지원. 승인하면 자동 디엠 · 어필리에이트가 열린다.
-        { key: 'creator-applications', label: '크리에이터 지원' },
-        { key: 'saleslinks', label: '브랜드 영업 링크' },
-      ],
-    },
-    {
-      group: '브랜드',
-      tabs: [
         { key: 'brandleads', label: '브랜드 신청자' },
-        // 어필리에이트(ZVZO 방식) 입점 신청. 승인하면 그 브랜드의 상품 등록이 열린다.
-        { key: 'affiliate-store', label: '어필리에이트 입점 신청' },
-        // 브랜드가 선정한 판매 신청 — 담당자가 양쪽에 연락해 진행한다.
-        { key: 'affiliate-selections', label: '어필리에이트 협업 진행', badge: newAffiliateSelections },
-        { key: 'affiliate-issues', label: '미처리 취소·반품' },
-        // 어필리에이트 지급 신청 · 지급 완료 · 반려 · 이체 / 원천징수 파일.
-        { key: 'affiliate-payouts', label: '어필리에이트 정산' },
+        { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
+        { key: 'saleslinks', label: '브랜드 영업 링크' },
       ],
     },
     {
@@ -383,6 +382,9 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       ],
     },
   ];
+  const navGroups = allNavGroups
+    .map((g) => ({ ...g, tabs: g.tabs.filter((t) => !CAMPAIGN_MENUS_HIDDEN || !HIDDEN_TABS.has(t.key)) }))
+    .filter((g) => g.tabs.length > 0);
 
   if (loading) {
     return (
@@ -491,7 +493,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               )}
             </div>
             <button
-              onClick={fetchData}
+              onClick={() => { setRefreshKey((k) => k + 1); fetchData(); }}
               className="px-3 py-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-all"
             >
               새로고침
@@ -543,14 +545,20 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {activeTab === 'dmqueue' && adminToken && <AdminDmQueue token={adminToken} />}
         {activeTab === 'overview' && (
           <div className="space-y-6">
+            {/* 지금 처리할 일 — 어필리에이트 단계별 대기 건수. 누르면 그 탭으로 간다. */}
+            {adminToken && (
+              <AdminAffiliateTodo token={adminToken} refreshKey={refreshKey} onNavigate={(tab) => setActiveTab(tab)} />
+            )}
+
             <AdminOperatorOverview
               data={overview}
               loading={overviewLoading}
               onNavigate={(tab) => setActiveTab(tab as OperatorTab)}
+              accountsOnly={CAMPAIGN_MENUS_HIDDEN}
             />
 
-            {/* 순수익 — 멤버십 / 캠페인 마진 / AI */}
-            {adminToken && (
+            {/* 순수익 — 멤버십 / 캠페인 마진 / AI (캠페인이 내려간 동안은 숨긴다) */}
+            {adminToken && !CAMPAIGN_MENUS_HIDDEN && (
               <AdminRevenueCards token={adminToken} settlementSummary={settlementSummary} overview={overview} />
             )}
 
@@ -563,7 +571,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                 <div>
                   <h3 className="text-sm font-black text-slate-900">1:1 다이렉트 제안</h3>
                   <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-                    광고주가 특정 인플루언서에게 직접 보낸 제안입니다. 공개 모집 캠페인은 캠페인 탭에서 처리합니다.
+                    광고주가 특정 인플루언서에게 직접 보낸 제안입니다.
                   </p>
                 </div>
                 {hiddenTestCount > 0 && (

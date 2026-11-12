@@ -53,7 +53,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateDmAutomation,
   onNavigateInsights,
   onNavigateBusiness,
-  onNavigateCalendar,
   onNavigateOpenSchedule,
   onNavigateAffiliateStore,
   onNavigateMyAffiliate,
@@ -262,12 +261,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClick={onNavigateBusiness}
           />
           <NavItem
-            icon="📅"
-            label={t('nav.calendar', '협업 현황', 'Calendar')}
-            active={currentSubView === 'calendar'}
-            onClick={onNavigateCalendar}
-          />
-          <NavItem
             icon="🗓️"
             label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')}
             active={currentSubView === 'open-schedule'}
@@ -324,7 +317,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <MobileNavItem icon="🤝" label={t('nav.barMyAffiliate', 'MY어필', 'My Affiliate')} active={currentSubView === 'my-affiliate'} onClick={() => { onNavigateMyAffiliate(); setIsMobileMenuOpen(false); }} />
             )}
             <MobileNavItem icon="📨" label={t('nav.barInbox', '수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
-            <MobileNavItem icon="📅" label={t('nav.barCalendar', '협업현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="🗓️" label={t('nav.barSchedule', '오픈일정', 'Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
           </div>
           {/* 오른쪽 끝을 흐리게 덮어 "여기서 끝이 아니다" 를 보여 준다. 잘린 칸이
@@ -371,7 +363,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <NavItem icon="🤝" label={t('nav.myAffiliate', 'MY 어필리에이트', 'My Affiliate')} active={currentSubView === 'my-affiliate'} onClick={() => { onNavigateMyAffiliate(); setIsMobileMenuOpen(false); }} />
               )}
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
@@ -495,7 +486,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {onNavigateMyAffiliate && <QuickCard icon="🤝" label={t('nav.myAffiliate', 'MY 어필리에이트', 'My Affiliate')} onClick={onNavigateMyAffiliate} />}
               <QuickCard icon="🔗" label={t('nav.links', '링크 관리', 'Links')} onClick={onNavigateLinks} />
               <QuickCard icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} onClick={onNavigateBusiness} />
-              <QuickCard icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} onClick={onNavigateCalendar} />
             </div>
 
             {/* Data Overview */}

@@ -45,7 +45,7 @@ import { sendPushToUser } from "./_shared/push.mts";
  *   인플루언서 submit_shipping   배송정보 입력 → 'info_submitted', 협업 진행(링크는 아직 닫힘)
  *   인플루언서 decline_selection 반려 → 'declined', 협업 진행 안 함(링크 열리지 않음)
  *   브랜드     ship_selection    송장번호 입력 → 'shipped', 전용 판매 링크 열림(manager_status 'done')
- * 배송정보가 들어온 협업은 운영 콘솔(scope=selections)에서 담당자가 보고 중간에서 조율한다.
+ * 브랜드가 선정하는 즉시 운영 콘솔(scope=selections)에 올라가고, 담당자가 그때부터 브랜드 · 인플루언서 사이에서 조율한다.
  * 예전 흐름으로 이미 링크가 열린 선정(shipping_status '')은 그대로 둔다.
  * 직거래 금지 동의: 브랜드 입점 신청 · 크리에이터 지원 때 체크한다(이전에 승인된 계정은 처음 선정 · 신청할 때).
  * 인플루언서 쪽 기능(상품 · 브랜드 · 신청 · MY)은 크리에이터 승인을 받은 계정만 쓴다.
