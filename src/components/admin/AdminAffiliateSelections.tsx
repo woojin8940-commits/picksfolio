@@ -82,6 +82,7 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
   const [filter, setFilter] = useState<Filter>('active');
   const [busy, setBusy] = useState('');
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +111,7 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
     (Object.keys(FILTER_LABEL) as Filter[]).map(f => [f, rows.filter(r => matches(r, f)).length]),
   ) as Record<Filter, number>, [rows]);
   const visible = rows.filter(r => matches(r, filter));
+  const opened = openId ? rows.find(r => r.id === openId) || null : null;
 
   const update = async (r: ManagerSelection, next: ManagerStatus) => {
     if (next === 'done' && !window.confirm('링크를 다시 열까요? 인플루언서의 전용 판매 링크로 다시 주문을 받을 수 있습니다.')) return;
@@ -135,7 +137,7 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
         {(Object.keys(FILTER_LABEL) as Filter[]).map(f => (
           <button
             key={f}
-            onClick={() => setFilter(f)}
+            onClick={() => { setFilter(f); setOpenId(null); }}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${filter === f ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}
           >
             {FILTER_LABEL[f]} {counts[f]}
@@ -149,9 +151,45 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
         <p className="text-xs font-bold text-red-500 py-10 text-center">{error}</p>
       ) : visible.length === 0 ? (
         <p className="text-xs font-bold text-slate-400 py-10 text-center bg-white rounded-2xl border border-slate-100">해당하는 건이 없습니다.</p>
-      ) : (
-        <div className="grid gap-3">
+      ) : !opened ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
           {visible.map(r => {
+            const status = (r.managerStatus || 'waiting') as ManagerStatus;
+            const canToggleLink = r.shippingStatus === 'shipped' || !r.shippingStatus;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => setOpenId(r.id)}
+                className={`text-left bg-white rounded-2xl border shadow-sm overflow-hidden hover:-translate-y-0.5 hover:shadow-md transition-all ${r.operatorUnseen ? 'border-red-200' : 'border-slate-100'}`}
+              >
+                <div className="relative aspect-square bg-slate-100">
+                  {r.productImage && <img src={r.productImage} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                  {r.shippingStatus && (
+                    <span className={`absolute top-2 left-2 text-[10px] font-black px-2 py-1 rounded-lg ${SHIPPING_STATUS_STYLE[r.shippingStatus]}`}>{SHIPPING_STATUS_LABEL[r.shippingStatus]}</span>
+                  )}
+                  {r.operatorUnseen ? (
+                    <span className="absolute top-2 right-2 text-[10px] font-black px-2 py-1 rounded-lg bg-red-500 text-white">NEW</span>
+                  ) : canToggleLink ? (
+                    <span className={`absolute top-2 right-2 text-[10px] font-black px-2 py-1 rounded-lg ${MANAGER_STATUS_STYLE[status]}`}>{MANAGER_STATUS_LABEL[status]}</span>
+                  ) : null}
+                </div>
+                <div className="p-3">
+                  <p className="text-[10px] font-bold text-slate-400 truncate">{r.brandName}</p>
+                  <p className="text-xs md:text-sm font-black text-slate-900 line-clamp-2 min-h-[2.5em]">{r.productName}</p>
+                  <p className="text-[11px] text-slate-500 mt-1 truncate">
+                    {won(r.salePrice)} · 수수료 <b className="text-blue-600">{r.commissionRate}%</b>
+                  </p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-0.5 truncate">@{r.influencerUsername} · {dateTime(r.updatedAt)}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <button onClick={() => setOpenId(null)} className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] font-black text-slate-600 hover:bg-slate-100">← 목록으로</button>
+          {[opened].map(r => {
             const status = (r.managerStatus || 'waiting') as ManagerStatus;
             // 배송정보 입력 전 · 반려된 건은 링크를 열지 않는다(협업이 진행되지 않음).
             // 송장 입력 전 링크는 브랜드가 발송해야 열린다.
