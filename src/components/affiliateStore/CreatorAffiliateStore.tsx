@@ -1101,7 +1101,7 @@ const AffiliateStoreBody: React.FC<CreatorAffiliateStoreProps & { mode: StoreMod
         </>
       )}
 
-      {tab === 'my' && <MyAffiliate onBrowse={() => switchTab('products')} />}
+      {tab === 'my' && <MyAffiliate onBrowse={() => switchTab('products')} onOpenProduct={openDetail} />}
       {tab === 'payouts' && <AffiliatePayouts as="influencer" />}
 
       {tab === 'mine' && (

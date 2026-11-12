@@ -4,6 +4,7 @@ import ManagerCampaignsPanel, { isMyTurn } from './ManagerCampaignsPanel';
 import ManagerBrandPicksPanel from './ManagerBrandPicksPanel';
 import ManagerDmAccessPanel from './ManagerDmAccessPanel';
 import AdminAffiliateSelections from '../admin/AdminAffiliateSelections';
+import ManagerAffiliateRecommendPanel from './ManagerAffiliateRecommendPanel';
 import { apiService } from '../../services/apiService';
 
 /**
@@ -38,7 +39,7 @@ interface ManagerDashboardProps {
   onNavigateCreator?: () => void;
 }
 
-type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'dm-access' | 'affiliate';
+type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'dm-access' | 'affiliate' | 'affiliate-recommend';
 
 const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 진행하기' },
@@ -46,6 +47,7 @@ const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정과 검수' },
   { key: 'dm-access', label: '자동 디엠 관리', hint: '매칭 등록자 · 제안 거절 · 이용 중단' },
   { key: 'affiliate', label: '어필리에이트 링크', hint: '브랜드가 선정한 판매 신청 · 링크 현황' },
+  { key: 'affiliate-recommend', label: '추천 어필리에이트', hint: '인플루언서에게 어울리는 어필리에이트 상품 리스트업 · 인플루언서의 MY 어필리에이트에 보여요' },
 ];
 
 const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
@@ -57,7 +59,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   const initialParams = new URLSearchParams(window.location.search);
   const requestedTab = initialParams.get('tab');
   const [tab, setTab] = useState<ManagerTab>(
-    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'dm-access' || requestedTab === 'affiliate'
+    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'dm-access' || requestedTab === 'affiliate' || requestedTab === 'affiliate-recommend'
       ? requestedTab
       : 'picks',
   );
@@ -193,6 +195,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
         {tab === 'dm-access' && <ManagerDmAccessPanel onNotify={notify} />}
         {/* 담당자는 서비스 계정으로 로그인한다 — 토큰 없이 부르면 서비스 계정 인증이 실린다. */}
         {tab === 'affiliate' && <AdminAffiliateSelections token="" />}
+        {tab === 'affiliate-recommend' && <ManagerAffiliateRecommendPanel onNotify={notify} />}
         {tab === 'campaigns' && (
           <ManagerCampaignsPanel
             managerUsername={username}

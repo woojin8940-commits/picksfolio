@@ -9,12 +9,15 @@ import {
   COMMISSION_STATUS_STYLE,
   SALE_STATE_LABEL,
   SALE_STATE_STYLE,
+  type AffiliateRecommendation,
   type MyAffiliateItem,
   type StoreOrder,
+  type StoreProduct,
   type StoreRequest,
 } from '../../services/affiliateStoreService';
 import AffiliateStepBoard, { affiliateSteps } from './AffiliateStepBoard';
 import SelectionShippingSheet from './SelectionShippingSheet';
+import RecommendedAffiliates from './RecommendedAffiliates';
 
 /**
  * MY 어필리에이트 — 선정(승인)된 상품과 인플루언서 전용 링크.
@@ -28,7 +31,10 @@ import SelectionShippingSheet from './SelectionShippingSheet';
  *
  * 브랜드가 판매를 중지했거나 판매가 끝난 상품은 '진행 상품'에서 지울 수 있다(기록은 남는다).
  * '진행 이력' 탭에는 지금까지 진행한 협업이 지운 것까지 모두 남는다.
+ * '추천 어필리에이트' 탭에는 담당자가 이 인플루언서에게 어울린다고 골라 둔 상품이 뜬다(담당자 대시보드에서 리스트업).
  */
+
+type View = 'products' | 'recommended' | 'history' | 'orders';
 
 /** 진행 상품에서 지울 수 있는 협업 — 지금 이 링크로 살 수 없는(판매 중지 · 기간 종료 · 삭제) 상품. */
 function canHide(i: MyAffiliateItem): boolean {
@@ -75,7 +81,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
+const MyAffiliate: React.FC<{ onBrowse: () => void; onOpenProduct?: (p: StoreProduct) => void }> = ({ onBrowse, onOpenProduct }) => {
   const [items, setItems] = useState<MyAffiliateItem[]>([]);
   const [preparing, setPreparing] = useState<MyAffiliateItem[]>([]);
   const [shippingFor, setShippingFor] = useState<StoreRequest | null>(null);
@@ -90,12 +96,14 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const [ordersHasMore, setOrdersHasMore] = useState(false);
   const [ordersCursor, setOrdersCursor] = useState<{ cursorAt: string; cursorId: string } | null>(null);
   const [copied, setCopied] = useState('');
-  const [view, setView] = useState<'products' | 'history' | 'orders'>('products');
+  const [view, setView] = useState<View>('products');
+  const [recs, setRecs] = useState<AffiliateRecommendation[]>([]);
+  const [recUnseen, setRecUnseen] = useState(0);
   const [hidingId, setHidingId] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await affiliateStoreService.myAffiliate();
+    const [res, rec] = await Promise.all([affiliateStoreService.myAffiliate(), affiliateStoreService.myRecommendations()]);
     setLoading(false);
     if (res.error) { setError(res.error); return; }
     setError('');
@@ -103,6 +111,12 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     setPreparing(res.preparing || []);
     setOrderCount(res.orderCount || 0);
     setTotals(res.totals);
+    // 추천은 부가 정보라 실패해도 나머지 화면은 그대로 보여 준다.
+    const recItems = rec.error ? [] : rec.items || [];
+    setRecs(recItems);
+    setRecUnseen(rec.error ? 0 : rec.unseenCount || 0);
+    // 아직 진행 중인 상품이 없으면 담당자 추천부터 보여 준다.
+    if (!(res.items || []).length && !(res.preparing || []).length && recItems.length) setView('recommended');
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -122,10 +136,17 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
     setOrdersLoaded(true);
   }, []);
 
-  const selectView = (next: 'products' | 'history' | 'orders') => {
+  const selectView = (next: View) => {
     setView(next);
     if (next === 'orders' && !ordersLoaded && !ordersLoading) void loadOrders();
   };
+
+  // 추천 탭을 열면 새 추천을 확인한 것으로 남긴다(카드의 NEW 표시는 이번 화면에서는 그대로 둔다).
+  useEffect(() => {
+    if (view !== 'recommended' || recUnseen === 0) return;
+    setRecUnseen(0);
+    void affiliateStoreService.markRecommendationsSeen();
+  }, [view, recUnseen]);
 
   const copy = async (code: string) => {
     if (await copyText(shopLink(code))) {
@@ -190,7 +211,7 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
   const active = all.filter(x => !x.item.hiddenAt);
   const history = [...all].sort((a, b) => String(b.item.updatedAt || b.item.createdAt).localeCompare(String(a.item.updatedAt || a.item.createdAt)));
 
-  if (all.length === 0) {
+  if (all.length === 0 && recs.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
         <Link2 className="w-8 h-8 text-slate-300 mx-auto mb-3" />
@@ -342,13 +363,18 @@ const MyAffiliate: React.FC<{ onBrowse: () => void }> = ({ onBrowse }) => {
         </>
       )}
 
-      <div className="flex gap-7 md:gap-10 border-b border-slate-200 mb-4">
-        {([['products', `진행 상품 ${active.length}`], ['history', `진행 이력 ${history.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>{label}</button>
+      <div className="flex gap-6 md:gap-10 border-b border-slate-200 mb-4 overflow-x-auto">
+        {([['products', `진행 상품 ${active.length}`], ['recommended', `추천 어필리에이트 ${recs.length}`], ['history', `진행 이력 ${history.length}`], ['orders', `판매 내역 ${orderCount}`]] as const).map(([k, label]) => (
+          <button key={k} onClick={() => selectView(k)} className={`pb-2.5 text-sm font-black border-b-2 -mb-px whitespace-nowrap flex items-center gap-1 ${view === k ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}`}>
+            {label}
+            {k === 'recommended' && recUnseen > 0 && <span className="px-1.5 py-0.5 rounded-md bg-red-500 text-white text-[9px] font-black">N</span>}
+          </button>
         ))}
       </div>
 
-      {view === 'products' ? (
+      {view === 'recommended' ? (
+        <RecommendedAffiliates items={recs} onOpen={onOpenProduct} />
+      ) : view === 'products' ? (
         <>
           {active.length === 0 ? (
             <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
