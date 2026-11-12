@@ -930,3 +930,44 @@ describe("G. 상품별 판매 신청 · 판매기간 · 판매중지", () => {
     await db.sql`UPDATE affiliate_store_products SET status = 'on_sale' WHERE id = ${item.productId}`;
   });
 });
+
+describe("H. 추천 어필리에이트(담당자 → 인플루언서)", () => {
+  test("담당자가 인플루언서에게 상품을 추천하면 MY 어필리에이트 추천 탭에 보이고, 빼면 사라진다", async () => {
+    const pool = await call(h.store, ADMIN, "GET", "/api/affiliate-store?scope=manager-rec-products");
+    assert.equal(pool.status, 200);
+    const product = pool.body.products[0];
+    assert.ok(product, "추천할 판매중 상품이 있다");
+
+    const creators = await call(h.store, ADMIN, "GET", `/api/affiliate-store?scope=manager-rec-creators&q=${INF}`);
+    assert.equal(creators.status, 200);
+    assert.ok(creators.body.creators.some((c: any) => c.username === INF));
+
+    const denied = await call(h.store, INF2, "POST", "/api/affiliate-store", { action: "manager_recommend", influencer: INF, productIds: [product.id] });
+    assert.equal(denied.status, 403, "담당자만 추천한다");
+
+    const rec = await call(h.store, ADMIN, "POST", "/api/affiliate-store", { action: "manager_recommend", influencer: INF, productIds: [product.id, product.id], note: "피드 톤과 잘 맞아요" });
+    assert.equal(rec.status, 200);
+    assert.equal(rec.body.items.length, 1, "같은 상품은 한 번만");
+    const again = await call(h.store, ADMIN, "POST", "/api/affiliate-store", { action: "manager_recommend", influencer: INF, productIds: [product.id] });
+    assert.equal(again.body.items.length, 1);
+    assert.equal(again.body.items[0].note, "피드 톤과 잘 맞아요", "메모 없이 다시 추천하면 메모는 남는다");
+
+    const mine = await call(h.store, INF, "GET", "/api/affiliate-store?scope=my-recommendations");
+    assert.equal(mine.status, 200);
+    assert.equal(mine.body.items.length, 1);
+    assert.equal(mine.body.items[0].product.id, product.id);
+    assert.equal(mine.body.unseenCount, 1);
+    assert.equal(mine.body.items[0].product.stock, undefined, "인플루언서에게 재고 수량은 주지 않는다");
+    const others = await call(h.store, INF2, "GET", "/api/affiliate-store?scope=my-recommendations");
+    assert.equal(others.body.items.filter((i: any) => i.id === mine.body.items[0].id).length, 0, "다른 인플루언서에게는 안 보인다");
+
+    await call(h.store, INF, "POST", "/api/affiliate-store", { action: "mark_recommendations_seen" });
+    const seen = await call(h.store, INF, "GET", "/api/affiliate-store?scope=my-recommendations");
+    assert.equal(seen.body.unseenCount, 0);
+
+    const removed = await call(h.store, ADMIN, "POST", "/api/affiliate-store", { action: "manager_update_recommendation", id: rec.body.items[0].id, remove: true });
+    assert.equal(removed.status, 200);
+    const empty = await call(h.store, INF, "GET", "/api/affiliate-store?scope=my-recommendations");
+    assert.equal(empty.body.items.length, 0);
+  });
+});

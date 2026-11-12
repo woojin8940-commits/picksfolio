@@ -276,6 +276,28 @@ export interface StoreProduct {
 
 export type ProductInput = Omit<StoreProduct, 'id' | 'businessUsername' | 'brandName' | 'createdAt' | 'updatedAt' | 'requestCounts' | 'saleState' | 'lastRequestAt'> & { id?: string };
 
+/** 담당자가 인플루언서에게 추천한 어필리에이트 상품(MY 어필리에이트 › 추천 어필리에이트). */
+export interface AffiliateRecommendation {
+  id: string;
+  note: string;
+  managerUsername: string;
+  recommendedAt: string;
+  updatedAt: string;
+  /** 인플루언서가 추천 탭에서 확인했는지. */
+  seen: boolean;
+  /** 이 상품에 낸 인플루언서의 판매 신청 상태('' = 신청 전). */
+  requestStatus: RequestStatus | '';
+  product: StoreProduct;
+}
+
+/** 추천 대상 인플루언서(승인된 크리에이터). */
+export interface RecommendCreator {
+  username: string;
+  name: string;
+  instagramUrl: string;
+  recommendationCount: number;
+}
+
 export interface StoreRequest {
   id: string;
   productId: string;
@@ -716,6 +738,38 @@ export const affiliateStoreService = {
   },
   cancelRequest(id: string) {
     return call<{ ok: true }>('POST', URL_BASE, { action: 'cancel_request', id });
+  },
+
+  /** 담당자가 추천한 어필리에이트 상품. */
+  myRecommendations() {
+    return call<{ items: AffiliateRecommendation[]; unseenCount: number }>('GET', `${URL_BASE}?scope=my-recommendations`);
+  },
+  markRecommendationsSeen() {
+    return call<{ ok: true }>('POST', URL_BASE, { action: 'mark_recommendations_seen' });
+  },
+
+  // 담당자 — 추천 어필리에이트 리스트업
+  recommendCreators(q = '') {
+    const p = new URLSearchParams({ scope: 'manager-rec-creators' });
+    if (q) p.set('q', q);
+    return call<{ creators: RecommendCreator[] }>('GET', `${URL_BASE}?${p.toString()}`, undefined, { token: '' });
+  },
+  managerRecommendations(influencer: string) {
+    const p = new URLSearchParams({ scope: 'manager-recommendations', influencer });
+    return call<{ items: AffiliateRecommendation[] }>('GET', `${URL_BASE}?${p.toString()}`, undefined, { token: '' });
+  },
+  recommendProducts(query: ProductQuery = {}, cursor?: ListCursor | null) {
+    const p = withCursor(new URLSearchParams({ scope: 'manager-rec-products' }), cursor);
+    for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== '' && v !== null) p.set(k, String(v));
+    return call<{ products: StoreProduct[]; total?: number; hasMore: boolean; nextCursor: ListCursor | null; taxonomy: CategoryNode[] }>(
+      'GET', `${URL_BASE}?${p.toString()}`, undefined, { token: '' },
+    );
+  },
+  recommend(influencer: string, productIds: string[], note = '') {
+    return call<{ items: AffiliateRecommendation[]; added: number }>('POST', URL_BASE, { action: 'manager_recommend', influencer, productIds, note }, { token: '' });
+  },
+  updateRecommendation(id: string, patch: { note?: string; remove?: boolean }) {
+    return call<{ ok: true }>('POST', URL_BASE, { action: 'manager_update_recommendation', id, ...patch }, { token: '' });
   },
 
   // 담당자 — 브랜드가 선정한 신청의 연락 진행

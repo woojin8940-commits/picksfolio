@@ -38,6 +38,8 @@ import { sendPushToUser } from "./_shared/push.mts";
  *   GET  /api/affiliate-store?scope=brand&section=progress&productId=  브랜드 진행관리: 선정 인플루언서의 배송 · 업로드 일정 · 업로드 링크 · 파트너십 코드
  *   GET  /api/affiliate-store?scope=brand&section=sales&productId=     브랜드 진행관리: 인플루언서별 판매 현황 · 상품 전체 판매
  *     운영자    review_application
+ *   GET  /api/affiliate-store?scope=my-recommendations       인플루언서: 담당자가 추천한 어필리에이트 상품(POST mark_recommendations_seen 으로 확인)
+ *     담당자    manager_recommend · manager_update_recommendation  (GET scope=manager-rec-creators&q · manager-recommendations&influencer · manager-rec-products&q: 추천 어필리에이트 리스트업)
  *     담당자    manager_update · manager_mark_seen  (GET scope=selections: 브랜드가 선정한 신청 — 선정 즉시 보이는 담당자 조율 큐, &countOnly=1 새 선정 수)
  *
  * 선정 이후 흐름(협찬 배송): 브랜드가 선정(approve)하면 인플루언서에게 선정 알림이 가고
@@ -1606,6 +1608,137 @@ async function managerUpdate(db: any, manager: string, body: any) {
   return Response.json({ request: { ...shapeRequest(rows[0]), managerNote: rows[0].manager_note } });
 }
 
+
+// ─────────────────────────── 추천 어필리에이트(담당자 → 인플루언서) ───────────────────────────
+
+/**
+ * 담당자가 인플루언서에게 어울리는 상품을 골라 둔다. 인플루언서는 MY 어필리에이트 › 추천 어필리에이트 탭에서
+ * 그 목록을 보고, 상품을 눌러 바로 판매 신청한다. 같은 인플루언서에게 같은 상품은 한 번만 들어간다.
+ */
+const REC_MAX_PER_CALL = 50;
+
+function shapeRecommendation(r: any) {
+  return {
+    id: r.rec_id,
+    note: r.rec_note || "",
+    managerUsername: r.rec_manager || "",
+    recommendedAt: r.rec_created_at,
+    updatedAt: r.rec_updated_at,
+    seen: !!r.rec_seen_at,
+    /** 이 상품에 낸 내 판매 신청 상태('' = 신청 전). */
+    requestStatus: r.req_status || "",
+    product: shapeProduct(r, true),
+  };
+}
+
+async function recommendationRows(db: any, influencer: string) {
+  return (await db.sql`
+    SELECT rec.id AS rec_id, rec.note AS rec_note, rec.manager_username AS rec_manager,
+      rec.created_at AS rec_created_at, rec.updated_at AS rec_updated_at, rec.seen_at AS rec_seen_at,
+      p.id, p.business_username, p.name, p.category, p.subcategory, p.summary,
+      CASE WHEN p.image_urls->0 IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(p.image_urls->0) END AS image_urls,
+      p.retail_price, p.sale_price, p.commission_rate, p.status, p.stock, p.options, p.sale_start_date, p.sale_end_date,
+      p.deleted_at, p.created_at, p.updated_at, a.brand_name,
+      (SELECT r.status FROM affiliate_store_requests r
+        WHERE r.product_id = p.id AND r.influencer_username = ${influencer} AND r.status <> 'cancelled'
+        ORDER BY r.created_at DESC LIMIT 1) AS req_status
+    FROM affiliate_recommendations rec
+    JOIN affiliate_store_products p ON p.id = rec.product_id
+    JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
+    WHERE rec.influencer_username = ${influencer} AND p.deleted_at IS NULL
+    ORDER BY rec.updated_at DESC, rec.id DESC
+    LIMIT 300
+  `) as any[];
+}
+
+/** 인플루언서: 담당자가 추천한 상품. */
+async function creatorRecommendations(db: any, username: string) {
+  const rows = await recommendationRows(db, username);
+  const items = rows.map(shapeRecommendation);
+  return Response.json({ items, unseenCount: items.filter((i) => !i.seen).length });
+}
+
+/** 인플루언서: 추천 탭을 열어 새 추천을 확인했다. */
+async function creatorMarkRecommendationsSeen(db: any, username: string) {
+  await db.sql`UPDATE affiliate_recommendations SET seen_at = NOW() WHERE influencer_username = ${username} AND seen_at IS NULL`;
+  return Response.json({ ok: true });
+}
+
+/** 담당자: 추천할 인플루언서 찾기(승인된 크리에이터 · 이름 · 아이디 · 인스타그램으로 검색). */
+async function managerRecommendCreators(db: any, url: URL) {
+  const q = clip(url.searchParams.get("q"), 80);
+  const like = q ? likeOf(q) : "";
+  const rows = (await db.sql`
+    SELECT c.username, c.name, c.instagram_url, c.created_at,
+      (SELECT COUNT(*) FROM affiliate_recommendations rec WHERE rec.influencer_username = c.username)::int AS rec_count
+    FROM creator_applications c
+    WHERE c.status = 'approved'
+      AND (${like} = '' OR c.username ILIKE ${like} OR c.name ILIKE ${like} OR c.instagram_url ILIKE ${like})
+    ORDER BY (SELECT MAX(rec.updated_at) FROM affiliate_recommendations rec WHERE rec.influencer_username = c.username) DESC NULLS LAST,
+      c.created_at DESC
+    LIMIT 40
+  `) as any[];
+  return Response.json({
+    creators: rows.map((r) => ({
+      username: r.username,
+      name: r.name || "",
+      instagramUrl: r.instagram_url || "",
+      recommendationCount: Number(r.rec_count) || 0,
+    })),
+  });
+}
+
+/** 담당자: 한 인플루언서에게 추천해 둔 상품. */
+async function managerRecommendations(db: any, url: URL) {
+  const influencer = norm(url.searchParams.get("influencer"));
+  if (!influencer) return err("인플루언서를 선택해 주세요.");
+  const rows = await recommendationRows(db, influencer);
+  return Response.json({ items: rows.map(shapeRecommendation) });
+}
+
+async function managerRecommend(db: any, manager: string, body: any) {
+  const influencer = norm(body.influencer);
+  if (!influencer) return err("인플루언서를 선택해 주세요.");
+  const ids: string[] = Array.from(new Set<string>(
+    (Array.isArray(body.productIds) ? body.productIds : []).map((v: unknown) => clip(v, 100)).filter(Boolean),
+  )).slice(0, REC_MAX_PER_CALL);
+  if (!ids.length) return err("추천할 상품을 골라 주세요.");
+  const note = clip(body.note, 500);
+  const creator = (await db.sql`SELECT 1 FROM creator_applications WHERE username = ${influencer} AND status = 'approved'`) as any[];
+  if (!creator[0]) return err("승인된 크리에이터만 추천할 수 있어요.", 404);
+  const products = (await db.sql`
+    SELECT p.id FROM affiliate_store_products p
+    JOIN affiliate_store_applications a ON a.business_username = p.business_username AND a.status = 'approved'
+    WHERE p.id = ANY(${ids}::text[]) AND p.deleted_at IS NULL
+  `) as any[];
+  if (!products.length) return err("추천할 수 있는 상품을 찾지 못했어요.", 404);
+  for (const p of products) {
+    await db.sql`
+      INSERT INTO affiliate_recommendations (id, influencer_username, product_id, manager_username, note)
+      VALUES (${newId("rec")}, ${influencer}, ${p.id}, ${manager}, ${note})
+      ON CONFLICT (influencer_username, product_id) DO UPDATE
+      SET manager_username = EXCLUDED.manager_username,
+          note = CASE WHEN EXCLUDED.note = '' THEN affiliate_recommendations.note ELSE EXCLUDED.note END,
+          updated_at = NOW()
+    `;
+  }
+  const rows = await recommendationRows(db, influencer);
+  return Response.json({ items: rows.map(shapeRecommendation), added: products.length });
+}
+
+async function managerUpdateRecommendation(db: any, body: any) {
+  const id = clip(body.id, 60);
+  if (body.remove) {
+    const rows = (await db.sql`DELETE FROM affiliate_recommendations WHERE id = ${id} RETURNING id`) as any[];
+    if (!rows[0]) return err("추천을 찾을 수 없습니다.", 404);
+    return Response.json({ ok: true });
+  }
+  const note = clip(body.note, 500);
+  const rows = (await db.sql`UPDATE affiliate_recommendations SET note = ${note}, updated_at = NOW() WHERE id = ${id} RETURNING id`) as any[];
+  if (!rows[0]) return err("추천을 찾을 수 없습니다.", 404);
+  return Response.json({ ok: true });
+}
+
 // ─────────────────────────── 진입 ───────────────────────────
 
 export default async (req: Request, context: Context) => {
@@ -1624,11 +1757,17 @@ export default async (req: Request, context: Context) => {
     return scope === "admin" ? adminGet(db) : adminReview(db, op.username, body);
   }
 
-  if (scope === "selections" || action === "manager_update" || action === "manager_mark_seen") {
+  const managerScope = scope === "selections" || scope === "manager-rec-creators" || scope === "manager-recommendations" || scope === "manager-rec-products";
+  if (managerScope || action === "manager_update" || action === "manager_mark_seen" || action === "manager_recommend" || action === "manager_update_recommendation") {
     const mgr = await requireManager(req);
     if (!mgr.ok) return mgr.response;
     try {
       if (scope === "selections") return await managerSelections(db, url);
+      if (scope === "manager-rec-creators") return await managerRecommendCreators(db, url);
+      if (scope === "manager-recommendations") return await managerRecommendations(db, url);
+      if (scope === "manager-rec-products") return await creatorProducts(db, url);
+      if (action === "manager_recommend") return await managerRecommend(db, mgr.managerUsername, body);
+      if (action === "manager_update_recommendation") return await managerUpdateRecommendation(db, body);
       if (action === "manager_mark_seen") return await managerMarkSeen(db, body);
       return await managerUpdate(db, mgr.managerUsername, body);
     } catch (e) {
@@ -1644,9 +1783,10 @@ export default async (req: Request, context: Context) => {
   if (!canUseStore(username) && !caller.isAdmin) return err("아직 오픈 전인 메뉴입니다.", 403);
 
   // 인플루언서 쪽 기능은 크리에이터 승인을 받은 계정만 쓴다(기존 계정은 자동 승인).
-  const creatorScope = ["creator", "product-detail", "brands", "my-request-status", "my-requests", "my-affiliate", "my-affiliate-orders"].includes(String(scope || ""))
+  const creatorScope = ["creator", "product-detail", "brands", "my-request-status", "my-requests", "my-affiliate", "my-affiliate-orders", "my-recommendations"].includes(String(scope || ""))
     || action === "request" || action === "cancel_request" || action === "submit_shipping" || action === "decline_selection"
-    || action === "confirm_received" || action === "submit_content" || action === "hide_my_affiliate";
+    || action === "confirm_received" || action === "submit_content" || action === "hide_my_affiliate"
+    || action === "mark_recommendations_seen";
   if (creatorScope && !caller.isAdmin) {
     const creator = await readCreatorAccess(username);
     if (!creator) return err("크리에이터 승인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
@@ -1668,6 +1808,7 @@ export default async (req: Request, context: Context) => {
       if (scope === "my-requests") return await creatorRequests(db, username, url);
       if (scope === "my-affiliate") return await creatorMyAffiliate(db, username);
       if (scope === "my-affiliate-orders") return await creatorMyAffiliateOrders(db, username, url);
+      if (scope === "my-recommendations") return await creatorRecommendations(db, username);
       return err("알 수 없는 요청입니다.");
     }
     switch (action) {
@@ -1685,6 +1826,7 @@ export default async (req: Request, context: Context) => {
       case "confirm_received": return await creatorConfirmReceived(db, username, body);
       case "submit_content": return await creatorSubmitContent(db, username, body);
       case "hide_my_affiliate": return await creatorHideAffiliate(db, username, body);
+      case "mark_recommendations_seen": return await creatorMarkRecommendationsSeen(db, username);
       default: return err("알 수 없는 요청입니다.");
     }
   } catch (e) {
