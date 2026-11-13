@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { affiliateStoreService, isHttpsUrl, type ApplicationInput, type StoreApplication } from '../../services/affiliateStoreService';
+import { affiliateStoreService, isHttpsUrl, withHttps, type ApplicationInput, type StoreApplication } from '../../services/affiliateStoreService';
 import DirectDealAgreement from './DirectDealAgreement';
 
 /**
@@ -9,6 +9,8 @@ import DirectDealAgreement from './DirectDealAgreement';
  * 1) 사업자 정보 → 2) 브랜드 정보 → 3) 담당자 정보 순서로 한 단계씩 받는다.
  * 위쪽 진행 막대와 "다음 ○○" 안내로 지금 어디쯤인지 보여 준다.
  */
+
+const isChannelUrl = (v: string) => /^https?:\/\/[^\s.]+\.[^\s]+$/i.test(v.trim());
 
 interface Props {
   businessUsername: string;
@@ -88,8 +90,8 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     if (step === 0) return form.businessName.trim().length > 0 && form.businessNumber.replace(/\D/g, '').length === 10
       && form.ceoName.trim().length > 0 && form.businessAddress.trim().length > 0 && form.csPhone.replace(/\D/g, '').length >= 8
       && form.mailOrderNumber.trim().length > 0;
-    if (step === 1) return form.brandName.trim().length > 0 && /^https?:\/\/\S+\.\S+/.test(form.channelUrl.trim()) && form.categories.length > 0
-      && isHttpsUrl(form.inquiryUrl);
+    if (step === 1) return form.brandName.trim().length > 0 && isChannelUrl(withHttps(form.channelUrl)) && form.categories.length > 0
+      && isHttpsUrl(withHttps(form.inquiryUrl));
     return (
       form.contactName.trim().length > 0 &&
       form.contactPhone.replace(/\D/g, '').length >= 9 &&
@@ -98,6 +100,17 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     );
   }, [step, form, agree, agreeDirectDeal]);
 
+  /** 브랜드 정보 단계에서 아직 채우지 않은 항목(다음 버튼 옆에 안내). */
+  const brandMissing = useMemo(() => {
+    if (step !== 1) return [];
+    const m: string[] = [];
+    if (!form.brandName.trim()) m.push('대표 브랜드명');
+    if (!isChannelUrl(withHttps(form.channelUrl))) m.push('대표 판매 채널 주소');
+    if (!isHttpsUrl(withHttps(form.inquiryUrl))) m.push('고객 문의 링크');
+    if (form.categories.length === 0) m.push('주요 카테고리');
+    return m;
+  }, [step, form]);
+
   const toggleCategory = (c: string) =>
     set('categories', form.categories.includes(c) ? form.categories.filter(x => x !== c) : [...form.categories, c]);
 
@@ -105,6 +118,7 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     setError('');
     if (!stepValid) return;
     if (step < STEPS.length - 1) {
+      if (step === 1) setForm(f => ({ ...f, channelUrl: withHttps(f.channelUrl), inquiryUrl: withHttps(f.inquiryUrl) }));
       setStep(step + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -112,6 +126,8 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
     setSubmitting(true);
     const res = await affiliateStoreService.apply(businessUsername, {
       ...form,
+      channelUrl: withHttps(form.channelUrl),
+      inquiryUrl: withHttps(form.inquiryUrl),
       businessNumber: form.businessNumber.replace(/\D/g, ''),
       directDealAgreement: agreeDirectDeal,
     });
@@ -189,11 +205,12 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
               <input className={inputCls} placeholder="예: PICKSFOLIO" value={form.brandName} onChange={e => set('brandName', e.target.value)} maxLength={100} />
             </Field>
             <Field label="대표 판매 채널 주소" required hint="자사몰, 스마트스토어 등 판매가 잘 이뤄지고 있는 주소를 입력해 주세요.">
-              <input className={inputCls} placeholder="https://example.com" value={form.channelUrl} onChange={e => set('channelUrl', e.target.value.trim())} maxLength={500} inputMode="url" />
+              <input className={inputCls} placeholder="www.example.com" value={form.channelUrl} onChange={e => set('channelUrl', e.target.value.trim())} onBlur={() => set('channelUrl', withHttps(form.channelUrl))} maxLength={500} inputMode="url" />
+              {form.channelUrl && !isChannelUrl(withHttps(form.channelUrl)) && <p className="text-[11px] font-bold text-red-500 mt-1.5">주소 형식을 확인해 주세요. (예: www.brand.com)</p>}
             </Field>
             <Field label="고객 문의 링크(자사몰 주소)" required hint="구매자가 문의하기를 누르면 이 주소로 이동해요. 자사몰 고객센터나 카카오톡 채널 주소를 넣어도 돼요.">
-              <input className={`${inputCls} ${form.inquiryUrl && !isHttpsUrl(form.inquiryUrl) ? 'border-red-300' : ''}`} placeholder="https://" value={form.inquiryUrl} onChange={e => set('inquiryUrl', e.target.value.trim())} maxLength={500} inputMode="url" />
-              {form.inquiryUrl && !isHttpsUrl(form.inquiryUrl) && <p className="text-[11px] font-bold text-red-500 mt-1.5">https:// 로 시작하는 주소만 쓸 수 있어요.</p>}
+              <input className={`${inputCls} ${form.inquiryUrl && !isHttpsUrl(withHttps(form.inquiryUrl)) ? 'border-red-300' : ''}`} placeholder="pf.kakao.com/... 또는 www.example.com" value={form.inquiryUrl} onChange={e => set('inquiryUrl', e.target.value.trim())} onBlur={() => set('inquiryUrl', withHttps(form.inquiryUrl))} maxLength={500} inputMode="url" />
+              {form.inquiryUrl && !isHttpsUrl(withHttps(form.inquiryUrl)) && <p className="text-[11px] font-bold text-red-500 mt-1.5">주소 형식을 확인해 주세요. (예: pf.kakao.com/_abc)</p>}
             </Field>
             <div className="border-t border-slate-200 my-8" />
             <Field label="주요 카테고리" required hint="브랜드와 가장 가까운 카테고리를 하나 이상 선택해 주세요.">
@@ -249,7 +266,13 @@ const AffiliateStoreApplication: React.FC<Props> = ({ businessUsername, categori
 
         {error && <p className="mt-6 text-xs font-bold text-red-500">{error}</p>}
 
-        <div className="flex justify-end gap-2 mt-10">
+        {brandMissing.length > 0 && (
+          <p className="mt-6 text-right text-[11px] font-bold text-slate-500">
+            다음으로 넘어가려면 <span className="text-red-500">{brandMissing.join(' · ')}</span> 항목을 확인해 주세요.
+          </p>
+        )}
+
+        <div className={`flex justify-end gap-2 ${brandMissing.length > 0 ? 'mt-3' : 'mt-10'}`}>
           <button
             type="button"
             onClick={() => { setError(''); setStep(s => Math.max(0, s - 1)); }}

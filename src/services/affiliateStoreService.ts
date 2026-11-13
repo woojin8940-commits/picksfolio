@@ -160,6 +160,15 @@ export interface ApplicationInput {
   inquiryUrl: string;
 }
 
+/** 'www.brand.com'처럼 https:// 없이 쓴 주소엔 https:// 를 붙이고, http:// 는 https:// 로 바꾼다. */
+export const withHttps = (v: string) => {
+  const t = (v || '').trim();
+  if (!t) return t;
+  if (/^http:\/\//i.test(t)) return `https://${t.slice(7)}`;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return t;
+  return `https://${t.replace(/^\/+/, '')}`;
+};
+
 /** 구매자 문의 링크 규칙(서버와 같다): https:// 로 시작하는 주소만. */
 export const isHttpsUrl = (v: string) => /^https:\/\/[^\s/?#]+\.[^\s]+$/i.test(v.trim());
 
