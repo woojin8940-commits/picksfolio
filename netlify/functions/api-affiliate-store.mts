@@ -82,6 +82,14 @@ const int = (v: unknown, min = 0, max = 1_000_000_000) => {
 };
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 const isUrl = (v: string) => /^https?:\/\/[^\s.]+\.[^\s]+$/i.test(v);
+/** 'www.brand.com'처럼 https:// 없이 쓴 주소엔 https:// 를 붙이고, http:// 는 https:// 로 바꾼다. */
+const withHttps = (v: string) => {
+  const t = (v || "").trim();
+  if (!t) return t;
+  if (/^http:\/\//i.test(t)) return `https://${t.slice(7)}`;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return t;
+  return `https://${t.replace(/^\/+/, "")}`;
+};
 /** 구매자 문의 링크: https:// 로 시작하는 주소만 받는다(화면도 같은 규칙으로 막는다). */
 const isHttpsUrl = (v: string) => /^https:\/\/[^\s/?#]+\.[^\s]+$/i.test(v);
 
@@ -635,7 +643,7 @@ async function brandUpdateSeller(db: any, username: string, body: any) {
   const businessAddress = clip(body.businessAddress, 300);
   const csPhone = clip(body.csPhone, 20);
   const mailOrderNumber = clip(body.mailOrderNumber, 60);
-  const inquiryUrl = clip(body.inquiryUrl, 500);
+  const inquiryUrl = withHttps(clip(body.inquiryUrl, 500));
   if (!ceoName) return err("대표자 이름을 입력해 주세요.");
   if (!businessAddress) return err("사업장 주소를 입력해 주세요.");
   if (csPhone.replace(/\D/g, "").length < 8) return err("고객센터 연락처를 정확히 입력해 주세요.");
@@ -658,7 +666,7 @@ async function brandApply(db: any, username: string, body: any) {
   const businessName = clip(body.businessName, 100);
   const businessNumber = String(body.businessNumber ?? "").replace(/\D/g, "");
   const brandName = clip(body.brandName, 100);
-  const channelUrl = clip(body.channelUrl, 500);
+  const channelUrl = withHttps(clip(body.channelUrl, 500));
   const categories = (Array.isArray(body.categories) ? body.categories : [])
     .map((c: unknown) => String(c))
     .filter((c: string) => CATEGORIES.includes(c));
@@ -670,7 +678,7 @@ async function brandApply(db: any, username: string, body: any) {
   const businessAddress = clip(body.businessAddress, 300);
   const csPhone = clip(body.csPhone, 20);
   const mailOrderNumber = clip(body.mailOrderNumber, 60);
-  const inquiryUrl = clip(body.inquiryUrl, 500);
+  const inquiryUrl = withHttps(clip(body.inquiryUrl, 500));
 
   if (!businessName) return err("사업자명을 입력해 주세요.");
   if (businessNumber.length !== 10) return err("사업자 등록번호 10자리를 입력해 주세요.");

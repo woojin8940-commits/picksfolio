@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { affiliateStoreService, isHttpsUrl, type StoreApplication } from '../../services/affiliateStoreService';
+import { affiliateStoreService, isHttpsUrl, withHttps, type StoreApplication } from '../../services/affiliateStoreService';
 
 /**
  * 판매자 정보 · 고객 문의 링크. 상품 페이지의 "판매자 정보 보기"와 구매자 주문 상세에 그대로 보인다
@@ -15,15 +15,15 @@ const BrandSellerInfo: React.FC<{ businessUsername: string; application: StoreAp
   const [csPhone, setCsPhone] = useState(application.csPhone || application.contactPhone || '');
   const [mailOrderNumber, setMailOrderNumber] = useState(application.mailOrderNumber || '');
   const [inquiryUrl, setInquiryUrl] = useState(application.inquiryUrl || '');
-  const urlOk = isHttpsUrl(inquiryUrl);
+  const urlOk = isHttpsUrl(withHttps(inquiryUrl));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
   const save = async () => {
     setMsg('');
-    if (!urlOk) { setMsg('고객 문의 링크는 https:// 로 시작하는 주소로 입력해 주세요.'); return; }
+    if (!urlOk) { setMsg('고객 문의 링크 주소 형식을 확인해 주세요.'); return; }
     setSaving(true);
-    const res = await affiliateStoreService.updateSeller(businessUsername, { ceoName, businessAddress, csPhone, mailOrderNumber, inquiryUrl: inquiryUrl.trim() });
+    const res = await affiliateStoreService.updateSeller(businessUsername, { ceoName, businessAddress, csPhone, mailOrderNumber, inquiryUrl: withHttps(inquiryUrl) });
     setSaving(false);
     if (res.error || !res.application) { setMsg(res.error || '저장하지 못했습니다.'); return; }
     onSaved(res.application);
@@ -46,9 +46,9 @@ const BrandSellerInfo: React.FC<{ businessUsername: string; application: StoreAp
       </div>
       <label className="block">
         <span className="text-xs font-bold text-slate-700">고객 문의 링크(자사몰 주소) *</span>
-        <input className={`${inputCls} mt-1 ${inquiryUrl && !urlOk ? 'border-red-300' : ''}`} value={inquiryUrl} onChange={e => setInquiryUrl(e.target.value.trim())} maxLength={500} inputMode="url" placeholder="https://" />
+        <input className={`${inputCls} mt-1 ${inquiryUrl && !urlOk ? 'border-red-300' : ''}`} value={inquiryUrl} onChange={e => setInquiryUrl(e.target.value.trim())} maxLength={500} inputMode="url" placeholder="pf.kakao.com/... 또는 www.example.com" />
         <span className="block text-[11px] text-slate-500 mt-1">구매자가 문의하기를 누르면 이 주소로 이동해요. 자사몰 고객센터나 카카오톡 채널 주소를 넣어도 돼요.</span>
-        {inquiryUrl && !urlOk && <span className="block text-[11px] font-bold text-red-500 mt-0.5">https:// 로 시작하는 주소만 쓸 수 있어요.</span>}
+        {inquiryUrl && !urlOk && <span className="block text-[11px] font-bold text-red-500 mt-0.5">주소 형식을 확인해 주세요. (예: pf.kakao.com/_abc)</span>}
       </label>
       <label className="block"><span className="text-xs font-bold text-slate-700">대표자 *</span><input className={`${inputCls} mt-1`} value={ceoName} onChange={e => setCeoName(e.target.value)} maxLength={50} /></label>
       <label className="block"><span className="text-xs font-bold text-slate-700">고객센터 연락처 *</span><input className={`${inputCls} mt-1`} value={csPhone} onChange={e => setCsPhone(e.target.value)} maxLength={20} inputMode="tel" /></label>
