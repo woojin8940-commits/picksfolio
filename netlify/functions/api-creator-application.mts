@@ -12,7 +12,7 @@ import { cleanHandle, resolveSharedLink } from "./_shared/instagram-metrics.mts"
  *
  *   GET  /api/creator-application                 본인: 승인 상태 + 내 지원서
  *   POST /api/creator-application { action: 'apply', name, contact, shortPrice, privacyConsent: true, directDealAgreement: true }
- *   GET  /api/creator-application?scope=admin     운영자: 지원서 목록(기존 계정 제외) + 인스타 프로필 · 최근 숏폼 3편
+ *   GET  /api/creator-application?scope=admin     운영자: 크리에이터 명단(지원자 · 기존 매칭 등록자 · 인스타 연동자) + 인스타 프로필 · 최근 숏폼 3편
  *   POST /api/creator-application { action: 'review', username, decision, reason }  운영자
  *
  * 인스타그램은 주소를 받지 않고 지원할 때 연동한 계정을 쓴다. 담당자는 그 계정의 프로필 ·
@@ -46,14 +46,85 @@ function shape(r: any) {
   };
 }
 
+/**
+ * 운영자 크리에이터 명단 — 지원서를 낸 새 크리에이터뿐 아니라 기존 크리에이터도 함께 싣는다.
+ *
+ *   · 크리에이터 지원서를 낸 사람(source = 'application')
+ *   · 브랜드 매칭받기에 등록한 인플루언서
+ *   · 픽스폴리오에서 인스타그램을 연동한 사람(creator_channels.connected)
+ *
+ * 기존 계정(legacy)은 지원 없이 승인돼 있어 심사 버튼 없이 보여 주고, 연동만 하고
+ * 아직 지원하지 않은 새 계정은 status = 'none' 으로 보여 준다.
+ */
 async function adminList(db: any, context?: any) {
   const rows = (await db.sql`
-    SELECT * FROM creator_applications
-    WHERE source = 'application'
-    ORDER BY (status = 'pending') DESC, created_at DESC
-    LIMIT 1000
+    WITH people AS (
+      SELECT username AS u FROM creator_applications WHERE source = 'application'
+      UNION
+      SELECT regexp_replace(LOWER(TRIM(applicant_username)), '^biz/', '') AS u
+      FROM collab_directory_applications
+      WHERE role = 'influencer' AND COALESCE(applicant_username, '') <> ''
+      UNION
+      SELECT regexp_replace(LOWER(TRIM(username)), '^biz/', '') AS u
+      FROM creator_channels
+      WHERE connected = TRUE AND COALESCE(username, '') <> ''
+    )
+    SELECT p.u AS roster_username, c.*,
+           d.name AS dir_name, d.contact AS dir_contact, d.instagram_url AS dir_instagram_url,
+           d.created_at AS dir_created_at,
+           ch.connected AS ch_connected, ch.instagram_url AS ch_instagram_url,
+           ch.instagram_handle AS ch_instagram_handle, ch.created_at AS ch_created_at
+    FROM people p
+    LEFT JOIN creator_applications c ON c.username = p.u
+    LEFT JOIN LATERAL (
+      SELECT name, contact, instagram_url, created_at FROM collab_directory_applications
+      WHERE role = 'influencer' AND regexp_replace(LOWER(TRIM(applicant_username)), '^biz/', '') = p.u
+      ORDER BY created_at DESC NULLS LAST LIMIT 1
+    ) d ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT connected, instagram_url, instagram_handle, created_at FROM creator_channels
+      WHERE regexp_replace(LOWER(TRIM(username)), '^biz/', '') = p.u
+      ORDER BY connected DESC NULLS LAST LIMIT 1
+    ) ch ON TRUE
+    WHERE p.u <> ''
+    ORDER BY (c.status = 'pending' AND c.source = 'application') DESC NULLS LAST,
+             COALESCE(c.updated_at, d.created_at, ch.created_at) DESC NULLS LAST
+    LIMIT 2000
   `) as any[];
-  const names = rows.map((r) => r.username);
+
+  const entries = rows.map((r) => {
+    const username = String(r.roster_username || "");
+    const base = r.username ? shape(r)! : null;
+    const handle = cleanHandle(r.ch_instagram_handle);
+    const instagramUrl = base?.instagramUrl || r.dir_instagram_url || r.ch_instagram_url ||
+      (handle ? `https://www.instagram.com/${handle}` : "");
+    // 기존 계정의 created_at 은 마이그레이션 시각이라 매칭 등록 · 연동 시각을 먼저 쓴다.
+    const firstSeen = base?.source === "application"
+      ? base.createdAt
+      : r.dir_created_at || r.ch_created_at || base?.createdAt || null;
+    return {
+      ...(base || {
+        status: "none",
+        rejectReason: "",
+        reviewedBy: "",
+        reviewedAt: null,
+        privacyConsentedAt: null,
+        directDealAgreedAt: null,
+        shortPrice: null,
+      }),
+      username,
+      source: base?.source || "linked",
+      name: base?.name || r.dir_name || "",
+      contact: base?.contact || r.dir_contact || "",
+      instagramUrl,
+      createdAt: firstSeen,
+      updatedAt: base?.source === "application" ? base.updatedAt : firstSeen,
+      matchRegistered: Boolean(r.dir_created_at || r.dir_name),
+      instagramLinked: Boolean(r.ch_connected),
+    };
+  });
+
+  const names = entries.map((r) => r.username);
   // 지원자 카드에 인스타 프로필 · 최근 숏폼 3편을 싣는다(어필리에이트 지원자 카드와 같은 데이터).
   // 채널 정보가 비었거나 오래된 사람은 연동된 계정에서 다시 받는다. 잠깐만 기다리고
   // 못 끝난 일은 응답 뒤에 마저 돌려 다음 열기에 반영한다.
@@ -65,8 +136,8 @@ async function adminList(db: any, context?: any) {
   const snapshots = await buildSnapshots(db, names)
     .catch((e) => { console.error("[creator-application] snapshot load failed", e); return new Map(); });
   return Response.json({
-    applications: rows.map((r) => ({
-      ...shape(r),
+    applications: entries.map((r) => ({
+      ...r,
       insights: snapshots.get(String(r.username || "").trim().toLowerCase()) || null,
     })),
   });

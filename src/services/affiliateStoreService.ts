@@ -116,6 +116,18 @@ export interface CreatorApplication {
   /** 운영자 목록에만 실린다: 인스타 프로필 · 팔로워 · 최근 릴스(InfluencerCandidateCard 데이터). */
   insights?: any;
 }
+/**
+ * 운영자 크리에이터 명단 한 줄. 지원서를 낸 사람뿐 아니라 기존 크리에이터(브랜드 매칭받기 등록자 ·
+ * 인스타 연동자)도 실린다. source = 'linked' · status = 'none' 은 연동만 하고 지원서가 없는 새 계정.
+ */
+export interface CreatorRosterEntry extends Omit<CreatorApplication, 'source' | 'status' | 'createdAt' | 'updatedAt'> {
+  source: CreatorApplication['source'] | 'linked';
+  status: CreatorStatus;
+  createdAt: string | null;
+  updatedAt: string | null;
+  matchRegistered: boolean;
+  instagramLinked: boolean;
+}
 export interface CreatorApplicationInput { name: string; contact: string; shortPrice: number; privacyConsent: boolean; directDealAgreement: boolean }
 
 export interface StoreApplication {
@@ -808,7 +820,7 @@ export const affiliateStoreService = {
     return call<{ application: CreatorApplication }>('POST', CREATOR_URL, { action: 'apply', ...input });
   },
   listCreatorApplications(token: string) {
-    return call<{ applications: CreatorApplication[] }>('GET', `${CREATOR_URL}?scope=admin`, undefined, { token });
+    return call<{ applications: CreatorRosterEntry[] }>('GET', `${CREATOR_URL}?scope=admin`, undefined, { token });
   },
   reviewCreator(token: string, username: string, decision: 'approve' | 'reject', reason = '') {
     return call<{ application: CreatorApplication }>('POST', CREATOR_URL, { action: 'review', username, decision, reason }, { token });
