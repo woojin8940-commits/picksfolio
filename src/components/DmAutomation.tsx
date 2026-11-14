@@ -2746,7 +2746,7 @@ const DmMatchPolicyNote: React.FC<{ tone?: 'slate' | 'emerald' }> = ({ tone = 's
       tone === 'emerald' ? 'text-emerald-700' : 'text-slate-500'
     }`}
   >
-    <li>· 등록 후 <strong>3개월 동안 캠페인 협업이 없으면</strong> 자동 디엠 이용이 중단될 수 있어요.</li>
+    <li>· 이용을 시작한 뒤 <strong>3개월 동안 캠페인 협업이 없으면</strong> 담당자 판단으로 자동 디엠 이용이 중단될 수 있어요.</li>
     <li>· 담당자가 제안을 드리지 못해 협업이 없었던 경우에는 계속 이용할 수 있어요.</li>
     <li>· 중단되더라도 만들어 둔 자동화는 그대로 남고, 담당자가 제안한 유가시딩 캠페인을 수락하면 다시 열려요.</li>
   </ul>
@@ -2866,7 +2866,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   // 구독으로 열린다. 서버가 자격(entitled)과 이유(dmAccess)를 함께 내려주며, 자격이
   // 없으면 저장·발송이 403 으로 막히므로 화면에서도 무엇을 하면 열리는지 안내한다.
   const [entitled, setEntitled] = useState(() => cachedSettings?.entitled !== false);
-  const [dmAccess, setDmAccess] = useState<{ suspended?: boolean; suspendedReason?: string; creatorRequired?: boolean } | null>(
+  const [dmAccess, setDmAccess] = useState<{ suspended?: boolean; suspendedReason?: string; creatorRequired?: boolean; viaCreatorApproval?: boolean } | null>(
     () => (cachedSettings as any)?.dmAccess || null,
   );
 
@@ -3123,7 +3123,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
           ? '자동 디엠은 크리에이터 승인 후 사용할 수 있어요. 크리에이터 지원서를 내면 담당자가 확인 후 승인해 드립니다.'
           : dmAccess?.suspended
           ? '담당자 판단으로 자동 디엠 이용이 중단되었어요. 유가시딩 캠페인 제안을 수락하면 다시 열립니다.'
-          : '자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요.';
+          : '기존 회원의 자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요.';
       setBanner({ type: 'err', text });
       // 편집 창이 열려 있으면 위 배너는 창에 가려진다. 창 안에도 같은 이유를 띄워야
       // '설정 완료'를 눌렀는데 아무 일도 없는 것처럼 보이지 않는다.
@@ -3504,12 +3504,13 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
       )}
 
       {/* 자동 디엠 이용 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
-          인플루언서는 브랜드 매칭받기 등록(결제 없음), 브랜드는 자동 디엠 플랜 구독으로 열린다.
+          새 인플루언서는 크리에이터 승인, 기존 인플루언서는 브랜드 매칭받기 등록(둘 다 결제 없음),
+          브랜드는 자동 디엠 플랜 구독으로 열린다.
           담당자가 중단한 경우에는 사유와 다시 여는 방법을 함께 보여 준다. */}
       {/* 새로 가입한 인플루언서는 크리에이터 승인을 받아야 자동 디엠이 열린다(기존 계정은 그대로). */}
       {!entitled && !isBusiness && dmAccess?.creatorRequired && (
         <section className="mb-6">
-          <CreatorApplicationGate feature="자동 디엠" />
+          <CreatorApplicationGate feature="자동 디엠" userName={userName} returnView="dm-automation" />
         </section>
       )}
 
@@ -3566,9 +3567,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                 </>
               ) : (
                 <>
-                  <h3 className="text-base md:text-lg font-black text-slate-900">자동 디엠은 브랜드 매칭받기를 등록해야 사용할 수 있어요</h3>
+                  <h3 className="text-base md:text-lg font-black text-slate-900">자동 디엠은 브랜드 매칭받기를 등록하면 사용할 수 있어요</h3>
                   <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
-                    내 채널 정보를 브랜드 매칭받기에 등록하면 결제 없이 인스타그램 자동 디엠을 바로 사용할 수 있어요.
+                    기존 회원은 크리에이터 지원 없이, 내 채널 정보를 브랜드 매칭받기에 등록하면 결제 없이 인스타그램 자동 디엠을 바로 사용할 수 있어요.
                     등록하면 담당자가 조건에 맞는 브랜드 캠페인을 제안해 드립니다.
                   </p>
                   <DmMatchPolicyNote />
@@ -3593,7 +3594,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
           모르고 지내다 중단 안내를 처음 받으면 "갑자기 막혔다" 로 읽힌다. */}
       {entitled && !isBusiness && loaded && (
         <section className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-5 py-4">
-          <p className="text-sm font-black text-emerald-800">브랜드 매칭받기 등록으로 자동 디엠을 무료로 이용 중이에요</p>
+          <p className="text-sm font-black text-emerald-800">
+            {dmAccess?.viaCreatorApproval
+              ? '크리에이터 승인으로 자동 디엠을 무료로 이용 중이에요'
+              : '브랜드 매칭받기 등록으로 자동 디엠을 무료로 이용 중이에요'}
+          </p>
           <DmMatchPolicyNote tone="emerald" />
         </section>
       )}

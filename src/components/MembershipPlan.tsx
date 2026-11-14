@@ -571,8 +571,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
               ? 'Every feature is free. Only Instagram DM automation needs the DM Automation plan (₩5,900/month, VAT incl.), which you can cancel anytime.'
               : '모든 기능을 무료로 이용할 수 있어요. 인스타그램 자동 디엠만 자동 디엠 플랜(월 5,900원, 부가세 포함)을 구독하면 사용할 수 있고, 언제든 해지할 수 있습니다.'
             : language === 'en'
-              ? 'Every feature is free — no membership needed. DM automation unlocks when you register for brand matching.'
-              : '멤버십 없이 모든 기능을 무료로 이용할 수 있어요. 자동 디엠은 브랜드 매칭받기를 등록하면 무료로 열립니다.'}
+              ? 'Every feature is free — no membership needed. DM automation unlocks for free once your creator application is approved (existing members: register for brand matching).'
+              : '멤버십 없이 모든 기능을 무료로 이용할 수 있어요. 자동 디엠은 크리에이터 승인을 받으면 무료로 열립니다(기존 회원은 브랜드 매칭받기 등록).'}
         </p>
       </header>
 
@@ -728,7 +728,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>영상 업로드 · 콘텐츠 업로드</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>캠페인 AI(콘텐츠 기획 AI)</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>인사이트 메뉴</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>자동 디엠</strong>은 <strong>브랜드 매칭받기</strong>를 등록하면 무료로 열립니다</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>자동 디엠</strong>은 <strong>크리에이터 승인</strong>을 받으면 무료로 열립니다(기존 회원은 브랜드 매칭받기 등록)</li>
             </ul>
           </div>
         )}
@@ -741,7 +741,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
           </h4>
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
             <li>멤버십으로 잠겨 있던 기능(영상 업로드 · 캠페인 AI · 인사이트)은 모두 무료로 열렸습니다.</li>
-            <li>인플루언서의 자동 디엠은 <strong>브랜드 매칭받기</strong>를 등록하면 결제 없이 이용할 수 있습니다. 담당자가 리스트업한 캠페인 제안을 계속 거절하면 담당자 판단으로 이용이 중단될 수 있고, 유가시딩 캠페인 제안을 수락하면 다시 열립니다.</li>
+            <li>새로 가입한 인플루언서의 자동 디엠은 <strong>크리에이터 지원서</strong>를 내고 승인을 받으면 결제 없이 이용할 수 있습니다. 기존 회원은 <strong>브랜드 매칭받기</strong>를 등록하면 바로 이용할 수 있습니다. 담당자가 리스트업한 캠페인 제안을 계속 거절하면 담당자 판단으로 이용이 중단될 수 있고, 유가시딩 캠페인 제안을 수락하면 다시 열립니다.</li>
             <li>브랜드 계정의 자동 디엠은 <strong>자동 디엠 플랜(월 {BRAND_DM_PRICE.toLocaleString()}원)</strong>을 구독해야 이용할 수 있습니다. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다.</li>
             <li><strong>해지하면 이미 결제한 이용 기간까지는 그대로 이용</strong>할 수 있고, 그 다음 달부터 자동결제가 중단됩니다. 종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.</li>
             <li>예전 멤버십(스탠다드 · AI 협업 · 프로)을 구독 중이었다면 다음 결제일에 추가 결제 없이 종료됩니다.</li>

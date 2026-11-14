@@ -104,6 +104,8 @@ export interface CreatorApplication {
   name: string;
   contact: string;
   instagramUrl: string;
+  /** 릴스 광고 단가(원). 이 항목이 생기기 전에 낸 지원서는 null. */
+  shortPrice: number | null;
   privacyConsentedAt: string | null;
   status: Exclude<CreatorStatus, 'none'>;
   rejectReason: string;
@@ -111,8 +113,10 @@ export interface CreatorApplication {
   reviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 운영자 목록에만 실린다: 인스타 프로필 · 팔로워 · 최근 릴스(InfluencerCandidateCard 데이터). */
+  insights?: any;
 }
-export interface CreatorApplicationInput { name: string; contact: string; instagramUrl: string; privacyConsent: boolean; directDealAgreement: boolean }
+export interface CreatorApplicationInput { name: string; contact: string; shortPrice: number; privacyConsent: boolean; directDealAgreement: boolean }
 
 export interface StoreApplication {
   id: string;

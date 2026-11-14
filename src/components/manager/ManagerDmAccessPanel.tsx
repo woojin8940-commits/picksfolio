@@ -121,7 +121,7 @@ const ManagerDmAccessPanel: React.FC<Props> = ({ onNotify }) => {
       <div>
         <h2 className="text-lg md:text-xl font-black text-slate-900">자동 디엠 이용자 관리</h2>
         <p className="text-xs md:text-sm text-slate-500 font-medium mt-1 leading-relaxed">
-          브랜드 매칭받기를 등록한 인플루언서는 자동 디엠을 무료로 씁니다. 제안을 못 받은 사람은 계속 이용하고,
+          크리에이터 승인을 받은 새 인플루언서와 브랜드 매칭받기를 등록한 기존 인플루언서는 자동 디엠을 무료로 씁니다. 제안을 못 받은 사람은 계속 이용하고,
           제안을 계속 거절하는 사람은 여기서 보고 중단할 수 있어요. 중단된 사람이 유가시딩 제안을 수락하면 자동으로 다시 열립니다.
         </p>
       </div>

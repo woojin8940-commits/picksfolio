@@ -1658,6 +1658,12 @@ const App: React.FC = () => {
       applySubView(params.get('from') === 'dm-automation' ? 'dm-automation' : 'campaigns');
       return;
     }
+    // 크리에이터 지원서에서 시작한 연동(?creator_apply)은 지원서가 있던 화면으로 되돌린다.
+    // 작성 중이던 지원서는 CreatorApplicationGate 가 되살린다. ig_connected 분기보다 먼저 본다.
+    if (params.get('creator_apply')) {
+      applySubView(params.get('from') === 'affiliate-store' ? 'affiliate-store' : 'dm-automation');
+      return;
+    }
     // 어필리에이트 지원하기에서 시작한 연동(?ig_affiliate)은 그 화면으로 되돌린다.
     // 보던 상품의 지원하기 창은 CreatorAffiliateStore 가 되살린다.
     if (params.get('ig_affiliate')) {
