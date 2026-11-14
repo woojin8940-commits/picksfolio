@@ -431,6 +431,12 @@ interface InfluencerCandidateCardProps {
    * 담당자 화면은 넘기지 않는다 — 등록 단가를 보고 제시가를 정해야 하기 때문이다.
    */
   managerPrice?: { fee?: number; secondUseFee?: number } | null;
+  /**
+   * 배지를 어디에 둘지. 'right'(기본)는 아이디 줄 오른쪽, 'below'는 아이디 줄 아래 한 줄.
+   * 배지가 많은 화면(운영자 크리에이터 명단)은 'below'를 쓴다 — 오른쪽에 몰아 두면
+   * 아이디 칸이 좁아져 아이디 · 출처 글자가 세로로 꺾인다.
+   */
+  badgesPlacement?: 'right' | 'below';
   /** 광고비 줄을 감춘다. 수수료로 정산하는 어필리에이트 지원자 목록처럼 단가가 의미 없는 자리에서 쓴다. */
   hidePrice?: boolean;
 }
@@ -438,6 +444,7 @@ interface InfluencerCandidateCardProps {
 const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   data,
   badges,
+  badgesPlacement = 'right',
   children,
   details,
   note,
@@ -596,7 +603,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
       {/* 인스타 아이디 · 출처 · 상태 배지를 한 줄에 둔다. 목록에서 사람을 구분하는
           것은 이 줄 하나뿐이고, 그 구분자는 계정 아이디다. */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2.5 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {m.profileImage ? (
             <img
               src={m.profileImage}
@@ -611,12 +618,12 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               {String(handle || m.name || '?').replace('@', '').slice(0, 1).toUpperCase()}
             </div>
           )}
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm font-black text-slate-900 truncate" title={idLine}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-sm font-black text-slate-900 truncate min-w-0" title={idLine}>
                 {idLine}
               </span>
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black whitespace-nowrap flex-shrink-0 ${source.cls}`}>
                 {source.label}
               </span>
             </div>
@@ -625,10 +632,13 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
             )}
           </div>
         </div>
-        {badges && (
+        {badges && badgesPlacement === 'right' && (
           <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>
         )}
       </div>
+      {badges && badgesPlacement === 'below' && (
+        <div className="flex items-center gap-1.5 flex-wrap mt-2">{badges}</div>
+      )}
 
       {/* 최근 게시물 세 칸. 계정 톤은 숫자가 아니라 그림이 답한다. 칸 수를 세 개로
           못박아 릴스가 한 편뿐인 계정도 같은 높이의 카드로 나온다 — 후보를 나란히

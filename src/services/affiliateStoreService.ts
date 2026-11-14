@@ -106,6 +106,8 @@ export interface CreatorApplication {
   instagramUrl: string;
   /** 릴스 광고 단가(원). 이 항목이 생기기 전에 낸 지원서는 null. */
   shortPrice: number | null;
+  /** 활동 카테고리. "뷰티, 패션" 처럼 쉼표로 잇는다. 이 항목이 생기기 전 지원서는 빈 값. */
+  categories?: string;
   privacyConsentedAt: string | null;
   status: Exclude<CreatorStatus, 'none'>;
   rejectReason: string;
@@ -127,8 +129,10 @@ export interface CreatorRosterEntry extends Omit<CreatorApplication, 'source' | 
   updatedAt: string | null;
   matchRegistered: boolean;
   instagramLinked: boolean;
+  /** 연동된 인스타 계정명(@ 없이). 연동 안 한 사람은 빈 값. */
+  instagramHandle?: string;
 }
-export interface CreatorApplicationInput { name: string; contact: string; shortPrice: number; privacyConsent: boolean; directDealAgreement: boolean }
+export interface CreatorApplicationInput { name: string; contact: string; shortPrice: number; categories: string; privacyConsent: boolean; directDealAgreement: boolean }
 
 export interface StoreApplication {
   id: string;
