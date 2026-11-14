@@ -816,7 +816,7 @@ interface CreatorAffiliateStoreProps {
 
 const CreatorAffiliateStore: React.FC<CreatorAffiliateStoreProps> = ({ userName, mode = 'store', initialTab, onNavigate }) => (
   <main className="p-4 md:p-14 w-full">
-    <CreatorApplicationGate feature="어필리에이트">
+    <CreatorApplicationGate feature="어필리에이트" userName={userName} returnView="affiliate-store">
       <AffiliateStoreBody key={`${mode}:${initialTab || ''}`} userName={userName} mode={mode} initialTab={initialTab} onNavigate={onNavigate} />
     </CreatorApplicationGate>
   </main>

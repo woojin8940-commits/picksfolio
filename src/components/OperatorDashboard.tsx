@@ -346,7 +346,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       // 일이 흐르는 순서: 인플루언서 · 브랜드 승인 → 선정되면 담당자 조율 → 주문 사고 처리 → 지급.
       group: '어필리에이트',
       tabs: [
-        { key: 'creator-applications', label: '1. 크리에이터 지원' },
+        { key: 'creator-applications', label: '1. 크리에이터 명단' },
         { key: 'affiliate-store', label: '2. 브랜드 입점 신청' },
         { key: 'affiliate-selections', label: '3. 협업 조율', badge: newAffiliateSelections },
         { key: 'affiliate-issues', label: '4. 취소·반품' },

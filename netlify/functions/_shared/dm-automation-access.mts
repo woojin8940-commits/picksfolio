@@ -32,7 +32,7 @@ export const DM_AUTOMATION_TIER: MembershipTier = 'brand_dm'
 export const BRAND_DM_PLANS: readonly MembershipTier[] = ['brand_dm', 'pro']
 
 export const DM_AUTOMATION_REQUIRED_MESSAGE =
-  '자동 디엠은 브랜드 매칭받기를 등록하면 무료로 사용할 수 있어요. 브랜드 계정은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있습니다.'
+  '자동 디엠은 크리에이터 승인을 받으면 무료로 사용할 수 있어요(기존 회원은 브랜드 매칭받기 등록). 브랜드 계정은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있습니다.'
 
 export type DmAutomationStatus = {
   allowed: boolean
@@ -48,6 +48,8 @@ export type DmAutomationStatus = {
    * 승인 전에는 자동 디엠을 쓸 수 없고, 화면은 크리에이터 지원 안내를 띄운다.
    */
   creatorRequired?: boolean
+  /** 인플루언서: 크리에이터 승인으로 쓰는 새 계정인지(false 면 매칭 등록으로 쓰는 기존 계정). 화면 안내 문구를 가른다. */
+  viaCreatorApproval?: boolean
   creatorStatus?: CreatorStatus
   creatorRejectReason?: string
   /**
@@ -147,6 +149,7 @@ const computeStatus = async (
       suspended: !!access.suspended,
       suspendedReason: access.reason || '',
       creatorRequired: !creator.approved,
+      viaCreatorApproval: true,
       creatorStatus: creator.status,
       creatorRejectReason: creator.rejectReason,
     }

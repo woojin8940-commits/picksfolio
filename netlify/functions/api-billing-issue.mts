@@ -79,7 +79,7 @@ export default async (req: Request) => {
       return Response.json(
         {
           success: false,
-          error: "자동 디엠 플랜은 브랜드 계정 전용이에요. 인플루언서는 브랜드 매칭받기를 등록하면 자동 디엠을 무료로 쓸 수 있습니다.",
+          error: "자동 디엠 플랜은 브랜드 계정 전용이에요. 인플루언서는 크리에이터 승인(기존 회원은 브랜드 매칭받기 등록)을 받으면 자동 디엠을 무료로 쓸 수 있습니다.",
         },
         { status: 403 },
       );
