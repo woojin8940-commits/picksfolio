@@ -24,6 +24,11 @@ import { cleanHandle, resolveSharedLink } from "./_shared/instagram-metrics.mts"
  */
 
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+/** "뷰티, 패션" 형식으로 정리한다. 중복 · 빈 값을 걷고 최대 5개 · 각 20자까지. */
+const cleanCategories = (v: unknown): string => {
+  const list = Array.isArray(v) ? v : String(v ?? "").split(",");
+  return Array.from(new Set(list.map((s) => String(s ?? "").trim().slice(0, 20)).filter(Boolean))).slice(0, 5).join(", ");
+};
 const err = (message: string, status = 400) => Response.json({ error: message }, { status });
 
 function shape(r: any) {
@@ -35,6 +40,7 @@ function shape(r: any) {
     contact: r.contact,
     instagramUrl: r.instagram_url,
     shortPrice: r.short_price == null ? null : Number(r.short_price),
+    categories: cleanCategories(r.categories),
     privacyConsentedAt: r.privacy_consented_at || null,
     directDealAgreedAt: r.direct_deal_agreed_at || null,
     status: r.status,
@@ -70,14 +76,14 @@ async function adminList(db: any, context?: any) {
       WHERE connected = TRUE AND COALESCE(username, '') <> ''
     )
     SELECT p.u AS roster_username, c.*,
-           d.name AS dir_name, d.contact AS dir_contact, d.instagram_url AS dir_instagram_url,
+           d.name AS dir_name, d.contact AS dir_contact, d.category AS dir_category, d.instagram_url AS dir_instagram_url,
            d.created_at AS dir_created_at,
            ch.connected AS ch_connected, ch.instagram_url AS ch_instagram_url,
            ch.instagram_handle AS ch_instagram_handle, ch.created_at AS ch_created_at
     FROM people p
     LEFT JOIN creator_applications c ON c.username = p.u
     LEFT JOIN LATERAL (
-      SELECT name, contact, instagram_url, created_at FROM collab_directory_applications
+      SELECT name, contact, category, instagram_url, created_at FROM collab_directory_applications
       WHERE role = 'influencer' AND regexp_replace(LOWER(TRIM(applicant_username)), '^biz/', '') = p.u
       ORDER BY created_at DESC NULLS LAST LIMIT 1
     ) d ON TRUE
@@ -117,6 +123,9 @@ async function adminList(db: any, context?: any) {
       name: base?.name || r.dir_name || "",
       contact: base?.contact || r.dir_contact || "",
       instagramUrl,
+      instagramHandle: handle || "",
+      // 지원서에 고른 카테고리가 먼저다. 지원서가 없는 기존 크리에이터는 매칭 등록 때 고른 값을 쓴다.
+      categories: base?.categories || cleanCategories(r.dir_category),
       createdAt: firstSeen,
       updatedAt: base?.source === "application" ? base.updatedAt : firstSeen,
       matchRegistered: Boolean(r.dir_created_at || r.dir_name),
@@ -175,10 +184,12 @@ async function apply(db: any, username: string, body: any, context?: any) {
   const name = clip(body.name, 50);
   const contact = clip(body.contact, 30);
   const instagramUrl = await linkedInstagramUrl(username);
+  const categories = cleanCategories(body.categories);
   const shortPrice = Math.round(Number(String(body.shortPrice ?? "").replace(/[^0-9]/g, "")));
   if (!name) return err("이름을 입력해 주세요.");
   if (!/^[0-9\-+\s]{8,20}$/.test(contact)) return err("연락처를 정확히 입력해 주세요.");
   if (!instagramUrl) return err("인스타그램 계정을 먼저 연동해 주세요. 연동한 계정으로 지원돼요.");
+  if (!categories) return err("활동 카테고리를 하나 이상 골라 주세요.");
   if (!Number.isFinite(shortPrice) || shortPrice < 1000 || shortPrice > 1_000_000_000) {
     return err("릴스 광고 단가를 원 단위 금액으로 입력해 주세요.");
   }
@@ -188,10 +199,10 @@ async function apply(db: any, username: string, body: any, context?: any) {
   }
 
   const rows = (await db.sql`
-    INSERT INTO creator_applications (username, source, name, contact, instagram_url, short_price, privacy_consented_at, direct_deal_agreed_at, status)
-    VALUES (${username}, 'application', ${name}, ${contact}, ${instagramUrl}, ${shortPrice}, NOW(), NOW(), 'pending')
+    INSERT INTO creator_applications (username, source, name, contact, instagram_url, short_price, categories, privacy_consented_at, direct_deal_agreed_at, status)
+    VALUES (${username}, 'application', ${name}, ${contact}, ${instagramUrl}, ${shortPrice}, ${categories}, NOW(), NOW(), 'pending')
     ON CONFLICT (username) DO UPDATE SET
-      name = EXCLUDED.name, contact = EXCLUDED.contact, instagram_url = EXCLUDED.instagram_url, short_price = EXCLUDED.short_price,
+      name = EXCLUDED.name, contact = EXCLUDED.contact, instagram_url = EXCLUDED.instagram_url, short_price = EXCLUDED.short_price, categories = EXCLUDED.categories,
       privacy_consented_at = NOW(), direct_deal_agreed_at = NOW(),
       status = 'pending', reject_reason = '', reviewed_by = '', reviewed_at = NULL, updated_at = NOW()
     WHERE creator_applications.status IN ('rejected', 'pending') AND creator_applications.source = 'application'

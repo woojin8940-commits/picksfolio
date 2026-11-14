@@ -8,6 +8,7 @@ import {
 import DirectDealAgreement from './affiliateStore/DirectDealAgreement';
 import { formatNumberWithCommas } from '../utils/formatters';
 import { apiService } from '../services/apiService';
+import { CREATOR_CATEGORIES, joinCategoryList, parseCategoryList } from '../utils/creatorCategories';
 
 /**
  * 크리에이터 지원 카드.
@@ -37,7 +38,7 @@ const IG_ERROR_TEXT: Record<string, string> = {
 
 interface IgState { status: 'loading' | 'linked' | 'reauth' | 'none' | 'error'; handle: string; followers: number }
 
-interface Draft { name: string; contact: string; shortPrice: string; editing: boolean; at: number }
+interface Draft { name: string; contact: string; shortPrice: string; categories?: string[]; editing: boolean; at: number }
 
 interface Props {
   /** 막혀 있는 기능 이름(안내 문구에 쓴다). 예: '어필리에이트', '자동 디엠' */
@@ -65,6 +66,10 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
   const [linkError, setLinkError] = useState('');
   // 릴스 광고 단가(원). 입력 중에는 숫자만 남겨 둔다.
   const [shortPrice, setShortPrice] = useState('');
+  // 활동 카테고리. 여러 개 고를 수 있다(최대 5개).
+  const [categories, setCategories] = useState<string[]>([]);
+  const toggleCategory = (c: string) =>
+    setCategories(prev => (prev.includes(c) ? prev.filter(x => x !== c) : prev.length >= 5 ? prev : [...prev, c]));
   const [consent, setConsent] = useState(false);
   const [directDeal, setDirectDeal] = useState(false);
   const [sending, setSending] = useState(false);
@@ -81,6 +86,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
     if (a) {
       setName(a.name); setContact(a.contact);
       setShortPrice(a.shortPrice ? String(a.shortPrice) : '');
+      setCategories(parseCategoryList(a.categories));
     }
     // 연동하러 나갔다 돌아왔다면 작성 중이던 값이 더 최신이다.
     try {
@@ -90,6 +96,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
         const d = JSON.parse(raw) as Draft;
         if (d && Date.now() - Number(d.at || 0) < DRAFT_TTL_MS) {
           setName(d.name || ''); setContact(d.contact || ''); setShortPrice(d.shortPrice || '');
+          if (Array.isArray(d.categories)) setCategories(d.categories);
           if (d.editing) setEditing(true);
         }
       }
@@ -138,7 +145,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
     setLinking(true);
     setLinkError('');
     try {
-      const draft: Draft = { name, contact, shortPrice, editing, at: Date.now() };
+      const draft: Draft = { name, contact, shortPrice, categories, editing, at: Date.now() };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     } catch {
       // 임시 저장이 막혀도 연동은 진행한다. 돌아와서 다시 적으면 된다.
@@ -157,6 +164,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
 
   const submit = async () => {
     if (!igLinked) { setSendError('인스타그램 계정을 먼저 연동해 주세요.'); return; }
+    if (categories.length === 0) { setSendError('활동 카테고리를 하나 이상 골라 주세요.'); return; }
     if (!Number(shortPrice)) { setSendError('릴스 광고 단가를 입력해 주세요.'); return; }
     if (!consent) { setSendError('개인정보 수집·이용에 동의해 주세요.'); return; }
     if (!directDeal) { setSendError('직거래 금지 안내에 동의해 주세요.'); return; }
@@ -166,6 +174,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
       name: name.trim(),
       contact: contact.trim(),
       shortPrice: Number(shortPrice),
+      categories: joinCategoryList(categories),
       privacyConsent: true,
       directDealAgreement: true,
     });
@@ -228,6 +237,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
           <p><span className="font-black text-slate-800">이름</span> {application.name}</p>
           <p><span className="font-black text-slate-800">연락처</span> {application.contact}</p>
           <p><span className="font-black text-slate-800">인스타그램</span> {application.instagramUrl}</p>
+          <p><span className="font-black text-slate-800">카테고리</span> {application.categories || '미선택'}</p>
           <p><span className="font-black text-slate-800">릴스 광고 단가</span> {application.shortPrice ? `${formatNumberWithCommas(application.shortPrice)}원` : '미입력'}</p>
           <button onClick={() => setEditing(true)} className="mt-2 text-[11px] font-black text-blue-600">지원서 수정</button>
         </div>
@@ -292,6 +302,26 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
             )}
             {linkError && <p className="mt-1.5 text-xs font-bold text-red-500">{linkError}</p>}
           </div>
+          <div className="block">
+            <span className="text-xs font-black text-slate-700">활동 카테고리 * <span className="font-bold text-slate-400">(최대 5개)</span></span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {CREATOR_CATEGORIES.map(c => {
+                const on = categories.includes(c);
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => toggleCategory(c)}
+                    aria-pressed={on}
+                    className={`h-8 px-3 rounded-full text-xs font-black border transition-colors ${on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                  >
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="mt-1 block text-[11px] text-slate-400">주로 올리는 콘텐츠 분야를 골라 주세요. 담당자가 맞는 브랜드 캠페인을 찾을 때 씁니다.</span>
+          </div>
           <label className="block">
             <span className="text-xs font-black text-slate-700">릴스 광고 단가 *</span>
             <div className="mt-1 relative">
@@ -310,7 +340,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
             <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0" />
             <span className="text-xs text-slate-600 leading-relaxed">
               <b className="text-slate-900">(필수) 개인정보 수집·이용 동의</b><br />
-              수집 항목: 이름, 연락처, 연동한 인스타그램 계정, 릴스 광고 단가 · 목적: 크리에이터 지원 검토 및 연락 · 보유 기간: 회원 탈퇴 또는 지원 철회 시까지.
+              수집 항목: 이름, 연락처, 연동한 인스타그램 계정, 활동 카테고리, 릴스 광고 단가 · 목적: 크리에이터 지원 검토 및 연락 · 보유 기간: 회원 탈퇴 또는 지원 철회 시까지.
               동의하지 않으면 지원할 수 없습니다. 자세한 내용은 <a href="/privacy" target="_blank" rel="noreferrer" className="text-blue-600 font-bold underline">개인정보처리방침</a>을 확인해 주세요.
             </span>
           </label>
@@ -320,7 +350,7 @@ const CreatorApplicationGate: React.FC<Props> = ({ feature, userName, returnView
             {editing && (
               <button onClick={() => setEditing(false)} className="h-12 px-5 rounded-xl border border-slate-200 text-sm font-black text-slate-600">취소</button>
             )}
-            <button onClick={submit} disabled={sending || !igLinked || !consent || !directDeal || !Number(shortPrice)} className="flex-1 h-12 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
+            <button onClick={submit} disabled={sending || !igLinked || !consent || !directDeal || !Number(shortPrice) || categories.length === 0} className="flex-1 h-12 rounded-xl bg-blue-600 text-white text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
               {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               크리에이터 지원하기
             </button>
