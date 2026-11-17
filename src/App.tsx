@@ -2329,7 +2329,7 @@ const App: React.FC = () => {
                 navigate('signup');
               }}
             />
-            {/* 히어로 다음은 실시간 트렌드 보드, 그 아래가 캠페인 소개다. */}
+            {/* 히어로 다음은 실시간 트렌드 보드, 그 아래가 어필리에이트 소개다. */}
             <LazyRoute fallback={null}>
               <DataBoardSection />
             </LazyRoute>
