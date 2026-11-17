@@ -3,13 +3,14 @@ import { motion } from 'motion/react';
 import {
   ArrowRight,
   BadgeCheck,
-  Handshake,
-  Megaphone,
-  ClipboardCheck,
+  Gift,
+  Wallet,
+  ShoppingBag,
+  Link2,
   UserCheck,
   Search,
   Receipt,
-  MessageSquare,
+  Store,
 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -21,68 +22,67 @@ const CampaignShowcase: React.FC<CampaignShowcaseProps> = ({ onSignup }) => {
   const { language } = useLanguage();
   const en = language === 'en';
 
-  /* 담당자가 실제로 해 주는 일 세 가지.
+  /* 어필리에이트로 크리에이터가 얻는 것 세 가지.
 
-     예전에는 이 자리에 보상 방식(제품 협찬 · 판매 수수료 · 확정 보수)을 늘어놓았다.
-     그런데 첫 칸이 "광고비 없음"이라, 이 서비스가 제품만 받고 콘텐츠를 만드는
-     시딩 창구로 읽혔다. 실제 운영은 그 반대다 — 담당자가 채널에 맞는 브랜드 광고를
-     찾아 조건까지 정리해 제안하고, 진행과 정산까지 함께 본다. 그래서 보상 종류가
-     아니라 담당자가 해 주는 일을 적는다. */
-  const managerRoles = [
+     예전에는 이 자리에 담당자가 브랜드 광고(캠페인)를 제안하는 흐름을 적었다.
+     브랜드 광고 캠페인은 더 이상 운영하지 않으므로, 지금 실제로 돌아가는
+     어필리에이트(상품 판매 신청 → 브랜드 선정 · 협찬 상품 배송 → 전용 판매 링크
+     → 판매 수수료 정산) 흐름을 소개한다. */
+  const highlights = [
     {
       icon: Search,
-      name: en ? 'Matched by your manager' : '채널을 보고 매칭',
+      name: en ? 'Pick the products you like' : '팔고 싶은 상품을 직접 선택',
       body: en
-        ? 'Your manager reviews your channel, audience and rate, then picks the brands that actually fit.'
-        : '담당자가 채널 성격과 시청자, 단가를 확인한 뒤 맞는 브랜드를 골라 연결합니다.',
-      chip: en ? 'Manager assigned' : '담당자 배정',
+        ? 'Browse products from partner brands by category and apply to sell the ones that fit your channel.'
+        : '입점 브랜드의 상품을 카테고리별로 둘러보고, 내 채널에 맞는 상품에 판매 신청을 보냅니다.',
+      chip: en ? 'Apply in one tap' : '간편 판매 신청',
       tint: '#EDF2FF',
       iconColor: '#2563EB',
     },
     {
-      icon: Megaphone,
-      name: en ? 'Ad offers come to you' : '광고 제안이 도착',
+      icon: Gift,
+      name: en ? 'Sample product + your own link' : '협찬 상품과 전용 판매 링크',
       body: en
-        ? 'Offers arrive with the fee, scope and schedule already written down — you only decide yes or no.'
-        : '광고비와 업무 범위, 일정이 적힌 제안이 도착합니다. 수락할지만 정하면 됩니다.',
-      chip: en ? 'Terms written up front' : '조건 정리 후 제안',
+        ? 'Once the brand selects you, the product is shipped to you and your personal sales link opens.'
+        : '브랜드에 선정되면 협찬 상품을 받아 보고, 나만의 전용 판매 링크가 열립니다.',
+      chip: en ? 'Product shipped to you' : '협찬 상품 배송',
       tint: '#E7F3EE',
       iconColor: '#0F9D6E',
     },
     {
-      icon: Handshake,
-      name: en ? 'Managed to the last step' : '진행·정산까지 관리',
+      icon: Wallet,
+      name: en ? 'Earn commission on every sale' : '판매할 때마다 수수료',
       body: en
-        ? 'Revisions, schedule and settlement are coordinated with the brand by your manager.'
-        : '수정 요청과 일정, 정산까지 담당자가 브랜드와 조율합니다.',
-      chip: en ? 'Manager handles it' : '담당자가 조율',
+        ? 'Orders placed through your link count as your sales. Track visits, orders and commission, then request your payout.'
+        : '내 링크로 들어온 주문은 모두 내 판매로 잡힙니다. 방문 · 주문 · 수수료를 확인하고 정산받으세요.',
+      chip: en ? 'Monthly payout' : '매월 정산',
       tint: '#FDF4E3',
       iconColor: '#B4780B',
     },
   ];
 
-  /* 담당자가 광고를 제안하는 순서. 대시보드의 캠페인 · 캠페인 협업 · 정산 화면이
+  /* 판매 신청부터 정산까지. 대시보드의 어필리에이트 · MY 어필리에이트 · 정산 화면이
      각각 이 단계를 맡는다. */
   const flow = [
     {
+      icon: ShoppingBag,
+      title: en ? 'Apply to sell' : '판매 신청',
+      body: en ? 'Choose a product and send your application.' : '마음에 드는 상품을 고르고 판매 신청을 보냅니다.',
+    },
+    {
       icon: UserCheck,
-      title: en ? 'Manager assigned' : '담당자 배정',
-      body: en ? 'Sign up and connect your channel — a manager takes a look.' : '가입하고 채널을 연결하면 담당자가 채널을 확인합니다.',
+      title: en ? 'Brand selects you' : '브랜드 선정',
+      body: en ? 'The brand reviews applications and picks its creators.' : '브랜드가 신청을 확인하고 함께할 크리에이터를 선정합니다.',
     },
     {
-      icon: Megaphone,
-      title: en ? 'Offer proposed' : '광고 제안',
-      body: en ? 'Your manager finds a fitting brand and sends the offer.' : '담당자가 채널에 맞는 브랜드 광고를 찾아 제안합니다.',
-    },
-    {
-      icon: ClipboardCheck,
-      title: en ? 'Terms agreed' : '조건 협의',
-      body: en ? 'Fee, scope and schedule are settled with the brand for you.' : '광고비와 업무 범위, 일정을 담당자가 브랜드와 정리합니다.',
+      icon: Link2,
+      title: en ? 'Sell with your link' : '전용 링크로 판매',
+      body: en ? 'Share your link on your page and content to start selling.' : '받은 상품을 소개하고 전용 링크를 개인페이지 · 콘텐츠에 올립니다.',
     },
     {
       icon: Receipt,
-      title: en ? 'Run & settle' : '진행·정산',
-      body: en ? 'Each step and the settlement date stay in your dashboard.' : '단계별 진행과 정산 일정이 대시보드에서 그대로 이어집니다.',
+      title: en ? 'Get paid' : '수수료 정산',
+      body: en ? 'Confirmed orders turn into commission you can request.' : '구매확정된 주문의 수수료를 정산 신청하면 지급됩니다.',
     },
   ];
 
@@ -97,33 +97,33 @@ const CampaignShowcase: React.FC<CampaignShowcaseProps> = ({ onSignup }) => {
 
       <div className="container mx-auto px-4 sm:px-6">
         <div className="max-w-2xl mb-9 md:mb-14 text-center lg:text-left mx-auto lg:mx-0">
-          <span className="text-[11px] md:text-xs font-black tracking-[0.25em] text-[#2563EB]">CAMPAIGN</span>
+          <span className="text-[11px] md:text-xs font-black tracking-[0.25em] text-[#2563EB]">AFFILIATE</span>
           <h2 className="mt-3 text-[1.5rem] leading-tight md:text-[3rem] md:leading-[1.1] font-black text-[#0B0F1A] font-display tracking-tighter">
             {en ? (
               <>
-                Your manager brings
+                Pick a brand product,
                 <br />
-                the brand offers to you
+                sell it with your own link
               </>
             ) : (
               <>
-                담당자가 브랜드 광고를
+                브랜드 상품을 골라
                 <br />
-                직접 제안합니다
+                내 링크로 판매하세요
               </>
             )}
           </h2>
           <p className="mt-4 text-sm md:text-lg text-[#4A5273] font-medium leading-relaxed">
             {en
-              ? 'A manager is assigned to your channel, finds brands that fit and proposes the ad with the fee and scope already agreed. Negotiation, progress and settlement are managed with you.'
-              : '채널마다 담당자가 배정됩니다. 담당자가 맞는 브랜드를 찾아 광고비와 업무 범위까지 정리해 제안하고, 협의부터 진행 관리와 정산까지 함께 챙깁니다.'}
+              ? 'Apply to sell products from partner brands. When a brand selects you, you receive the product and a personal sales link — every order through that link earns you commission.'
+              : '입점 브랜드의 상품에 판매 신청을 보내 보세요. 선정되면 협찬 상품과 전용 판매 링크를 받고, 그 링크로 들어온 주문마다 판매 수수료가 쌓입니다.'}
           </p>
         </div>
 
         <div>
-          {/* 담당자가 해 주는 일 세 가지 + 제안부터 정산까지의 단계 */}
+          {/* 어필리에이트 핵심 세 가지 + 판매 신청부터 정산까지의 단계 */}
           <div className="grid sm:grid-cols-3 gap-3.5 md:gap-5">
-            {managerRoles.map((type, idx) => (
+            {highlights.map((type, idx) => (
               <motion.div
                 key={type.name}
                 initial={{ opacity: 0, y: 18 }}
@@ -149,15 +149,15 @@ const CampaignShowcase: React.FC<CampaignShowcaseProps> = ({ onSignup }) => {
             ))}
           </div>
 
-          {/* 제안부터 정산까지 네 단계. 좁은 화면에서는 두 칸씩 접힌다. */}
+          {/* 판매 신청부터 정산까지 네 단계. 좁은 화면에서는 두 칸씩 접힌다. */}
           <div className="mt-3.5 md:mt-5 bg-white rounded-3xl sm:rounded-[1.75rem] border border-[#0B0F1A]/[0.07] p-4 sm:p-5 md:p-7 shadow-[0_20px_50px_-40px_rgba(11,15,26,0.7)]">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-sm md:text-lg font-black text-[#0B0F1A] tracking-tight">
-                {en ? 'From offer to payout' : '제안부터 정산까지'}
+                {en ? 'From application to payout' : '판매 신청부터 정산까지'}
               </h3>
               <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] font-black text-[#5B6382] bg-[#F1F3F9] px-2.5 py-1 rounded-full">
-                <MessageSquare size={12} strokeWidth={2.8} />
-                {en ? 'Your manager runs every step' : '전 과정 담당자 관리'}
+                <Store size={12} strokeWidth={2.8} />
+                {en ? 'All in your dashboard' : '대시보드에서 한 번에'}
               </span>
             </div>
 
@@ -189,7 +189,7 @@ const CampaignShowcase: React.FC<CampaignShowcaseProps> = ({ onSignup }) => {
               onClick={onSignup}
               className="mt-6 md:mt-8 w-full sm:w-auto flex sm:inline-flex items-center justify-center gap-2 bg-[#0B0F1A] hover:bg-[#1B2236] text-white px-6 py-3.5 rounded-full text-sm md:text-base font-black transition-all active:scale-[0.97] shadow-[0_16px_34px_-18px_rgba(11,15,26,0.8)]"
             >
-              {en ? 'Sign up and get matched' : '가입하고 담당자 매칭받기'}
+              {en ? 'Sign up and start selling' : '가입하고 어필리에이트 시작하기'}
               <ArrowRight size={16} strokeWidth={2.8} />
             </button>
           )}
