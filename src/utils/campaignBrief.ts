@@ -162,11 +162,12 @@ export const normalizeRewardMode = (value: unknown): RewardMode =>
   rewardModeOf(typeof value === 'string' ? value : '').value;
 
 /**
- * 더는 새로 고를 수 없는 방식. 커머스형(공동구매)은 어필리에이트로 대체되었다.
+ * 더는 새로 고를 수 없는 방식. 캠페인은 광고비 지급형만 운영한다 — 커머스형(공동구매)은
+ * 어필리에이트로 대체되었고, 제품 협찬형도 새로 받지 않는다.
  * 정의는 지난 캠페인 이력 표기를 위해 남겨 두고, 등록 화면 · 공개 목록에서만 뺀다.
  * 서버(_shared/reward-mode.mts)의 RETIRED_REWARD_MODES 와 짝이다.
  */
-export const RETIRED_REWARD_MODES: RewardMode[] = ['groupbuy'];
+export const RETIRED_REWARD_MODES: RewardMode[] = ['barter', 'groupbuy'];
 
 /** 브랜드가 캠페인 등록 화면에서 고를 수 있는 진행 방식들. */
 export const PICKABLE_REWARD_MODES: RewardModeDef[] = REWARD_MODES.filter(m => !RETIRED_REWARD_MODES.includes(m.value));

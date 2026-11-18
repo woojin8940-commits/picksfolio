@@ -420,9 +420,12 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
 
   // 협업이 열린 캠페인은 지원 목록에서 뺀다. 같은 캠페인이 "지원 검토 중"과
   // "3단계 진행 중"으로 두 장 나오면 어느 쪽이 지금인지 알 수 없다.
+  // MY 캠페인에는 브랜드에 최종 선정된 캠페인만 둔다. 광고비 지급 캠페인은 공개 지원을
+  // 받지 않으므로, 검토 중 · 미선정 기록을 띄우면 인플루언서가 하지도 않은 지원의 결과를
+  // 보게 된다. 선정됐지만 아직 진행 단계가 열리지 않은 캠페인만 '진행 준비'로 함께 깐다.
   const waiting = useMemo(() => {
     const started = new Set(collabs.map(c => String(c.campaignId || '')).filter(Boolean));
-    return applications.filter(a => !started.has(String(a.campaign_id)));
+    return applications.filter(a => String(a.status) === 'accepted' && !started.has(String(a.campaign_id)));
   }, [collabs, applications]);
 
   /**
@@ -439,19 +442,16 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   );
   const shownWaiting = useMemo(
     () =>
-      waiting.filter(a =>
-        listTab === 'closed' ? String(a.status) === 'rejected' : String(a.status) !== 'rejected',
-      ),
+      listTab === 'closed' ? [] : waiting,
     [waiting, listTab],
   );
   // 탭에 붙일 개수. 눌러 보기 전에 마감된 것이 몇 건인지 알 수 있어야, 굳이 넘어가
   // 볼 필요가 있는지 판단할 수 있다.
   const tabCounts = useMemo(() => {
     const closedCollabs = collabs.filter(isClosedCollab).length;
-    const closedApplies = waiting.filter(a => String(a.status) === 'rejected').length;
     return {
-      active: collabs.length - closedCollabs + (waiting.length - closedApplies),
-      closed: closedCollabs + closedApplies,
+      active: collabs.length - closedCollabs + waiting.length,
+      closed: closedCollabs,
     };
   }, [collabs, waiting]);
 
@@ -807,11 +807,11 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
-          <h2 className="text-lg md:text-2xl font-black text-slate-900">{isEn ? 'Collab Campaigns' : '협업 캠페인'}</h2>
+          <h2 className="text-lg md:text-2xl font-black text-slate-900">{isEn ? 'My Campaigns' : 'MY 캠페인'}</h2>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">
             {isEn
-              ? 'Open a campaign to run its steps, insights and settlement.'
-              : '진행 중인 캠페인을 눌러 단계 · 인사이트 · 정산을 확인하고 입력하세요'}
+              ? 'Campaigns a brand selected you for. Open one to upload your plan, draft video and post at each step.'
+              : '브랜드에 최종 선정된 캠페인이에요. 캠페인을 눌러 단계별로 기획안 · 초안 영상 · 업로드 링크를 올려 주세요'}
           </p>
         </div>
         <button
@@ -877,8 +877,8 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
           </h3>
           <p className="text-sm text-slate-500 font-medium">
             {isEn
-              ? 'Campaigns you apply to show up here once they start.'
-              : '캠페인 메뉴에서 지원하면 선정된 캠페인이 이곳에 나타납니다'}
+              ? 'When a brand selects you for a campaign, it shows up here.'
+              : '브랜드에 최종 선정되면 캠페인이 이곳에 나타납니다'}
           </p>
         </div>
       ) : (
@@ -987,22 +987,16 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
           {shownWaiting.length > 0 && (
             <section className={shownCollabs.length > 0 ? 'mt-8' : ''}>
               <h3 className="text-sm font-black text-slate-900 mb-1">
-                {listTab === 'closed'
-                  ? isEn ? 'Not selected' : '미선정 지원'
-                  : isEn ? 'Waiting for results' : '지원 결과 대기'}
+                {isEn ? 'Selected · getting ready' : '선정 · 진행 준비'}
               </h3>
               <p className="text-[11px] text-slate-400 font-medium mb-3">
-                {listTab === 'closed'
-                  ? isEn
-                    ? 'These applications did not go through.'
-                    : '이번에는 선정되지 않은 지원입니다.'
-                  : isEn
-                    ? 'Selected campaigns move up to the list above.'
-                    : '선정되면 위 목록으로 옮겨지고 진행 단계가 열립니다.'}
+                {isEn
+                  ? 'Once the manager confirms the terms, the campaign moves up and its steps open.'
+                  : '담당자가 조건을 확정하면 위 목록으로 옮겨지고 진행 단계가 열립니다.'}
               </p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
                 {shownWaiting.map(a => {
-                  const status = APPLY_STATUS[String(a.status)] || APPLY_STATUS.pending;
+                  const status = APPLY_STATUS.accepted;
                   return (
                     <div key={a.id} className="bg-white rounded-xl border border-slate-100 overflow-hidden opacity-90">
                       <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">

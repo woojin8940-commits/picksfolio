@@ -56,8 +56,18 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabCampaignId, setCollabCampaignId] = useState<string | null>(null);
+  /**
+   * 캠페인 진행사항의 안 읽은 수. 인플루언서가 기획안 · 초안 영상을 올리면 캠페인 메뉴에
+   * 빨간 표시가 붙는다. 캠페인 화면에 있는 동안은 묻지 않는다 — 그 화면이 협업을 열 때마다
+   * 읽음을 남긴다.
+   */
+  const [collabUnread, setCollabUnread] = useState(0);
 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
+  useVisiblePolling(async signal => {
+    const { unreadTotal } = await apiService.getCollabUnread('brand', { signal });
+    if (!signal.aborted) setCollabUnread(unreadTotal);
+  }, 120000, !!cleanUsername && currentSubView !== 'campaign-collab', cleanUsername, 4000);
   const showAffiliateStore = canSeeAffiliateStore(cleanUsername);
   // 볼 수 없는 계정이면 예전에 저장된 탭으로도 들어가지 못하게 한다.
   useEffect(() => {
@@ -551,7 +561,19 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           </div>
 
           {/* Business management cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
+            <div className="bg-gradient-to-br from-violet-600 to-fuchsia-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
+              <div>
+                <h3 className="text-sm md:text-2xl font-black mb-1 flex items-center gap-2">
+                  📢 캠페인
+                  {collabUnread > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full">{collabUnread > 99 ? '99+' : collabUnread}</span>
+                  )}
+                </h3>
+                <p className="opacity-80 font-bold text-[9px] md:text-base">광고비 지급 캠페인을 등록하고, 담당자가 추천한 인플루언서를 선정해 기획안 · 초안 영상 · 업로드까지 진행하세요.</p>
+              </div>
+              <button onClick={() => setCurrentSubView('campaign-collab')} className="bg-white text-violet-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캠페인 관리</button>
+            </div>
             <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
                 <h3 className="text-sm md:text-2xl font-black mb-1 flex items-center gap-2">🏬 어필리에이트</h3>
@@ -608,6 +630,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           {/* 인사이트는 내 계정 데이터를 보는 메뉴라, 캠페인 그룹 위 · DM 자동화 바로 아래에 둔다. */}
           <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
           <div className="my-3 border-t border-white/10" />
+          <NavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           {showAffiliateStore && (
             <NavItem icon="🏬" label="어필리에이트" active={currentSubView === 'affiliate-store'} onClick={() => setCurrentSubView('affiliate-store')} />
           )}
@@ -639,6 +662,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="🔗" label="관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
           <MobileNavItem icon="📩" label="DM자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <MobileNavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
+          <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           {showAffiliateStore && (
             <MobileNavItem icon="🏬" label="어필리에이트" active={currentSubView === 'affiliate-store'} onClick={() => setCurrentSubView('affiliate-store')} />
           )}
@@ -666,6 +690,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { setCurrentSubView('dm-automation'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => { setCurrentSubView('tagged-insights'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
+              <NavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               {showAffiliateStore && (
                 <NavItem icon="🏬" label="어필리에이트" active={currentSubView === 'affiliate-store'} onClick={() => { setCurrentSubView('affiliate-store'); setIsMobileMenuOpen(false); }} />
               )}

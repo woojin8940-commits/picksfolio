@@ -30,11 +30,12 @@ interface AdminDashboardProps {
   onNavigateMembership: () => void;
   onNavigateOpenSchedule: () => void;
   /**
-   * 캠페인 · 협업 캠페인 메뉴는 없어졌다(픽스폴리오는 어필리에이트가 주력이다). 그 자리에
-   * 어필리에이트(브랜드 상품)와 MY 어필리에이트(진행 중인 어필리에이트)가 들어간다.
-   * 예전 알림 링크(?tab=campaigns · ?tab=collab)로 들어오는 화면은 App 이 그대로 연다.
+   * 캠페인 찾기 화면. 인플루언서 메뉴에는 두지 않는다 — 캠페인은 광고비 지급형만 운영하고,
+   * 광고비 지급형은 공개 지원을 받지 않는다(담당자 리스트업 → 브랜드 최종 선정).
+   * 예전 알림 링크(?tab=campaigns)로 들어오는 화면은 App 이 그대로 연다.
    */
   onNavigateCampaigns?: () => void;
+  /** MY 캠페인 — 브랜드에 최종 선정된 캠페인의 진행 단계(기획안 · 초안 영상 · 업로드) · 인사이트 · 정산. */
   onNavigateMyCollabs?: () => void;
   /** 어필리에이트 스토어. 볼 수 없는 계정이면 넘어오지 않는다(없으면 메뉴를 숨긴다). */
   onNavigateAffiliateStore?: () => void;
@@ -54,6 +55,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateInsights,
   onNavigateBusiness,
   onNavigateOpenSchedule,
+  onNavigateMyCollabs,
   onNavigateAffiliateStore,
   onNavigateMyAffiliate,
   children
@@ -66,6 +68,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // 서랍은 화면을 가득 덮는다. 덮인 화면에서 뒤로가기를 누르는 것은 자연스러운
   // 반응인데 그게 앱을 떠나는 동작이면 사용자는 서랍에 갇힌다. 뒤로가기로 닫는다.
   useCloseOnBack(isMobileMenuOpen, () => setIsMobileMenuOpen(false));
+  /**
+   * MY 캠페인 진행사항의 안 읽은 수. 브랜드가 기획안 · 초안에 피드백을 달거나 담당자가
+   * 단계를 넘기면 메뉴에 빨간 표시가 붙는다. MY 캠페인 화면에 있는 동안은 묻지 않는다 —
+   * 그 화면이 협업을 열 때마다 읽음을 남긴다.
+   */
+  const [collabUnread, setCollabUnread] = useState(0);
+  useVisiblePolling(async signal => {
+    if (!userName || !onNavigateMyCollabs) return;
+    const { unreadTotal } = await apiService.getCollabUnread('influencer', { signal });
+    if (!signal.aborted) setCollabUnread(unreadTotal);
+  }, 120000, !!userName && !!onNavigateMyCollabs && currentSubView !== 'my-collabs', userName, 4000);
   /**
    * 아래 막대에서 지금 보고 있는 메뉴를 보이는 자리로 끌어온다.
    *
@@ -238,6 +251,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClick={onNavigateInsights}
           />
           <div className="my-3 border-t border-white/10" />
+          {onNavigateMyCollabs && (
+            <NavItem
+              icon="📢"
+              label={t('nav.myCampaigns', 'MY 캠페인', 'My Campaigns')}
+              active={currentSubView === 'my-collabs'}
+              onClick={onNavigateMyCollabs}
+              badge={collabUnread}
+            />
+          )}
           {onNavigateAffiliateStore && (
             <NavItem
               icon="🏬"
@@ -310,6 +332,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             />
             <MobileNavItem icon="📩" label={t('nav.barDm', '자동DM', 'DM')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
             <MobileNavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
+            {onNavigateMyCollabs && (
+              <MobileNavItem icon="📢" label={t('nav.barMyCampaigns', 'MY캠페인', 'Campaigns')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+            )}
             {onNavigateAffiliateStore && (
               <MobileNavItem icon="🏬" label={t('nav.affiliateStore', '어필리에이트', 'Affiliate')} active={currentSubView === 'affiliate-store'} onClick={() => { onNavigateAffiliateStore(); setIsMobileMenuOpen(false); }} />
             )}
@@ -356,6 +381,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="📩" label={t('nav.dmAutomation', 'DM 자동화', 'DM Automation')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
+              {onNavigateMyCollabs && (
+                <NavItem icon="📢" label={t('nav.myCampaigns', 'MY 캠페인', 'My Campaigns')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+              )}
               {onNavigateAffiliateStore && (
                 <NavItem icon="🏬" label={t('nav.affiliateStore', '어필리에이트', 'Affiliate')} active={currentSubView === 'affiliate-store'} onClick={() => { onNavigateAffiliateStore(); setIsMobileMenuOpen(false); }} />
               )}
@@ -483,6 +511,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
+              {onNavigateMyCollabs && <QuickCard icon="📢" label={t('nav.myCampaigns', 'MY 캠페인', 'My Campaigns')} onClick={onNavigateMyCollabs} badge={collabUnread} />}
               {onNavigateMyAffiliate && <QuickCard icon="🤝" label={t('nav.myAffiliate', 'MY 어필리에이트', 'My Affiliate')} onClick={onNavigateMyAffiliate} />}
               <QuickCard icon="🔗" label={t('nav.links', '링크 관리', 'Links')} onClick={onNavigateLinks} />
               <QuickCard icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} onClick={onNavigateBusiness} />

@@ -287,9 +287,9 @@ export default async (req: Request) => {
       const auth = await requireAccountOwner(req, String(body.business_username));
       if (!auth.ok) return auth.response;
 
-      // 커머스형(공동구매)은 어필리에이트로 대체되어 더는 등록받지 않는다.
+      // 캠페인은 광고비 지급형만 받는다. 커머스형은 어필리에이트로 대체되었고 제품 협찬형도 새로 받지 않는다.
       if (body.type === "group_buy" || isRetiredRewardMode(body.reward_mode)) {
-        return Response.json({ error: "커머스 캠페인은 더 이상 등록할 수 없습니다. 어필리에이트를 이용해 주세요." }, { status: 400 });
+        return Response.json({ error: "캠페인은 광고비 지급형만 등록할 수 있습니다. 커머스는 어필리에이트를 이용해 주세요." }, { status: 400 });
       }
 
       // 담당자 이름 · 연락처는 등록할 때마다 받는다. 화면에서도 막지만 서버에서
@@ -374,8 +374,12 @@ export default async (req: Request) => {
 
       const c = existing[0] as Record<string, any>;
       if (c.deleted_at) return Response.json({ error: "삭제된 캠페인입니다." }, { status: 409 });
-      if (updates.type === "group_buy" || (updates.reward_mode !== undefined && isRetiredRewardMode(updates.reward_mode))) {
-        return Response.json({ error: "커머스 캠페인은 더 이상 등록할 수 없습니다. 어필리에이트를 이용해 주세요." }, { status: 400 });
+      // 이미 그 방식으로 등록된 지난 캠페인을 고치는 것(마감 · 문구 수정)은 막지 않는다 — 다른 방식에서 바꿔 들어가는 것만 막는다.
+      const switchingToRetired = updates.reward_mode !== undefined
+        && isRetiredRewardMode(updates.reward_mode)
+        && normalizeRewardMode(updates.reward_mode) !== normalizeRewardMode(c.reward_mode);
+      if ((updates.type === "group_buy" && c.type !== "group_buy") || switchingToRetired) {
+        return Response.json({ error: "캠페인은 광고비 지급형만 등록할 수 있습니다. 커머스는 어필리에이트를 이용해 주세요." }, { status: 400 });
       }
 
       // 캠페인 ID 만 알면 남의 캠페인을 고칠 수 있었다. 등록한 브랜드(또는 관리자)만

@@ -104,8 +104,9 @@ type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' |
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs' | 'affiliate-store' | 'my-affiliate';
 
 /** 다시 뜬 페이지가 되살려도 되는 탭(utils/resumeTab). */
-// 캠페인 · 협업 캠페인은 메뉴에서 빠졌다 — 새로고침으로 그 화면에 되돌아가지 않게 목록에서 뺀다(예전 알림 링크로는 열린다).
-const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'affiliate-store', 'my-affiliate'];
+// 캠페인 찾기(campaigns)는 인플루언서 메뉴에 없다 — 광고비 지급 캠페인은 공개 지원을 받지 않는다.
+// MY 캠페인(my-collabs)은 메뉴에 있으니 새로고침해도 그 화면으로 돌아간다.
+const SUBVIEWS: SubView[] = ['dashboard', 'links', 'dm-automation', 'insights', 'business', 'calendar', 'membership', 'open-schedule', 'settlement', 'my-collabs', 'affiliate-store', 'my-affiliate'];
 
 const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
   dashboard: 'dashboard',

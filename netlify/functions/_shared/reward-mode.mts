@@ -48,10 +48,11 @@ export const isManagerListupMode = (raw: unknown): boolean =>
   MANAGER_LISTUP_MODES.includes(normalizeRewardMode(raw));
 
 /**
- * 더는 새로 등록할 수 없는 방식. 커머스형(공동구매)은 어필리에이트 스토어로 대체되어
- * 등록 · 수정 · 공개 목록에서 빠졌다. 값 자체는 지난 이력 표기를 위해 남겨 둔다.
+ * 더는 새로 등록할 수 없는 방식. 캠페인은 광고비 지급형만 운영한다.
+ * 커머스형(공동구매)은 어필리에이트 스토어로 대체되었고, 제품 협찬형도 새로 받지 않는다.
+ * 등록 · 수정 · 공개 목록에서 빠지며, 값 자체는 지난 이력 표기를 위해 남겨 둔다.
  */
-export const RETIRED_REWARD_MODES: RewardModeValue[] = ["groupbuy"];
+export const RETIRED_REWARD_MODES: RewardModeValue[] = ["barter", "groupbuy"];
 
 export const isRetiredRewardMode = (raw: unknown): boolean =>
   RETIRED_REWARD_MODES.includes(normalizeRewardMode(raw));
