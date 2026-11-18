@@ -1805,7 +1805,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">
-            내가 등록한 캠페인을 관리하고 지원자를 확인하세요
+            광고비 지급 캠페인을 등록하면 담당자가 인플루언서를 리스트업합니다. 최종 선정한 인플루언서와 기획안 · 초안 영상 · 업로드를 단계별로 진행하세요
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

@@ -1067,7 +1067,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 <label className={LABEL}>진행 방식 *</label>
                 {/* 방식을 한 줄에 나란히 둔다 — 나란히 보이지 않으면 무엇을 고르는지
                     비교가 안 되고, 두 줄로 접히면 마지막 방식이 덤처럼 보인다. */}
-                <div className={`grid grid-cols-1 ${pickableModes.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2`}>
+                <div className={`grid grid-cols-1 ${pickableModes.length >= 3 ? 'sm:grid-cols-3' : pickableModes.length === 2 ? 'sm:grid-cols-2' : ''} gap-2`}>
                   {pickableModes.map(m => {
                     const active = form.reward_mode === m.value;
                     return (
