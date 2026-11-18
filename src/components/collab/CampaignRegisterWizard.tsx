@@ -5,14 +5,20 @@ import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
 import {
   PICKABLE_REWARD_MODES, rewardModeOf, normalizePickableRewardMode, COMMISSION_RANGE,
-  TIERS, tierFeeLabel, stageMarksFor,
+  stageMarksFor,
   PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, CONTENT_FORMATS, GENDERS, AGE_BANDS,
   INFLUENCER_STYLES, EXCLUDE_KEYWORDS,
-  parseTierCounts, serializeTierCounts, chosenTiers, totalHeadcount,
-  allocatedFloor, allocatedCeiling, remainingBudget, canAddOne, affordableCount,
-  derivedTitle, derivedRequirements, derivedUnitFee, contentFormatLabel,
-  type TierCounts, type TierKey,
+  derivedTitle, derivedRequirements, contentFormatLabel,
 } from '../../utils/campaignBrief';
+
+/**
+ * 광고비 지급형의 최소 집행 예산.
+ *
+ * 픽스폴리오는 마이크로 인플루언서 시딩·어필리에이트 플랫폼이라, 등록 화면에서
+ * 나노·마이크로·매크로·메가 규모도, 모집 인원도 묻지 않는다. 브랜드는 예산만
+ * 정하고, 후보는 담당자가 마이크로 인플루언서 중심으로 리스트업한다.
+ */
+const MIN_PAID_BUDGET = 100_000;
 
 /**
  * 캠페인 등록.
@@ -34,9 +40,10 @@ import {
  * 예산 5,000만원을 시딩 단가로 나누면 500명이 나오는데, 브랜드가 실제로 원하는 것은
  * "메가 한 명을 중심에 두고 마이크로를 여러 명" 같은 구성이었다.
  *
- * 그래서 패키지를 없애고 두 가지를 직접 받는다. 예산과 규모별 인원이다. 인원을 계산해
- * 주는 대신, 각 규모의 최소 단가로 배분액을 계산해 예산을 넘기지 못하게 막는다. 브랜드는
- * 남은 예산을 보면서 구성을 직접 굴려 볼 수 있고, 나온 구성은 정의상 예산 안에 있다.
+ * 그래서 패키지를 없애고 예산과 인원을 직접 받는다. 한동안은 나노·마이크로·매크로·메가
+ * 규모별로 인원을 배분하게 했지만, 픽스폴리오를 마이크로 인플루언서 시딩·어필리에이트
+ * 플랫폼으로 잡으면서 규모 선택과 모집 인원을 없앴다. 광고비 지급형은 예산만 받고,
+ * 몇 명과 진행할지는 담당자의 리스트업과 브랜드의 선정으로 정해진다.
  *
  * 진행 방식은 세 갈래다. 광고비 지급형은 구성안·콘텐츠 검수를 거치고 정산이 붙는다.
  * 제품 협찬형은 광고비 없이 제품만 제공하므로 검수와 정산 단계가 없다. 공동구매는
@@ -143,23 +150,6 @@ const isEmail = (raw: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim());
 const splitCsv = (raw: unknown): string[] =>
   String(raw ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
-/**
- * 수정 모드에서 규모별 인원을 되읽는다.
- *
- * 규모별 인원이 생기기 전에 등록된 캠페인은 tier_counts 가 비어 있고 follower_tiers
- * 에 고른 구간만 남아 있다. 그 구간들을 인원 0 으로 골라 둔 상태로 살려 둔다 —
- * 그러지 않으면 수정 화면에서 브랜드가 예전에 고른 조건이 통째로 사라진 것처럼 보인다.
- */
-const initialTierCounts = (editing: CampaignBriefDraft | null): TierCounts => {
-  const parsed = parseTierCounts(editing?.tier_counts);
-  if (Object.keys(parsed).length > 0) return parsed;
-  const legacy: TierCounts = {};
-  splitCsv(editing?.follower_tiers).forEach(key => {
-    if (TIERS.some(t => t.key === key)) legacy[key as TierKey] = 0;
-  });
-  return legacy;
-};
-
 /** 단계별 작성 상태. 사이드바에서 완료/미입력으로 보여 준다. */
 type FieldState = { label: string; done: boolean; required: boolean };
 
@@ -242,7 +232,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     influencer_ages: splitCsv(editing?.influencer_ages),
     sns_category: editing?.sns_category || '',
     ad_objective: editing?.ad_objective || 'awareness',
-    tier_counts: initialTierCounts(editing),
     target_audience: editing?.target_audience || '',
     influencer_styles: splitCsv(editing?.influencer_styles),
     exclude_keywords: splitCsv(editing?.exclude_keywords),
@@ -316,14 +305,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const commissionRate = Number(digitsOnly(form.commission_rate) || 0);
   // 담당자 연락처는 보기 좋게 하이픈을 넣은 채로 들고 있고, 검사와 저장은 숫자로 한다.
   const contactPhoneDigits = digitsOnly(form.contact_phone);
-  const counts = form.tier_counts;
-  // 모집 인원은 방식에 따라 다른 곳에서 나온다 — 배분한 인원 합계이거나, 직접 받은 인원이다.
-  const headcount = picksInfluencer ? totalHeadcount(counts) : applyHeadcount;
-  const floorSum = allocatedFloor(counts);
-  const ceilingSum = allocatedCeiling(counts);
-  const leftover = remainingBudget(budgetKrw, counts);
-  const cheapestFee = Math.min(...TIERS.map(t => t.minFee));
-  const overBudget = picksInfluencer && budgetKrw > 0 && floorSum > budgetKrw;
+  // 광고비 지급형은 모집 인원을 묻지 않는다(0 = 정해 두지 않음). 지원을 받는 방식만 인원을 받는다.
+  const headcount = picksInfluencer ? 0 : applyHeadcount;
   const badCommission =
     isGroupBuy &&
     (commissionRate < COMMISSION_RANGE.min || commissionRate > COMMISSION_RANGE.max);
@@ -348,36 +331,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
   // 지금 단계의 key. 위 useEffect 가 반영되기 전 한 번은 범위를 넘을 수 있어 기본값을 둔다.
   const stepKey = steps[step]?.key || steps[0].key;
-
-  // ------------------------------------------------------------------ 규모별 인원
-  // 규모별 배분은 광고비 지급형에서만 쓰므로 기준은 예산 하나다. canAddOne 의 수량
-  // 인자는 지원을 받아 고르는 방식용이라 여기서는 0 을 넘긴다.
-  /** 카드를 누르면 그 구간을 고르거나 뺀다. 처음 고를 때 한 명으로 시작한다. */
-  const toggleTier = (key: TierKey) =>
-    setForm(p => {
-      const next: TierCounts = { ...p.tier_counts };
-      if (next[key] !== undefined) {
-        delete next[key];
-        return { ...p, tier_counts: next };
-      }
-      const tier = TIERS.find(t => t.key === key)!;
-      const seed = canAddOne(tier, p.reward_mode, Number(digitsOnly(p.budget_krw) || 0), 0, next) ? 1 : 0;
-      next[key] = seed;
-      return { ...p, tier_counts: next };
-    });
-
-  const bumpTier = (key: TierKey, delta: number) =>
-    setForm(p => {
-      const next: TierCounts = { ...p.tier_counts };
-      const current = next[key] || 0;
-      if (delta > 0) {
-        const tier = TIERS.find(t => t.key === key)!;
-        const budget = Number(digitsOnly(p.budget_krw) || 0);
-        if (!canAddOne(tier, p.reward_mode, budget, 0, next)) return p;
-      }
-      next[key] = Math.max(0, current + delta);
-      return { ...p, tier_counts: next };
-    });
 
   // ------------------------------------------------------------------ 이미지
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -472,7 +425,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         ? [{ label: '콘텐츠 형식', done: !!form.content_format, required: true }]
         : []),
       ...(picksInfluencer
-        ? [{ label: '광고 집행 예산', done: budgetKrw >= cheapestFee, required: true }]
+        ? [{ label: '광고 집행 예산', done: budgetKrw >= MIN_PAID_BUDGET, required: true }]
         : [{ label: mode.headcountLabel, done: applyHeadcount > 0, required: true }]),
       ...(isGroupBuy
         ? [
@@ -494,7 +447,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '연령', done: form.influencer_ages.length > 0, required: true },
       { label: 'SNS 채널 카테고리', done: !!form.sns_category, required: true },
       { label: '광고 목적', done: !!form.ad_objective, required: true },
-      { label: '규모별 모집 인원', done: headcount > 0 && !overBudget, required: true },
       { label: '타겟 오디언스', done: !!form.target_audience.trim(), required: false },
       { label: '인플루언서 스타일', done: form.influencer_styles.length > 0, required: false },
       { label: '제외 조건', done: form.exclude_keywords.length > 0, required: false },
@@ -502,7 +454,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   }), [
     form, mode, picksInfluencer, isGroupBuy, hasRecruitPeriod, hasUploadSchedule, conceptLabel,
     applyHeadcount, commissionRate, productPrice, salePrice, badSalePrice,
-    badCommission, budgetKrw, cheapestFee, headcount, overBudget,
+    badCommission, budgetKrw, headcount,
   ]);
 
   /** 그 단계에서 반드시 있어야 하는 것. 없으면 다음으로 넘기지 않는다. */
@@ -528,8 +480,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     }
     if (key === 'campaign') {
       if (picksInfluencer) {
-        if (budgetKrw < cheapestFee) {
-          return `광고 집행 예산은 ${formatKoreanWon(cheapestFee)}부터 입력할 수 있습니다.`;
+        if (budgetKrw < MIN_PAID_BUDGET) {
+          return `광고 집행 예산은 ${formatKoreanWon(MIN_PAID_BUDGET)}부터 입력할 수 있습니다.`;
         }
       } else if (applyHeadcount < 1) {
         return `${mode.headcountLabel}을 1명 이상 입력해 주세요.`;
@@ -559,8 +511,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     if (key === 'influencer') {
       if (form.influencer_ages.length === 0) return '희망 연령대를 한 개 이상 선택해 주세요.';
       if (!form.sns_category) return 'SNS 채널 카테고리를 선택해 주세요.';
-      if (headcount < 1) return '규모를 고르고 모집 인원을 1명 이상 배분해 주세요.';
-      if (overBudget) return `배분한 인원의 집행액이 예산을 ${formatKoreanWon(floorSum - budgetKrw)} 넘습니다.`;
       return '';
     }
     return '';
@@ -596,10 +546,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         gender: form.influencer_gender,
         ages: form.influencer_ages,
         snsCategory: form.sns_category,
-        tierCounts: counts,
         styles: form.influencer_styles,
         excludes: form.exclude_keywords,
-        headcount: applyHeadcount,
+        headcount,
         channel: form.upload_channel,
       });
 
@@ -617,7 +566,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         // 금액은 비워 둔다. 0 을 넣으면 인플루언서 화면에 보상이 "0원"으로 크게 찍힌다.
         // 공동구매는 판매 수수료로 정산하므로 '수익 배분'으로 남긴다.
         reward_type: isBarter ? 'product' : isGroupBuy ? 'revenue_share' : 'fixed',
-        reward_amount: picksInfluencer ? String(derivedUnitFee(form.reward_mode, counts)) : '',
+        reward_amount: '',
         requirements,
         max_applicants: headcount,
         // 모집기간. 지원을 받는 방식은 브랜드가 고른 기간을 그대로 쓰고, 담당자가
@@ -643,7 +592,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         // 지원을 받아 고르는 방식에는 희망 인플루언서 조건이 없다. 폼에 남아 있는 값이
         // 있어도(방식을 바꾸기 전에 골라 둔 값) 보내지 않는다 — 조건으로 저장되면
         // 지원 화면에 "여성 20대 나노"가 걸려 지원 자체가 줄어든다.
-        tier_counts: picksInfluencer ? serializeTierCounts(counts) : '',
+        // 규모별 배분은 더 이상 받지 않는다. 예전 캠페인을 수정해 저장하면 비워진다.
+        tier_counts: '',
         // 패키지를 걷어내기 전에 만들어진 화면들이 아직 이 값을 읽는다. 진행 방식에서
         // 짝이 되는 값을 남겨 둬야 그쪽에서 협업 단계를 엉뚱하게 잡지 않는다.
         package_tier: isBarter ? 'seeding' : 'full',
@@ -658,10 +608,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         influencer_gender: picksInfluencer ? form.influencer_gender : 'any',
         influencer_ages: picksInfluencer ? form.influencer_ages : [],
         sns_category: picksInfluencer ? form.sns_category : '',
-        // 담당자 리스트업은 고른 구간만 읽는다. 인원까지 필요한 화면은 tier_counts 를 본다.
-        follower_tiers: picksInfluencer
-          ? chosenTiers(counts).filter(t => (counts[t.key] || 0) > 0).map(t => t.key)
-          : [],
+        // 규모(팔로워 구간)는 고르지 않는다. 담당자는 마이크로 인플루언서 중심으로 찾는다.
+        follower_tiers: [],
         // 희망 최소 조회수는 더 이상 받지 않는다. 컬럼과 예전 캠페인의 값은 그대로
         // 두고(이미 저장된 조건이므로), 새로 등록하는 캠페인에서는 0 으로 남긴다.
         // 수정할 때는 아예 보내지 않는다 — 0 을 보내면 서버가 예전 값을 지웠다.
@@ -746,57 +694,15 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           ? '커머스는 무엇이 다를까요?'
           : '제품 협찬형은 무엇이 다를까요?',
       body: picksInfluencer
-        ? '쓸 수 있는 총액을 적어 주세요. 다음 단계에서 규모별로 인원을 배분할 때, 이 예산 안에서만 담을 수 있게 잔액을 보여 드립니다.'
+        ? '쓸 수 있는 총액을 적어 주세요. 담당자가 이 예산 안에서 진행할 후보를 리스트업해 드리고, 1인 금액은 후보를 확정할 때 정해집니다.'
         : isGroupBuy
           ? '캠페인 협업 목록에 올라가고, 판매를 함께할 인플루언서가 직접 지원합니다. 광고비 대신 판매 수수료로 정산하며, 콘텐츠 검수와 수수료 정산 단계가 있습니다.'
           : '캠페인 협업 목록에 올라가고, 인플루언서가 직접 지원합니다. 광고비 없이 제품만 제공하므로 구성안·콘텐츠 검수 단계가 없고, 가이드를 전달한 뒤 업로드를 확인하는 흐름으로 진행됩니다.',
     },
     influencer: {
-      title: '규모는 섞는 게 좋을까요?',
-      body: '메가 한 명으로 화제를 만들고 마이크로·나노로 후속 반응을 채우는 구성이 가장 흔합니다. 배분액은 각 규모 금액 구간의 시작값으로 계산하고, 실제 금액은 담당자가 후보를 확정할 때 그 구간 안에서 정해집니다.',
+      title: '왜 마이크로 인플루언서일까요?',
+      body: '팬층이 뚜렷한 마이크로 인플루언서 여러 명이 같은 시기에 올리면 반응률이 안정적이고 구매 전환으로 이어지기 쉽습니다. 조건만 정해 주시면 담당자가 맞는 후보를 리스트업해 드립니다.',
     },
-  };
-
-  /** 예산 대비 배분 상태. 규모 카드 위에 한 줄로 얹는다. */
-  const allocationBar = () => {
-    const ratio = budgetKrw > 0 ? Math.min(100, Math.round((floorSum / budgetKrw) * 100)) : 0;
-    return (
-      <div className={`rounded-2xl border p-4 ${overBudget ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-black text-slate-500">배분한 집행액</p>
-            <p className={`text-lg font-black ${overBudget ? 'text-rose-600' : 'text-slate-900'}`}>
-              {formatKoreanWon(floorSum) || '0원'}
-              <span className="text-[11px] font-bold text-slate-400 ml-1.5">
-                / {formatKoreanWon(budgetKrw) || '0원'}
-              </span>
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] font-black text-slate-500">남은 예산</p>
-            <p className={`text-sm font-black ${overBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
-              {formatKoreanWon(leftover) || '0원'}
-            </p>
-          </div>
-        </div>
-        <div className="h-1.5 rounded-full bg-white mt-3 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${overBudget ? 'bg-rose-500' : 'bg-slate-900'}`}
-            style={{ width: `${ratio}%` }}
-          />
-        </div>
-        {headcount > 0 && (
-          <p className="text-[11px] text-slate-400 font-medium mt-2">
-            실제 집행액은 규모별 단가 구간에 따라 {formatKoreanWon(floorSum)} ~ {formatKoreanWon(ceilingSum)} 사이에서 확정됩니다.
-          </p>
-        )}
-        {overBudget && (
-          <p className="text-[11px] text-rose-600 font-black mt-2">
-            예산을 넘었습니다. 인원을 줄이거나 예산을 늘려 주세요.
-          </p>
-        )}
-      </div>
-    );
   };
 
   return (
@@ -1203,7 +1109,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     <span className="text-sm font-black text-slate-500">원</span>
                   </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-1.5">
-                    쓸 수 있는 총액을 적어 주세요. 다음 단계에서 이 예산 안에서 규모별 인원을 배분합니다.
+                    쓸 수 있는 총액을 적어 주세요. 담당자가 이 예산 안에서 후보를 리스트업합니다.
                   </p>
                 </div>
               ) : (
@@ -1412,102 +1318,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               </div>
 
-              {/* ------------------------------------------ 규모별 모집 인원 */}
-              <div>
-                <label className={LABEL}>
-                  규모별 모집 인원 * <span className="text-slate-400 font-bold">(예산 안에서 배분)</span>
-                </label>
-
-                {allocationBar()}
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-                  {TIERS.map(t => {
-                    const chosen = counts[t.key] !== undefined;
-                    const room = affordableCount(t, budgetKrw, counts);
-                    return (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onClick={() => toggleTier(t.key)}
-                        className={`text-left p-3 rounded-xl border-2 transition-colors ${
-                          chosen ? 'border-slate-900 bg-slate-50' : 'border-slate-100 hover:border-slate-300'
-                        }`}
-                      >
-                        <span className="flex items-center justify-between gap-1">
-                          <span className="text-xs font-black text-slate-900">{t.label}</span>
-                          {chosen && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-slate-900 text-white text-[9px] font-black">
-                              {counts[t.key]}명
-                            </span>
-                          )}
-                        </span>
-                        <span className="block text-[10px] text-slate-400 font-bold mt-1">{t.followers}</span>
-                        <span className="block text-[10px] text-slate-500 font-black mt-1">
-                          1인 {tierFeeLabel(t)}
-                        </span>
-                        <span className="block text-[10px] text-slate-400 font-medium mt-1 leading-tight">
-                          {chosen ? `${room}명 더 배분 가능` : t.note}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* 고른 규모마다 인원 조절 줄. 고르기 전에는 나오지 않는다. */}
-                {chosenTiers(counts).length > 0 ? (
-                  <div className="mt-3 rounded-2xl border border-slate-100 divide-y divide-slate-100 overflow-hidden">
-                    {chosenTiers(counts).map(t => {
-                      const n = counts[t.key] || 0;
-                      const addable = canAddOne(t, form.reward_mode, budgetKrw, 0, counts);
-                      return (
-                        <div key={t.key} className="flex items-center justify-between gap-3 px-4 py-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-black text-slate-900">
-                              {t.label}
-                              <span className="text-[10px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
-                            </p>
-                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                              1인 {tierFeeLabel(t)}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => bumpTier(t.key, -1)}
-                              disabled={n <= 0}
-                              className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 font-black text-sm disabled:opacity-30 hover:border-slate-400"
-                            >
-                              −
-                            </button>
-                            <span className="w-10 text-center text-sm font-black text-slate-900">{n}</span>
-                            <button
-                              type="button"
-                              onClick={() => bumpTier(t.key, 1)}
-                              disabled={!addable}
-                              className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 font-black text-sm disabled:opacity-30 hover:border-slate-400"
-                            >
-                              +
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleTier(t.key)}
-                              className="ml-1 text-[10px] font-black text-slate-400 hover:text-rose-500"
-                            >
-                              제거
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    규모를 고르면 인원을 배분할 수 있습니다.
-                    {budgetKrw <= 0 && ' 먼저 캠페인 설정에서 예산을 입력해 주세요.'}
-                  </p>
-                )}
-              </div>
-
               <div>
                 <label className={LABEL}>타겟 오디언스</label>
                 <input
@@ -1612,25 +1422,17 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
             <p className="text-[11px] font-black text-white/60">현재 설정</p>
             <p className="text-sm font-black mt-2">{mode.label}</p>
             <div className="mt-3 space-y-1.5 text-[11px] font-bold">
-              <div className="flex items-center justify-between">
-                <span className="text-white/50">{mode.headcountLabel}</span>
-                <span>{headcount}명</span>
-              </div>
+              {!picksInfluencer && (
+                <div className="flex items-center justify-between">
+                  <span className="text-white/50">{mode.headcountLabel}</span>
+                  <span>{headcount}명</span>
+                </div>
+              )}
               {picksInfluencer ? (
                 <>
                   <div className="flex items-center justify-between">
                     <span className="text-white/50">집행 예산</span>
                     <span>{formatKoreanWon(budgetKrw) || '0원'}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-white/50">배분</span>
-                    <span>{formatKoreanWon(floorSum) || '0원'}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-white/50">잔액</span>
-                    <span className={overBudget ? 'text-rose-300' : 'text-emerald-300'}>
-                      {overBudget ? `-${formatKoreanWon(floorSum - budgetKrw)}` : formatKoreanWon(leftover) || '0원'}
-                    </span>
                   </div>
                 </>
               ) : (
@@ -1690,15 +1492,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               )}
             </div>
-            {picksInfluencer && chosenTiers(counts).length > 0 && (
-              <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-1.5">
-                {chosenTiers(counts).map(t => (
-                  <span key={t.key} className="px-2 py-1 rounded-full bg-white/10 text-[10px] font-black">
-                    {t.label} {counts[t.key]}명
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
@@ -1717,7 +1510,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 GENDERS.find(g => g.value === form.influencer_gender)?.label,
                 ...form.influencer_ages,
                 form.sns_category,
-                ...chosenTiers(counts).map(t => `${t.label} ${counts[t.key]}명`),
                 ...form.influencer_styles,
               ]
                 .filter(Boolean)

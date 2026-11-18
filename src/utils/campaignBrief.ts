@@ -534,7 +534,8 @@ export const derivedRequirements = (input: {
   gender: string;
   ages: string[];
   snsCategory: string;
-  tierCounts: TierCounts;
+  /** 예전 캠페인의 규모별 배분. 새 등록 화면은 보내지 않는다. */
+  tierCounts?: TierCounts;
   styles: string[];
   excludes: string[];
   /** 지원을 받아 고르는 방식의 모집·협찬 인원. */
@@ -568,13 +569,16 @@ export const derivedRequirements = (input: {
   if (who) lines.push(`희망 인플루언서: ${who}`);
   if (input.snsCategory) lines.push(`채널 카테고리: ${input.snsCategory}`);
 
-  const picked = chosenTiers(input.tierCounts).filter(t => (input.tierCounts[t.key] || 0) > 0);
+  const tierCounts = input.tierCounts || {};
+  const picked = chosenTiers(tierCounts).filter(t => (tierCounts[t.key] || 0) > 0);
   if (picked.length) {
     lines.push(
       `모집 구성: ${picked
-        .map(t => `${t.label} ${input.tierCounts[t.key]}명(1인 ${tierFeeLabel(t)})`)
+        .map(t => `${t.label} ${tierCounts[t.key]}명(1인 ${tierFeeLabel(t)})`)
         .join(' · ')}`,
     );
+  } else if (input.headcount && input.headcount > 0) {
+    lines.push(`${def.headcountLabel}: ${input.headcount}명`);
   }
   if (input.styles.length) lines.push(`선호 스타일: ${input.styles.join(', ')}`);
   if (input.excludes.length) lines.push(`제외 조건: ${input.excludes.join(', ')}`);
