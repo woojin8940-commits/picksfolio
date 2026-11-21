@@ -68,6 +68,23 @@ async function call(
   }
 }
 
+/** 저장된 고정 메뉴의 postback 값 목록. 읽기에 실패하면 null(확인 불가). */
+async function readMenuPayloads(host: string, node: string, accessToken: string): Promise<string[] | null> {
+  try {
+    const url = new URL(`https://${host}/${GRAPH_VERSION}/${encodeURIComponent(node)}/messenger_profile`);
+    url.searchParams.set("fields", "persistent_menu");
+    url.searchParams.set("platform", "instagram");
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as any;
+    const menus = data?.data?.[0]?.persistent_menu;
+    if (!Array.isArray(menus)) return [];
+    return menus.flatMap((m: any) => (m?.call_to_actions || []).map((c: any) => String(c?.payload || "")));
+  } catch {
+    return null;
+  }
+}
+
 /** 고정 메뉴에 상담원 시작 버튼 하나를 등록한다. */
 export async function syncAiConsultMenu(args: {
   accessToken: string;
@@ -77,7 +94,8 @@ export async function syncAiConsultMenu(args: {
   const { accessToken, tokenSource, igId } = args;
   if (!accessToken) return { ok: false, error: "액세스 토큰이 없습니다." };
   const button = { type: "postback", title: AI_CONSULT_BUTTON_LABEL, payload: AI_CONSULT_START_PAYLOAD };
-  const group = { locale: "default", composer_input_disabled: false, call_to_actions: [button] };
+  // 인스타그램은 composer_input_disabled · webview_height_ratio 를 지원하지 않는다(문서 기준).
+  const group = { locale: "default", call_to_actions: [button] };
   // 아이스브레이커와 같은 이유로 문서 두 갈래(platform 필수 / 생략)를 모두 시도한다.
   const variants = [
     { platform: "instagram", persistent_menu: [group] },
@@ -88,7 +106,14 @@ export async function syncAiConsultMenu(args: {
   for (const node of nodes) {
     for (const body of variants) {
       const r = await call("POST", host, node, accessToken, body);
-      if (r.ok) return { ok: true };
+      if (r.ok) {
+        // 성공 응답이 와도 실제로 저장됐는지 한 번 읽어서 확인한다.
+        const saved = await readMenuPayloads(host, node, accessToken);
+        if (saved === null || saved.includes(AI_CONSULT_START_PAYLOAD)) return { ok: true };
+        lastError = "인스타그램이 고정 메뉴를 저장하지 않았습니다.";
+        console.warn(`[persistent-menu] saved menu missing button (node=${node === "me" ? "me" : "ig-id"})`);
+        continue;
+      }
       lastError = r.error || lastError;
       console.warn(`[persistent-menu] attempt failed (node=${node === "me" ? "me" : "ig-id"}): ${r.error}`);
       if (!r.retryable) return { ok: false, error: lastError };
