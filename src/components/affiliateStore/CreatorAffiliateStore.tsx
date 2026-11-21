@@ -1034,7 +1034,7 @@ const AffiliateStoreBody: React.FC<CreatorAffiliateStoreProps & { mode: StoreMod
         <h2 className="text-xl md:text-3xl font-black text-slate-900">{mode === 'my' ? 'MY 어필리에이트' : '어필리에이트'}</h2>
         <p className="text-xs md:text-sm text-slate-500 mt-1">
           {mode === 'my'
-            ? '진행 중인 어필리에이트의 전용 링크 · 콘텐츠 업로드 · 판매 성과와 내 신청 · 정산을 확인하세요.'
+            ? '진행 중인 어필리에이트의 전용 링크 · 판매 성과와 내 신청 · 정산을 확인하세요.'
             : '브랜드들이 올린 상품을 골라 판매 신청하고, 판매한 만큼 수수료를 받으세요.'}
         </p>
       </header>

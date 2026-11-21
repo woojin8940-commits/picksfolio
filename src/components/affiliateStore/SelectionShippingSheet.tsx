@@ -107,7 +107,6 @@ const SelectionShippingSheet: React.FC<Props> = ({ request, onClose, onDone }) =
             <CalendarClock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="text-xs leading-relaxed text-amber-800">
               <p className="font-black">업로드 일정은 픽스폴리오 담당자가 연락드려 함께 조율해요.</p>
-              <p className="mt-0.5 text-amber-700">업로드한 뒤에는 MY 어필리에이트에서 콘텐츠 링크와 파트너십 코드를 올려 주세요. 브랜드가 확인할 수 있어요.</p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">

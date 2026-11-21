@@ -39,7 +39,7 @@ import { AffiliateProgressBoard, AffiliateSalesBoard } from './BrandAffiliatePro
  *   승인               → 상품 관리 · 판매 신청 관리
  *
  * 진행관리(예전 '판매 신청')는 캠페인 협업처럼 진행 중인 어필리에이트(신청을 받은 상품)를 카드로 깔고,
- * 하나를 누르면 지원 현황 · 선정 인플루언서 · 진행 단계(배송 현황 · 업로드 링크 · 파트너십 코드)
+ * 하나를 누르면 지원 현황 · 선정 인플루언서 · 진행 단계(배송 현황)
  * · 판매 현황 탭이 열린다(진행 단계 · 판매 현황은 BrandAffiliateProgress).
  *
  * 판매 신청은 상품별로 묶어 본다. 상품마다 대기 · 선정 · 반려 수와 "새 신청"(아직 확인 안 함) 알림을 보여 주고,
@@ -455,7 +455,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
     }
   };
 
-  /** 선정 카드 아래 한 줄 — 배송 · 업로드 단계 요약(입력은 진행 단계 탭에서). */
+  /** 선정 카드 아래 한 줄 — 배송 단계 요약(입력은 진행 단계 탭에서). */
   const progressSummary = (r: StoreRequest) => {
     if (r.status !== 'approved') return null;
     if (r.shippingStatus === 'declined') {
@@ -474,7 +474,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
       >
         <span className="flex-1 min-w-0">
           <span className="font-black text-slate-700">
-            {r.shippingStatus === 'info_submitted' ? '배송정보 도착 · 협찬 상품을 보내고 송장을 입력해 주세요' : r.shippingStatus === 'awaiting_info' ? '인플루언서 배송정보 입력 대기' : r.contentUrl ? '콘텐츠 업로드 완료' : '콘텐츠 업로드 대기'}
+            {r.shippingStatus === 'info_submitted' ? '배송정보 도착 · 협찬 상품을 보내고 송장을 입력해 주세요' : r.shippingStatus === 'awaiting_info' ? '인플루언서 배송정보 입력 대기' : '발송 완료 · 판매 링크 오픈'}
           </span>
         </span>
         <span className="text-blue-600 font-black shrink-0">진행 단계 <ChevronRight className="inline w-3 h-3" /></span>
@@ -695,7 +695,7 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
         ) : (
           <div className="space-y-2.5">
             <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 font-bold">
-              진행 중인 어필리에이트예요. 상품을 누르면 지원 · 선정 인플루언서(한 화면) · 진행 단계(배송 현황 · 업로드 링크 · 파트너십 코드) · 판매 현황을 볼 수 있어요.
+              진행 중인 어필리에이트예요. 상품을 누르면 지원 · 선정 인플루언서(한 화면) · 진행 단계(배송 현황) · 판매 현황을 볼 수 있어요.
               선정하면 인플루언서가 배송정보를 입력하고, 협찬 상품을 보내 송장번호를 입력하면 전용 판매 링크가 열려요. 업로드 일정은 픽스폴리오 담당자가 양쪽과 조율해요.
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">

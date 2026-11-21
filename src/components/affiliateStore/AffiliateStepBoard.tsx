@@ -10,8 +10,10 @@ import { copyText } from '../../utils/clipboard';
 /**
  * 어필리에이트 진행 단계 — 캠페인 진행사항(CampaignProcessBoard)과 같은 모양의 한 화면.
  *
- *   1. 제품 배송                    인플루언서가 배송지를 적고, 브랜드가 보내고 송장을 입력한다
- *   2. 업로드 링크 · 파트너십 코드   인플루언서가 올린 콘텐츠 링크와 브랜디드 콘텐츠 파트너십 코드
+ *   1. 제품 배송   인플루언서가 배송지를 적고, 브랜드가 보내고 송장을 입력한다
+ *
+ * 예전에는 2단계(업로드 링크 · 파트너십 코드)가 있었지만 인플루언서 입력을 줄이려고 뺐다.
+ * DB 칸(content_url · partnership_code)과 예전에 올라온 값은 그대로 남아 있다.
  *
  * 업로드 일정은 단계로 두지 않는다 — 선정 뒤 운영 담당자가 브랜드 · 인플루언서 사이에서 직접 조율한다.
  *
@@ -114,7 +116,8 @@ export function affiliateSteps(r: StoreRequest, role: Role): StepState[] {
     waitingNote: '인플루언서가 콘텐츠를 업로드하면 링크와 파트너십 코드가 여기에 나와요. 캠페인 이력에서 2차 광고로 돌릴 수 있어요.',
   };
 
-  return [shipping, content];
+  void content; // 업로드 링크 · 파트너십 코드 단계는 더 이상 보여 주지 않는다.
+  return [shipping];
 }
 
 const Section: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
@@ -132,8 +135,9 @@ const AffiliateStepBoard: React.FC<{
   const steps = affiliateSteps(r, role);
   const declined = r.shippingStatus === 'declined';
   const currentKey = (steps.find(s => s.current) || steps.find(s => !s.done) || steps[steps.length - 1]).key;
-  const [open, setOpen] = useState<AffiliateStepKey | ''>(focusStep || currentKey);
-  useEffect(() => { if (focusStep) setOpen(focusStep); }, [focusStep]);
+  const known = (k?: AffiliateStepKey) => (k && steps.some(s => s.key === k) ? k : undefined);
+  const [open, setOpen] = useState<AffiliateStepKey | ''>(known(focusStep) || currentKey);
+  useEffect(() => { const k = known(focusStep); if (k) setOpen(k); }, [focusStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [busy, setBusy] = useState<'' | 'ship' | 'receive' | 'content'>('');
   const [error, setError] = useState('');
