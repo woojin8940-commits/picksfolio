@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Check, CheckCircle2, Loader2, Truck, Upload, Users } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, Loader2, Truck, Users } from 'lucide-react';
 import {
   affiliateStoreService,
   won,
@@ -17,14 +17,14 @@ import AffiliateStepBoard, { type AffiliateStepKey } from './AffiliateStepBoard'
  *
  * 진행 단계는 캠페인 진행사항 보드와 같은 모양이다 — 단계를 가로로 늘어놓은 칸에 인플루언서 카드가 들어가고,
  * 카드를 누르면 그 사람의 진행 단계(AffiliateStepBoard)가 그 단계가 펼쳐진 채로 열린다.
- * 어필리에이트라 단계는 둘이다(+ 진행 완료 칸). 업로드 일정은 운영 담당자가 양쪽 사이에서 조율한다.
+ * 어필리에이트 단계는 제품 배송 하나다(+ 발송 완료 칸). 업로드 일정은 운영 담당자가 양쪽 사이에서 조율한다.
  *   배송 현황      인플루언서가 입력한 배송지 → 브랜드가 협찬 상품을 보내고 송장번호 입력
- *   업로드 링크    인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크 · 파트너십 코드(캠페인 이력에서 2차 광고로 돌린다)
+ * 업로드 링크 · 파트너십 코드 입력 단계는 인플루언서 입력을 줄이려고 뺐다.
  *
  * 판매 현황은 이 상품이 픽스폴리오(인플루언서 전용 링크)를 통해 얼마나 팔렸는지와 인플루언서별 판매.
  */
 
-type ColumnKey = 'shipping' | 'content' | 'done';
+type ColumnKey = 'shipping' | 'done';
 
 type Column = {
   key: ColumnKey;
@@ -38,16 +38,14 @@ type Column = {
 /** 보드의 칸 — 캠페인 진행사항 보드와 같은 모양. 마지막 칸은 세 단계를 다 지난 사람이 서는 자리다. */
 const COLUMNS: Column[] = [
   { key: 'shipping', title: '제품 배송', focus: 'shipping', reviewLabel: '발송 처리', emptyLabel: '배송을 기다리는 인플루언서가 없습니다.', icon: <Truck className="w-4 h-4" /> },
-  { key: 'content', title: '업로드 링크 · 코드', focus: 'content', emptyLabel: '업로드 · 파트너십 코드를 기다리는 인플루언서가 없습니다.', icon: <Upload className="w-4 h-4" /> },
-  { key: 'done', title: '진행 완료', focus: 'content', emptyLabel: '링크와 파트너십 코드가 모두 올라오면 이 칸으로 넘어옵니다.', icon: <CheckCircle2 className="w-4 h-4" /> },
+  { key: 'done', title: '발송 완료', focus: 'shipping', emptyLabel: '협찬 상품을 보내고 송장번호를 입력하면 이 칸으로 넘어옵니다.', icon: <CheckCircle2 className="w-4 h-4" /> },
 ];
-const ORDER: ColumnKey[] = ['shipping', 'content', 'done'];
+const ORDER: ColumnKey[] = ['shipping', 'done'];
 
 /** 이 협업이 지금 서 있는 칸. */
 const columnOf = (r: StoreRequest): ColumnKey => {
   const st = r.shippingStatus || '';
   if (st === 'awaiting_info' || st === 'info_submitted') return 'shipping';
-  if (!r.contentUrl || !r.partnershipCode) return 'content';
   return 'done';
 };
 
@@ -132,7 +130,7 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
       <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
         <Users className="w-8 h-8 text-slate-300 mx-auto mb-3" />
         <p className="text-sm font-black text-slate-700">아직 선정된 인플루언서가 없어요</p>
-        <p className="text-xs text-slate-400 mt-1">지원 · 선정 인플루언서에서 인플루언서를 선정하면 여기서 제품 배송 · 업로드 링크를 관리해요.</p>
+        <p className="text-xs text-slate-400 mt-1">지원 · 선정 인플루언서에서 인플루언서를 선정하면 여기서 제품 배송을 관리해요.</p>
       </div>
     );
   }
@@ -246,9 +244,7 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
                   const frame = 'border-slate-200/70';
                   const working = column.key === 'shipping'
                     ? (r.shippingStatus === 'awaiting_info' ? '배송정보 입력 대기' : '발송 대기')
-                    : column.key === 'content'
-                      ? (r.contentUrl ? '파트너십 코드 대기' : r.deliveredAt ? '콘텐츠 제작 중' : r.shippingStatus ? '상품 수령 대기' : '업로드 대기')
-                      : '진행 완료';
+                    : r.deliveredAt ? '상품 수령 완료 · 판매 링크 오픈' : '판매 링크 오픈';
                   return (
                     <div key={r.id} className={`rounded-xl border bg-white ${frame}`}>
                       <button type="button" onClick={() => setDetail({ id: r.id, focus: column.focus })} className="w-full text-left px-2.5 pt-2.5 pb-2">
@@ -263,11 +259,9 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
                           </div>
                         </div>
                         <div className="mt-2 flex items-center gap-1.5">
-                          {column.key === 'done' || column.key === 'content' ? (
+                          {column.key === 'done' ? (
                             <p className="text-[11px] font-bold text-slate-500 truncate">
-                              {r.contentUrl
-                                ? (r.contentSubmittedAt ? `업로드 ${korDate(r.contentSubmittedAt)}` : '업로드 완료')
-                                : r.shippedAt ? `발송 ${korDate(r.shippedAt)} · 업로드 전` : '업로드 전'}
+                              {r.shippedAt ? `발송 ${korDate(r.shippedAt)}${r.trackingCompany ? ` · ${r.trackingCompany}` : ''}` : '발송 완료'}
                             </p>
                           ) : (
                             <p className="text-[11px] font-bold text-slate-400 truncate">
@@ -275,11 +269,6 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
                             </p>
                           )}
                         </div>
-                        {(column.key === 'content' || column.key === 'done') && r.contentUrl && (
-                          <p className={`mt-1.5 text-[11px] font-black truncate ${r.partnershipCode ? 'text-slate-600' : 'text-amber-600'}`}>
-                            {r.partnershipCode ? `파트너십 코드 ${r.partnershipCode}` : '파트너십 코드 대기'}
-                          </p>
-                        )}
                       </button>
                       {review ? (
                         <div className="px-2.5 pb-2.5">

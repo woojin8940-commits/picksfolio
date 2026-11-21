@@ -32,9 +32,9 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
     return () => { alive = false; };
   }, []);
 
-  // 업로드가 남은 협업(업로드 일정은 담당자가 조율한다).
+  // 배송 단계가 남은 협업(업로드 일정은 담당자가 조율한다).
   const todo = (items || [])
-    .filter(i => !i.contentUrl && i.shippingStatus !== 'declined' && !i.hiddenAt)
+    .filter(i => (i.shippingStatus === 'awaiting_info' || i.shippingStatus === 'info_submitted') && !i.hiddenAt)
     .slice(0, 3);
 
   return (
@@ -85,7 +85,7 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
           {todo.length > 0 ? (
             <div className="mt-3 divide-y divide-slate-50">
               {todo.map(i => {
-                const s = i.shippingStatus === 'awaiting_info' ? '배송정보 입력' : i.shippingStatus === 'info_submitted' ? '발송 대기' : '업로드 전';
+                const s = i.shippingStatus === 'awaiting_info' ? '배송정보 입력' : '발송 대기';
                 return (
                   <button key={i.id} onClick={onMyAffiliate} className="w-full flex items-center gap-3 py-2.5 text-left">
                     {i.productImage && <img src={i.productImage} alt="" className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0" />}
@@ -97,7 +97,7 @@ const AffiliateHomeSummary: React.FC<Props> = ({ onBrowse, onMyAffiliate }) => {
                   </button>
                 );
               })}
-              <p className="pt-2 text-[11px] text-slate-400">업로드 일정은 픽스폴리오 담당자가 연락드려 조율해요. 업로드한 뒤 MY 어필리에이트에 업로드 링크 · 파트너십 코드를 올려 주세요.</p>
+              <p className="pt-2 text-[11px] text-slate-400">업로드 일정은 픽스폴리오 담당자가 연락드려 조율해요.</p>
             </div>
           ) : items.length === 0 ? (
             <p className="mt-3 text-xs text-slate-400">아직 진행 중인 어필리에이트가 없어요. 상품을 둘러보고 판매 신청해 보세요.</p>

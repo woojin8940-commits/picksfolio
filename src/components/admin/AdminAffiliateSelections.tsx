@@ -287,19 +287,16 @@ const AdminAffiliateSelections: React.FC<{ token: string; onNewCountChange?: (n:
                   </div>
                 )}
 
-                {(r.shippingStatus === 'shipped' || !r.shippingStatus) && (
+                {/* 업로드 링크 · 파트너십 코드 입력은 없앴다. 예전에 올라온 값만 보여 준다. */}
+                {r.contentUrl && (
                   <div className="mt-3 bg-slate-50 rounded-xl p-3 text-xs space-y-1">
-                    <p className="text-[10px] font-black text-slate-400">콘텐츠 업로드</p>
-                    {r.contentUrl ? (
-                      <>
-                        <a href={r.contentUrl} target="_blank" rel="noreferrer" className="block text-blue-600 font-bold truncate">{r.contentUrl}</a>
-                        <p className={`font-bold ${r.partnershipCode ? 'text-slate-600' : 'text-amber-600'}`}>
-                          {r.partnershipCode ? `파트너십 코드 ${r.partnershipCode}` : '파트너십 코드 미입력'}
-                          {r.contentSubmittedAt ? ` · 업로드 ${dateTime(r.contentSubmittedAt)}` : ''}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="font-bold text-slate-400">아직 업로드 전 · 업로드 일정은 담당자가 양쪽과 조율해 주세요.</p>
+                    <p className="text-[10px] font-black text-slate-400">콘텐츠 업로드 (예전 입력)</p>
+                    <a href={r.contentUrl} target="_blank" rel="noreferrer" className="block text-blue-600 font-bold truncate">{r.contentUrl}</a>
+                    {(r.partnershipCode || r.contentSubmittedAt) && (
+                      <p className="font-bold text-slate-600">
+                        {r.partnershipCode ? `파트너십 코드 ${r.partnershipCode}` : ''}
+                        {r.contentSubmittedAt ? `${r.partnershipCode ? ' · ' : ''}업로드 ${dateTime(r.contentSubmittedAt)}` : ''}
+                      </p>
                     )}
                   </div>
                 )}
