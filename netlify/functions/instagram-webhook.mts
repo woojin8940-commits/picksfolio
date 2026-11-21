@@ -923,7 +923,8 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
     await sendTriggerDm(ctx, {
       recipientId: senderId,
       message: greeting!.message,
-      buttons: greeting!.buttons,
+      // 인사말은 글만 보낸다(예전에 저장된 링크 버튼도 보내지 않는다). 글 메시지여야
+      // AI 공구 상담 버튼을 같은 말풍선 아래에 붙일 수 있다.
       claimKey: inboundDmKey("greet", eventId),
       trigger: "greeting",
       ruleName: "첫 인사말",
