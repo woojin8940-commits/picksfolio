@@ -4,7 +4,7 @@ import { sendDmMessages } from "./instagram-dm.mts";
 import { claimIfNew, noteSentText, release, wasSentByUs } from "./dm-send-registry.mts";
 import { appendDmLog } from "./dm-automation-log.mts";
 import { dateOnly, kstToday, saleStateOf } from "./affiliate-sale-period.mts";
-import { notify, siteUrl } from "./affiliate-store-orders.mts";
+import { siteUrl } from "./affiliate-store-orders.mts";
 import { loadCompanyCodes, lookupTracking, resolveCompanyCode, trackingApiKey } from "./delivery-tracking.mts";
 import { AI_CONSULT_START_PAYLOAD } from "./instagram-persistent-menu.mts";
 import { noteDmContact } from "./dm-contacts.mts";
@@ -291,7 +291,22 @@ function productFacts(p: ConsultProduct): string {
     for (const f of p.faq) lines.push(`Q. ${f.q}\nA. ${f.a}`);
   }
   lines.push(`구매 링크: ${p.buyUrl}`);
-  lines.push(`주문 내역 · 교환 · 반품 신청: ${siteUrl()}/my/orders`);
+  return lines.join("\n");
+}
+
+const PICKSFOLIO_CS_EMAIL = "business@picks-folio.com";
+
+/**
+ * 교환 · 반품 · 불량 안내. AI 가 정책을 요약하지 않고, 브랜드가 판매자 정보에 등록한
+ * 문의 창구(문의 링크 · 고객센터 전화)로 바로 보낸다. 둘 다 없으면 픽스폴리오 고객센터.
+ */
+function exchangeGuide(p: ConsultProduct): string {
+  const url = /^https:\/\/\S+$/i.test(p.inquiryUrl) ? p.inquiryUrl : "";
+  const lines = ["교환 · 반품 · 불량 문의는 브랜드 고객센터에서 바로 도와드려요 🙏"];
+  if (url) lines.push(`문의 남기기: ${url}`);
+  if (p.csPhone) lines.push(`전화: ${p.csPhone}`);
+  if (!url && !p.csPhone) lines.push(`문의: ${PICKSFOLIO_CS_EMAIL}`);
+  lines.push(`문의하실 때 주문번호를 같이 남겨 주세요. 주문번호는 ${siteUrl()}/my/orders 에서 확인할 수 있어요.`);
   return lines.join("\n");
 }
 
@@ -313,7 +328,7 @@ function systemPrompt(p: ConsultProduct, tone: "friendly" | "polite"): string {
     "4. 효능 · 효과를 보장하거나 피부 질환 · 건강 상태에 맞는지 판단하지 않는다. 주의사항만 그대로 안내한다.",
     "5. 다른 상품이나 픽스폴리오 밖에서 진행하는 공구를 물으면 action 을 external 로 한다.",
     "6. 고객이 자기 주문의 배송 상황 · 송장을 물으면 action 을 order_lookup 으로 하고 reply 는 비운다.",
-    "7. 교환 · 반품 · 불량 · 파손을 말하면 action 을 exchange 로 하고, 자료의 교환 · 반품 안내를 요약해 reply 에 적는다.",
+    "7. 교환 · 반품 · 불량 · 파손 · 환불을 말하면 action 을 exchange 로 하고 reply 는 비운다(브랜드 고객센터 안내는 따로 나간다).",
     "8. 사람과 이야기하고 싶다, 화가 났다, 가격 협상 · 개인 할인 요청, 자료로 답할 수 없는 질문은 action 을 handoff 로 한다.",
     "9. 구매하고 싶다고 하면 구매 링크를 알려 준다.",
     `10. ${toneRule} 답은 3~5문장 이내로 짧게, DM 에 맞게 쓴다. 마크다운(별표 · 샵)을 쓰지 않는다.`,
@@ -583,18 +598,7 @@ async function answer(ctx: ConsultCtx, t: ConsultThread, text: string, eventId: 
     await send(ctx, t.igsid, `aic_vn_${eventId}`, "배송 조회 도와드릴게요! 주문하실 때 입력한 주문자 성함을 알려 주세요.");
     return;
   }
-  if (ai.action === "exchange") {
-    await notify(getDatabase(), {
-      recipientType: "brand",
-      recipient: p.brandUsername,
-      kind: "ai_consult_exchange",
-      title: `[${p.name}] 교환 · 반품 문의가 DM으로 들어왔어요`,
-      body: "AI 공구 상담원이 교환 · 반품 안내와 주문 내역 링크를 보냈어요. 신청이 들어오면 주문 관리에서 확인해 주세요.",
-    });
-  }
-  const reply = ai.action === "exchange" && !ai.reply.includes("/my/orders")
-    ? `${ai.reply}\n\n교환 · 반품 신청: ${siteUrl()}/my/orders`
-    : ai.reply;
+  const reply = ai.action === "exchange" ? exchangeGuide(p) : ai.reply;
   t.history.push({ role: "model", text: reply.slice(0, 500) });
   await writeThread(ctx.username, t);
   await bumpStats(ctx.username, { answered: 1 });
