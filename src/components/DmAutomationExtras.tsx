@@ -672,10 +672,11 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
     >
       {/* 처음 보는 인플루언서를 위한 한눈 안내. */}
       <div className="rounded-2xl bg-pink-50/50 border border-pink-100 p-4 mb-4">
-        <p className="text-xs font-black text-slate-800 mb-3">이런 기능이에요</p>
+        <p className="text-xs font-black text-slate-800 mb-1">이런 기능이에요</p>
+        <p className="text-[11px] font-bold text-pink-600 mb-3">픽스폴리오에서 진행하는 공구(어필리에이트 상품)에서만 작동해요.</p>
         <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           {[
-            { t: '고객이 버튼을 눌러요', d: 'DM 창에 [🛍️ 공구 상품 문의] 버튼이 생겨요. 누르면 진행 중인 공구 상품이 버튼으로 떠요.' },
+            { t: '고객이 버튼을 눌러요', d: 'DM 창에 [🛍️ 공구 상품 문의] 버튼이 생겨요. 누르면 픽스폴리오에서 진행 중인 공구 상품이 버튼으로 떠요.' },
             { t: 'AI가 대신 답해요', d: '가격 · 배송 · 옵션 · 성분처럼 자주 묻는 질문에 브랜드가 등록한 정보로 바로 답해요.' },
             { t: '어려운 건 넘겨드려요', d: 'AI가 답하기 어려운 질문은 직접 확인하도록 넘겨드려요. 직접 답장하면 AI는 바로 멈춰요.' },
           ].map((step, i) => (
@@ -689,7 +690,7 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
           ))}
         </ol>
         <p className="text-[10px] text-slate-400 font-medium mt-3 leading-relaxed">
-          버튼으로 시작한 대화만 AI가 읽어요. 일반 DM은 지금처럼 그대로 받아요. 공구를 열 때 스토리에 "DM 창 메뉴(☰)에서 공구 문의를 눌러 주세요"라고 한 번 알려 주면 더 많이 써요.
+          다른 곳에서 진행하는 공구 문의는 AI가 "직접 확인하고 답변드릴게요"라고 한 번만 안내하고 넘겨드려요. 버튼으로 시작한 대화만 AI가 읽고, 일반 DM은 지금처럼 그대로 받아요. 공구를 열 때 스토리에 "DM 창 메뉴(☰)에서 공구 문의를 눌러 주세요"라고 한 번 알려 주면 더 많이 써요.
         </p>
       </div>
 
