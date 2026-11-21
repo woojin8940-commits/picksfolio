@@ -776,7 +776,7 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
           <span className="ml-auto text-[11px] font-black text-slate-700">{draft.enabled ? AI_CONSULT_BUTTON_LABEL : '없음'}</span>
         </div>
         <p className="text-[10px] text-slate-400 font-medium leading-relaxed mt-2">
-          첫 화면 버튼은 처음 대화하는 고객에게, 고정 메뉴(입력칸 옆 ☰)는 이미 대화한 고객에게도 항상 보여요.
+          첫 화면 버튼은 처음 대화하는 고객에게, 고정 메뉴(입력칸 옆 ☰)는 이미 대화한 고객에게도 항상 보여요. 고객이 DM을 보내면 첫 답장(인사말 · 키워드 답장) 아래에도 버튼이 붙어요. 대화 중에는 붙지 않고, 처음 DM이거나 하루 넘게 쉬었다가 다시 온 DM에만 붙어요. 설정한 답장이 없으면 기본 인사와 함께 보내요.
         </p>
       </div>
 

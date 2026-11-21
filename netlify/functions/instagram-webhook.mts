@@ -45,7 +45,17 @@ import { backupCommentEvents, backupMessageEvents, enqueueCommentEvents, enqueue
 import type { QueuedComment, QueuedMessage } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
-import { handleAiConsultEvent } from "./_shared/ai-consult-engine.mts";
+import { aiConsultAvailable, handleAiConsultEvent } from "./_shared/ai-consult-engine.mts";
+import { AI_CONSULT_BUTTON_LABEL, AI_CONSULT_START_PAYLOAD } from "./_shared/instagram-persistent-menu.mts";
+
+/** 인사말 · 자동 답장 아래에 붙는 AI 공구 상담 버튼(빠른 답장). */
+const CONSULT_QUICK_REPLY = [
+  { content_type: "text", title: AI_CONSULT_BUTTON_LABEL, payload: AI_CONSULT_START_PAYLOAD },
+];
+/** 링크 버튼 카드 뒤처럼 버튼을 붙일 수 없는 경우 따로 보내는 한 줄. */
+const CONSULT_PROMPT_TEXT = "공구 상품이 궁금하면 아래 버튼을 눌러 주세요 🙂";
+/** 인사말 · 자동 답장이 하나도 설정되지 않았을 때 보내는 기본 인사. */
+const CONSULT_DEFAULT_GREETING = "안녕하세요! 문의 주셔서 감사해요 😊 공구 상품이 궁금하면 아래 버튼을 눌러 주세요.";
 import {
   baitGateKey,
   baitMainKey,
@@ -432,6 +442,8 @@ async function sendTriggerDm(
     trigger: "greeting" | "keyword" | "faq";
     ruleId?: string;
     ruleName?: string;
+    /** 마지막 메시지 아래에 AI 공구 상담 버튼을 붙인다. */
+    consultButton?: boolean;
   },
 ): Promise<void> {
   const { username, settings, igId, accessToken } = ctx;
@@ -460,6 +472,20 @@ async function sendTriggerDm(
       ruleName,
     });
     return;
+  }
+
+  /**
+   * AI 공구 상담 버튼. 빠른 답장은 글 메시지에만 확실히 붙으므로, 마지막 통이 글이면
+   * 거기에 붙이고 링크 버튼 카드면 짧은 안내 한 줄을 뒤에 따로 보낸다(덤으로 보내는
+   * 통이라 실패해도 본 답장은 성공으로 본다).
+   */
+  if (args.consultButton) {
+    const last = plan.messages[plan.messages.length - 1] as Record<string, unknown>;
+    if (typeof last?.text === "string" && !last.attachment) {
+      plan.messages[plan.messages.length - 1] = { ...last, quick_replies: CONSULT_QUICK_REPLY };
+    } else {
+      plan.messages.push({ text: CONSULT_PROMPT_TEXT, quick_replies: CONSULT_QUICK_REPLY });
+    }
   }
 
   if (!(await claimIfNew(username, claimKey, true))) {
@@ -864,7 +890,18 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
       (greeting!.onlyFirstContact === false && conversationWentQuiet(noted.prevLastAt)));
   const matched = text ? pickKeywordReply(replies, text) : undefined;
 
-  if (!greetingWanted && !matched) return;
+  /**
+   * AI 공구 상담원이 켜져 있으면 대화의 첫 메시지(처음 DM, 또는 24시간 넘게 조용했다가
+   * 다시 온 DM)에 상담 버튼을 붙인다. 첫 화면 버튼을 못 본 고객도 바로 누를 수 있게.
+   * 인사말이나 키워드 답장이 나가면 그 마지막 메시지 아래에 붙고, 아무 답장도
+   * 설정돼 있지 않으면 기본 인사와 함께 보낸다.
+   */
+  const consultWanted =
+    aiConsultAvailable() &&
+    Boolean((settings as any).aiConsult?.enabled) &&
+    (noted.first || conversationWentQuiet(noted.prevLastAt));
+
+  if (!greetingWanted && !matched && !consultWanted) return;
 
   if (blocked) {
     await appendLog(username, {
@@ -890,6 +927,8 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
       claimKey: inboundDmKey("greet", eventId),
       trigger: "greeting",
       ruleName: "첫 인사말",
+      // 키워드 답장이 이어 나가면 버튼은 그 마지막 답장 아래에 붙인다.
+      consultButton: consultWanted && !matched,
     });
   }
 
@@ -902,6 +941,18 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
       trigger: "keyword",
       ruleId: matched.id,
       ruleName: matched.name,
+      consultButton: consultWanted,
+    });
+  }
+
+  if (consultWanted && !greetingWanted && !matched) {
+    await sendTriggerDm(ctx, {
+      recipientId: senderId,
+      message: CONSULT_DEFAULT_GREETING,
+      claimKey: inboundDmKey("greet", eventId),
+      trigger: "greeting",
+      ruleName: "AI 공구 상담 안내",
+      consultButton: true,
     });
   }
 }
