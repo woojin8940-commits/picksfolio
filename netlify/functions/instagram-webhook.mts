@@ -884,10 +884,10 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
   const greetingWanted =
     Boolean(greeting?.enabled) &&
     hasTriggerContent(greeting!) &&
-    // 처음 대화하는 사람에게만 보내는 게 기본값이다. 껐다면 24시간 넘게 조용했던
-    // 대화가 다시 시작될 때도 한 번 더 보낸다(대화 중에는 다시 보내지 않는다).
-    (noted.first ||
-      (greeting!.onlyFirstContact === false && conversationWentQuiet(noted.prevLastAt)));
+    // 처음 대화하는 사람, 그리고 24시간 넘게 조용했던 대화가 다시 시작될 때 보낸다
+    // (공구 문의일 수 있어서 항상). 대화 중에는 다시 보내지 않는다. 예전의
+    // "처음 대화하는 사람에게만" 설정(onlyFirstContact)은 더 이상 보지 않는다.
+    (noted.first || conversationWentQuiet(noted.prevLastAt));
   const matched = text ? pickKeywordReply(replies, text) : undefined;
 
   /**
@@ -923,7 +923,8 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
     await sendTriggerDm(ctx, {
       recipientId: senderId,
       message: greeting!.message,
-      buttons: greeting!.buttons,
+      // 인사말은 글만 보낸다(예전에 저장된 링크 버튼도 보내지 않는다). 글 메시지여야
+      // AI 공구 상담 버튼을 같은 말풍선 아래에 붙일 수 있다.
       claimKey: inboundDmKey("greet", eventId),
       trigger: "greeting",
       ruleName: "첫 인사말",

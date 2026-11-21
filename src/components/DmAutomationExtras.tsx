@@ -969,7 +969,12 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
 
   const save = async () => {
     const resolved: DmDirectSettings = {
-      greeting,
+      greeting: {
+        ...greeting,
+        onlyFirstContact: false,
+        // 인사말은 글만 보낸다. 링크 버튼 카드에는 AI 공구 상담 버튼을 함께 붙일 수 없다.
+        buttons: [],
+      },
       replies: replies.map((r) => ({ ...r, keywords: parseKeywords(r.id, r.keywords) })),
     };
 
@@ -1011,7 +1016,7 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
           <div className="min-w-0">
             <h4 className="text-sm font-black text-slate-900">첫 인사말</h4>
             <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-              처음 DM 을 보내온 사람에게 자동으로 보냅니다.
+              처음 DM을 보낸 사람, 그리고 24시간 넘게 대화가 없다가 다시 DM을 보낸 사람에게 자동으로 보내요.
             </p>
           </div>
           <Toggle
@@ -1029,21 +1034,9 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
           placeholder="예) 안녕하세요! 문의 주셔서 감사합니다 😊 궁금한 점을 남겨주시면 순서대로 답변드릴게요."
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-slate-400 resize-none mb-3"
         />
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={greeting.onlyFirstContact !== false}
-            onChange={(e) => patchGreeting({ onlyFirstContact: e.target.checked })}
-            className="mt-0.5 w-4 h-4 rounded border-slate-300 accent-pink-600"
-          />
-          <span className="text-[11px] md:text-xs font-bold text-slate-600 leading-relaxed">
-            처음 대화하는 사람에게만 보내기
-            <span className="block font-medium text-slate-400">
-              끄면 24시간 넘게 끊겼던 대화가 다시 시작될 때도 한 번 더 보냅니다.
-              대화 중에는 어느 경우에도 다시 보내지 않아요.
-            </span>
-          </span>
-        </label>
+        <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+          대화 중에는 다시 보내지 않아요. 하루 넘게 조용했던 대화가 다시 시작되면 공구 문의일 수 있어서 한 번 더 보내요.
+        </p>
       </div>
 
       {/* 키워드 자동 답장 */}
