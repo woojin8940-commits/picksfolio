@@ -7,6 +7,7 @@ import {
   DM_AI_CONSULT_INTRO_MAX, DM_FAQ_MAX, DM_FAQ_QUESTION_MAX,
 } from '../services/apiService';
 import { affiliateStoreService, type MyAffiliateItem } from '../services/affiliateStoreService';
+import DmLinkButtonsEditor, { linkButtonsInvalid, normalizeLinkUrl } from './DmLinkButtonsEditor';
 import Toggle from './DmToggle';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 
@@ -969,12 +970,22 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
 
   const save = async () => {
     const resolved: DmDirectSettings = {
-      greeting,
+      greeting: {
+        ...greeting,
+        onlyFirstContact: false,
+        buttons: (greeting.buttons || [])
+          .map((b) => ({ ...b, label: b.label.trim(), url: normalizeLinkUrl(b.url) }))
+          .filter((b) => b.label && b.url),
+      },
       replies: replies.map((r) => ({ ...r, keywords: parseKeywords(r.id, r.keywords) })),
     };
 
     // 켜 둔 채로 비워 두면 아무 일도 일어나지 않는다. 저장은 되지만 사용자는
     // "켰는데 안 온다"를 겪으므로 저장 전에 알려준다.
+    if (linkButtonsInvalid(greeting.buttons || [])) {
+      onNotice('err', '인사말 링크 버튼의 이름과 https:// 주소를 확인해 주세요.');
+      return;
+    }
     if (resolved.greeting.enabled && !resolved.greeting.message.trim()) {
       onNotice('err', '인사말을 켜 두셨어요. 보낼 인사말 문구를 입력해 주세요.');
       return;
@@ -1011,7 +1022,7 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
           <div className="min-w-0">
             <h4 className="text-sm font-black text-slate-900">첫 인사말</h4>
             <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-              처음 DM 을 보내온 사람에게 자동으로 보냅니다.
+              처음 DM을 보낸 사람, 그리고 24시간 넘게 대화가 없다가 다시 DM을 보낸 사람에게 자동으로 보내요.
             </p>
           </div>
           <Toggle
@@ -1029,21 +1040,14 @@ export const DmTriggerSection: React.FC<TriggerProps> = ({
           placeholder="예) 안녕하세요! 문의 주셔서 감사합니다 😊 궁금한 점을 남겨주시면 순서대로 답변드릴게요."
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-slate-400 resize-none mb-3"
         />
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={greeting.onlyFirstContact !== false}
-            onChange={(e) => patchGreeting({ onlyFirstContact: e.target.checked })}
-            className="mt-0.5 w-4 h-4 rounded border-slate-300 accent-pink-600"
-          />
-          <span className="text-[11px] md:text-xs font-bold text-slate-600 leading-relaxed">
-            처음 대화하는 사람에게만 보내기
-            <span className="block font-medium text-slate-400">
-              끄면 24시간 넘게 끊겼던 대화가 다시 시작될 때도 한 번 더 보냅니다.
-              대화 중에는 어느 경우에도 다시 보내지 않아요.
-            </span>
-          </span>
-        </label>
+        <DmLinkButtonsEditor
+          buttons={greeting.buttons || []}
+          onChange={(buttons) => patchGreeting({ buttons })}
+          disabled={!entitled || saving}
+        />
+        <p className="text-[10px] text-slate-400 font-medium mt-2 leading-relaxed">
+          대화 중에는 다시 보내지 않아요. 하루 넘게 조용했던 대화가 다시 시작되면 공구 문의일 수 있어서 한 번 더 보내요.
+        </p>
       </div>
 
       {/* 키워드 자동 답장 */}
