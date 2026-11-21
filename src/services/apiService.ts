@@ -925,6 +925,10 @@ export interface DmAutomationSettings {
   automations: DmAutomationItem[];
   /** DM 창 첫 화면의 "자주 묻는 질문"(인스타그램 아이스브레이커). */
   faq?: DmFaqSettings;
+  /** AI 공구 상담원. */
+  aiConsult?: DmAiConsultSettings;
+  /** 상담 엔진이 열린 환경인지(아니면 화면에 '오픈 준비 중'). */
+  aiConsultAvailable?: boolean;
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
   rules?: DmRule[];
@@ -1002,6 +1006,19 @@ export interface DmFaqItem {
   answer: string;
   buttons: DmMessageButton[];
 }
+
+/** AI 공구 상담원 설정(DM 자동화 화면). */
+export interface DmAiConsultSettings {
+  enabled: boolean;
+  /** friendly = 친근한 해요체, polite = 정중한 합니다체. */
+  tone: 'friendly' | 'polite';
+  /** 상담 시작 때 상품 목록 위에 붙는 한마디(선택, 200자). */
+  intro: string;
+  syncedAt?: string;
+  syncError?: string;
+}
+
+export const DM_AI_CONSULT_INTRO_MAX = 200;
 
 export interface DmFaqSettings {
   enabled: boolean;
@@ -3943,6 +3960,31 @@ export const apiService = {
       };
     } catch (e) {
       console.error('[API] Failed to save DM FAQ:', e);
+      return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  async saveDmAiConsult(
+    username: string,
+    aiConsult: DmAiConsultSettings,
+  ): Promise<{ ok: boolean; error?: string; warning?: string; aiConsult?: DmAiConsultSettings }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'saveAiConsult', aiConsult }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
+      }
+      clearMemory(`dmAutomation:${normalizeAccount(username)}`);
+      return { ok: data?.success === true, error: data?.error, warning: data?.warning, aiConsult: data?.aiConsult };
+    } catch (e) {
+      console.error('[API] Failed to save AI consult:', e);
       return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
     }
   },

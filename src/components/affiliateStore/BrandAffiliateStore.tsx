@@ -74,6 +74,11 @@ const dateText = (iso: string) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
+/** 뷰티 · 스킨케어 상품인데 AI 상담에 필요한 성분 · 용량 · 사용 기한 · 주의사항 중 빈 칸이 있는지. */
+const aiInfoMissing = (p: StoreProduct) =>
+  ['뷰티', '스킨케어'].includes(p.category) &&
+  ![p.keyIngredients, p.volume, p.shelfLife, p.caution].every(v => (v || '').trim());
+
 const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -388,10 +393,11 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
 
   const toggleSale = async (p: StoreProduct) => {
     setBusyId(p.id);
-    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, descriptionImageUrls, sizeGuideImageUrls, deliveryGuideImageUrls, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl, saleStartDate, saleEndDate } = p;
+    const { id, name, category, subcategory, summary, description, imageUrls, detailImageUrls, sizeGuide, deliveryGuide, descriptionImageUrls, sizeGuideImageUrls, deliveryGuideImageUrls, options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl, saleStartDate, saleEndDate, shipStartDate, keyIngredients, volume, shelfLife, caution, faq } = p;
     const res = await affiliateStoreService.saveProduct(businessUsername, {
       id, name, category, subcategory, summary, description, imageUrls, detailImageUrls: detailImageUrls || [], sizeGuide: sizeGuide || '', deliveryGuide: deliveryGuide || '', descriptionImageUrls: descriptionImageUrls || [], sizeGuideImageUrls: sizeGuideImageUrls || [], deliveryGuideImageUrls: deliveryGuideImageUrls || [], options, retailPrice, salePrice, commissionRate, stock, shippingFee, productUrl,
       saleStartDate: saleStartDate || '', saleEndDate: saleEndDate || '',
+      shipStartDate: shipStartDate || '', keyIngredients: keyIngredients || '', volume: volume || '', shelfLife: shelfLife || '', caution: caution || '', faq: faq || [],
       status: p.status === 'on_sale' ? 'paused' : 'on_sale',
     });
     setBusyId('');
@@ -599,6 +605,9 @@ const BrandAffiliateStore: React.FC<Props> = ({ businessUsername }) => {
                       <CalendarDays className="w-3 h-3 text-slate-400" /> {salePeriodText(p.saleStartDate, p.saleEndDate)}
                       {p.status === 'on_sale' && p.saleState && p.saleState !== 'on_sale' && (
                         <span className={`ml-1 px-1.5 py-0.5 rounded font-black text-[9px] ${SALE_STATE_STYLE[p.saleState]}`}>{SALE_STATE_LABEL[p.saleState]}</span>
+                      )}
+                      {aiInfoMissing(p) && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded font-black text-[9px] bg-amber-50 text-amber-700" title="AI 공구 상담원이 답할 정보가 비어 있어요. 상품 수정에서 입력해 주세요.">AI 상담 정보 필요</span>
                       )}
                     </p>
                     <div className="md:hidden flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-[11px]">

@@ -263,6 +263,9 @@ export const BRAND_ORDER_SORTS: { key: BrandOrderSort; label: string }[] = [
 export type BrandOrderFilter = 'new' | 'preparing' | 'shipped' | 'delivered' | 'all' | 'to_ship';
 export type BrandClaimFilter = 'all' | 'cancel' | 'return' | 'action';
 
+/** AI 공구 상담원이 답할 때 쓰는 자주 묻는 질문 한 줄. */
+export interface ProductFaq { q: string; a: string }
+
 export interface StoreProduct {
   id: string;
   businessUsername: string;
@@ -294,6 +297,15 @@ export interface StoreProduct {
   /** 판매기간(한국 날짜 'YYYY-MM-DD'). 비어 있으면 제한 없음. */
   saleStartDate: string;
   saleEndDate: string;
+  /** AI 공구 상담원용: 출고 예정일('YYYY-MM-DD', 비어 있으면 주문 후 바로 출고). */
+  shipStartDate: string;
+  /** AI 공구 상담원용: 뷰티 · 스킨케어 상품 정보. */
+  keyIngredients: string;
+  volume: string;
+  shelfLife: string;
+  caution: string;
+  /** AI 공구 상담원용: 브랜드가 적은 자주 묻는 질문(최대 20개). */
+  faq: ProductFaq[];
   /** 서버가 계산한 지금 판매 상태. */
   saleState?: SaleState;
   createdAt: string;

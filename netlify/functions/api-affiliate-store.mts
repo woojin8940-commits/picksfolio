@@ -122,6 +122,15 @@ function shapeApplication(r: any) {
   };
 }
 
+/** AI 상담 정보에서 뷰티 상품 칸(성분 · 용량 · 사용 기한 · 주의사항)을 꼭 받는 상위 카테고리. */
+const AI_BEAUTY_CATEGORIES = ["뷰티", "스킨케어"];
+const AI_FAQ_MAX = 20;
+/** 자주 묻는 질문을 [{ q, a }] 로 정리한다. 질문 · 답변 중 하나라도 비면 버린다. */
+const cleanFaq = (v: unknown) => (Array.isArray(v) ? v : [])
+  .map((f: any) => ({ q: clip(f?.q, 100), a: clip(f?.a, 500) }))
+  .filter((f) => f.q && f.a)
+  .slice(0, AI_FAQ_MAX);
+
 function shapeProduct(r: any, forCreator = false) {
   const base = {
     id: r.id,
@@ -150,6 +159,13 @@ function shapeProduct(r: any, forCreator = false) {
     /** 판매기간(한국 날짜 'YYYY-MM-DD', 비어 있으면 제한 없음). */
     saleStartDate: dateOnly(r.sale_start_date),
     saleEndDate: dateOnly(r.sale_end_date),
+    /** AI 공구 상담원용 정보. 출고 예정일(비어 있으면 바로 출고) · 뷰티 상품 정보 · 자주 묻는 질문. */
+    shipStartDate: dateOnly(r.ship_start_date),
+    keyIngredients: r.key_ingredients || "",
+    volume: r.volume || "",
+    shelfLife: r.shelf_life || "",
+    caution: r.caution || "",
+    faq: Array.isArray(r.faq) ? r.faq : [],
     /** 지금 실제 판매 상태(판매중 · 판매 예정 · 기간 종료 · 품절 · 판매중지 …). */
     saleState: saleStateOf(r),
     createdAt: r.created_at,
@@ -814,6 +830,28 @@ async function brandSaveProduct(db: any, username: string, body: any) {
   const startParam = saleStartDate || null;
   const endParam = saleEndDate || null;
 
+  // AI 상담 정보. 예전 화면처럼 칸을 보내지 않은 저장은 기존 값을 그대로 둔다.
+  const keepAi = p.shipStartDate === undefined && p.keyIngredients === undefined && p.volume === undefined
+    && p.shelfLife === undefined && p.caution === undefined && p.faq === undefined;
+  const shipStartDate = parseDateInput(p.shipStartDate);
+  if (shipStartDate === null) return err("출고 예정일 날짜를 확인해 주세요.");
+  const shipParam = shipStartDate || null;
+  const keyIngredients = clip(p.keyIngredients, 1000);
+  const volume = clip(p.volume, 100);
+  const shelfLife = clip(p.shelfLife, 100);
+  const caution = clip(p.caution, 1000);
+  const faqJson = JSON.stringify(cleanFaq(p.faq));
+  // 뷰티 · 스킨케어 상품은 새로 등록할 때와 판매중으로 둘 때 성분 · 용량 · 사용 기한 · 주의사항이 꼭 있어야 한다.
+  if (!keepAi && AI_BEAUTY_CATEGORIES.includes(category) && !id) {
+    const missing = [
+      [keyIngredients, "주요 성분"],
+      [volume, "용량"],
+      [shelfLife, "사용 기한"],
+      [caution, "주의사항"],
+    ].filter(([v]) => !String(v).trim()).map(([, label]) => label);
+    if (missing.length > 0) return err(`AI 상담 정보의 ${missing.join(", ")}을(를) 입력해 주세요.`);
+  }
+
   const imgs = JSON.stringify(imageUrls);
   const detailImgs = JSON.stringify(detailImageUrls);
   // 상세페이지 칸을 보내지 않은 저장(예: 예전 화면)은 기존 상세페이지를 그대로 둔다.
@@ -833,6 +871,12 @@ async function brandSaveProduct(db: any, username: string, body: any) {
         delivery_guide_image_urls = CASE WHEN ${keepGuideImages}::boolean THEN delivery_guide_image_urls ELSE ${deliveryImgs}::jsonb END,
         sale_start_date = CASE WHEN ${keepPeriod}::boolean THEN sale_start_date ELSE ${startParam}::date END,
         sale_end_date = CASE WHEN ${keepPeriod}::boolean THEN sale_end_date ELSE ${endParam}::date END,
+        ship_start_date = CASE WHEN ${keepAi}::boolean THEN ship_start_date ELSE ${shipParam}::date END,
+        key_ingredients = CASE WHEN ${keepAi}::boolean THEN key_ingredients ELSE ${keyIngredients} END,
+        volume = CASE WHEN ${keepAi}::boolean THEN volume ELSE ${volume} END,
+        shelf_life = CASE WHEN ${keepAi}::boolean THEN shelf_life ELSE ${shelfLife} END,
+        caution = CASE WHEN ${keepAi}::boolean THEN caution ELSE ${caution} END,
+        faq = CASE WHEN ${keepAi}::boolean THEN faq ELSE ${faqJson}::jsonb END,
         product_url = ${productUrl}, status = ${status}, updated_at = NOW()
       WHERE id = ${id} AND business_username = ${username} AND deleted_at IS NULL
       RETURNING *
@@ -843,11 +887,13 @@ async function brandSaveProduct(db: any, username: string, body: any) {
       INSERT INTO affiliate_store_products
         (id, business_username, name, category, subcategory, summary, description, image_urls, detail_image_urls, options,
          retail_price, sale_price, commission_rate, stock, shipping_fee, product_url, status, size_guide, delivery_guide,
-         description_image_urls, size_guide_image_urls, delivery_guide_image_urls, sale_start_date, sale_end_date)
+         description_image_urls, size_guide_image_urls, delivery_guide_image_urls, sale_start_date, sale_end_date,
+         ship_start_date, key_ingredients, volume, shelf_life, caution, faq)
       VALUES
         (${newId("asp")}, ${username}, ${name}, ${category}, ${subcategory}, ${summary}, ${description}, ${imgs}::jsonb, ${detailImgs}::jsonb, ${opts}::jsonb,
          ${retailPrice}, ${salePrice}, ${commissionRate}, ${stock}, ${shippingFee}, ${productUrl}, ${status}, ${sizeGuide}, ${deliveryGuide},
-         ${descImgs}::jsonb, ${sizeImgs}::jsonb, ${deliveryImgs}::jsonb, ${startParam}::date, ${endParam}::date)
+         ${descImgs}::jsonb, ${sizeImgs}::jsonb, ${deliveryImgs}::jsonb, ${startParam}::date, ${endParam}::date,
+         ${shipParam}::date, ${keyIngredients}, ${volume}, ${shelfLife}, ${caution}, ${faqJson}::jsonb)
       RETURNING *
     `) as any[];
   }

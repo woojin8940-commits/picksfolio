@@ -20,6 +20,12 @@ import {
   faqPayload,
   syncIceBreakers,
 } from "./_shared/instagram-ice-breakers.mts";
+import {
+  AI_CONSULT_BUTTON_LABEL,
+  AI_CONSULT_START_PAYLOAD,
+  clearAiConsultMenu,
+  syncAiConsultMenu,
+} from "./_shared/instagram-persistent-menu.mts";
 import { reschedulePendingCommentJobs } from "./_shared/dm-jobs.mts";
 import {
   readSubscribedFields,
@@ -168,6 +174,59 @@ interface DmFaqSettings {
   syncError?: string;
 }
 
+/**
+ * AI 공구 상담원 설정.
+ *
+ * 켜면 아이스브레이커 첫 칸과 DM 고정 메뉴에 "🛍️ 공구 상품 문의" 버튼이 올라간다.
+ * 고객이 그 버튼으로 시작한 대화만 상담원이 읽고 답한다(다른 DM 은 읽지 않는다).
+ * 자주 묻는 질문은 남은 3칸을 쓴다.
+ */
+interface DmAiConsultSettings {
+  enabled: boolean;
+  /** 말투. friendly = 친근한 해요체, polite = 정중한 합니다체. */
+  tone: "friendly" | "polite";
+  /** 상담 시작 때 상품 목록 위에 붙는 인플루언서 한마디(선택). */
+  intro: string;
+  /** 고정 메뉴 · 아이스브레이커 등록을 마친 시각. */
+  syncedAt?: string;
+  /** 등록 실패 이유. */
+  syncError?: string;
+}
+
+const AI_CONSULT_INTRO_MAX = 200;
+
+/**
+ * 상담 엔진이 배포된 환경에서만 켤 수 있다. 버튼만 올라가고 눌러도 답이 없는
+ * 상태를 막기 위해서다. Netlify 환경 변수 AI_CONSULT_ENABLED=1 로 연다.
+ */
+const aiConsultAvailable = () => process.env.AI_CONSULT_ENABLED === "1";
+
+function sanitizeAiConsult(raw: any): DmAiConsultSettings {
+  return {
+    enabled: Boolean(raw?.enabled),
+    tone: raw?.tone === "polite" ? "polite" : "friendly",
+    intro: String(raw?.intro || "").trim().slice(0, AI_CONSULT_INTRO_MAX),
+  };
+}
+
+/** 상담원 버튼이 실제로 DM 창에 올라가야 하는지. */
+const aiConsultActive = (doc: Pick<DmSettings, "enabled" | "aiConsult">) =>
+  aiConsultAvailable() && Boolean(doc.enabled) && Boolean(doc.aiConsult?.enabled);
+
+/**
+ * 아이스브레이커에 올릴 버튼 목록. 상담원이 켜져 있으면 첫 칸을 상담원 버튼이
+ * 쓰고, 자주 묻는 질문은 남은 칸(최대 3개)을 쓴다.
+ */
+function iceBreakerEntriesFor(doc: Pick<DmSettings, "enabled" | "faq" | "aiConsult">) {
+  if (!doc.enabled) return [];
+  const head = aiConsultActive(doc)
+    ? [{ question: AI_CONSULT_BUTTON_LABEL, payload: AI_CONSULT_START_PAYLOAD }]
+    : [];
+  const faqItems = doc.faq?.enabled ? doc.faq.items || [] : [];
+  return [...head, ...faqItems.map((f) => ({ question: f.question, payload: faqPayload(f.id) }))]
+    .slice(0, ICE_BREAKER_MAX);
+}
+
 /** 처음 DM 을 받았을 때 보낼 인사말. */
 interface DmGreetingSettings {
   enabled: boolean;
@@ -215,6 +274,8 @@ interface DmSettings {
   faq?: DmFaqSettings;
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
+  /** AI 공구 상담원. */
+  aiConsult?: DmAiConsultSettings;
   rules: unknown[];
   /**
    * 답글/DM 발송 속도 — 시간당 최대 발송량(답글 + DM 합산, 50~700건, 기본 500건).
@@ -254,6 +315,7 @@ const DEFAULT_SETTINGS: DmSettings = {
   igUsername: "",
   automations: [],
   faq: { enabled: false, items: [] },
+  aiConsult: { enabled: false, tone: "friendly", intro: "" },
   direct: {
     greeting: { enabled: false, message: "", buttons: [], onlyFirstContact: true },
     replies: [],
@@ -738,6 +800,8 @@ const handle = async (req: Request, context: Context) => {
       // 예전에 저장된 문서에는 이 두 블록이 없다. 화면이 `undefined` 를 만나
       // 빈 화면을 그리지 않도록 기본값으로 채워 내려준다.
       faq: { ...DEFAULT_SETTINGS.faq!, ...(data.faq || {}) },
+      aiConsult: { ...DEFAULT_SETTINGS.aiConsult!, ...(data.aiConsult || {}) },
+      aiConsultAvailable: aiConsultAvailable(),
       direct: {
         greeting: { ...DEFAULT_SETTINGS.direct!.greeting, ...(data.direct?.greeting || {}) },
         replies: Array.isArray(data.direct?.replies) ? data.direct!.replies : [],
@@ -910,6 +974,97 @@ const handle = async (req: Request, context: Context) => {
      * 저장 순서가 중요하다. 먼저 문서에 쓰고(사용자가 입력한 내용은 무슨 일이
      * 있어도 잃지 않는다), 그다음 인스타그램에 등록한다.
      */
+    /**
+     * AI 공구 상담원 저장.
+     *
+     * 문서에 먼저 쓰고, 그다음 인스타그램에 고정 메뉴 · 아이스브레이커를 올린다(끄면 내린다).
+     * 아이스브레이커는 질문 버튼과 한 묶음이라 질문 목록까지 함께 다시 등록한다.
+     */
+    if (body?.action === "saveAiConsult") {
+      const aiConsult = sanitizeAiConsult(body?.aiConsult);
+      if (aiConsult.enabled && !aiConsultAvailable()) {
+        return Response.json(
+          { error: "AI 공구 상담원은 아직 오픈 준비 중이에요. 열리면 바로 켤 수 있어요.", code: "AI_CONSULT_UNAVAILABLE" },
+          { status: 400 },
+        );
+      }
+      let stored: DmSettings | null;
+      try {
+        stored = await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
+          const existing = { ...DEFAULT_SETTINGS, ...(current || {}) };
+          return {
+            ...existing,
+            aiConsult: { ...aiConsult, syncedAt: undefined, syncError: undefined },
+            ownerAuthUserId: !auth.isAdmin && auth.userId ? auth.userId : existing.ownerAuthUserId,
+            updatedAt: now,
+          };
+        });
+      } catch (e) {
+        if (e instanceof BlobWriteConflictError) {
+          return Response.json(
+            { error: "다른 저장이 동시에 진행돼 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.", code: "SAVE_CONFLICT" },
+            { status: 409 },
+          );
+        }
+        throw e;
+      }
+
+      const current = { ...DEFAULT_SETTINGS, ...(stored || {}) };
+      if (!current.accessToken) {
+        return Response.json({
+          success: true,
+          aiConsult: current.aiConsult,
+          warning: "인스타그램 계정을 연동하면 DM 창에 상담 버튼이 표시됩니다.",
+        });
+      }
+
+      const ig = {
+        accessToken: current.accessToken,
+        tokenSource: current.tokenSource,
+        igId: current.igUserId || current.igAccountId,
+      };
+      const on = aiConsultActive(current);
+      const menu = on ? await syncAiConsultMenu(ig) : await clearAiConsultMenu(ig);
+      const entries = iceBreakerEntriesFor(current);
+      const ice = entries.length > 0
+        ? await syncIceBreakers({ ...ig, entries })
+        : await clearIceBreakers(ig);
+
+      const syncError = [menu.ok ? "" : `고정 메뉴: ${menu.error}`, ice.ok ? "" : `질문 버튼: ${ice.error}`]
+        .filter(Boolean)
+        .join(" / ") || undefined;
+      const syncedAt = !syncError && on ? new Date().toISOString() : undefined;
+      const faqSyncedAt = ice.ok && entries.some((e) => e.payload !== AI_CONSULT_START_PAYLOAD)
+        ? new Date().toISOString()
+        : undefined;
+      await mutateBlobJSON<DmSettings>(STORE_NAME, key, (doc) =>
+        doc
+          ? {
+              ...doc,
+              aiConsult: { ...aiConsult, syncedAt, syncError },
+              faq: doc.faq ? { ...doc.faq, syncedAt: faqSyncedAt, syncError: ice.ok ? undefined : ice.error } : doc.faq,
+            }
+          : null,
+      ).catch((e) => console.warn("[dm-automation] ai consult sync flag save failed:", (e as Error)?.message));
+
+      const faqCount = current.faq?.enabled ? (current.faq.items || []).length : 0;
+      const warning = [
+        !current.enabled && aiConsult.enabled
+          ? "자동 발송 스위치가 꺼져 있어 상담 버튼을 DM 창에 올리지 않았습니다. 스위치를 켜면 함께 올라갑니다."
+          : "",
+        on && faqCount > ICE_BREAKER_MAX - 1
+          ? `상담 버튼이 첫 칸을 써서 자주 묻는 질문은 ${ICE_BREAKER_MAX - 1}개까지만 보여요. 마지막 질문 ${faqCount - (ICE_BREAKER_MAX - 1)}개는 DM 창에서 빠졌어요.`
+          : "",
+      ].filter(Boolean).join(" ") || undefined;
+
+      return Response.json({
+        success: !syncError,
+        aiConsult: { ...aiConsult, syncedAt, syncError },
+        error: syncError,
+        warning,
+      });
+    }
+
     if (body?.action === "saveFaq") {
       let faq: DmFaqSettings;
       try {
@@ -965,13 +1120,17 @@ const handle = async (req: Request, context: Context) => {
        * 있다.
        */
       const switchOff = !current.enabled;
-      const active = current.enabled && faq.enabled ? faq.items : [];
+      // 상담원 버튼이 켜져 있으면 첫 칸을 내주고 질문은 남은 칸에 들어간다.
+      const active = iceBreakerEntriesFor({ ...current, faq });
+      const droppedFaq = current.enabled && faq.enabled
+        ? faq.items.length - active.filter((e) => e.payload !== AI_CONSULT_START_PAYLOAD).length
+        : 0;
       const sync = active.length > 0
         ? await syncIceBreakers({
             accessToken: current.accessToken,
             tokenSource: current.tokenSource,
             igId: current.igUserId || current.igAccountId,
-            entries: active.map((f) => ({ question: f.question, payload: faqPayload(f.id) })),
+            entries: active,
           })
         : await clearIceBreakers({
             accessToken: current.accessToken,
@@ -1024,6 +1183,9 @@ const handle = async (req: Request, context: Context) => {
         [
           switchOff && faq.enabled && faq.items.length > 0
             ? "자동 발송 스위치가 꺼져 있어 질문 버튼을 DM 창에 올리지 않았습니다. 스위치를 켜면 함께 올라갑니다."
+            : "",
+          droppedFaq > 0
+            ? `AI 공구 상담원 버튼이 첫 칸을 쓰고 있어 질문은 3개까지만 DM 창에 올라가요. 마지막 질문 ${droppedFaq}개는 올라가지 않았어요.`
             : "",
           webhookWarning,
         ]
@@ -1349,14 +1511,16 @@ const handle = async (req: Request, context: Context) => {
      * 오지 않는다 — 받는 사람에게는 그냥 고장난 계정이다.
      */
     if (op.kind === "settings" && typeof body.enabled === "boolean" && next.accessToken) {
-      const faq = next.faq;
-      if (faq?.enabled && (faq.items || []).length > 0) {
-        const sync = next.enabled
+      const faq = next.faq || DEFAULT_SETTINGS.faq!;
+      const consultOn = aiConsultAvailable() && Boolean(next.aiConsult?.enabled);
+      if ((faq.enabled && (faq.items || []).length > 0) || consultOn) {
+        const entries = iceBreakerEntriesFor({ ...next, faq });
+        const sync = next.enabled && entries.length > 0
           ? await syncIceBreakers({
               accessToken: next.accessToken,
               tokenSource: next.tokenSource,
               igId: next.igUserId || next.igAccountId,
-              entries: faq.items.map((f) => ({ question: f.question, payload: faqPayload(f.id) })),
+              entries,
             })
           : await clearIceBreakers({
               accessToken: next.accessToken,
@@ -1371,6 +1535,12 @@ const handle = async (req: Request, context: Context) => {
         ).catch((e) =>
           console.warn("[dm-automation] faq toggle sync save failed:", (e as Error)?.message),
         );
+      }
+      // 상담원 고정 메뉴도 스위치를 따라간다(꺼진 채 남아 있으면 눌러도 답이 없는 버튼이 된다).
+      if (consultOn) {
+        const ig = { accessToken: next.accessToken, tokenSource: next.tokenSource, igId: next.igUserId || next.igAccountId };
+        const menu = next.enabled ? await syncAiConsultMenu(ig) : await clearAiConsultMenu(ig);
+        if (!menu.ok) console.warn("[dm-automation] ai consult menu toggle sync failed:", menu.error);
       }
     }
 

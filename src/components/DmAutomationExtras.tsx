@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  AlertCircle, CalendarClock, Check, Clock, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, RefreshCw, Send, Trash2,
+  AlertCircle, CalendarClock, Check, Clock, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, RefreshCw, Send, ShoppingBag, Trash2,
 } from 'lucide-react';
 import {
-  apiService, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
-  DM_FAQ_MAX, DM_FAQ_QUESTION_MAX,
+  apiService, DmAiConsultSettings, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
+  DM_AI_CONSULT_INTRO_MAX, DM_FAQ_MAX, DM_FAQ_QUESTION_MAX,
 } from '../services/apiService';
+import { affiliateStoreService, type MyAffiliateItem } from '../services/affiliateStoreService';
 import Toggle from './DmToggle';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 
@@ -376,10 +377,12 @@ interface FaqProps {
   value: DmFaqSettings;
   onChange: (faq: DmFaqSettings) => void;
   onNotice: Notice;
+  /** AI 공구 상담원이 켜져 있으면 첫 칸을 상담 버튼이 써서 3개가 된다. */
+  maxItems?: number;
 }
 
 export const DmFaqSection: React.FC<FaqProps> = ({
-  userName, connected, entitled, masterEnabled, value, onChange, onNotice,
+  userName, connected, entitled, masterEnabled, value, onChange, onNotice, maxItems = DM_FAQ_MAX,
 }) => {
   // 서버가 확정한 값(등록 시각·실패 이유 포함)으로 화면을 맞춘다 — 고치는 중이 아닐 때만.
   const { draft, setDraft, markSynced } = useServerDraft<DmFaqSettings>(value);
@@ -390,7 +393,7 @@ export const DmFaqSection: React.FC<FaqProps> = ({
     setDraft({ ...draft, items: items.map((f) => (f.id === id ? { ...f, ...patch } : f)) });
 
   const addItem = () => {
-    if (items.length >= DM_FAQ_MAX) return;
+    if (items.length >= maxItems) return;
     setDraft({
       ...draft,
       items: [...items, { id: genId('faq'), question: '', answer: '', buttons: [] }],
@@ -432,7 +435,9 @@ export const DmFaqSection: React.FC<FaqProps> = ({
     <SectionShell
       icon={<HelpCircle size={17} />}
       title="자주 묻는 질문 버튼"
-      desc="DM 창을 처음 여는 사람에게 추천 질문을 최대 4개 보여줍니다. 누르면 미리 정해 둔 답변이 바로 발송돼요."
+      desc={maxItems < DM_FAQ_MAX
+        ? `DM 창을 처음 여는 사람에게 추천 질문을 보여줍니다. AI 공구 상담원 버튼이 첫 칸을 써서 질문은 ${maxItems}개까지예요.`
+        : 'DM 창을 처음 여는 사람에게 추천 질문을 최대 4개 보여줍니다. 누르면 미리 정해 둔 답변이 바로 발송돼요.'}
       right={
         <Toggle
           on={Boolean(draft.enabled)}
@@ -441,6 +446,14 @@ export const DmFaqSection: React.FC<FaqProps> = ({
         />
       }
     >
+      {items.length > maxItems && (
+        <div className="mb-3">
+          <HintBox tone="warn">
+            AI 공구 상담원 버튼이 첫 칸을 쓰고 있어 질문은 {maxItems}개까지만 DM 창에 올라가요. 마지막
+            질문 {items.length - maxItems}개는 지우거나 다른 질문과 합쳐 주세요.
+          </HintBox>
+        </div>
+      )}
       <div className="space-y-3 mb-4">
         {items.length === 0 ? (
           <div className="text-center py-8 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
@@ -485,10 +498,10 @@ export const DmFaqSection: React.FC<FaqProps> = ({
         <button
           type="button"
           onClick={addItem}
-          disabled={items.length >= DM_FAQ_MAX || !entitled}
+          disabled={items.length >= maxItems || !entitled}
           className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 rounded-xl py-2 px-3.5 text-xs font-black hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         >
-          <Plus size={14} /> 질문 추가 ({items.length}/{DM_FAQ_MAX})
+          <Plus size={14} /> 질문 추가 ({items.length}/{maxItems})
         </button>
         <SaveButton saving={saving} disabled={!entitled} onClick={save} />
       </div>
@@ -527,6 +540,237 @@ export const DmFaqSection: React.FC<FaqProps> = ({
           <HintBox tone="warn">
             자동 발송 스위치가 꺼져 있어요. 스위치를 끄면 답변이 나가지 않기 때문에, 질문 버튼도
             DM 창에서 함께 내려갑니다. 다시 켜면 자동으로 올라갑니다.
+          </HintBox>
+        )}
+      </div>
+    </SectionShell>
+  );
+};
+
+/* ────────────────────────── 1-1. AI 공구 상담원 ────────────────────────── */
+
+interface AiConsultProps {
+  userName: string;
+  connected: boolean;
+  entitled: boolean;
+  masterEnabled: boolean;
+  /** 상담 엔진이 열린 환경인지. 아니면 '오픈 준비 중'으로 두고 켤 수 없다. */
+  available: boolean;
+  value: DmAiConsultSettings;
+  onChange: (v: DmAiConsultSettings) => void;
+  onNotice: Notice;
+  /** 미리보기에 같이 보여줄 자주 묻는 질문 문구(켜져 있을 때만). */
+  faqQuestions: string[];
+}
+
+const AI_CONSULT_BUTTON_LABEL = '🛍️ 공구 상품 문의';
+const AI_TONES: { key: DmAiConsultSettings['tone']; label: string; sample: string }[] = [
+  { key: 'friendly', label: '친근하게', sample: '이 상품은 12월 1일부터 순차 출고돼요 😊' },
+  { key: 'polite', label: '정중하게', sample: '해당 상품은 12월 1일부터 순차 출고됩니다.' },
+];
+
+/**
+ * AI 공구 상담원 카드.
+ *
+ * 켜면 아이스브레이커 첫 칸과 DM 고정 메뉴에 "🛍️ 공구 상품 문의" 버튼이 올라간다.
+ * 고객이 그 버튼을 누르면 지금 진행 중인 픽스폴리오 공구 상품이 버튼으로 뜨고, 고른
+ * 상품에 대해서는 브랜드가 등록한 정보로만 답한다. 버튼으로 시작하지 않은 DM 은 읽지
+ * 않는다.
+ */
+export const DmAiConsultSection: React.FC<AiConsultProps> = ({
+  userName, connected, entitled, masterEnabled, available, value, onChange, onNotice, faqQuestions,
+}) => {
+  const { draft, setDraft, markSynced } = useServerDraft<DmAiConsultSettings>(value);
+  const [saving, setSaving] = useState(false);
+  const [products, setProducts] = useState<MyAffiliateItem[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void affiliateStoreService.myAffiliate().then((res) => {
+      if (!alive) return;
+      setProducts(res.error ? [] : (res.items || []).filter((x) => x.live));
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    const result = await apiService.saveDmAiConsult(userName, draft);
+    setSaving(false);
+    if (result.aiConsult) {
+      markSynced();
+      onChange(result.aiConsult);
+    }
+    if (result.ok) {
+      onNotice('ok', draft.enabled ? 'AI 공구 상담원을 켰어요. DM 창(앱)에서 상담 버튼을 확인해 보세요.' : '저장했어요.');
+      if (result.warning) onNotice('err', result.warning);
+    } else {
+      onNotice('err', result.error || '저장에 실패했습니다.');
+    }
+  };
+
+  const previewButtons = [
+    ...(draft.enabled ? [AI_CONSULT_BUTTON_LABEL] : []),
+    ...faqQuestions,
+  ].slice(0, DM_FAQ_MAX);
+
+  return (
+    <SectionShell
+      icon={<ShoppingBag size={17} />}
+      title="AI 공구 상담원"
+      desc="고객이 DM 창에서 [🛍️ 공구 상품 문의]를 누르면, 진행 중인 공구 상품 정보로 AI가 대신 답해요. 무료예요."
+      right={
+        available ? (
+          <Toggle
+            on={Boolean(draft.enabled)}
+            onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
+            disabled={!entitled || saving}
+          />
+        ) : (
+          <span className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-black text-amber-700">
+            오픈 준비 중
+          </span>
+        )
+      }
+    >
+      {/* DM 창 미리보기 — 첫 화면 버튼과 고정 메뉴. */}
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 mb-4">
+        <p className="text-[11px] font-black text-slate-400 mb-2.5">고객 DM 창에 이렇게 보여요</p>
+        <div className="flex flex-col items-center gap-1.5 mb-3">
+          {previewButtons.length === 0 ? (
+            <p className="text-[11px] font-bold text-slate-400 py-2">상담원을 켜면 첫 칸에 상담 버튼이 올라가요</p>
+          ) : (
+            previewButtons.map((label, i) => (
+              <span
+                key={`${label}-${i}`}
+                className={`px-3.5 py-1.5 rounded-full border text-xs font-bold ${
+                  label === AI_CONSULT_BUTTON_LABEL && i === 0
+                    ? 'bg-white border-pink-300 text-pink-600'
+                    : 'bg-white border-slate-200 text-slate-600'
+                }`}
+              >
+                {label}
+              </span>
+            ))
+          )}
+        </div>
+        <div className="flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2">
+          <span className="text-slate-400 text-sm leading-none">☰</span>
+          <span className="text-[11px] font-bold text-slate-500">고정 메뉴</span>
+          <span className="ml-auto text-[11px] font-black text-slate-700">{draft.enabled ? AI_CONSULT_BUTTON_LABEL : '없음'}</span>
+        </div>
+        <p className="text-[10px] text-slate-400 font-medium leading-relaxed mt-2">
+          첫 화면 버튼은 처음 대화하는 고객에게, 고정 메뉴(입력칸 옆 ☰)는 이미 대화한 고객에게도 항상 보여요.
+        </p>
+      </div>
+
+      {/* 말투 */}
+      <div className="mb-4">
+        <p className="text-xs font-black text-slate-700 mb-2">답변 말투</p>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-2">
+          {AI_TONES.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setDraft({ ...draft, tone: t.key })}
+              className={`h-9 px-4 rounded-lg text-xs font-black ${draft.tone === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-500 font-medium">
+          예) {AI_TONES.find((t) => t.key === draft.tone)?.sample}
+        </p>
+      </div>
+
+      {/* 한마디 */}
+      <div className="mb-4">
+        <p className="text-xs font-black text-slate-700 mb-2">상담 시작 인사 <span className="text-slate-400 font-bold">(선택)</span></p>
+        <textarea
+          value={draft.intro}
+          onChange={(e) => setDraft({ ...draft, intro: e.target.value })}
+          maxLength={DM_AI_CONSULT_INTRO_MAX}
+          rows={2}
+          placeholder="예) 공구 문의 주셔서 감사해요! 궁금한 상품을 골라 주세요 😊"
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-slate-400 resize-none"
+        />
+        <p className="text-[10px] text-slate-400 font-medium mt-1">
+          비워 두면 기본 인사가 나가요. 상품 버튼 바로 위에 붙고, AI가 답한다는 안내도 함께 나가요.
+        </p>
+      </div>
+
+      {/* 지금 상담 대상이 되는 공구 */}
+      <div className="mb-4">
+        <p className="text-xs font-black text-slate-700 mb-2">
+          지금 상담하는 공구 상품 {products && products.length > 0 && <span className="text-pink-600">{products.length}</span>}
+        </p>
+        {products === null ? (
+          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-bold py-2">
+            <Loader2 size={13} className="animate-spin" /> 불러오는 중
+          </div>
+        ) : products.length === 0 ? (
+          <div className="text-center py-5 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
+            <p className="text-slate-500 font-bold text-xs">지금 진행 중인 공구가 없어요</p>
+            <p className="text-[10px] text-slate-400 font-medium mt-1">고객이 버튼을 누르면 "지금 진행 중인 공구가 없어요 🙏"로 안내돼요.</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {products.map((p) => (
+              <div key={p.id} className="flex items-center gap-2.5 rounded-xl border border-slate-200 px-3 py-2">
+                {p.productImage ? (
+                  <img src={p.productImage} alt="" className="w-8 h-8 rounded-lg object-cover bg-slate-100 shrink-0" />
+                ) : (
+                  <div className="w-8 h-8 rounded-lg bg-slate-100 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-slate-900 truncate">{p.productName || '상품'}</p>
+                  {p.brandName && <p className="text-[10px] text-slate-400 font-bold truncate">{p.brandName}</p>}
+                </div>
+              </div>
+            ))}
+            <p className="text-[10px] text-slate-400 font-medium pt-1">
+              픽스폴리오 어필리에이트에서 진행 중인 상품만 상담해요. 판매 기간이 끝나면 버튼에서 자동으로 빠져요.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end mb-4">
+        <SaveButton saving={saving} disabled={!entitled || !available} onClick={save} />
+      </div>
+
+      {draft.syncError ? (
+        <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-[11px] md:text-xs font-bold text-red-700 leading-relaxed mb-3">
+          <AlertCircle size={13} className="inline mr-1 -mt-0.5" />
+          인스타그램에 등록하지 못했어요: {draft.syncError}
+        </div>
+      ) : draft.syncedAt && draft.enabled ? (
+        <p className="text-[11px] font-bold text-emerald-600 mb-3">
+          <Check size={12} className="inline mr-1 -mt-0.5" />
+          {fmtDateTime(draft.syncedAt)}에 DM 창에 상담 버튼을 올렸어요.
+        </p>
+      ) : null}
+
+      <div className="space-y-2">
+        <HintBox>
+          상담원은 <b>상담 버튼으로 시작한 대화만</b> 읽고 답해요. 그 밖의 DM은 읽지도 저장하지도 않아요.
+          상담 중인 대화에는 첫 인사말 · 키워드 자동 답장이 나가지 않아요.
+        </HintBox>
+        <HintBox>
+          그 대화에 직접 답장을 보내면 AI는 바로 멈추고, 그때부터는 직접 이어서 답하시면 돼요. 픽스폴리오가 아닌
+          외부 공구 문의는 "직접 확인하고 답변드릴게요" 한 번만 안내하고 넘겨 드려요.
+        </HintBox>
+        <HintBox>
+          가격 · 옵션 · 배송 · 교환 정책 · 성분 같은 정보는 <b>브랜드가 등록한 내용으로만</b> 답해요. 재고 수량은
+          알려주지 않고(구매 가능 / 품절만), 사이즈 추천도 하지 않아요.
+        </HintBox>
+        {!connected && (
+          <HintBox tone="warn">인스타그램 계정을 연동하면 상담 버튼이 DM 창에 표시됩니다.</HintBox>
+        )}
+        {connected && !masterEnabled && draft.enabled && (
+          <HintBox tone="warn">
+            자동 발송 스위치가 꺼져 있어 상담 버튼이 DM 창에서 내려가 있어요. 스위치를 켜면 함께 올라갑니다.
           </HintBox>
         )}
       </div>

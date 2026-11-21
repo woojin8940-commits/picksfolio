@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, DmFollowUp,
-  DmDirectSettings, DmFaqSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
+  DmAiConsultSettings, DmDirectSettings, DmFaqSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -18,7 +18,7 @@ import ManualDmModal from './ManualDmModal';
 import CollabMatchRegister from './CollabMatchRegister';
 import CreatorApplicationGate from './CreatorApplicationGate';
 import Toggle from './DmToggle';
-import { DM_SEND_SPEED_DEFAULT, DmFaqSection, DmSendSpeedSection, DmSendStatusSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { DM_SEND_SPEED_DEFAULT, DmAiConsultSection, DmFaqSection, DmSendSpeedSection, DmSendStatusSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 import { instagramPostUrl } from '../utils/instagramPostUrl';
 
 interface DmAutomationProps {
@@ -2888,6 +2888,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
    * 서버가 돌려준 값을 그대로 다시 담아 화면과 실제 상태를 일치시킨다.
    */
   const [faq, setFaq] = useState<DmFaqSettings>(() => cachedSettings?.faq || { enabled: false, items: [] });
+  const [aiConsult, setAiConsult] = useState<DmAiConsultSettings>(
+    () => cachedSettings?.aiConsult || { enabled: false, tone: 'friendly', intro: '' },
+  );
+  const [aiConsultAvailable, setAiConsultAvailable] = useState(Boolean(cachedSettings?.aiConsultAvailable));
   const [direct, setDirect] = useState<DmDirectSettings>(() => normalizeDirect(cachedSettings?.direct));
   const [sendSpeed, setSendSpeed] = useState<number>(() => cachedSettings?.sendSpeed || DM_SEND_SPEED_DEFAULT);
 
@@ -3035,6 +3039,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
         setDmAccess((s as any).dmAccess || null);
         setBaitHealth(s.baitHealth || null);
         if (s.faq) setFaq(s.faq);
+        if (s.aiConsult) setAiConsult(s.aiConsult);
+        setAiConsultAvailable(Boolean(s.aiConsultAvailable));
         if (s.direct) setDirect(normalizeDirect(s.direct));
         if (s.sendSpeed) setSendSpeed(s.sendSpeed);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
@@ -4079,8 +4085,21 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
           onChange={setDirect}
           onNotice={notify}
         />
+        {/* AI 공구 상담원 — 질문 버튼(아이스브레이커) 첫 칸을 쓰므로 바로 위에 둔다. */}
+        <DmAiConsultSection
+          userName={userName}
+          connected={connected}
+          entitled={entitled}
+          masterEnabled={enabled}
+          available={aiConsultAvailable}
+          value={aiConsult}
+          onChange={setAiConsult}
+          onNotice={notify}
+          faqQuestions={faq.enabled ? faq.items.map((f) => f.question).filter(Boolean) : []}
+        />
         {/* 자주 묻는 질문(DM 창 추천 질문 버튼)은 "디엠 자동응답" 아래에 둔다. */}
         <DmFaqSection
+          maxItems={aiConsultAvailable && aiConsult.enabled ? 3 : 4}
           userName={userName}
           connected={connected}
           entitled={entitled}
