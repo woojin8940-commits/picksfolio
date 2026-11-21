@@ -1020,6 +1020,18 @@ export interface DmAiConsultSettings {
 
 export const DM_AI_CONSULT_INTRO_MAX = 200;
 
+/** 인플루언서가 넘겨받은 상담 대화. */
+export interface AiConsultHandoff {
+  igsid: string;
+  name: string;
+  handle: string;
+  productName: string;
+  /** customer_request | handoff | external | order_not_found | verify_failed | influencer_replied | ai_error | daily_cap */
+  reason: string;
+  question: string;
+  at: string;
+}
+
 export interface DmFaqSettings {
   enabled: boolean;
   items: DmFaqItem[];
@@ -3961,6 +3973,40 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to save DM FAQ:', e);
       return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  async getAiConsultStatus(username: string): Promise<{
+    ok: boolean;
+    error?: string;
+    stats?: { started: number; answered: number; handoffs: number };
+    handedOff?: AiConsultHandoff[];
+  }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }, { account: username }),
+        body: JSON.stringify({ action: 'aiConsultStatus' }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) return { ok: false, error: data?.error || `불러오지 못했습니다. (HTTP ${res.status})` };
+      return { ok: true, stats: data?.stats, handedOff: Array.isArray(data?.handedOff) ? data.handedOff : [] };
+    } catch {
+      return { ok: false, error: '네트워크 오류로 불러오지 못했습니다.' };
+    }
+  },
+
+  async resumeAiConsult(username: string, igsid: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }, { account: username }),
+        body: JSON.stringify({ action: 'aiConsultResume', igsid }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      return res.ok ? { ok: true } : { ok: false, error: data?.error || '처리하지 못했습니다.' };
+    } catch {
+      return { ok: false, error: '네트워크 오류로 처리하지 못했습니다.' };
     }
   },
 

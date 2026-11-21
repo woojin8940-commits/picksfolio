@@ -3,7 +3,7 @@ import {
   AlertCircle, CalendarClock, Check, Clock, Gauge, HelpCircle, Loader2, MessageSquareReply, Plus, RefreshCw, Send, ShoppingBag, Trash2,
 } from 'lucide-react';
 import {
-  apiService, DmAiConsultSettings, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
+  AiConsultHandoff, apiService, DmAiConsultSettings, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
   DM_AI_CONSULT_INTRO_MAX, DM_FAQ_MAX, DM_FAQ_QUESTION_MAX,
 } from '../services/apiService';
 import { affiliateStoreService, type MyAffiliateItem } from '../services/affiliateStoreService';
@@ -564,6 +564,16 @@ interface AiConsultProps {
 }
 
 const AI_CONSULT_BUTTON_LABEL = '🛍️ 공구 상품 문의';
+const HANDOFF_REASON: Record<string, string> = {
+  customer_request: '고객이 직접 문의 요청',
+  handoff: 'AI가 답할 수 없는 질문',
+  external: '외부 공구 문의',
+  order_not_found: '주문을 찾지 못함',
+  verify_failed: '주문 확인 실패',
+  influencer_replied: '직접 답장함',
+  ai_error: 'AI 응답 오류',
+  daily_cap: '오늘 AI 답변 한도 도달',
+};
 const AI_TONES: { key: DmAiConsultSettings['tone']; label: string; sample: string }[] = [
   { key: 'friendly', label: '친근하게', sample: '이 상품은 12월 1일부터 순차 출고돼요 😊' },
   { key: 'polite', label: '정중하게', sample: '해당 상품은 12월 1일부터 순차 출고됩니다.' },
@@ -583,6 +593,33 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
   const { draft, setDraft, markSynced } = useServerDraft<DmAiConsultSettings>(value);
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<MyAffiliateItem[] | null>(null);
+  const [stats, setStats] = useState<{ started: number; answered: number; handoffs: number } | null>(null);
+  const [handedOff, setHandedOff] = useState<AiConsultHandoff[]>([]);
+  const [resuming, setResuming] = useState('');
+
+  const loadStatus = async () => {
+    const res = await apiService.getAiConsultStatus(userName);
+    if (res.ok) {
+      setStats(res.stats || null);
+      setHandedOff(res.handedOff || []);
+    }
+  };
+  useEffect(() => {
+    if (available && connected) void loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available, connected, userName]);
+
+  const resume = async (igsid: string) => {
+    setResuming(igsid);
+    const res = await apiService.resumeAiConsult(userName, igsid);
+    setResuming('');
+    if (res.ok) {
+      setHandedOff((prev) => prev.filter((h) => h.igsid !== igsid));
+      onNotice('ok', 'AI에게 다시 맡겼어요. 고객의 다음 메시지부터 AI가 답해요.');
+    } else {
+      onNotice('err', res.error || '처리하지 못했습니다.');
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -633,6 +670,61 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
         )
       }
     >
+      {available && stats && (
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {[
+            { label: '상담 시작', value: stats.started },
+            { label: 'AI 답변', value: stats.answered },
+            { label: '직접 넘겨받음', value: stats.handoffs },
+          ].map((s) => (
+            <div key={s.label} className="rounded-2xl border border-slate-100 bg-slate-50/60 py-3 text-center">
+              <p className="text-lg font-black text-slate-900">{s.value.toLocaleString('ko-KR')}</p>
+              <p className="text-[10px] text-slate-400 font-bold">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {available && handedOff.length > 0 && (
+        <div className="rounded-2xl border border-pink-200 bg-pink-50/40 p-4 mb-4">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <p className="text-xs font-black text-slate-800">직접 답해야 하는 대화 <span className="text-pink-600">{handedOff.length}</span></p>
+            <button type="button" onClick={() => void loadStatus()} className="text-slate-400 hover:text-slate-700" aria-label="새로고침">
+              <RefreshCw size={13} />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {handedOff.map((h) => (
+              <div key={h.igsid} className="rounded-xl bg-white border border-slate-200 px-3 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-slate-900 truncate">
+                      {h.name || (h.handle ? `@${h.handle}` : '고객')}
+                      {h.handle && h.name && <span className="text-slate-400 font-bold"> @{h.handle}</span>}
+                    </p>
+                    <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                      {HANDOFF_REASON[h.reason] || '직접 확인 필요'}{h.productName ? ` · ${h.productName}` : ''} · {fmtDateTime(h.at)}
+                    </p>
+                    {h.question && <p className="text-[11px] text-slate-600 font-medium mt-1 line-clamp-2">"{h.question}"</p>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void resume(h.igsid)}
+                    disabled={resuming === h.igsid}
+                    className="shrink-0 h-8 px-2.5 rounded-lg bg-slate-100 text-slate-700 text-[11px] font-black hover:bg-slate-200 disabled:opacity-50"
+                  >
+                    {resuming === h.igsid ? <Loader2 size={12} className="animate-spin" /> : 'AI에게 다시 맡기기'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 font-medium mt-2">
+            인스타그램 앱 DM에서 직접 답장하시면 돼요. 72시간이 지나면 목록에서 사라져요.
+          </p>
+        </div>
+      )}
+
       {/* DM 창 미리보기 — 첫 화면 버튼과 고정 메뉴. */}
       <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 mb-4">
         <p className="text-[11px] font-black text-slate-400 mb-2.5">고객 DM 창에 이렇게 보여요</p>

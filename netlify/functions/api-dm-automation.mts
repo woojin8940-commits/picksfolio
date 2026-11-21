@@ -45,6 +45,8 @@ import {
 } from "./_shared/dm-send-speed.mts";
 import { clearFeedCache } from "./_shared/instagram-feed.mts";
 import { getSupabaseServer } from "./_shared/supabase.mts";
+import { listHandedOff, readStats, resumeThread } from "./_shared/ai-consult-engine.mts";
+import { getDmContact } from "./_shared/dm-contacts.mts";
 
 /**
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
@@ -852,6 +854,41 @@ const handle = async (req: Request, context: Context) => {
      * 발송 속도 위에 보여 주는 읽기 전용 값이라 플랜과 무관하게 응답한다.
      * 발송 기록(dm_send_attempts)은 8일만 보관하므로 "오늘"과 "최근 1시간"만 센다.
      */
+    /**
+     * AI 공구 상담원 현황 — 누적 숫자와 인플루언서가 넘겨받은 대화 목록.
+     * 목록에는 고객 표시 이름 · 아이디와 마지막 질문만 싣는다(전화번호 · 주문 정보는 없다).
+     */
+    if (body?.action === "aiConsultStatus") {
+      const [stats, threads] = await Promise.all([readStats(username), listHandedOff(username)]);
+      const handedOff = await Promise.all(threads.map(async (t) => {
+        const c = await getDmContact(username, t.igsid).catch(() => null);
+        return {
+          igsid: t.igsid,
+          name: c?.name || "",
+          handle: c?.username || "",
+          productName: t.productName || "",
+          reason: t.handoffReason || "",
+          question: t.lastQuestion || "",
+          at: t.handedOffAt || t.updatedAt,
+        };
+      }));
+      return Response.json({
+        success: true,
+        stats: { started: stats.started, answered: stats.answered, handoffs: stats.handoffs },
+        handedOff,
+      });
+    }
+
+    /** 넘겨받은 대화를 AI 에게 다시 맡긴다(다음 고객 메시지부터 AI 가 답한다). */
+    if (body?.action === "aiConsultResume") {
+      const igsid = String(body?.igsid || "").slice(0, 64);
+      if (!igsid) return Response.json({ error: "대화를 찾지 못했어요." }, { status: 400 });
+      const ok = await resumeThread(username, igsid);
+      return ok
+        ? Response.json({ success: true })
+        : Response.json({ error: "72시간이 지나 끝난 대화예요. 고객이 상담 버튼을 다시 누르면 새로 시작돼요." }, { status: 404 });
+    }
+
     if (body?.action === "sendStats") {
       const stored = (await store.get(key, { type: "json" })) as DmSettings | null;
       const ids = [...new Set([stored?.igUserId, stored?.igAccountId].map((v) => String(v || "")).filter(Boolean))];

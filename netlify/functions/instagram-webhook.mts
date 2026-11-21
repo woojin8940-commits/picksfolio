@@ -45,6 +45,7 @@ import { backupCommentEvents, backupMessageEvents, enqueueCommentEvents, enqueue
 import type { QueuedComment, QueuedMessage } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
+import { handleAiConsultEvent } from "./_shared/ai-consult-engine.mts";
 import {
   baitGateKey,
   baitMainKey,
@@ -1208,7 +1209,28 @@ export async function processWebhookPayload(
           outcome.error = (e as Error)?.message || "처리 오류";
         }
       };
+      /**
+       * AI 공구 상담원이 먼저 본다. 상담 버튼으로 시작한 대화(또는 인플루언서가 넘겨받은
+       * 대화)라면 상담원이 처리하고, 기존 첫 인사말 · 키워드 답장은 보내지 않는다 —
+       * 같은 질문에 답이 두 개 오는 일을 막는다. 상담원과 무관한 이벤트는 그대로 흘려보낸다.
+       */
+      const consultCtx = {
+        username,
+        settings: settings as any,
+        graphHost: graphHost(settings),
+        graphVersion: GRAPH_VERSION,
+        igId,
+        accessToken,
+        ownIds,
+        blocked: sendBlockedReason,
+      };
       for (const event of messagingEvents) {
+        // 상담원 처리 중 오류가 나면(이벤트는 다시 처리된다) 기존 자동 답장도 보내지 않는다.
+        let consult: "handled" | "suppress" | null = "suppress";
+        await runTrigger("ai consult", async () => {
+          consult = await handleAiConsultEvent(consultCtx, event);
+        });
+        if (consult) continue;
         await runTrigger("faq postback", () => handleFaqPostback(triggerCtx, event));
         await runTrigger("bait postback", () => handleBaitPostback(triggerCtx, event));
         await runTrigger("inbound DM trigger", () => handleInboundMessage(triggerCtx, event));
