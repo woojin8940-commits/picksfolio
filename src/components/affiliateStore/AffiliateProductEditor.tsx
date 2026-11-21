@@ -84,9 +84,23 @@ const toInput = (p: StoreProduct | null, defaultDeliveryGuide = ''): ProductInpu
   productUrl: p?.productUrl || '',
   saleStartDate: p?.saleStartDate || '',
   saleEndDate: p?.saleEndDate || '',
+  shipStartDate: p?.shipStartDate || '',
+  keyIngredients: p?.keyIngredients || '',
+  volume: p?.volume || '',
+  shelfLife: p?.shelfLife || '',
+  caution: p?.caution || '',
+  faq: p?.faq || [],
   // 새 상품은 등록하자마자 인플루언서에게 보이도록 기본값을 '판매중'으로 둔다.
   status: p?.status || 'on_sale',
 });
+
+/** AI 상담 정보에서 성분 · 용량 · 사용 기한 · 주의사항을 꼭 받는 상위 카테고리(서버와 같다). */
+const AI_BEAUTY_CATEGORIES = ['뷰티', '스킨케어'];
+const AI_FAQ_MAX = 20;
+const AI_FAQ_EXAMPLES = ['묶음 할인 있나요?', '정품 맞나요?', '선물 포장 되나요?'];
+
+const textareaCls =
+  'w-full p-3.5 rounded-lg border border-slate-200 text-sm text-slate-900 leading-relaxed placeholder:text-slate-300 focus:outline-none focus:border-blue-600';
 
 const inputCls =
   'w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600';
@@ -243,6 +257,8 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [periodMode, setPeriodMode] = useState(!!(product?.saleStartDate || product?.saleEndDate));
+  const [shipDateMode, setShipDateMode] = useState(!!product?.shipStartDate);
+  const isBeauty = AI_BEAUTY_CATEGORIES.includes(form.category);
   const fileRef = useRef<HTMLInputElement>(null);
   const detailFileRef = useRef<HTMLInputElement>(null);
 
@@ -381,12 +397,30 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
       return;
     }
     const nextStatus = statusOverride || form.status;
+    if (isBeauty && !product) {
+      const aiMissing = ([
+        [form.keyIngredients, '주요 성분'],
+        [form.volume, '용량'],
+        [form.shelfLife, '사용 기한'],
+        [form.caution, '주의사항'],
+      ] as [string, string][]).filter(([v]) => !v.trim()).map(([, label]) => label);
+      if (aiMissing.length > 0) {
+        setError(`AI 상담 정보의 ${aiMissing.join(', ')}을(를) 입력해 주세요. 뷰티 · 스킨케어 상품은 꼭 필요한 정보예요.`);
+        return;
+      }
+    }
+    if (shipDateMode && !form.shipStartDate) {
+      setError('출고 예정일을 선택하거나 "바로 출고"로 바꿔 주세요.');
+      return;
+    }
     if (nextStatus === 'on_sale' && form.saleEndDate && form.saleEndDate < kstToday() && form.saleEndDate !== (product?.saleEndDate || '')) {
       setError('판매 종료일이 이미 지났어요. 판매기간을 오늘 이후로 바꿔 주세요.');
       return;
     }
     const payload: ProductInput = {
       ...form,
+      shipStartDate: shipDateMode ? form.shipStartDate : '',
+      faq: form.faq.map(f => ({ q: f.q.trim(), a: f.a.trim() })).filter(f => f.q && f.a),
       status: statusOverride || form.status,
       options: useOptions ? form.options.filter(o => o.name.trim()) : [],
       stock: totalStock,
@@ -710,6 +744,96 @@ const AffiliateProductEditor: React.FC<Props> = ({ businessUsername, taxonomy, f
             </div>
           </Row>
         )}
+      </Section>
+
+      <Section title="AI 상담 정보" desc="AI 공구 상담원이 인플루언서 DM으로 들어온 고객 문의에 답할 때 이 정보를 사용해요.">
+        <p className="rounded-xl bg-amber-50 border border-amber-100 px-3.5 py-2.5 text-xs font-bold text-amber-700">
+          가격 · 옵션 · 배송비 · 판매기간 · 사이즈 가이드 · 배송 · 반품 안내는 위에 입력한 내용을 그대로 써요. 재고 수량은 고객에게 알려주지 않고 품절 여부만 안내해요.
+        </p>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+          {([
+            { key: 'now', label: '바로 출고' },
+            { key: 'date', label: '출고일 지정' },
+          ] as const).map(o => {
+            const active = o.key === 'date' ? shipDateMode : !shipDateMode;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => {
+                  if (o.key === 'now') { setShipDateMode(false); set('shipStartDate', ''); }
+                  else setShipDateMode(true);
+                }}
+                className={`h-9 px-4 rounded-lg text-xs font-black ${active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+        {shipDateMode && (
+          <Row label="출고 예정일" required hint="이 날부터 순차 출고돼요. 고객이 언제 받을 수 있는지 물으면 이 날짜로 안내해요.">
+            <input type="date" className={`${inputCls} w-auto min-w-[150px]`} value={form.shipStartDate} min={kstToday()} onChange={e => set('shipStartDate', e.target.value)} />
+          </Row>
+        )}
+        {isBeauty && (
+          <>
+            <Row label="주요 성분" required>
+              <textarea className={textareaCls} rows={3} maxLength={1000} value={form.keyIngredients} onChange={e => set('keyIngredients', e.target.value)} placeholder="예: 나이아신아마이드 5%, 히알루론산, 판테놀" />
+            </Row>
+            <Row label="용량" required>
+              <input className={inputCls} maxLength={100} value={form.volume} onChange={e => set('volume', e.target.value)} placeholder="예: 50ml" />
+            </Row>
+            <Row label="사용 기한" required>
+              <input className={inputCls} maxLength={100} value={form.shelfLife} onChange={e => set('shelfLife', e.target.value)} placeholder="예: 제조일로부터 30개월, 개봉 후 12개월" />
+            </Row>
+            <Row label="주의사항" required>
+              <textarea className={textareaCls} rows={3} maxLength={1000} value={form.caution} onChange={e => set('caution', e.target.value)} placeholder="예: 상처가 있는 부위에는 사용하지 마세요. 이상이 있으면 사용을 멈추고 전문의와 상담하세요." />
+            </Row>
+          </>
+        )}
+        <Row label="자주 묻는 질문" hint={`선택 · 최대 ${AI_FAQ_MAX}개. 고객이 자주 묻는 질문과 답을 적어 두면 AI가 그대로 안내해요.`}>
+          <div className="space-y-2">
+            {form.faq.map((f, i) => (
+              <div key={i} className="flex gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <input
+                    className={inputCls}
+                    value={f.q}
+                    maxLength={100}
+                    placeholder={`질문 (예: ${AI_FAQ_EXAMPLES[i % AI_FAQ_EXAMPLES.length]})`}
+                    onChange={e => set('faq', form.faq.map((x, j) => (j === i ? { ...x, q: e.target.value } : x)))}
+                  />
+                  <textarea
+                    className={textareaCls}
+                    rows={2}
+                    value={f.a}
+                    maxLength={500}
+                    placeholder="답변"
+                    onChange={e => set('faq', form.faq.map((x, j) => (j === i ? { ...x, a: e.target.value } : x)))}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => set('faq', form.faq.filter((_, j) => j !== i))}
+                  className="w-11 h-11 shrink-0 rounded-lg border border-slate-200 text-slate-400 hover:text-red-500 flex items-center justify-center"
+                  aria-label="질문 삭제"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            {form.faq.length < AI_FAQ_MAX && (
+              <button
+                type="button"
+                onClick={() => set('faq', [...form.faq, { q: '', a: '' }])}
+                className="h-10 px-3 rounded-lg border border-dashed border-slate-300 text-xs font-bold text-slate-500 hover:border-blue-500 hover:text-blue-600 flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> 질문 추가
+              </button>
+            )}
+          </div>
+        </Row>
       </Section>
 
       <Section title="판매 상태">
