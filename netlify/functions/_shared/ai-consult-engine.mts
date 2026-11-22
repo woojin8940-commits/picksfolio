@@ -532,6 +532,18 @@ async function showTyping(ctx: ConsultCtx, recipientId: string): Promise<void> {
   await Promise.all([post("mark_seen"), post("typing_on")]);
 }
 
+/** "입력 중…" 표시를 끈다. 답장이 나간 뒤에도 표시가 남는 경우가 있어 항상 직접 끈다. */
+async function hideTyping(ctx: ConsultCtx, recipientId: string): Promise<void> {
+  if (!ctx.accessToken || !recipientId) return;
+  const url = `https://${ctx.graphHost}/${ctx.graphVersion}/${encodeURIComponent(ctx.igId)}/messages`;
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ctx.accessToken}` },
+    body: JSON.stringify({ recipient: { id: recipientId }, sender_action: "typing_off" }),
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => undefined);
+}
+
 /* ────────────────────────── 흐름 ────────────────────────── */
 
 function introText(ctx: ConsultCtx): string {
@@ -761,85 +773,95 @@ export async function handleAiConsultEvent(ctx: ConsultCtx, event: any): Promise
   }
   // 답을 준비하는 동안(상품 조회 · AI 답변) "입력 중…"을 먼저 띄운다. 답장보다 늦게 도착하면 표시가
   // 남아 있으므로 짧게 기다렸다가 넘어간다(최대 2초). 넘겨받은 대화에서는 AI 가 답하지 않으니 띄우지 않는다.
-  if (thread?.stage !== "human" || isOurPayload) await showTyping(ctx, senderId);
-
-  if (payload === AI_CONSULT_START_PAYLOAD) {
-    await startConsult(ctx, senderId, eventId);
-    return "handled";
+  const typing = thread?.stage !== "human" || isOurPayload;
+  if (typing) await showTyping(ctx, senderId);
+  // 답장을 보낸 뒤(또는 보낼 게 없을 때) 표시를 반드시 끈다. 고객이 다시 묻기 전까지는 띄우지 않는다.
+  try {
+    return await respond();
+  } finally {
+    if (typing) await hideTyping(ctx, senderId);
   }
-  if (payload.startsWith(AI_PRODUCT_PAYLOAD_PREFIX)) {
-    const id = payload.slice(AI_PRODUCT_PAYLOAD_PREFIX.length);
-    const p = (await loadActiveProducts(ctx.username)).find((x) => x.id === id);
-    if (!p) {
-      await send(ctx, senderId, `aic_gone_${eventId}`, "이 공구는 마감됐어요. 진행 중인 다른 공구를 확인해 보세요.", [
+
+  async function respond(): Promise<"handled" | "suppress" | null> {
+
+    if (payload === AI_CONSULT_START_PAYLOAD) {
+      await startConsult(ctx, senderId, eventId);
+      return "handled";
+    }
+    if (payload.startsWith(AI_PRODUCT_PAYLOAD_PREFIX)) {
+      const id = payload.slice(AI_PRODUCT_PAYLOAD_PREFIX.length);
+      const p = (await loadActiveProducts(ctx.username)).find((x) => x.id === id);
+      if (!p) {
+        await send(ctx, senderId, `aic_gone_${eventId}`, "이 공구는 마감됐어요. 진행 중인 다른 공구를 확인해 보세요.", [
+          { title: "공구 상품 보기", payload: AI_CONSULT_START_PAYLOAD },
+        ]);
+        return "handled";
+      }
+      await selectProduct(ctx, senderId, p, eventId, false);
+      return "handled";
+    }
+    if (payload === PAYLOAD_HUMAN) {
+      const now = new Date().toISOString();
+      const t = thread || { igsid: senderId, stage: "consult" as ConsultStage, history: [], startedAt: now, updatedAt: now };
+      await handOff(ctx, t, eventId, "customer_request", "네, 제가 직접 확인하고 답변드릴게요 🙂 궁금한 내용을 남겨 주세요.", "", true);
+      return "handled";
+    }
+
+    // 여기부터는 진행 중인 상담 대화의 일반 메시지.
+    const t = thread!;
+    if (t.stage === "human") return "suppress";
+    const text = String(message?.text || "").trim();
+    if (!text) {
+      if (message?.attachments) {
+        await send(ctx, senderId, `aic_att_${eventId}`, "사진이나 파일은 제가 확인하기 어려워요. 궁금한 점을 글로 보내 주시면 바로 답해 드릴게요!", CONSULT_QUICK);
+        return "handled";
+      }
+      return "suppress";
+    }
+
+    if (t.stage === "select") {
+      await send(ctx, senderId, `aic_pick_${eventId}`, "아래 버튼에서 궁금한 상품을 먼저 골라 주세요 🙂", [
         { title: "공구 상품 보기", payload: AI_CONSULT_START_PAYLOAD },
       ]);
       return "handled";
     }
-    await selectProduct(ctx, senderId, p, eventId, false);
-    return "handled";
-  }
-  if (payload === PAYLOAD_HUMAN) {
-    const now = new Date().toISOString();
-    const t = thread || { igsid: senderId, stage: "consult" as ConsultStage, history: [], startedAt: now, updatedAt: now };
-    await handOff(ctx, t, eventId, "customer_request", "네, 제가 직접 확인하고 답변드릴게요 🙂 궁금한 내용을 남겨 주세요.", "", true);
-    return "handled";
-  }
-
-  // 여기부터는 진행 중인 상담 대화의 일반 메시지.
-  const t = thread!;
-  if (t.stage === "human") return "suppress";
-  const text = String(message?.text || "").trim();
-  if (!text) {
-    if (message?.attachments) {
-      await send(ctx, senderId, `aic_att_${eventId}`, "사진이나 파일은 제가 확인하기 어려워요. 궁금한 점을 글로 보내 주시면 바로 답해 드릴게요!", CONSULT_QUICK);
-      return "handled";
-    }
-    return "suppress";
-  }
-
-  if (t.stage === "select") {
-    await send(ctx, senderId, `aic_pick_${eventId}`, "아래 버튼에서 궁금한 상품을 먼저 골라 주세요 🙂", [
-      { title: "공구 상품 보기", payload: AI_CONSULT_START_PAYLOAD },
-    ]);
-    return "handled";
-  }
-  if (t.stage === "verify_name") {
-    // 이름이 아니라 질문을 보낸 경우(길거나 물음표) 다시 이름을 묻는다.
-    if (text.replace(/\s/g, "").length > 15 || /[?？]/.test(text)) {
-      t.verifyTries = (t.verifyTries || 0) + 1;
-      if (t.verifyTries >= VERIFY_TRIES) {
-        await handOff(ctx, t, eventId, "verify_failed");
+    if (t.stage === "verify_name") {
+      // 이름이 아니라 질문을 보낸 경우(길거나 물음표) 다시 이름을 묻는다.
+      if (text.replace(/\s/g, "").length > 15 || /[?？]/.test(text)) {
+        t.verifyTries = (t.verifyTries || 0) + 1;
+        if (t.verifyTries >= VERIFY_TRIES) {
+          await handOff(ctx, t, eventId, "verify_failed");
+          return "handled";
+        }
+        await writeThread(ctx.username, t);
+        await send(ctx, senderId, `aic_vn_${eventId}`, "배송 조회를 위해 주문자 성함만 보내 주세요. (예: 홍길동)");
         return "handled";
       }
+      t.verifyName = text.slice(0, 30);
+      t.stage = "verify_phone";
       await writeThread(ctx.username, t);
-      await send(ctx, senderId, `aic_vn_${eventId}`, "배송 조회를 위해 주문자 성함만 보내 주세요. (예: 홍길동)");
+      await send(ctx, senderId, `aic_vp_${eventId}`, "주문하실 때 입력한 휴대폰 번호 뒤 4자리를 알려 주세요.");
       return "handled";
     }
-    t.verifyName = text.slice(0, 30);
-    t.stage = "verify_phone";
-    await writeThread(ctx.username, t);
-    await send(ctx, senderId, `aic_vp_${eventId}`, "주문하실 때 입력한 휴대폰 번호 뒤 4자리를 알려 주세요.");
-    return "handled";
-  }
-  if (t.stage === "verify_phone") {
-    const digits = text.replace(/\D/g, "");
-    if (digits.length !== 4) {
-      t.verifyTries = (t.verifyTries || 0) + 1;
-      if (t.verifyTries >= VERIFY_TRIES) {
-        await handOff(ctx, t, eventId, "verify_failed");
+    if (t.stage === "verify_phone") {
+      const digits = text.replace(/\D/g, "");
+      if (digits.length !== 4) {
+        t.verifyTries = (t.verifyTries || 0) + 1;
+        if (t.verifyTries >= VERIFY_TRIES) {
+          await handOff(ctx, t, eventId, "verify_failed");
+          return "handled";
+        }
+        await writeThread(ctx.username, t);
+        await send(ctx, senderId, `aic_vp_${eventId}`, "휴대폰 번호 뒤 4자리 숫자만 보내 주세요. (예: 1234)");
         return "handled";
       }
-      await writeThread(ctx.username, t);
-      await send(ctx, senderId, `aic_vp_${eventId}`, "휴대폰 번호 뒤 4자리 숫자만 보내 주세요. (예: 1234)");
+      await lookupOrders(ctx, t, digits, eventId);
       return "handled";
     }
-    await lookupOrders(ctx, t, digits, eventId);
+
+    await answer(ctx, t, text, eventId);
     return "handled";
   }
-
-  await answer(ctx, t, text, eventId);
-  return "handled";
 }
 
 /** 인플루언서가 [AI에게 다시 맡기기]를 눌렀을 때. 다음 고객 메시지부터 AI 가 답한다. */
