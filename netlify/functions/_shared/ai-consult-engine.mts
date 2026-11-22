@@ -341,14 +341,34 @@ function systemPrompt(p: ConsultProduct, tone: "friendly" | "polite"): string {
     `10. ${toneRule} 답은 3~5문장 이내로 짧게, DM 에 맞게 쓴다. 마크다운(별표 · 샵)을 쓰지 않는다.`,
     "11. 자기가 AI 라는 사실을 숨기지 않는다. 인플루언서 본인인 척하지 않는다.",
     "",
-    '출력은 JSON 하나만: {"reply": "고객에게 보낼 문장", "action": "answer|handoff|external|order_lookup|exchange"}',
+    "12. 고객 질문은 말이 달라도 뜻으로 이해한다. 예: '뭐 들었어요?' '성분 알려줘' → 주요 성분, '얼마?' '할인해요?' → 가격, '언제 와요?' → 출고 · 배송.",
+    '출력은 코드 블록 없이 JSON 하나만: {"reply": "고객에게 보낼 문장", "action": "answer|handoff|external|order_lookup|exchange"}',
     "",
     "[상품 자료]",
     productFacts(p),
   ].join("\n");
 }
 
+/** AI 호출이 실패한 마지막 이유(고객 내용 없음). 상담원 현황 API 로 확인한다. */
+async function noteAiError(username: string, code: string, detail = "") {
+  try {
+    const s = await readStats(username);
+    (s as any).lastAiError = { at: new Date().toISOString(), code, detail: detail.slice(0, 300) };
+    await store().setJSON(statsKey(username), s);
+  } catch { /* 진단용이라 실패해도 무시 */ }
+}
+
+/** 모델 응답 글에서 JSON 한 덩어리를 꺼낸다. 코드 블록 · 앞뒤 설명이 붙어 와도 읽는다. */
+function parseAiJson(text: string): any | null {
+  const t = text.replace(/```(?:json)?/gi, "").trim();
+  try { return JSON.parse(t); } catch { /* 아래에서 다시 */ }
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch { /* 실패 */ } }
+  return null;
+}
+
 async function askGemini(
+  username: string,
   p: ConsultProduct,
   tone: "friendly" | "polite",
   history: ConsultThread["history"],
@@ -356,38 +376,62 @@ async function askGemini(
 ): Promise<{ reply: string; action: AiAction } | null> {
   const key = process.env.GEMINI_API_KEY;
   const base = process.env.GOOGLE_GEMINI_BASE_URL;
-  if (!key || !base) return null;
-  try {
-    const contents = [
-      ...history.map((h) => ({ role: h.role, parts: [{ text: h.text }] })),
-      { role: "user", parts: [{ text: question.slice(0, 1000) }] },
-    ];
-    const res = await fetch(`${base}/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt(p, tone) }] },
-        contents,
-        generationConfig: { temperature: 0.2, maxOutputTokens: 600, responseMimeType: "application/json" },
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) {
-      console.warn("[ai-consult] gemini http", res.status);
-      return null;
-    }
-    const data: any = await res.json();
-    const text = (data?.candidates?.[0]?.content?.parts || []).map((x: any) => x?.text || "").join("");
-    const parsed = JSON.parse(text.replace(/^```(?:json)?|```$/g, "").trim());
-    const actions: AiAction[] = ["answer", "handoff", "external", "order_lookup", "exchange"];
-    const action: AiAction = actions.includes(parsed?.action) ? parsed.action : "answer";
-    const reply = String(parsed?.reply || "").replace(/\*\*/g, "").trim().slice(0, 900);
-    if (!reply && action === "answer") return null;
-    return { reply, action };
-  } catch (e) {
-    console.warn("[ai-consult] gemini failed:", (e as Error)?.name || "error");
+  if (!key || !base) {
+    await noteAiError(username, "missing_env", `key=${Boolean(key)} base=${Boolean(base)}`);
     return null;
   }
+  const contents = [
+    ...history.map((h) => ({ role: h.role, parts: [{ text: h.text }] })),
+    { role: "user", parts: [{ text: question.slice(0, 1000) }] },
+  ];
+  const actions: AiAction[] = ["answer", "handoff", "external", "order_lookup", "exchange"];
+  // 일시적인 오류(게이트웨이 · 한도)는 한 번 더 시도한다.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${base}/v1beta/models/${MODEL}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt(p, tone) }] },
+          contents,
+          generationConfig: { temperature: 0.2, maxOutputTokens: 800 },
+        }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        console.warn("[ai-consult] gemini http", res.status, detail.slice(0, 300));
+        await noteAiError(username, `http_${res.status}`, detail);
+        if (res.status >= 500 || res.status === 429) continue;
+        return null;
+      }
+      const data: any = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts || []).map((x: any) => x?.text || "").join("").trim();
+      if (!text) {
+        await noteAiError(username, "empty", String(data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || ""));
+        continue;
+      }
+      const parsed = parseAiJson(text);
+      if (!parsed) {
+        // JSON 모양이 아니면 글 자체를 답으로 쓴다(규칙은 시스템 지시로 이미 걸려 있다).
+        await noteAiError(username, "not_json", "");
+        const reply = text.replace(/\*\*/g, "").trim().slice(0, 900);
+        return reply ? { reply, action: "answer" } : null;
+      }
+      const action: AiAction = actions.includes(parsed?.action) ? parsed.action : "answer";
+      const reply = String(parsed?.reply || "").replace(/\*\*/g, "").trim().slice(0, 900);
+      if (!reply && action === "answer") {
+        await noteAiError(username, "empty_reply", "");
+        continue;
+      }
+      return { reply, action };
+    } catch (e) {
+      const name = (e as Error)?.name || "error";
+      console.warn("[ai-consult] gemini failed:", name);
+      await noteAiError(username, `exception_${name}`, (e as Error)?.message || "");
+    }
+  }
+  return null;
 }
 
 /* ────────────────────────── 발송 ────────────────────────── */
@@ -590,7 +634,7 @@ async function answer(ctx: ConsultCtx, t: ConsultThread, text: string, eventId: 
   await bumpStats(ctx.username, { dayCalls: 1 });
 
   const tone = ctx.settings.aiConsult?.tone === "polite" ? "polite" : "friendly";
-  const ai = await askGemini(p, tone, t.history, text);
+  const ai = await askGemini(ctx.username, p, tone, t.history, text);
   if (!ai) {
     await handOff(ctx, t, eventId, "ai_error", HANDOFF_TEXT, text);
     return;
