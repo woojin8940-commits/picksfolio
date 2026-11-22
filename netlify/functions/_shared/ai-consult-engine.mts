@@ -37,7 +37,13 @@ const DAILY_AI_CAP = 1000;
 const QUICK_REPLY_MAX = 13;
 const QUICK_REPLY_TITLE_MAX = 20;
 const VERIFY_TRIES = 3;
-const MODEL = "gemini-2.5-flash-lite";
+/**
+ * 쓸 모델(앞에서부터 시도). 넷리파이 AI 게이트웨이는 오래된 모델을 내린다(2.5 Flash-Lite 는
+ * 2026-11 기준 'unknown_model'). 환경 변수 AI_CONSULT_MODEL 로 바꿀 수 있고, 모델이 없다는 오류면
+ * 다음 후보로 넘어간다. 가능한 모델: https://api.netlify.com/api/v1/ai-gateway/providers/detailed
+ */
+const MODELS = [process.env.AI_CONSULT_MODEL, "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash"]
+  .filter((m, i, a): m is string => Boolean(m) && a.indexOf(m) === i);
 
 export const AI_PRODUCT_PAYLOAD_PREFIX = "aic_p_";
 const PAYLOAD_HUMAN = "aic_human";
@@ -59,6 +65,8 @@ export interface ConsultThread {
   verifyTries?: number;
   handoffReason?: string;
   handedOffAt?: string;
+  /** 인플루언서 확인이 필요한 질문이 있음(AI 는 계속 답할 수 있다). */
+  needsHuman?: boolean;
   /** 인플루언서 화면에 보여 줄 마지막 고객 질문(넘겨받은 대화만). */
   lastQuestion?: string;
   startedAt: string;
@@ -132,7 +140,7 @@ export async function listHandedOff(username: string, limit = 30): Promise<Consu
     // 접두사가 같은 다른 계정(예: abc 와 abc_shop)의 대화가 섞이지 않게 키 모양을 정확히 본다.
     if (!validIgsid(b.key.slice(`t_${username}_`.length))) continue;
     const t = (await store().get(b.key, { type: "json" }).catch(() => null)) as ConsultThread | null;
-    if (!t || t.stage !== "human") continue;
+    if (!t || (t.stage !== "human" && !t.needsHuman)) continue;
     if (Date.now() - Date.parse(t.updatedAt || "") > THREAD_TTL_MS) continue;
     out.push(t);
   }
@@ -385,8 +393,10 @@ async function askGemini(
     { role: "user", parts: [{ text: question.slice(0, 1000) }] },
   ];
   const actions: AiAction[] = ["answer", "handoff", "external", "order_lookup", "exchange"];
-  // 일시적인 오류(게이트웨이 · 한도)는 한 번 더 시도한다.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // 일시적인 오류(게이트웨이 · 한도)는 한 번 더 시도하고, 모델이 없다는 오류면 다음 모델로 넘어간다.
+  let mi = 0;
+  for (let attempt = 0; attempt < 3 && mi < MODELS.length; attempt++) {
+    const MODEL = MODELS[mi];
     try {
       const res = await fetch(`${base}/v1beta/models/${MODEL}:generateContent`, {
         method: "POST",
@@ -394,14 +404,16 @@ async function askGemini(
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt(p, tone) }] },
           contents,
-          generationConfig: { temperature: 0.2, maxOutputTokens: 800 },
+          // 생각(thinking) 토큰이 출력 한도를 먹어도 답이 잘리지 않게 넉넉히 둔다.
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
         }),
         signal: AbortSignal.timeout(25_000),
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
         console.warn("[ai-consult] gemini http", res.status, detail.slice(0, 300));
-        await noteAiError(username, `http_${res.status}`, detail);
+        await noteAiError(username, `http_${res.status}`, `${MODEL}: ${detail}`);
+        if (/unknown_model|not found|not_found|unsupported/i.test(detail)) { mi++; continue; }
         if (res.status >= 500 || res.status === 429) continue;
         return null;
       }
@@ -566,8 +578,16 @@ async function selectProduct(ctx: ConsultCtx, igsid: string, p: ConsultProduct, 
   );
 }
 
-async function handOff(ctx: ConsultCtx, t: ConsultThread, eventId: string, reason: string, text = HANDOFF_TEXT, question = "") {
-  t.stage = "human";
+/**
+ * 인플루언서에게 넘긴다.
+ *
+ * 고객이 [직접 문의하기]를 눌렀을 때만 AI 가 대화에서 빠진다(silence). 그 밖의 경우(답할 수 없는
+ * 질문 · 외부 공구 · AI 오류 등)는 그 질문만 인플루언서에게 넘기고, 고객이 다음에 보내는 질문에는
+ * AI 가 계속 답한다. 인플루언서가 그 대화에 직접 답장하면 그때 AI 가 멈춘다.
+ */
+async function handOff(ctx: ConsultCtx, t: ConsultThread, eventId: string, reason: string, text = HANDOFF_TEXT, question = "", silence = false) {
+  t.stage = silence ? "human" : t.productId ? "consult" : "select";
+  t.needsHuman = true;
   t.handoffReason = reason;
   t.handedOffAt = new Date().toISOString();
   t.verifyName = undefined;
@@ -762,7 +782,7 @@ export async function handleAiConsultEvent(ctx: ConsultCtx, event: any): Promise
   if (payload === PAYLOAD_HUMAN) {
     const now = new Date().toISOString();
     const t = thread || { igsid: senderId, stage: "consult" as ConsultStage, history: [], startedAt: now, updatedAt: now };
-    await handOff(ctx, t, eventId, "customer_request", "네, 제가 직접 확인하고 답변드릴게요 🙂 궁금한 내용을 남겨 주세요.");
+    await handOff(ctx, t, eventId, "customer_request", "네, 제가 직접 확인하고 답변드릴게요 🙂 궁금한 내용을 남겨 주세요.", "", true);
     return "handled";
   }
 
@@ -828,6 +848,7 @@ export async function resumeThread(username: string, igsid: string): Promise<boo
   const t = await readThread(username, igsid);
   if (!t) return false;
   t.stage = t.productId ? "consult" : "select";
+  t.needsHuman = false;
   t.handoffReason = undefined;
   t.handedOffAt = undefined;
   t.lastQuestion = undefined;

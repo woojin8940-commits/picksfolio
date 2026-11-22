@@ -616,7 +616,7 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
     setResuming('');
     if (res.ok) {
       setHandedOff((prev) => prev.filter((h) => h.igsid !== igsid));
-      onNotice('ok', 'AI에게 다시 맡겼어요. 고객의 다음 메시지부터 AI가 답해요.');
+      onNotice('ok', '처리했어요. 이 대화는 AI가 계속 답해요.');
     } else {
       onNotice('err', res.error || '처리하지 못했습니다.');
     }
@@ -738,14 +738,14 @@ export const DmAiConsultSection: React.FC<AiConsultProps> = ({
                     disabled={resuming === h.igsid}
                     className="shrink-0 h-8 px-2.5 rounded-lg bg-slate-100 text-slate-700 text-[11px] font-black hover:bg-slate-200 disabled:opacity-50"
                   >
-                    {resuming === h.igsid ? <Loader2 size={12} className="animate-spin" /> : 'AI에게 다시 맡기기'}
+                    {resuming === h.igsid ? <Loader2 size={12} className="animate-spin" /> : h.aiActive ? '확인 완료' : 'AI에게 다시 맡기기'}
                   </button>
                 </div>
               </div>
             ))}
           </div>
           <p className="text-[10px] text-slate-400 font-medium mt-2">
-            인스타그램 앱 DM에서 직접 답장하시면 돼요. 72시간이 지나면 목록에서 사라져요.
+            AI가 답하지 못한 질문만 여기 모여요. 그 대화의 다른 질문에는 AI가 계속 답하고, 인스타그램 앱에서 직접 답장하면 그때 AI가 멈춰요. 72시간이 지나면 목록에서 사라져요.
           </p>
         </div>
       )}
