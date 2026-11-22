@@ -503,6 +503,23 @@ async function send(ctx: ConsultCtx, recipientId: string, claimKey: string, text
   return result.ok;
 }
 
+/**
+ * "입력 중…" 표시. 답을 준비하는 동안(상품 조회 · AI 답변) 고객이 기다리고 있다는 걸 알 수
+ * 있게 바로 띄운다. 메시지가 아니라 발송 한도와 무관하고, 실패해도 상담에는 영향이 없다.
+ * 인스타그램은 다음 메시지가 도착하면 표시를 알아서 지운다.
+ */
+async function showTyping(ctx: ConsultCtx, recipientId: string): Promise<void> {
+  if (!ctx.accessToken || !recipientId) return;
+  const url = `https://${ctx.graphHost}/${ctx.graphVersion}/${encodeURIComponent(ctx.igId)}/messages`;
+  const post = (sender_action: string) => fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ctx.accessToken}` },
+    body: JSON.stringify({ recipient: { id: recipientId }, sender_action }),
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => undefined);
+  await Promise.all([post("mark_seen"), post("typing_on")]);
+}
+
 /* ────────────────────────── 흐름 ────────────────────────── */
 
 function introText(ctx: ConsultCtx): string {
@@ -722,6 +739,9 @@ export async function handleAiConsultEvent(ctx: ConsultCtx, event: any): Promise
     await appendDmLog(ctx.username, { kind: "dm", status: "skipped", trigger: "ai_consult", reason: blocked, recipientId: senderId }).catch(() => undefined);
     return isOurPayload || thread ? "suppress" : null;
   }
+  // 답을 준비하는 동안(상품 조회 · AI 답변) "입력 중…"을 먼저 띄운다. 답장보다 늦게 도착하면 표시가
+  // 남아 있으므로 짧게 기다렸다가 넘어간다(최대 2초). 넘겨받은 대화에서는 AI 가 답하지 않으니 띄우지 않는다.
+  if (thread?.stage !== "human" || isOurPayload) await showTyping(ctx, senderId);
 
   if (payload === AI_CONSULT_START_PAYLOAD) {
     await startConsult(ctx, senderId, eventId);
