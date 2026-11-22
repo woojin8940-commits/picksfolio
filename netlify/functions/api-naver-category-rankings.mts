@@ -21,7 +21,7 @@ const CATEGORY_ENGLISH_LABELS: Record<string, string> = {
   "50000008": "Living / Health",
 };
 
-const TRANSLATION_MODEL = "gemini-2.5-flash-lite";
+const TRANSLATION_MODEL = "gemini-3.1-flash-lite"; // 2.5 Flash-Lite 는 AI 게이트웨이에서 내려감(2026-11)
 const TRANSLATION_CACHE_KEY = "keyword-translations-ko-en";
 
 const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000;

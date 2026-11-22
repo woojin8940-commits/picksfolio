@@ -870,6 +870,8 @@ const handle = async (req: Request, context: Context) => {
           reason: t.handoffReason || "",
           question: t.lastQuestion || "",
           at: t.handedOffAt || t.updatedAt,
+          // AI 가 그 대화에서 계속 답하고 있는지(아니면 인플루언서가 이어받은 상태).
+          aiActive: t.stage !== "human",
         };
       }));
       return Response.json({

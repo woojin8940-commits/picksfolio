@@ -34,7 +34,7 @@ import { mutateBlobJSON } from "./_shared/blob-write.mts";
 // 함께 없어졌다.
 //
 // 모든 계정에 무료로 열려 있고, Blobs 에 두는 하루 사용량 한도만 있다.
-const MODEL = "gemini-2.5-flash-lite";
+const MODEL = "gemini-3.1-flash-lite"; // 2.5 Flash-Lite 는 AI 게이트웨이에서 내려감(2026-11)
 const DAILY_LIMIT = 100;
 const MAX_TURNS = 12;
 

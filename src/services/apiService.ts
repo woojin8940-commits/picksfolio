@@ -1030,6 +1030,8 @@ export interface AiConsultHandoff {
   reason: string;
   question: string;
   at: string;
+  /** AI 가 이 대화에서 계속 답하는 중인지. false 면 인플루언서가 이어받은 상태. */
+  aiActive?: boolean;
 }
 
 export interface DmFaqSettings {
