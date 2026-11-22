@@ -179,7 +179,8 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
   }
 
   const shipWaiting = active.filter(r => r.shippingStatus === 'info_submitted');
-  const uploadedCount = active.filter(r => r.contentUrl).length;
+  // 업로드 링크 단계를 없앴으므로, 협찬 상품을 보내 판매 링크가 열린 인원을 보여 준다.
+  const shippedCount = active.filter(r => r.shippingStatus === 'shipped' || !r.shippingStatus).length;
   const downloadAddresses = () => {
     if (shipWaiting.length === 0) return;
     const lines = [
@@ -208,7 +209,7 @@ export const AffiliateProgressBoard: React.FC<{ businessUsername: string; produc
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1">
         <p className="text-base md:text-lg font-black text-slate-900">진행 중 인플루언서 {active.length}명</p>
         <span className="text-slate-300 font-black">·</span>
-        <p className="text-base md:text-lg font-black text-slate-900">업로드 완료 {uploadedCount}명</p>
+        <p className="text-base md:text-lg font-black text-slate-900">발송 완료 {shippedCount}명</p>
         {shipWaiting.length > 0 && (
           <span className="px-2.5 py-1 rounded-md bg-slate-900 text-white text-[11px] font-black">확인 필요 {shipWaiting.length}건</span>
         )}
