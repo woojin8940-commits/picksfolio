@@ -882,7 +882,7 @@ const handle = async (req: Request, context: Context) => {
     /** 넘겨받은 대화를 AI 에게 다시 맡긴다(다음 고객 메시지부터 AI 가 답한다). */
     if (body?.action === "aiConsultResume") {
       const igsid = String(body?.igsid || "").slice(0, 64);
-      if (!igsid) return Response.json({ error: "대화를 찾지 못했어요." }, { status: 400 });
+      if (!/^\d{5,30}$/.test(igsid)) return Response.json({ error: "대화를 찾지 못했어요." }, { status: 400 });
       const ok = await resumeThread(username, igsid);
       return ok
         ? Response.json({ success: true })
