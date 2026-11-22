@@ -93,6 +93,11 @@ export interface ConsultCtx {
 
 const store = () => getStore({ name: STORE, consistency: "strong" });
 const threadKey = (username: string, igsid: string) => `t_${username}_${igsid}`;
+/** 인스타그램 IGSID 는 숫자뿐이다. 다른 값이면 다른 계정의 키와 겹칠 수 있으니 거부한다. */
+export const validIgsid = (v: string) => /^\d{5,30}$/.test(v);
+const lookupKey = (username: string, igsid: string) => `lookup_${username}_${igsid}_${kstToday()}`;
+/** 고객 한 명이 하루에 시도할 수 있는 배송 조회 횟수(이름 + 뒤 4자리 대입 방지). */
+const LOOKUP_DAILY_MAX = 3;
 const statsKey = (username: string) => `stats_${username}`;
 
 export const aiConsultAvailable = () => process.env.AI_CONSULT_ENABLED === "1";
@@ -124,6 +129,8 @@ export async function listHandedOff(username: string, limit = 30): Promise<Consu
   const out: ConsultThread[] = [];
   const { blobs } = await store().list({ prefix: `t_${username}_` });
   for (const b of blobs) {
+    // 접두사가 같은 다른 계정(예: abc 와 abc_shop)의 대화가 섞이지 않게 키 모양을 정확히 본다.
+    if (!validIgsid(b.key.slice(`t_${username}_`.length))) continue;
     const t = (await store().get(b.key, { type: "json" }).catch(() => null)) as ConsultThread | null;
     if (!t || t.stage !== "human") continue;
     if (Date.now() - Date.parse(t.updatedAt || "") > THREAD_TTL_MS) continue;
@@ -520,6 +527,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 async function lookupOrders(ctx: ConsultCtx, t: ConsultThread, last4: string, eventId: string) {
   const db = getDatabase();
+  const lk = lookupKey(ctx.username, t.igsid);
+  const tried = Number((await store().get(lk).catch(() => null)) || 0);
+  await store().set(lk, String(tried + 1)).catch(() => undefined);
   const name = (t.verifyName || "").replace(/\s/g, "");
   const rows = (await db.sql`
     SELECT product_name, option_name, quantity, status, tracking_company, tracking_number
@@ -592,6 +602,11 @@ async function answer(ctx: ConsultCtx, t: ConsultThread, text: string, eventId: 
     return;
   }
   if (ai.action === "order_lookup") {
+    const tried = Number((await store().get(lookupKey(ctx.username, t.igsid)).catch(() => null)) || 0);
+    if (tried >= LOOKUP_DAILY_MAX) {
+      await handOff(ctx, t, eventId, "lookup_limit", "오늘은 배송 조회를 더 할 수 없어요. 제가 직접 확인하고 답변드릴게요 🙂", text);
+      return;
+    }
     t.stage = "verify_name";
     t.verifyTries = 0;
     await writeThread(ctx.username, t);
@@ -706,6 +721,17 @@ export async function handleAiConsultEvent(ctx: ConsultCtx, event: any): Promise
     return "handled";
   }
   if (t.stage === "verify_name") {
+    // 이름이 아니라 질문을 보낸 경우(길거나 물음표) 다시 이름을 묻는다.
+    if (text.replace(/\s/g, "").length > 15 || /[?？]/.test(text)) {
+      t.verifyTries = (t.verifyTries || 0) + 1;
+      if (t.verifyTries >= VERIFY_TRIES) {
+        await handOff(ctx, t, eventId, "verify_failed");
+        return "handled";
+      }
+      await writeThread(ctx.username, t);
+      await send(ctx, senderId, `aic_vn_${eventId}`, "배송 조회를 위해 주문자 성함만 보내 주세요. (예: 홍길동)");
+      return "handled";
+    }
     t.verifyName = text.slice(0, 30);
     t.stage = "verify_phone";
     await writeThread(ctx.username, t);
@@ -734,6 +760,7 @@ export async function handleAiConsultEvent(ctx: ConsultCtx, event: any): Promise
 
 /** 인플루언서가 [AI에게 다시 맡기기]를 눌렀을 때. 다음 고객 메시지부터 AI 가 답한다. */
 export async function resumeThread(username: string, igsid: string): Promise<boolean> {
+  if (!validIgsid(igsid)) return false;
   const t = await readThread(username, igsid);
   if (!t) return false;
   t.stage = t.productId ? "consult" : "select";

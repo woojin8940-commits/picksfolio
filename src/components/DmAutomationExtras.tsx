@@ -573,6 +573,7 @@ const HANDOFF_REASON: Record<string, string> = {
   influencer_replied: '직접 답장함',
   ai_error: 'AI 응답 오류',
   daily_cap: '오늘 AI 답변 한도 도달',
+  lookup_limit: '배송 조회 횟수 초과',
 };
 const AI_TONES: { key: DmAiConsultSettings['tone']; label: string; sample: string }[] = [
   { key: 'friendly', label: '친근하게', sample: '이 상품은 12월 1일부터 순차 출고돼요 😊' },
