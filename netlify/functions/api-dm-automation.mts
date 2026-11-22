@@ -875,6 +875,7 @@ const handle = async (req: Request, context: Context) => {
       return Response.json({
         success: true,
         stats: { started: stats.started, answered: stats.answered, handoffs: stats.handoffs },
+        lastAiError: (stats as any).lastAiError || null,
         handedOff,
       });
     }
