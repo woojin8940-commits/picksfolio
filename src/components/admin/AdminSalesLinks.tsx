@@ -23,7 +23,7 @@ interface Reel { id?: string; permalink: string; thumbnailUrl: string; views?: n
 interface Item {
   id: string;
   link_id: string;
-  source: 'registered' | 'external';
+  source: 'registered' | 'external' | 'member';
   application_id: string;
   instagram_handle: string;
   profile_url: string;
@@ -414,12 +414,24 @@ const LinkEditor: React.FC<{
         <RegisteredPicker
           headers={headers}
           existingIds={new Set(link.items.map(i => i.application_id).filter(Boolean))}
+          existingHandles={new Set(link.items.map(i => String(i.instagram_handle || '').toLowerCase()).filter(Boolean))}
           onClose={() => setPickerOpen(false)}
-          onPick={async ids => {
+          onPick={async picks => {
             // 실패 문구는 창 안에 띄운다. 창 뒤(페이지 맨 위)에 띄우면 어두운 배경에 가려
             // 버튼을 눌러도 아무 일도 없는 것처럼 보인다.
             try {
-              const data = await call({ action: 'add_registered', link_id: link.id, application_ids: ids });
+              const ids = picks.filter(k => !k.startsWith('member:'));
+              const usernames = picks.filter(k => k.startsWith('member:')).map(k => k.slice(7));
+              const data = { added: 0, skipped: [] as string[], failed: 0 };
+              for (const res of [
+                ids.length ? await call({ action: 'add_registered', link_id: link.id, application_ids: ids }) : null,
+                usernames.length ? await call({ action: 'add_members', link_id: link.id, usernames }) : null,
+              ]) {
+                if (!res) continue;
+                data.added += Number(res.added || 0);
+                data.skipped.push(...(res.skipped || []));
+                data.failed += Number(res.failed || 0);
+              }
               setPickerOpen(false);
               await reload();
               const notes = [
@@ -564,8 +576,8 @@ const ItemCard: React.FC<{
             <a href={item.profile_url} target="_blank" rel="noopener noreferrer" className="font-black text-sm text-slate-900 hover:text-blue-600 truncate">
               @{item.instagram_handle || '(아이디 없음)'}
             </a>
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${item.source === 'registered' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
-              {item.source === 'registered' ? '매칭 등록자' : '미등록'}
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${item.source === 'registered' ? 'bg-blue-50 text-blue-600' : item.source === 'member' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
+              {item.source === 'registered' ? '매칭 등록자' : item.source === 'member' ? '가입 크리에이터' : '미등록'}
             </span>
           </div>
           <p className="text-[11px] font-medium text-slate-400">
@@ -684,35 +696,97 @@ const handleOf = (d: DirEntry) => {
   return String(d.instagram_url || '').match(/instagram\.com\/([^/?#]+)/i)?.[1] || d.applicant_username || '';
 };
 
+/** 고르기 창의 한 줄. 매칭 등록서(dir) 또는 등록서 없는 가입 크리에이터(member). */
+interface PickRow {
+  key: string;
+  kind: 'dir' | 'member';
+  handle: string;
+  name: string;
+  category: string;
+  followers: number;
+  price: string;
+  status: string;
+}
+
+interface RosterEntry {
+  username: string;
+  name?: string;
+  status?: string;
+  instagramUrl?: string;
+  instagramHandle?: string;
+  categories?: string;
+  matchRegistered?: boolean;
+  insights?: { followers?: number; instagramHandle?: string; instagramUrl?: string } | null;
+}
+
+const handleFromUrl = (url: string) => String(url || '').match(/instagram\.com\/([^/?#]+)/i)?.[1] || '';
+const normU = (u: string) => String(u || '').trim().toLowerCase().replace(/^biz\//, '');
+
 const RegisteredPicker: React.FC<{
   headers: () => Record<string, string>;
   existingIds: Set<string>;
+  existingHandles: Set<string>;
   onClose: () => void;
   /** 실패하면 이유 문구를, 성공하면 빈 문자열을 돌려준다. */
-  onPick: (ids: string[]) => Promise<string>;
-}> = ({ headers, existingIds, onClose, onPick }) => {
-  const [list, setList] = useState<DirEntry[] | null>(null);
+  onPick: (keys: string[]) => Promise<string>;
+}> = ({ headers, existingIds, existingHandles, onClose, onPick }) => {
+  const [list, setList] = useState<PickRow[] | null>(null);
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/collab-directory?role=influencer&sort=followers', { credentials: 'same-origin', headers: headers() })
-      .then(r => r.json())
-      .then(d => setList(d.applications || []))
-      .catch(() => setList([]));
+    // 브랜드 매칭 등록서만 보면 가입한 크리에이터 일부만 나온다.
+    // 크리에이터 명단(지원자 · 매칭 등록자 · 인스타 연동 계정)도 함께 불러와 합친다.
+    const opts = { credentials: 'same-origin' as RequestCredentials, headers: headers() };
+    Promise.all([
+      fetch('/api/collab-directory?role=influencer&sort=followers', opts).then(r => r.json()).catch(() => ({})),
+      fetch('/api/creator-application?scope=admin', opts).then(r => r.json()).catch(() => ({})),
+    ]).then(([dir, roster]) => {
+      const dirs: DirEntry[] = dir?.applications || [];
+      const members: RosterEntry[] = roster?.applications || [];
+      const dirUsers = new Set(dirs.map(d => normU(d.applicant_username)).filter(Boolean));
+      const rows: PickRow[] = dirs.map(d => ({
+        key: d.id,
+        kind: 'dir',
+        handle: handleOf(d),
+        name: d.name,
+        category: d.category,
+        followers: Number(d.follower_count || 0),
+        price: d.ad_price ? `희망 단가 ${d.ad_price}` : '',
+        status: '',
+      }));
+      for (const m of members) {
+        const u = normU(m.username);
+        if (!u || dirUsers.has(u)) continue;
+        const handle = String(m.instagramHandle || m.insights?.instagramHandle || '').replace(/^@/, '')
+          || handleFromUrl(m.instagramUrl || m.insights?.instagramUrl || '');
+        rows.push({
+          key: `member:${u}`,
+          kind: 'member',
+          handle: handle || u,
+          name: m.name || '',
+          category: String(m.categories || ''),
+          followers: Number(m.insights?.followers || 0),
+          price: !handle ? '인스타 계정 없음' : m.status === 'rejected' ? '반려된 크리에이터' : '',
+          status: handle ? '' : 'nohandle',
+        });
+      }
+      rows.sort((a, b) => b.followers - a.followers);
+      setList(rows);
+    });
   }, [headers]);
 
   const q = query.trim().toLowerCase();
   const shown = (list || []).filter(d =>
-    !q || [handleOf(d), d.name, d.category].some(v => String(v || '').toLowerCase().includes(q)));
+    !q || [d.handle, d.name, d.category].some(v => String(v || '').toLowerCase().includes(q)));
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-slate-100 space-y-2">
-          <p className="font-black text-slate-900">브랜드 매칭 등록자에서 가져오기</p>
+          <p className="font-black text-slate-900">가입 크리에이터에서 가져오기 <span className="text-xs font-bold text-slate-400">{list ? `${list.length}명` : ''}</span></p>
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="아이디·이름·분야 검색" className={inputCls} autoFocus />
         </div>
         <div className="flex-1 overflow-y-auto p-2">
@@ -721,23 +795,27 @@ const RegisteredPicker: React.FC<{
           ) : shown.length === 0 ? (
             <p className="p-8 text-center text-sm font-bold text-slate-400">해당하는 등록자가 없습니다.</p>
           ) : shown.map(d => {
-            const already = existingIds.has(d.id);
+            const already = (d.kind === 'dir' && existingIds.has(d.key)) || (d.status !== 'nohandle' && existingHandles.has(d.handle.toLowerCase()));
+            const disabled = already || d.status === 'nohandle';
             return (
-              <label key={d.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl ${already ? 'opacity-40' : 'hover:bg-slate-50 cursor-pointer'}`}>
+              <label key={d.key} className={`flex items-center gap-3 px-3 py-2 rounded-xl ${disabled ? 'opacity-40' : 'hover:bg-slate-50 cursor-pointer'}`}>
                 <input
                   type="checkbox"
-                  disabled={already}
-                  checked={already || picked.has(d.id)}
+                  disabled={disabled}
+                  checked={already || picked.has(d.key)}
                   onChange={e => setPicked(prev => {
                     const next = new Set(prev);
-                    if (e.target.checked) next.add(d.id); else next.delete(d.id);
+                    if (e.target.checked) next.add(d.key); else next.delete(d.key);
                     return next;
                   })}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-black text-slate-900 truncate">@{handleOf(d)} <span className="font-medium text-slate-400">{d.name}</span></p>
+                  <p className="text-sm font-black text-slate-900 truncate">
+                    @{d.handle} <span className="font-medium text-slate-400">{d.name}</span>
+                    {d.kind === 'member' && <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[10px] font-black">가입 크리에이터</span>}
+                  </p>
                   <p className="text-[11px] font-bold text-slate-400 truncate">
-                    {formatCountKo(d.follower_count)} 팔로워{d.category ? ` · ${d.category}` : ''}{d.ad_price ? ` · 희망 단가 ${d.ad_price}` : ''}
+                    {formatCountKo(d.followers)} 팔로워{d.category ? ` · ${d.category}` : ''}{d.price ? ` · ${d.price}` : ''}
                   </p>
                 </div>
                 {already && <span className="text-[10px] font-black text-slate-400">추가됨</span>}
