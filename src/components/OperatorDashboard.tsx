@@ -44,7 +44,8 @@ import { isTestProposal } from '../utils/testData';
  * CAMPAIGN_MENUS_HIDDEN 을 false 로 바꾸면 그대로 다시 보인다.
  */
 const CAMPAIGN_MENUS_HIDDEN = true;
-const HIDDEN_TABS = new Set<string>(['campaigns', 'listup', 'collabs', 'commerce', 'directory', 'saleslinks', 'settlement']);
+// 브랜드 영업 링크(saleslinks)는 브랜드 영업에 다시 쓰기 위해 숨김 목록에서 뺐다.
+const HIDDEN_TABS = new Set<string>(['campaigns', 'listup', 'collabs', 'commerce', 'directory', 'settlement']);
 
 type OperatorTab =
   | 'overview'
