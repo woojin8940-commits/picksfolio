@@ -96,6 +96,39 @@ async function mirrorImage(source: string, key: string): Promise<string> {
   }
 }
 
+/** 인스타·페이스북 이미지 서버 주소인지. 이 주소는 다른 사이트에서 띄우면 막히거나 며칠 뒤 만료된다. */
+export function isInstagramCdnUrl(raw: unknown): boolean {
+  try {
+    return hostIn(new URL(String(raw || "")), ["cdninstagram.com", "fbcdn.net"]);
+  } catch {
+    return false;
+  }
+}
+
+/** 주소에 박힌 만료 시각(oe, 16진수 초)이 지났는지. 없으면 모른다(false). */
+function cdnUrlExpired(raw: string): boolean {
+  try {
+    const oe = new URL(raw).searchParams.get("oe");
+    if (!oe || !/^[0-9a-f]{6,10}$/i.test(oe)) return false;
+    return parseInt(oe, 16) * 1000 <= Date.now();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 프로필 사진을 브랜드 화면에서 깨지지 않는 주소로 바꾼다.
+ * 인스타 이미지 서버 주소면 우리 저장소에 복사해 그 주소를 돌려주고, 이미 만료됐거나
+ * 복사에 실패하면 빈 값을 돌려준다(화면은 첫 글자로 대신 그린다). 그 밖의 주소는 그대로 둔다.
+ */
+export async function stableProfileImage(raw: unknown, handle: string): Promise<string> {
+  const url = String(raw || "").trim();
+  if (!url || !isInstagramCdnUrl(url)) return url;
+  if (cdnUrlExpired(url)) return "";
+  const keyBase = safeKeyPrefix(handle || "unknown") || "unknown";
+  return mirrorImage(url, `${keyBase}/profile-${Date.now().toString(36)}`);
+}
+
 /**
  * HTTP/2 로 요청한다. 인스타는 공개 프로필 주소에 HTTP/1.1 로 오는 요청을 모두 429 로
  * 막는다. Node 의 fetch 는 HTTP/1.1 만 쓰므로, 같은 요청이라도 이 길로 보내야 답을 준다.

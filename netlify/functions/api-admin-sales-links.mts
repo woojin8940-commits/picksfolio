@@ -6,6 +6,7 @@ import {
   cleanReelUrl,
   fetchPublicProfile,
   fetchReelThumbnail,
+  stableProfileImage,
   handleFromInput,
   type SalesReel,
 } from "./_shared/sales-link-profile.mts";
@@ -113,6 +114,7 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
       snap.error = pub.error;
     }
   }
+  snap.profileImageUrl = await stableProfileImage(snap.profileImageUrl, snap.handle);
   return snap;
 }
 
@@ -168,6 +170,7 @@ async function snapshotMember(db: any, username: string, opts: { skipPublic?: bo
       snap.error = pub.error;
     }
   }
+  snap.profileImageUrl = await stableProfileImage(snap.profileImageUrl, snap.handle);
   return snap;
 }
 

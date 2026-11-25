@@ -6,7 +6,7 @@ import { instagramPostUrl } from '../utils/instagramPostUrl';
  * 브랜드 영업용 링크 공개 화면(/pick/<토큰>).
  *
  * 운영자가 브랜드에게 보내는 인플루언서 제안 명단이다. 로그인 없이 열리고, 계정마다
- * 팔로워·팔로잉·최근 릴스 3편(조회수 포함)과 운영자가 정한 피드 / 릴스 단가(블러 처리)만 보인다. 미등록 계정의
+ * 팔로워·팔로잉·최근 릴스 3편(조회수 포함)과 운영자가 정한 피드 / 릴스 단가만 보인다. 맨 위에 대외비 안내를 띄운다. 미등록 계정의
  * 릴스 조회수는 운영자가 직접 넣는다. 평균 조회수·동향은 싣지 않는다.
  */
 
@@ -97,6 +97,13 @@ const SalesLinkPage: React.FC<{ token: string }> = ({ token }) => {
 
   return (
     <div className="min-h-screen bg-[#f6f5f2] text-slate-900">
+      <div className="bg-red-600 text-white">
+        <div className="max-w-[1440px] mx-auto px-5 sm:px-8 py-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs sm:text-sm">
+          <span className="font-black tracking-widest">대외비</span>
+          <span className="text-white/50">/</span>
+          <span className="font-bold">이 페이지의 단가와 정보는 받으신 분만 보실 수 있도록 공유된 자료입니다. 외부 공유를 삼가 주세요.</span>
+        </div>
+      </div>
       <div className="bg-amber-300 text-slate-950">
         <div className="max-w-[1440px] mx-auto px-5 sm:px-8 py-2.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs sm:text-sm">
           <span className="font-black">인플루언서 미리보기</span>
@@ -172,13 +179,7 @@ const InfluencerCard: React.FC<{ it: Influencer }> = ({ it }) => {
       <div className="flex flex-col">
       <div className="p-6 sm:p-7 pb-4 flex items-center gap-4">
         <div className="w-16 h-16 rounded-full bg-slate-100 overflow-hidden shrink-0 ring-2 ring-white shadow">
-          {it.profile_image_url ? (
-            <img src={it.profile_image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-sm font-black text-slate-400">
-              {(it.handle || '?').slice(0, 1).toUpperCase()}
-            </div>
-          )}
+          <Avatar src={it.profile_image_url} handle={it.handle} />
         </div>
         <div className="min-w-0 flex-1">
           <a
@@ -247,6 +248,29 @@ const InfluencerCard: React.FC<{ it: Influencer }> = ({ it }) => {
   );
 };
 
+/** 프로필 사진. 주소가 없거나 불러오지 못하면 아이디 첫 글자로 대신 그린다. */
+const Avatar: React.FC<{ src: string; handle: string }> = ({ src, handle }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (!src || failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-xl font-black text-slate-400">
+        {(handle || '?').slice(0, 1).toUpperCase()}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      className="w-full h-full object-cover"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
 const PriceBox: React.FC<{ it: Influencer }> = ({ it }) => (
       <div className="p-6 sm:p-7 pt-5">
         <div className="rounded-2xl bg-slate-950 text-white px-5 py-4">
@@ -257,9 +281,6 @@ const PriceBox: React.FC<{ it: Influencer }> = ({ it }) => (
           </div>
           {it.price_note && <p className="mt-2 text-xs font-bold text-white/60 truncate">{it.price_note}</p>}
         </div>
-        <p className="mt-2.5 text-xs font-bold text-slate-500 leading-relaxed">
-          정확한 견적은 픽스폴리오 가입 후 캠페인을 등록하면 안내해 드려요
-        </p>
       </div>
 );
 
