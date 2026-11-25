@@ -255,7 +255,7 @@ const PriceBox: React.FC<{ it: Influencer }> = ({ it }) => (
             <PriceCell label="피드" value={it.price} />
             <PriceCell label="릴스" value={it.reels_price} />
           </div>
-          {it.price_note && <p className="mt-2 text-xs font-bold text-white/60 truncate blur-sm select-none" aria-hidden="true">{it.price_note}</p>}
+          {it.price_note && <p className="mt-2 text-xs font-bold text-white/60 truncate">{it.price_note}</p>}
         </div>
         <p className="mt-2.5 text-xs font-bold text-slate-500 leading-relaxed">
           정확한 견적은 픽스폴리오 가입 후 캠페인을 등록하면 안내해 드려요
@@ -266,7 +266,7 @@ const PriceBox: React.FC<{ it: Influencer }> = ({ it }) => (
 const PriceCell: React.FC<{ label: string; value: number }> = ({ label, value }) => (
   <div className="min-w-0">
     <p className="text-[11px] font-black text-white/50">{label}</p>
-    <p className="text-xl font-black whitespace-nowrap blur-md select-none" aria-hidden="true">{value > 0 ? formatKRW(value) : '협의'}</p>
+    <p className="text-xl font-black whitespace-nowrap">{value > 0 ? formatKRW(value) : '협의'}</p>
   </div>
 );
 
