@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { withLiveRegistered } from "./_shared/sales-link-live.mts";
+import { isInstagramCdnUrl, stableProfileImage } from "./_shared/sales-link-profile.mts";
 
 /**
  * 브랜드 영업용 링크 — 공개 조회.
@@ -40,6 +41,22 @@ export default async (req: Request, context: Context) => {
       WHERE link_id = ${link.id}
       ORDER BY sort_order ASC, created_at ASC
     `);
+    // 예전에 담긴 줄은 프로필 사진이 인스타 이미지 서버 주소라 브랜드 화면에서 깨진다.
+    // 열릴 때 한 번 우리 저장소로 옮겨 두고(만료된 주소는 비운다) 다음부터는 그 주소를 쓴다.
+    await Promise.all(
+      rows
+        .filter((r: any) => isInstagramCdnUrl(r.profile_image_url))
+        .map(async (r: any) => {
+          const fixed = await stableProfileImage(r.profile_image_url, String(r.instagram_handle || ""));
+          if (fixed === r.profile_image_url) return;
+          r.profile_image_url = fixed;
+          try {
+            await db.sql`UPDATE sales_link_influencers SET profile_image_url = ${fixed} WHERE id = ${r.id}`;
+          } catch {
+            // 저장에 실패해도 이번 응답은 고친 주소로 내려 준다.
+          }
+        }),
+    );
     return Response.json(
       {
         link: { title: link.title, brand_name: link.brand_name, intro: link.intro, updated_at: link.updated_at },
