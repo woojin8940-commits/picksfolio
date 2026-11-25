@@ -10,6 +10,7 @@ import {
   type SalesReel,
 } from "./_shared/sales-link-profile.mts";
 import { normUsername, ratesFromApplication, withLiveRegistered } from "./_shared/sales-link-live.mts";
+import { buildSnapshots } from "./_shared/campaign-listup.mts";
 
 /**
  * 브랜드 영업용 링크 — 운영자 관리 API.
@@ -107,6 +108,61 @@ async function snapshotRegistered(db: any, applicationId: string, opts: { skipPu
         reels: snap.reels.length ? snap.reels : pub.profile.reels,
       };
       // 팔로워 수만 못 받은 계정 — 연동 지표나 등록서에도 없으면 직접 넣으라고 알린다.
+      if (pub.profile.notice && !snap.followers) snap.error = pub.profile.notice;
+    } else if (!snap.reels.length) {
+      snap.error = pub.error;
+    }
+  }
+  return snap;
+}
+
+/**
+ * 브랜드 매칭 등록서가 없는 가입 크리에이터(크리에이터 지원자 · 인스타 연동 계정)의 스냅샷.
+ * 크리에이터 명단과 같은 자료(creator_channels · creator_applications · site_data)를 쓴다.
+ */
+async function snapshotMember(db: any, username: string, opts: { skipPublic?: boolean } = {}) {
+  const uname = normUsername(username);
+  if (!uname) return null;
+  const snaps = await buildSnapshots(db, [uname]);
+  const s: any = snaps.get(uname) || null;
+  const apps = await db.sql`SELECT name, instagram_url, short_price FROM creator_applications WHERE username = ${uname} LIMIT 1`;
+  const app = apps?.[0];
+  const handle =
+    handleFromInput(s?.instagramHandle) || handleFromInput(s?.instagramUrl) || handleFromInput(app?.instagram_url);
+  if (!handle) return null;
+  const rates = ratesFromApplication({ post_price: s?.postPrice, short_price: s?.shortPrice, ad_price: s?.adPrice });
+  const reels: SalesReel[] = (Array.isArray(s?.recentReels) ? s.recentReels : [])
+    .slice(0, 3)
+    .map((r: any) => ({
+      id: String(r?.id || ""),
+      permalink: String(r?.permalink || ""),
+      thumbnailUrl: String(r?.thumbnailUrl || ""),
+      views: clampInt(Number(r?.views || 0)),
+    }));
+  let snap = {
+    applicantUsername: uname,
+    handle,
+    displayName: String(app?.name || s?.name || ""),
+    category: String(s?.categories || ""),
+    followers: clampInt(Number(s?.followers || 0)),
+    following: clampInt(Number(s?.following || 0)),
+    profileImageUrl: String(s?.profileImage || ""),
+    reels,
+    basePrice: rates.feed,
+    reelsBasePrice: rates.reels || clampInt(Number(app?.short_price || 0)),
+    error: "",
+  };
+  if (!opts.skipPublic && (!snap.reels.length || !snap.following || !snap.followers)) {
+    const pub = await fetchPublicProfile(handle);
+    if ("profile" in pub) {
+      snap = {
+        ...snap,
+        handle: pub.profile.handle,
+        followers: snap.followers || pub.profile.followers,
+        following: snap.following || pub.profile.following,
+        profileImageUrl: snap.profileImageUrl || pub.profile.profileImageUrl,
+        reels: snap.reels.length ? snap.reels : pub.profile.reels,
+      };
       if (pub.profile.notice && !snap.followers) snap.error = pub.profile.notice;
     } else if (!snap.reels.length) {
       snap.error = pub.error;
@@ -299,6 +355,48 @@ export default async (req: Request) => {
         return Response.json({ added, skipped, failed: failed.length });
       }
 
+      case "add_members": {
+        // 브랜드 매칭 등록서가 없는 가입 크리에이터를 계정 이름으로 담는다.
+        if (!b.link_id) return Response.json({ error: "링크를 먼저 선택해 주세요." }, { status: 400 });
+        const names: string[] = (Array.isArray(b.usernames) ? b.usernames : []).map(normUsername).filter(Boolean).slice(0, 50);
+        const existing = await db.sql`SELECT LOWER(instagram_handle) AS h, LOWER(applicant_username) AS u FROM sales_link_influencers WHERE link_id = ${b.link_id}`;
+        const haveHandle = new Set(existing.map((r: any) => r.h).filter(Boolean));
+        const haveUser = new Set(existing.map((r: any) => r.u).filter(Boolean));
+        let added = 0;
+        const skipped: string[] = [];
+        const failed: string[] = [];
+        let throttled = false;
+        for (const uname of names) {
+          if (haveUser.has(uname)) continue;
+          try {
+            const snap = await snapshotMember(db, uname, { skipPublic: throttled });
+            if (!snap) { failed.push(uname); continue; }
+            if (snap.error.includes("HTTP 429")) throttled = true;
+            if (haveHandle.has(snap.handle.toLowerCase())) { skipped.push(snap.handle); continue; }
+            await db.sql`
+              INSERT INTO sales_link_influencers (
+                id, link_id, sort_order, source, applicant_username, instagram_handle, profile_url, display_name,
+                profile_image_url, category, followers, following, recent_reels, base_price, price,
+                reels_base_price, reels_price, fetch_error, synced_at
+              ) VALUES (
+                ${genId("sli")}, ${b.link_id}, ${await nextSortOrder(db, b.link_id)}, 'member', ${snap.applicantUsername}, ${snap.handle},
+                ${`https://www.instagram.com/${snap.handle}/`}, ${snap.displayName}, ${snap.profileImageUrl},
+                ${snap.category}, ${snap.followers}, ${snap.following}, ${JSON.stringify(snap.reels)}::jsonb,
+                ${snap.basePrice}, ${snap.basePrice},
+                ${snap.reelsBasePrice}, ${snap.reelsBasePrice}, ${snap.error}, ${new Date().toISOString()}
+              )
+            `;
+            haveUser.add(uname);
+            haveHandle.add(snap.handle.toLowerCase());
+            added += 1;
+          } catch (err: any) {
+            console.error("[sales-links] add_members 실패:", uname, err?.message);
+            failed.push(uname);
+          }
+        }
+        return Response.json({ added, skipped, failed: failed.length });
+      }
+
       case "update_item": {
         if (!b.id) return Response.json({ error: "id가 필요합니다." }, { status: 400 });
         const [cur] = await db.sql`SELECT * FROM sales_link_influencers WHERE id = ${b.id}`;
@@ -339,6 +437,13 @@ export default async (req: Request) => {
         let notice = "";
         if (cur.source === "registered" && cur.application_id) {
           const snap = await snapshotRegistered(db, cur.application_id);
+          if (snap) {
+            ({ followers, following, reels, profileImageUrl: image, displayName: name } = snap);
+            handle = snap.handle || handle;
+            error = snap.error;
+          }
+        } else if (cur.source === "member" && cur.applicant_username) {
+          const snap = await snapshotMember(db, cur.applicant_username);
           if (snap) {
             ({ followers, following, reels, profileImageUrl: image, displayName: name } = snap);
             handle = snap.handle || handle;
