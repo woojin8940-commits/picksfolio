@@ -17,11 +17,19 @@ export const todayInSeoul = (): string =>
  *
  * 이 값은 화면에 보이는 문자열에만 쓴다. 저장·발송되는 금액은 숫자 그대로 다룬다.
  */
-let displayLocale: 'ko' | 'en' = 'ko';
+let displayLocale: 'ko' | 'en' | 'ja' = 'ko';
 
-export const setDisplayLocale = (locale: 'ko' | 'en'): void => {
+export const setDisplayLocale = (locale: 'ko' | 'en' | 'ja'): void => {
   displayLocale = locale;
 };
+
+/** 언어별 원화 단위. 영어는 '3,000 KRW', 일본어는 '3,000ウォン', 한국어는 '3,000원'. */
+const wonLabel = (amount: string): string => {
+  if (displayLocale === 'en') return `${amount} KRW`;
+  if (displayLocale === 'ja') return `${amount}ウォン`;
+  return `${amount}원`;
+};
+const wonZero = (): string => wonLabel('0');
 
 /**
  * 만·억으로 접은 숫자의 영어 표기(24,300 → 24.3K). 한국어일 때는 null 을 준다.
@@ -30,9 +38,17 @@ export const setDisplayLocale = (locale: 'ko' | 'en'): void => {
  * 만·억으로 접는다. 한국어 표기를 건드리지 않으려고 이렇게 갈랐다.
  */
 export const compactCountEn = (value: number | null | undefined): string | null => {
-  if (displayLocale !== 'en') return null;
+  if (displayLocale === 'ko') return null;
   const num = Number(value || 0);
   if (!Number.isFinite(num)) return null;
+  if (displayLocale === 'ja') {
+    // 일본어도 만·억 단위로 접는다. 글자만 万·億 으로 바꾼다.
+    const short = (n: number) => (n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
+    const absJa = Math.abs(num);
+    if (absJa >= 100000000) return `${short(num / 100000000)}億`;
+    if (absJa >= 10000) return `${short(num / 10000)}万`;
+    return num.toLocaleString('ja-JP');
+  }
   const trim = (n: number, unit: string) => `${n.toFixed(1).replace(/\.0$/, '')}${unit}`;
   const abs = Math.abs(num);
   if (abs >= 1_000_000_000) return trim(num / 1_000_000_000, 'B');
@@ -53,10 +69,10 @@ export const stripCommas = (value: string): string => {
 };
 
 export const formatKRW = (value: number | string | null | undefined): string => {
-  if (value === null || value === undefined) return displayLocale === 'en' ? '0 KRW' : '0원';
+  if (value === null || value === undefined) return wonZero();
   const num = typeof value === 'string' ? Number(value.replace(/[^0-9]/g, '')) : value;
-  if (isNaN(num)) return displayLocale === 'en' ? '0 KRW' : '0원';
-  if (displayLocale === 'en') return `${formatNumberWithCommas(num)} KRW`;
+  if (isNaN(num)) return wonZero();
+  if (displayLocale !== 'ko') return wonLabel(formatNumberWithCommas(num));
   return `${formatNumberWithCommas(num)}원`;
 };
 
@@ -68,9 +84,9 @@ export const formatKRW = (value: number | string | null | undefined): string => 
  */
 export const formatSignedKRW = (value: number | null | undefined): string => {
   const num = Number(value || 0);
-  if (!Number.isFinite(num) || num === 0) return displayLocale === 'en' ? '0 KRW' : '0원';
+  if (!Number.isFinite(num) || num === 0) return wonZero();
   const signed = `${num < 0 ? '-' : '+'}${formatNumberWithCommas(Math.abs(Math.round(num)))}`;
-  if (displayLocale === 'en') return `${signed} KRW`;
+  if (displayLocale !== 'ko') return wonLabel(signed);
   return `${signed}원`;
 };
 
@@ -103,8 +119,8 @@ export const toAsciiSafeId = (s: string): string =>
 export const formatKoreanWon = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '';
   const num = typeof value === 'string' ? Number(String(value).replace(/[^0-9]/g, '')) : value;
-  if (isNaN(num) || num === 0) return displayLocale === 'en' ? '0 KRW' : '0원';
-  if (displayLocale === 'en') return `${formatNumberWithCommas(num)} KRW`;
+  if (isNaN(num) || num === 0) return wonZero();
+  if (displayLocale !== 'ko') return wonLabel(formatNumberWithCommas(num));
   const eok = Math.floor(num / 100000000);
   const man = Math.floor((num % 100000000) / 10000);
   const rest = num % 10000;

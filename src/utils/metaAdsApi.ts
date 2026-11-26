@@ -538,7 +538,7 @@ export async function runRemainingSteps(
       const name = res.pendingName || current.pendingName || current.name;
       const objectId = window.prompt(`Meta 광고 관리자에서 '${name}' 생성 여부를 확인해 주세요. 이미 생성됐다면 해당 객체 ID를 입력하세요. 생성되지 않은 것이 확실하면 '미생성'을 입력하세요. 취소하면 재생성하지 않습니다.`);
       if (signal?.aborted) return { record: res.record || current, error: '요청을 중단했습니다.' };
-      if (objectId?.trim() === '미생성') {
+      if (['미생성', 'not created', '未作成'].includes(objectId?.trim() ?? '')) {
         res = await recoverMetaAd(username, current, signal, { confirmNotCreated: true, pendingName: name });
       } else if (objectId?.trim()) {
         res = await recoverMetaAd(username, current, signal, { objectId: objectId.trim() });

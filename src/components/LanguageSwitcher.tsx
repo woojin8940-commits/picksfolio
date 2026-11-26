@@ -22,13 +22,17 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
   const { language, toggleLanguage, setLanguage } = useLanguage();
 
   if (variant === 'compact') {
-    const nextLabel = language === 'ko' ? 'EN' : '한국어';
+    // 한 칸 버튼은 다음 언어 이름을 보여 주고, 누르면 그 언어로 넘어간다.
+    const next = language === 'ko' ? 'en' : language === 'en' ? 'ja' : 'ko';
+    const nextLabel = next === 'en' ? 'EN' : next === 'ja' ? '日本語' : '한국어';
+    const nextAria = next === 'en' ? 'Switch to English' : next === 'ja' ? '日本語に切り替え' : '한국어로 변경';
     return (
       <button
         type="button"
         onClick={toggleLanguage}
-        aria-label={language === 'ko' ? 'Switch to English' : '한국어로 변경'}
-        title={language === 'ko' ? 'Switch to English' : '한국어로 변경'}
+        translate="no"
+        aria-label={nextAria}
+        title={nextAria}
         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all border whitespace-nowrap ${
           className || 'bg-white/10 hover:bg-white/20 text-white border-white/20'
         }`}
@@ -55,8 +59,9 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
 
   return (
     <div
+      translate="no"
       role="group"
-      aria-label={language === 'ko' ? '언어 선택' : 'Language'}
+      aria-label={language === 'ko' ? '언어 선택' : language === 'ja' ? '言語' : 'Language'}
       className={`inline-flex items-center rounded-full p-0.5 border text-xs font-bold ${shell} ${className}`}
     >
       <button
@@ -83,6 +88,18 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
         <span aria-hidden="true">🇺🇸</span>
         <span className="md:hidden">EN</span>
         <span className="hidden md:inline">English</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setLanguage('ja')}
+        aria-pressed={language === 'ja'}
+        className={`px-2.5 md:px-3 py-1 rounded-full transition-all flex items-center gap-1 whitespace-nowrap ${
+          language === 'ja' ? activeBtn : idleBtn
+        }`}
+      >
+        <span aria-hidden="true">🇯🇵</span>
+        <span className="md:hidden">JP</span>
+        <span className="hidden md:inline">日本語</span>
       </button>
     </div>
   );

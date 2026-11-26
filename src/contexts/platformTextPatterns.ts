@@ -1684,4 +1684,700 @@ export const platformTextPatterns = [
     "source": "^([\\d,]+)편$",
     "replacement": "$1 reels"
   },
+  {
+    "source": "^링크 버튼을 함께 보낼 때는 본문을 (.+?)자 이내로 작성해 주세요\\. \\(현재 (.+?)자\\) 인스타그램은 댓글 1건당 DM을 1통만 허용해, 본문과 버튼이 카드 한 장에 담기며 (.+?)자를 넘는 내용은 작게 표시되거나 잘릴 수 있습니다\\.$",
+    "replacement": "When sending a link button, keep the message within $1 characters. (currently $2) Instagram allows only one DM per comment, so the message and button go on a single card, and anything over $3 characters may be shown small or cut off."
+  },
+  {
+    "source": "^자사몰 상세페이지처럼 세로로 긴 이미지가 있다면 올려 주세요\\. 위에서부터 순서대로 이어서 보여 줍니다\\(최대 (.+?)장, 장당 5MB 이하\\)\\. 없으면 아래 상품 설명 · 사이즈 가이드 · 배송 안내만으로도 판매할 수 있습니다\\.$",
+    "replacement": "If you have long vertical images like your own store's detail page, upload them. They are shown one after another from the top (up to $1 images, 5MB or less each). Without them you can still sell with just the product description, size guide and shipping info below."
+  },
+  {
+    "source": "^@(.+?) 님을 선정할까요\\? 인플루언서에게 선정 알림이 가고, 인플루언서가 협찬 상품 배송정보를 입력하면 협업이 진행됩니다\\. 상품을 보내고 송장번호를 입력하면 인플루언서의 전용 판매 링크가 열립니다\\.$",
+    "replacement": "Select @$1? The influencer gets a selection notice, and the collab proceeds once they enter shipping info for the sponsored product. When you send the product and enter the tracking number, the influencer's dedicated sales link opens."
+  },
+  {
+    "source": "^Meta 광고 관리자에서 '(.+?)' 생성 여부를 확인해 주세요\\. 이미 생성됐다면 해당 객체 ID를 입력하세요\\. 생성되지 않은 것이 확실하면 '미생성'을 입력하세요\\. 취소하면 재생성하지 않습니다\\.$",
+    "replacement": "Please check in Meta Ads Manager whether '$1' was created. If it was, enter that object ID. If you are sure it was not created, enter 'not created'. If you cancel, it will not be recreated."
+  },
+  {
+    "source": "^(.+?) 님에게 (.+?)을\\(를\\) (.+?) (.+?)\\(예금주 (.+?)\\)로 이체했나요\\? 이체한 날짜를 확인하고 확인을 누르면 지급 완료로 바뀌고 신청자에게 알림이 가요\\.$",
+    "replacement": "Did you transfer $2 to $1 at $3 $4 (account holder $5)? Check the transfer date and press Confirm — it changes to Paid and the applicant is notified."
+  },
+  {
+    "source": "^본문과 링크 버튼이 메시지 한 통으로 발송됩니다\\. \\(본문 (.+?)자까지\\) 따로 보내고 싶다면 아래 \"메시지 추가\"에서 텍스트를 추가해 링크 버튼을 넣어 주세요\\.$",
+    "replacement": "The message and link button are sent as one message. (message up to $1 characters) To send them separately, add text under \"Add message\" below and put the link button there."
+  },
+  {
+    "source": "^지급 가능 금액 전액을 신청할까요\\? 총 수수료 (.+?) 소득세\\(3%\\) −(.+?) 지방소득세 −(.+?) 실지급액 (.+?) 지급 예정일: (.+?)$",
+    "replacement": "Request the full available amount? Total commission $1 Income tax (3%) −$2 Local income tax −$3 Net payout $4 Expected payout date: $5"
+  },
+  {
+    "source": "^첫 번째 이미지가 대표 이미지입니다\\. 이미지를 고르면 정사각형으로 노출될 영역을 직접 선택할 수 있어요\\. 최대 (.+?)장까지 올릴 수 있어요\\.$",
+    "replacement": "The first image is the main image. When you pick an image you can choose the area shown as a square. You can upload up to $1 images."
+  },
+  {
+    "source": "^본문이 (.+?)자를 넘어 앞부분은 텍스트로 먼저, 마지막 (.+?)자는 링크 버튼과 함께 한 통으로 발송됩니다\\. \\(현재 (.+?)자\\)$",
+    "replacement": "The message is over $1 characters, so the first part is sent as text and the last $2 characters go out together with the link button in one message. (currently $3)"
+  },
+  {
+    "source": "^DM 창을 처음 여는 사람에게 추천 질문을 보여줍니다\\. AI 공구 상담원 버튼이 첫 칸을 써서 질문은 (.+?)개까지예요\\.$",
+    "replacement": "Shows suggested questions to people opening the DM window for the first time. The AI group-buy assistant button uses the first slot, so you can add up to $1 questions."
+  },
+  {
+    "source": "^픽스폴리오 담당자(.+?)가 인플루언서에게 연락해 조건과 일정을 조율합니다\\. 진행 상황은 담당자가 안내해 드립니다\\.$",
+    "replacement": "PICKSfolio manager$1 contacts the influencer to coordinate the terms and schedule. The manager will keep you updated on progress."
+  },
+  {
+    "source": "^지원자를 수락하면 픽스폴리오 담당자(.+?)가 배정되어 브랜드와 인플루언서 양쪽에 연락해 조건과 일정을 정리합니다\\.$",
+    "replacement": "When you accept an applicant, PICKSfolio manager$1 is assigned and contacts both the brand and the influencer to settle the terms and schedule."
+  },
+  {
+    "source": "^함께할 인플루언서는 브랜드가 직접 수락하고, 그 뒤는 픽스폴리오 담당자(.+?)가 배정되어 연락드립니다\\.$",
+    "replacement": "The brand accepts the influencers it wants to work with, and then PICKSfolio manager$1 is assigned and gets in touch."
+  },
+  {
+    "source": "^(.+?)을\\(를\\) 글이나 이미지로 입력해 주세요\\. 구매자와 인플루언서가 보는 필수 상품 정보입니다\\.$",
+    "replacement": "Please enter $1 as text or an image. It is required product information that buyers and influencers see."
+  },
+  {
+    "source": "^AI 상담 정보의 (.+?)을\\(를\\) 입력해 주세요\\. 뷰티 · 스킨케어 상품은 꼭 필요한 정보예요\\.$",
+    "replacement": "Please enter $1 in the AI consultation info. It is required for beauty and skincare products."
+  },
+  {
+    "source": "^@(.+?) 를 추가했지만 정보를 불러오지 못했습니다: (.+?) 아래 카드에서 직접 입력해 주세요\\.$",
+    "replacement": "Added @$1 but could not load the details: $2 Please enter them yourself in the card below."
+  },
+  {
+    "source": "^'(.+?)'을\\(를\\) 어필리에이트 이력에서 삭제할까요\\? 주문 · 정산 기록은 그대로 남습니다\\.$",
+    "replacement": "Delete '$1' from the affiliate history? Order and settlement records stay as they are."
+  },
+  {
+    "source": "^· 사이트 전체 구매 (.+?)건 중 광고 기여 구매 (.+?)건\\(기간이 다를 수 있어 참고용\\)$",
+    "replacement": "· Of $1 site-wide purchases, $2 were attributed to ads (periods may differ, for reference only)"
+  },
+  {
+    "source": "^@(.+?) 님을 크리에이터로 승인할까요\\? 승인하면 자동 디엠과 어필리에이트가 바로 열립니다\\.$",
+    "replacement": "Approve @$1 as a creator? Once approved, auto-DM and affiliate open right away."
+  },
+  {
+    "source": "^선택 · 최대 (.+?)개\\. 고객이 자주 묻는 질문과 답을 적어 두면 AI가 그대로 안내해요\\.$",
+    "replacement": "Optional · up to $1. Write down questions customers often ask and the answers, and the AI will answer the same way."
+  },
+  {
+    "source": "^첫 번째 시트에서 '(.+?)' 열을 찾지 못했어요\\. 내려받은 엑셀 양식을 그대로 써 주세요\\.$",
+    "replacement": "Could not find the '$1' column in the first sheet. Please use the downloaded Excel template as it is."
+  },
+  {
+    "source": "^'(.+?)'을\\(를\\) 진행 상품에서 삭제할까요\\? 진행 이력 탭에서는 계속 볼 수 있어요\\.$",
+    "replacement": "Remove '$1' from your active products? You can still see it in the History tab."
+  },
+  {
+    "source": "^(.+?) 이미지 일부를 올리지 못했습니다\\. 5MB 이하 이미지로 다시 시도해 주세요\\.$",
+    "replacement": "Some $1 images could not be uploaded. Please try again with images of 5MB or less."
+  },
+  {
+    "source": "^협업 진행을 위해 카카오톡 아이디와 휴대폰 번호를 (.+?)에 제공하는 데 동의합니다\\.$",
+    "replacement": "I agree to provide my KakaoTalk ID and mobile number to $1 to carry out the collab."
+  },
+  {
+    "source": "^(.+?)일 동안 최대 (.+?) · 메타는 날마다 조금 더 쓰거나 덜 쓸 수 있습니다$",
+    "replacement": "Up to $2 over $1 days · Meta may spend a little more or less each day"
+  },
+  {
+    "source": "^@(.+?) 크리에이터 지원을 반려합니다\\. 인플루언서에게 보일 사유를 적어 주세요\\.$",
+    "replacement": "Rejecting @$1's creator application. Please write the reason the influencer will see."
+  },
+  {
+    "source": "^내 계정은 (.+?)에 가깝습니다 — 분류된 (.+?)편 중 (.+?)편\\.(.+?)$",
+    "replacement": "Your account is closest to $1 — $3 of the $2 classified.$4"
+  },
+  {
+    "source": "^결제 완료 주문 (.+?)건을 배송 준비로 바꿀까요\\? 구매자에게 알림이 가요\\.$",
+    "replacement": "Move $1 paid orders to preparing for shipment? Buyers will be notified."
+  },
+  {
+    "source": "^카드로 불러오면 내용을 고친 뒤 버튼 한 번으로 (.+?)에 반영할 수 있어요\\.$",
+    "replacement": "Once loaded into a card, you can edit it and apply it to the $1 with one button."
+  },
+  {
+    "source": "^'(.+?)' 입점 신청을 반려합니다\\. 브랜드에게 보일 사유를 적어 주세요\\.$",
+    "replacement": "Rejecting the store application from '$1'. Please write the reason the brand will see."
+  },
+  {
+    "source": "^'(.+?)' 영업 링크를 삭제할까요\\? 공개 주소도 더는 열리지 않습니다\\.$",
+    "replacement": "Delete the '$1' sales link? The public address will stop opening too."
+  },
+  {
+    "source": "^'(.+?)' 입점을 승인할까요\\? 승인하면 바로 상품 등록이 열립니다\\.$",
+    "replacement": "Approve the store for '$1'? Once approved, product registration opens right away."
+  },
+  {
+    "source": "^링크 버튼을 함께 보낼 때는 본문을 (.+?)자 이내로 작성해 주세요\\.$",
+    "replacement": "When sending a link button, keep the message within $1 characters."
+  },
+  {
+    "source": "^손이 필요한 일이 (.+?)건 있어요\\. 카드를 누르면 바로 이동해요\\.$",
+    "replacement": "There are $1 things that need your attention. Tap a card to go straight there."
+  },
+  {
+    "source": "^지급 가능 금액 (.+?) 전액을 신청할까요\\? 지급 예정일: (.+?)$",
+    "replacement": "Request the full available amount of $1? Expected payout date: $2"
+  },
+  {
+    "source": "^'(.+?)' 열이 없어요\\. 내려받은 엑셀 양식을 그대로 써 주세요\\.$",
+    "replacement": "There is no '$1' column. Please use the downloaded Excel template as it is."
+  },
+  {
+    "source": "^'(.+?)' 상품을 삭제할까요\\? 인플루언서 목록에서도 사라집니다\\.$",
+    "replacement": "Delete the '$1' product? It will disappear from the influencer list too."
+  },
+  {
+    "source": "^발송 속도를 시간당 (.+?)건으로 저장했어요\\. 바로 적용됩니다\\.$",
+    "replacement": "Sending speed saved as $1 per hour. It applies right away."
+  },
+  {
+    "source": "^(.+?)부터 등록한 카카오페이로 월 (.+?)원이 자동결제됩니다\\.$",
+    "replacement": "From $1, KRW $2 a month is charged automatically to the KakaoPay you registered."
+  },
+  {
+    "source": "^이미 카카오 계정으로 옮겨졌습니다 \\((.+?) · (.+?)\\)\\.$",
+    "replacement": "Already moved to a Kakao account ($1 · $2)."
+  },
+  {
+    "source": "^할인이 적용된 공동구매 판매가입니다\\. 정가 대비 (.+?)% 할인$",
+    "replacement": "The discounted group-buy sale price. $1% off the regular price"
+  },
+  {
+    "source": "^· 배송비 (.+?) 환불 안 함\\(PG 수수료 뺀 금액 정산\\)$",
+    "replacement": "· Shipping fee $1 not refunded (settled minus PG fees)"
+  },
+  {
+    "source": "^판매기간\\((.+?)\\)이 시작되면 판매 신청과 구매가 열려요\\.$",
+    "replacement": "Sales requests and purchases open once the sales period ($1) starts."
+  },
+  {
+    "source": "^실패 (.+?)건, 일부만 발송된 DM (.+?)건이 있습니다\\.$",
+    "replacement": "$1 failed, and $2 DMs were only partly sent."
+  },
+  {
+    "source": "^@(.+?)의 게시물을 브랜드와 함께 Meta 광고로 내보냅니다$",
+    "replacement": "Runs @$1's post as a Meta ad together with the brand"
+  },
+  {
+    "source": "^클릭\\(전체\\) (.+?)회 · CTR\\(전체\\) (.+?)%$",
+    "replacement": "Clicks (all) $1 · CTR (all) $2%"
+  },
+  {
+    "source": "^인플루언서 전용 링크 주문 (.+?)건 · 취소 · 환불 제외$",
+    "replacement": "$1 orders via influencer links · excluding cancellations and refunds"
+  },
+  {
+    "source": "^(.+?)계정의 연동이 만료되었어요\\. 다시 연동해 주세요\\.$",
+    "replacement": "The connection for the $1 account has expired. Please connect it again."
+  },
+  {
+    "source": "^(.+?)행: 택배사 코드 '(.+?)'는 코드표에 없어요\\.$",
+    "replacement": "Row $1: courier code '$2' is not in the code table."
+  },
+  {
+    "source": "^(.+?) 지급분 원천징수 신고 파일\\(주민등록번호 포함\\)$",
+    "replacement": "Withholding tax report file for $1 payouts (includes resident registration numbers)"
+  },
+  {
+    "source": "^(.+?) 주문을 전액 환불할까요\\? 되돌릴 수 없습니다\\.$",
+    "replacement": "Refund the $1 order in full? This cannot be undone."
+  },
+  {
+    "source": "^(.+?)명은 추가하지 못했습니다\\. 다시 시도해 주세요\\.$",
+    "replacement": "Could not add $1. Please try again."
+  },
+  {
+    "source": "^@(.+?) 의 (.+?) 단가가 등록서 단가를 따릅니다\\.$",
+    "replacement": "@$1's $2 rate now follows the rate on the registration form."
+  },
+  {
+    "source": "^수락하면 인플루언서에게 선정 안내가 갑니다\\. (.+?)$",
+    "replacement": "When you accept, the influencer is notified that they were selected. $1"
+  },
+  {
+    "source": "^이미 있는 계정 (.+?) 은\\(는\\) 건너뛰었습니다\\.$",
+    "replacement": "Skipped existing accounts $1."
+  },
+  {
+    "source": "^같은 송장으로 이미 발송된 (.+?)건은 건너뛰었어요\\.$",
+    "replacement": "Skipped $1 already shipped with the same tracking number."
+  },
+  {
+    "source": "^(.+?)계정을 다시 연동하면 바로 지원할 수 있어요\\.$",
+    "replacement": "Reconnect the $1 account and you can apply right away."
+  },
+  {
+    "source": "^(.+?)행: 주문번호 (.+?)가 위에 이미 있어요\\.$",
+    "replacement": "Row $1: order number $2 already appears above."
+  },
+  {
+    "source": "^픽스폴리오를 통해 (.+?)에서 협업을 제안드렸습니다\\.$",
+    "replacement": "We have sent you a collab offer from $1 through PICKSfolio."
+  },
+  {
+    "source": "^(.+?)을 전액 환불할까요\\? 되돌릴 수 없습니다\\.$",
+    "replacement": "Refund $1 in full? This cannot be undone."
+  },
+  {
+    "source": "^DM (.+?)건, 답글 (.+?)건 발송했습니다\\.$",
+    "replacement": "Sent $1 DMs and $2 replies."
+  },
+  {
+    "source": "^(.+?)을 내려받을까요\\? 열람 기록이 남아요\\.$",
+    "replacement": "Download $1? The access will be logged."
+  },
+  {
+    "source": "^@(.+?) 의 팔로워·릴스를 새로 불러왔습니다\\.$",
+    "replacement": "Reloaded @$1's followers and Reels."
+  },
+  {
+    "source": "^주문목록_(.+?)_(.+?)_(.+?)\\.xlsx$",
+    "replacement": "Orders_$1_$2_$3.xlsx"
+  },
+  {
+    "source": "^불러오지 못했습니다\\. \\(HTTP (.+?)\\)$",
+    "replacement": "Could not load. (HTTP $1)"
+  },
+  {
+    "source": "^요청에 실패했습니다\\. \\(HTTP (.+?)\\)$",
+    "replacement": "The request failed. (HTTP $1)"
+  },
+  {
+    "source": "^(.+?)건 처리 · (.+?)건 실패(.+?)$",
+    "replacement": "$1 processed · $2 failed$3"
+  },
+  {
+    "source": "^반품 환불 (.+?) 제외 · 남은 배송비 정산$",
+    "replacement": "Excluding return refunds $1 · remaining shipping fee settled"
+  },
+  {
+    "source": "^\\(등록됨: (.+?) · 바꿀 때만 입력\\)$",
+    "replacement": "(Registered: $1 · enter only to change)"
+  },
+  {
+    "source": "^최소 신청 금액은 (.+?)(.+?)이에요\\.$",
+    "replacement": "The minimum request amount is $1$2."
+  },
+  {
+    "source": "^1개 판매 시 인플루언서 수수료 약 (.+?)$",
+    "replacement": "Influencer commission per item sold about $1"
+  },
+  {
+    "source": "^다시 확인 버튼 이름 \\(예: (.+?)\\)$",
+    "replacement": "Re-check button label (e.g. $1)"
+  },
+  {
+    "source": "^이벤트 수신 중 · 마지막 이벤트 (.+?)$",
+    "replacement": "Receiving events · last event $1"
+  },
+  {
+    "source": "^(.+?)행: 택배사 코드가 비어 있어요\\.$",
+    "replacement": "Row $1: the courier code is empty."
+  },
+  {
+    "source": "^@(.+?) 자동 디엠을 다시 열었습니다\\.$",
+    "replacement": "Reopened auto-DM for @$1."
+  },
+  {
+    "source": "^@(.+?) 를 추가했습니다\\. (.+?)$",
+    "replacement": "Added @$1. $2"
+  },
+  {
+    "source": "^상품 더 보기 \\((.+?)/(.+?)\\)$",
+    "replacement": "Show more products ($1/$2)"
+  },
+  {
+    "source": "^이 답변을 (.+?) 초안 카드로 불러오기$",
+    "replacement": "Load this answer into the $1 draft card"
+  },
+  {
+    "source": "^(.+?) ~ (.+?) · (.+?)일$",
+    "replacement": "$1 ~ $2 · $3 days"
+  },
+  {
+    "source": "^업로드 완료 · 파트너십 코드 (.+?)$",
+    "replacement": "Upload complete · partnership code $1"
+  },
+  {
+    "source": "^(.+?)행: 주문번호가 비어 있어요\\.$",
+    "replacement": "Row $1: the order number is empty."
+  },
+  {
+    "source": "^(.+?)행: 송장번호가 너무 길어요\\.$",
+    "replacement": "Row $1: the tracking number is too long."
+  },
+  {
+    "source": "^@(.+?) 자동 디엠을 중단했습니다\\.$",
+    "replacement": "Stopped auto-DM for @$1."
+  },
+  {
+    "source": "^담당자(.+?)가 연락해 진행합니다\\.$",
+    "replacement": "Manager$1 will contact you to proceed."
+  },
+  {
+    "source": "^'(.+?)' 단계에서 멈춘 광고입니다$",
+    "replacement": "This ad stopped at the '$1' step"
+  },
+  {
+    "source": "^(.+?)명을 추가했습니다\\.(.+?)$",
+    "replacement": "Added $1.$2"
+  },
+  {
+    "source": "^@(.+?) 를 이 링크에서 뺄까요\\?$",
+    "replacement": "Remove @$1 from this link?"
+  },
+  {
+    "source": "^'(.+?)' 단계에서 멈췄습니다\\.$",
+    "replacement": "Stopped at the '$1' step."
+  },
+  {
+    "source": "^총액 (.+?) · 실지급 (.+?)$",
+    "replacement": "Total $1 · Net paid $2"
+  },
+  {
+    "source": "^순서를 바꾸지 못했습니다: (.+?)$",
+    "replacement": "Could not change the order: $1"
+  },
+  {
+    "source": "^메일 주소가 복사되었어요 (.+?)$",
+    "replacement": "Email address copied $1"
+  },
+  {
+    "source": "^@(.+?) 정보를 저장했습니다\\.$",
+    "replacement": "Saved @$1's details."
+  },
+  {
+    "source": "^지원 · 선정 인플루언서 (.+?)$",
+    "replacement": "Applicants · selected influencers $1"
+  },
+  {
+    "source": "^(.+?)건은 처리하지 못했어요\\.$",
+    "replacement": "Could not process $1."
+  },
+  {
+    "source": "^송장등록_실패_(.+?)\\.xlsx$",
+    "replacement": "TrackingUpload_failed_$1.xlsx"
+  },
+  {
+    "source": "^버튼 이름 \\(예: (.+?)\\)$",
+    "replacement": "Button label (e.g. $1)"
+  },
+  {
+    "source": "^신청자 더 보기 \\((.+?)\\)$",
+    "replacement": "Show more applicants ($1)"
+  },
+  {
+    "source": "^송장입력양식_(.+?)\\.xlsx$",
+    "replacement": "TrackingForm_$1.xlsx"
+  },
+  {
+    "source": "^(.+?)개 상품을 추천했어요\\.$",
+    "replacement": "Recommended $1 products."
+  },
+  {
+    "source": "^@(.+?) 를 추가했습니다\\.$",
+    "replacement": "Added @$1."
+  },
+  {
+    "source": "^포함 주문 (.+?)건(.+?)$",
+    "replacement": "Includes $1 orders$2"
+  },
+  {
+    "source": "^(.+?)에게 협업 제안 보내기$",
+    "replacement": "Send a collab offer to $1"
+  },
+  {
+    "source": "^'(.+?)' 추천을 뺄까요\\?$",
+    "replacement": "Remove the '$1' recommendation?"
+  },
+  {
+    "source": "^· 담당자 아이디 @(.+?)$",
+    "replacement": "· Manager ID @$1"
+  },
+  {
+    "source": "^배송 · 반품 안내 (.+?)$",
+    "replacement": "Shipping · return info $1"
+  },
+  {
+    "source": "^▪ 업로드 일정 : (.+?)$",
+    "replacement": "▪ Upload schedule: $1"
+  },
+  {
+    "source": "^▪ 콘텐츠 유형 : (.+?)$",
+    "replacement": "▪ Content type: $1"
+  },
+  {
+    "source": "^링크 클릭 대비 (.+?)%$",
+    "replacement": "$1% of link clicks"
+  },
+  {
+    "source": "^(.+?)님이 가입한 아이디$",
+    "replacement": "ID registered by $1"
+  },
+  {
+    "source": "^판매 수수료 (.+?) 포함$",
+    "replacement": "Includes sales commission $1"
+  },
+  {
+    "source": "^정가 대비 (.+?)% 할인$",
+    "replacement": "$1% off the regular price"
+  },
+  {
+    "source": "^질문 \\(예: (.+?)\\)$",
+    "replacement": "Question (e.g. $1)"
+  },
+  {
+    "source": "^추천 어필리에이트 (.+?)$",
+    "replacement": "Recommended affiliates $1"
+  },
+  {
+    "source": "^▪ 제안 내용 : (.+?)$",
+    "replacement": "▪ Offer details: $1"
+  },
+  {
+    "source": "^\\(하루 약 (.+?)\\)$",
+    "replacement": "(about $1 a day)"
+  },
+  {
+    "source": "^· 전 단계의 (.+?)%$",
+    "replacement": "· $1% of the previous step"
+  },
+  {
+    "source": "^선정했습니다\\. (.+?)$",
+    "replacement": "Selected. $1"
+  },
+  {
+    "source": "^(.+?)업로드 (.+?)$",
+    "replacement": "$1Upload $2"
+  },
+  {
+    "source": "^(.+?) 상세 (.+?)$",
+    "replacement": "$1 detail $2"
+  },
+  {
+    "source": "^업로드 마감 D-(.+?)$",
+    "replacement": "Upload deadline D-$1"
+  },
+  {
+    "source": "^일일 (.+?)(.+?)$",
+    "replacement": "Daily $1$2"
+  },
+  {
+    "source": "^· 광고 ID (.+?)$",
+    "replacement": "· Ad ID $1"
+  },
+  {
+    "source": "^파트너십 코드 (.+?)$",
+    "replacement": "Partnership code $1"
+  },
+  {
+    "source": "^(.+?)분 (.+?)초$",
+    "replacement": "$1 min $2 s"
+  },
+  {
+    "source": "^발송 (.+?)(.+?)$",
+    "replacement": "Shipped $1$2"
+  },
+  {
+    "source": "^'(.+?)' 검색 결과$",
+    "replacement": "Results for '$1'"
+  },
+  {
+    "source": "^\\(최대 (.+?)\\)$",
+    "replacement": "(up to $1)"
+  },
+  {
+    "source": "^총 (.+?)(.+?)$",
+    "replacement": "Total $1$2"
+  },
+  {
+    "source": "^이미지 해시 (.+?)$",
+    "replacement": "Image hash $1"
+  },
+  {
+    "source": "^메일 주소: (.+?)$",
+    "replacement": "Email address: $1"
+  },
+  {
+    "source": "^· 완료일: (.+?)$",
+    "replacement": "· Completed: $1"
+  },
+  {
+    "source": "^(.+?) 이미지 삭제$",
+    "replacement": "Delete $1 image"
+  },
+  {
+    "source": "^(.+?)건 발송 처리$",
+    "replacement": "Mark $1 as shipped"
+  },
+  {
+    "source": "^(.+?)~(.+?)세$",
+    "replacement": "$1–$2 yrs"
+  },
+  {
+    "source": "^일일 예산 (.+?)$",
+    "replacement": "Daily budget $1"
+  },
+  {
+    "source": "^캠페인 · (.+?)$",
+    "replacement": "Campaign · $1"
+  },
+  {
+    "source": "^영상 ID (.+?)$",
+    "replacement": "Video ID $1"
+  },
+  {
+    "source": "^전체 예산 (.+?)$",
+    "replacement": "Total budget $1"
+  },
+  {
+    "source": "^(.+?) 안에 발송$",
+    "replacement": "Send within $1"
+  },
+  {
+    "source": "^· 사유: (.+?)$",
+    "replacement": "· Reason: $1"
+  },
+  {
+    "source": "^불러온 날 (.+?)$",
+    "replacement": "Loaded on $1"
+  },
+  {
+    "source": "^희망 단가 (.+?)$",
+    "replacement": "Desired rate $1"
+  },
+  {
+    "source": "^· 지급일 (.+?)$",
+    "replacement": "· Payout date $1"
+  },
+  {
+    "source": "^진행 상품 (.+?)$",
+    "replacement": "Active products $1"
+  },
+  {
+    "source": "^진행 이력 (.+?)$",
+    "replacement": "History $1"
+  },
+  {
+    "source": "^판매 내역 (.+?)$",
+    "replacement": "Sales $1"
+  },
+  {
+    "source": "^(.+?)개 추천하기$",
+    "replacement": "Recommend $1"
+  },
+  {
+    "source": "^총 예산 (.+?)$",
+    "replacement": "Total budget $1"
+  },
+  {
+    "source": "^자체 소재(.+?)$",
+    "replacement": "Own creative$1"
+  },
+  {
+    "source": "^· 픽셀 (.+?)$",
+    "replacement": "· Pixel $1"
+  },
+  {
+    "source": "^결과 · (.+?)$",
+    "replacement": "Results · $1"
+  },
+  {
+    "source": "^지출 · (.+?)$",
+    "replacement": "Spend · $1"
+  },
+  {
+    "source": "^· 담당 (.+?)$",
+    "replacement": "· Manager $1"
+  },
+  {
+    "source": "^· 처리 (.+?)$",
+    "replacement": "· Handled $1"
+  },
+  {
+    "source": "^수수료 (.+?)%$",
+    "replacement": "Commission $1%"
+  },
+  {
+    "source": "^· 선정 (.+?)$",
+    "replacement": "· Selected $1"
+  },
+  {
+    "source": "^− 차감 (.+?)$",
+    "replacement": "− Deduction $1"
+  },
+  {
+    "source": "^(.+?) 구매하기$",
+    "replacement": "Buy $1"
+  },
+  {
+    "source": "^발송 완료(.+?)$",
+    "replacement": "Shipped$1"
+  },
+  {
+    "source": "^배송정보 (.+?)$",
+    "replacement": "Shipping info $1"
+  },
+  {
+    "source": "^내 신청 (.+?)$",
+    "replacement": "My requests $1"
+  },
+  {
+    "source": "^(.+?) 만들기$",
+    "replacement": "Create $1"
+  },
+  {
+    "source": "^담당 @(.+?)$",
+    "replacement": "Manager @$1"
+  },
+  {
+    "source": "^이미지 (.+?)$",
+    "replacement": "Image $1"
+  },
+  {
+    "source": "^(.+?) 빼기$",
+    "replacement": "Remove $1"
+  },
+  {
+    "source": "^(.+?) 픽셀$",
+    "replacement": "$1 pixel"
+  },
+  {
+    "source": "^배송지(.+?)$",
+    "replacement": "Shipping address$1"
+  },
+  {
+    "source": "^총액 (.+?)$",
+    "replacement": "Total $1"
+  },
+  {
+    "source": "^선정 (.+?)$",
+    "replacement": "Selected $1"
+  },
+  {
+    "source": "^(.+?) 전체$",
+    "replacement": "All $1"
+  },
+  {
+    "source": "^(.+?)세$",
+    "replacement": "$1 yrs"
+  },
+  {
+    "source": "^(.+?)배$",
+    "replacement": "$1×"
+  },
+  {
+    "source": "^(.+?)일$",
+    "replacement": "$1 days"
+  },
+  {
+    "source": "^(.+?)초$",
+    "replacement": "$1 s"
+  },
 ] as const;
