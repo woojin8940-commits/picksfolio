@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import PlatformLanguageBridge from '../components/PlatformLanguageBridge';
 import { setDisplayLocale } from '../utils/formatters';
 
-export type Language = 'ko' | 'en';
+export type Language = 'ko' | 'en' | 'ja';
 
 interface LanguageContextType {
   language: Language;
@@ -177,19 +177,35 @@ export const compilePlatformTextPatterns = (
   glue: findPatternGlue(pattern.source),
 }));
 
-let platformTextBundlePromise: Promise<PlatformTextBundle> | null = null;
+/**
+ * 언어별 번역 묶음. 한국어 화면 문구를 열쇠로, 그 언어 문구를 값으로 둔다.
+ *
+ * 영어와 일본어는 서로 섞지 않는다. 일본어 화면에서 일본어 번역이 없는 문구를
+ * 영어로 대신 보여 주면 한 화면에 두 외국어가 섞인다. 없는 문구는 한국어로 남겨
+ * 누락을 눈에 띄게 하고, 사전을 채워서 메운다.
+ */
+const platformTextBundlePromises: Partial<Record<Exclude<Language, 'ko'>, Promise<PlatformTextBundle>>> = {};
 
-const loadPlatformTextBundle = () => {
-  if (!platformTextBundlePromise) {
-    platformTextBundlePromise = Promise.all([
+const loadPlatformTextBundle = (language: Exclude<Language, 'ko'>): Promise<PlatformTextBundle> => {
+  const cached = platformTextBundlePromises[language];
+  if (cached) return cached;
+  const promise = language === 'ja'
+    ? Promise.all([
+      import('./platformTextTranslationsJa'),
+      import('./platformTextPatternsJa'),
+    ]).then(([translationsModule, patternsModule]) => ({
+      translations: translationsModule.platformTextTranslationsJa,
+      patterns: patternsModule.platformTextPatternsJa,
+    }))
+    : Promise.all([
       import('./platformTextTranslations'),
       import('./platformTextPatterns'),
     ]).then(([translationsModule, patternsModule]) => ({
       translations: translationsModule.platformTextTranslations,
       patterns: patternsModule.platformTextPatterns,
     }));
-  }
-  return platformTextBundlePromise!;
+  platformTextBundlePromises[language] = promise;
+  return promise;
 };
 
 const translations: Record<string, { ko: string; en: string }> = {
@@ -329,12 +345,14 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [language, setLanguageState] = useState<Language>(() => {
     try {
       const saved = localStorage.getItem('picks_language');
-      return (saved === 'en' || saved === 'ko') ? saved : 'ko';
+      return (saved === 'en' || saved === 'ko' || saved === 'ja') ? saved : 'ko';
     } catch {
       return 'ko';
     }
   });
-  const [platformTextBundle, setPlatformTextBundle] = useState<PlatformTextBundle | null>(null);
+  /** 불러온 번역 묶음과 그 묶음의 언어. 언어가 바뀌면 다른 언어 묶음은 쓰지 않는다. */
+  const [loadedBundle, setLoadedBundle] = useState<{ language: Language; bundle: PlatformTextBundle } | null>(null);
+  const platformTextBundle = loadedBundle && loadedBundle.language === language ? loadedBundle.bundle : null;
 
   /**
    * 금액 서식을 이 렌더 전에 맞춰 둔다.
@@ -346,11 +364,11 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   setDisplayLocale(language);
 
   useEffect(() => {
-    if (language !== 'en' || platformTextBundle) return;
+    if (language === 'ko' || platformTextBundle) return;
     let cancelled = false;
-    loadPlatformTextBundle()
+    loadPlatformTextBundle(language)
       .then(bundle => {
-        if (!cancelled) setPlatformTextBundle(bundle);
+        if (!cancelled) setLoadedBundle({ language, bundle });
       })
       .catch(error => {
         console.warn('[Language] Failed to load platform translations:', error);
@@ -365,14 +383,18 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try { localStorage.setItem('picks_language', lang); } catch {}
   }, []);
 
+  /** 한국어 → 영어 → 일본어 → 한국어 순서로 돌린다(좁은 화면의 한 칸 버튼). */
   const toggleLanguage = useCallback(() => {
-    setLanguage(language === 'ko' ? 'en' : 'ko');
+    setLanguage(language === 'ko' ? 'en' : language === 'en' ? 'ja' : 'ko');
   }, [language, setLanguage]);
 
   const t = useCallback((key: string, defaultKo?: string, defaultEn?: string): string => {
     const entry = translations[key];
     if (entry) {
-      return language === 'en' ? entry.en : entry.ko;
+      if (language === 'en') return entry.en;
+      // 일본어는 한국어 문구를 돌려주고, 화면 번역(PlatformLanguageBridge)이
+      // 일본어 사전으로 옮긴다. 영어 문구를 돌려주면 일본어 화면에 영어가 섞인다.
+      return entry.ko;
     }
     if (language === 'en') {
       return defaultEn || defaultKo || key;
@@ -396,7 +418,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const platformTextCache = useMemo(() => new Map<string, string | null>(), [compiledPlatformTextPatterns]);
 
   const translatePlatformText = useCallback((value: string): string => {
-    if (language !== 'en' || !HANGUL_PATTERN.test(value)) return value;
+    if (language === 'ko' || !HANGUL_PATTERN.test(value)) return value;
     const leadingWhitespace = value.match(/^\s*/)?.[0] ?? '';
     const trailingWhitespace = value.match(/\s*$/)?.[0] ?? '';
     const normalized = value.replace(/\s+/g, ' ').trim();
