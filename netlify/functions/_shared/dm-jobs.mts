@@ -88,6 +88,44 @@ export async function enqueueMessageEvents(events: QueuedMessage[]): Promise<voi
   await wakeDmWorkers([...accounts.values()].flatMap((account) => account.id ? [account.id] : [])).catch((e) => console.error("[dm-queue] wake failed:", (e as Error)?.message));
 }
 
+/** 서버가 직접 넣는 지연 메시지 이벤트 표시. 웹훅으로 들어온 이벤트에서는 지운다. */
+export const FOLLOW_CHECK_MARKER = "picksFollowCheck";
+
+export interface DelayedMessageEvent {
+  /** 작업 ID 의 고유 부분(같은 값이면 한 번만 들어간다). */
+  key: string;
+  /** 웹훅 entry.id — 처리할 때 계정을 찾는 데 쓴다. */
+  igAccountId: string;
+  /** 작업자 줄을 나누는 계정 ID(settings.igUserId). */
+  jobAccountId: string;
+  username: string;
+  event: Record<string, any>;
+  dueAt: Date;
+}
+
+/**
+ * 정해진 시각에 처리할 메시지 이벤트를 넣는다(팔로우 안내 뒤 서버의 팔로우 재확인).
+ * 작업자는 20초 안에 시간이 되는 작업은 기다렸다 처리하고, 그보다 뒤는 1분마다 도는
+ * 스케줄러가 깨운다.
+ */
+export async function enqueueDelayedMessageEvents(items: DelayedMessageEvent[]): Promise<void> {
+  if (items.length === 0) return;
+  const rows = items.map((item) => ({
+    id: `message:${item.jobAccountId}:${item.key}`.slice(0, 300),
+    job_type: "message_event",
+    ig_account_id: item.jobAccountId,
+    username: item.username,
+    priority: 0,
+    due_at: item.dueAt.toISOString(),
+    payload: { igAccountId: item.igAccountId, entryTime: Date.now(), event: item.event },
+  }));
+  const { error } = await getSupabaseServer().from("dm_jobs").upsert(rows, {
+    onConflict: "id",
+    ignoreDuplicates: true,
+  }).abortSignal(AbortSignal.timeout(2_000));
+  if (error) throw error;
+}
+
 export async function enqueueCommentEvents(events: QueuedComment[]): Promise<void> {
   if (events.length === 0) return;
   const client = getSupabaseServer();
