@@ -5,6 +5,7 @@ import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import AdBoostModal from './AdBoostModal';
 import MetaPageEngagementPanel from './MetaPageEngagement';
 import { instagramPostUrl } from '../utils/instagramPostUrl';
+import { useLanguage } from '../contexts/LanguageContext';
 
 /**
  * 캠페인 이력 — 지난 캠페인에서 올라간 게시물의 성과.
@@ -79,6 +80,11 @@ type HistoryPost = {
   cleanFileUrl: string;
   cleanFileName: string;
   metrics: PostMetric | null;
+  /**
+   * 도달 · 저장수. 인플루언서가 인사이트를 연동했고 최근 릴스에서 찾은 게시물만 값이 있다.
+   * 못 받은 값은 null 이다 — 0 으로 두면 아무도 안 봤거나 저장하지 않은 게시물로 읽힌다.
+   */
+  insights?: { reach: number | null; saved: number | null } | null;
   reason: string;
   /** 어필리에이트: 이 인플루언서 전용 링크의 판매액 · 주문 수(취소 · 환불 제외). */
   sales?: number;
@@ -112,6 +118,10 @@ type HistoryCampaign = {
   /** CPV 의 분자 — 지표가 맞춰진 게시물의 지급액만. spend 는 확정 지급액 전부다. */
   measuredSpend: number;
   cpv: number;
+  /** 도달 · 저장수 합계와, 그 값을 받은 게시물 수. */
+  reach?: number;
+  saved?: number;
+  insightsMatched?: number;
   /** 어필리에이트: 이 상품이 픽스폴리오를 통해 팔린 금액 · 주문 수. */
   sales?: number;
   orders?: number;
@@ -133,6 +143,9 @@ type HistoryTotals = {
   spend: number;
   measuredSpend: number;
   cpv: number;
+  reach: number;
+  saved: number;
+  insightsMatched: number;
   sales?: number;
   orders?: number;
 };
@@ -140,6 +153,100 @@ type HistoryTotals = {
 const EMPTY_TOTALS: HistoryTotals = {
   campaigns: 0, collabs: 0, uploaded: 0, matched: 0, views: 0, reactions: 0,
   comments: 0, shares: 0, sharesMatched: 0, spend: 0, measuredSpend: 0, cpv: 0,
+  reach: 0, saved: 0, insightsMatched: 0,
+};
+
+/** 팔로워 분포 한 칸. 서버는 메타가 준 키(F · 18-24 · KR)와 인원 수를 그대로 보낸다. */
+type AudienceSlice = { key: string; value: number };
+type CreatorAudience = {
+  gender: AudienceSlice[];
+  age: AudienceSlice[];
+  country: AudienceSlice[];
+  reason: string;
+  fetchedAt: string;
+};
+
+/** 성별 이름은 화면 언어로 직접 붙인다(비율과 한 줄로 묶여 번역 사전으로는 맞출 수 없다). */
+const GENDER_LABEL: Record<string, Record<string, string>> = {
+  ko: { F: '여성', M: '남성' },
+  en: { F: 'Women', M: 'Men' },
+  ja: { F: '女性', M: '男性' },
+};
+
+/** 받은 값 안에서의 비율(%). 10% 이상은 정수, 그 아래는 소수 한 자리. */
+const shareOf = (value: number, total: number): number => {
+  if (!total) return 0;
+  const pct = (value / total) * 100;
+  return pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10;
+};
+
+/** 국가 코드 → 지금 화면 언어의 이름. 브라우저가 이름을 모르면 코드 그대로 둔다. */
+const regionName = (code: string, language: string): string => {
+  try {
+    const names = new Intl.DisplayNames([language], { type: 'region' });
+    return names.of(code.toUpperCase()) || code;
+  } catch {
+    return code;
+  }
+};
+
+/**
+ * 협업한 인플루언서의 팔로워 분포 — 성별 · 많은 연령대 두 칸 · 많은 국가 세 칸.
+ *
+ * 브랜드가 묻는 것은 "우리 타깃에게 닿았나"라서, 그래프 대신 읽히는 비율 한 줄씩만 둔다.
+ * 메타는 팔로워 100명 미만이거나 집계 전인 계정에 분포를 주지 않는다. 그때는 이유를 적는다.
+ */
+const AudienceSummary: React.FC<{ audience?: CreatorAudience }> = ({ audience }) => {
+  const { language } = useLanguage();
+  if (!audience) return null;
+  const genderTotal = audience.gender.reduce((sum, r) => sum + r.value, 0);
+  const ageTotal = audience.age.reduce((sum, r) => sum + r.value, 0);
+  const countryTotal = audience.country.reduce((sum, r) => sum + r.value, 0);
+  const hasAny = genderTotal + ageTotal + countryTotal > 0;
+  return (
+    <div className="mt-2 rounded-lg bg-slate-50 px-2.5 py-2">
+      <p className="text-[10px] font-black text-slate-500">팔로워 분포</p>
+      {hasAny ? (
+        <div className="mt-1 space-y-0.5 text-[10px] font-bold text-slate-600 leading-snug">
+          {genderTotal > 0 && (
+            <p>
+              <span className="text-slate-400">성별 </span>
+              {audience.gender
+                .filter((r) => r.key.toUpperCase() !== 'U')
+                .map((r) => `${(GENDER_LABEL[language] || GENDER_LABEL.ko)[r.key.toUpperCase()] || r.key} ${shareOf(r.value, genderTotal)}%`)
+                .join(' · ')}
+            </p>
+          )}
+          {ageTotal > 0 && (
+            <p>
+              <span className="text-slate-400">연령 </span>
+              {[...audience.age]
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 2)
+                .map((r) => `${r.key} ${shareOf(r.value, ageTotal)}%`)
+                .join(' · ')}
+            </p>
+          )}
+          {countryTotal > 0 && (
+            <p>
+              <span className="text-slate-400">국가 </span>
+              {[...audience.country]
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 3)
+                .map((r) => `${regionName(r.key, language)} ${shareOf(r.value, countryTotal)}%`)
+                .join(' · ')}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="mt-0.5 text-[10px] text-slate-400 font-medium leading-snug">
+          {audience.reason === 'few_followers'
+            ? '팔로워 100명 이상인 계정부터 인스타그램이 분포를 제공합니다.'
+            : '인스타그램이 아직 분포를 집계하지 않았습니다.'}
+        </p>
+      )}
+    </div>
+  );
 };
 
 /** 지표를 못 붙인 이유를 브랜드가 할 일로 바꿔서 적는다. */
@@ -236,7 +343,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   }, [cacheKey]);
 
   const [campaigns, setCampaigns] = useState<HistoryCampaign[]>(cached?.campaigns || []);
-  const [totals, setTotals] = useState<HistoryTotals>(cached?.totals || EMPTY_TOTALS);
+  const [totals, setTotals] = useState<HistoryTotals>({ ...EMPTY_TOTALS, ...(cached?.totals || {}) });
+  /** 협업한 인플루언서별 팔로워 분포. 연동하지 않았거나 인사이트를 끈 인플루언서는 없다. */
+  const [audiences, setAudiences] = useState<Record<string, CreatorAudience>>(cached?.audiences || {});
   const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<StatusFilter>('');
@@ -260,7 +369,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         return;
       }
       setCampaigns(data.campaigns || []);
-      setTotals(data.totals || EMPTY_TOTALS);
+      setTotals({ ...EMPTY_TOTALS, ...(data.totals || {}) });
+      setAudiences(data.audiences || {});
       setError('');
       try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
     } catch {
@@ -349,6 +459,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       base.sharesMatched += c.sharesMatched ?? 0;
       base.spend += c.spend;
       base.measuredSpend += c.measuredSpend ?? 0;
+      base.reach += c.reach ?? 0;
+      base.saved += c.saved ?? 0;
+      base.insightsMatched += c.insightsMatched ?? 0;
       base.sales = (base.sales ?? 0) + (c.sales ?? 0);
       base.orders = (base.orders ?? 0) + (c.orders ?? 0);
     }
@@ -365,13 +478,16 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   // 공유 수는 인사이트 값이라 조회수·댓글보다 덜 채워진다. 몇 건에서 받았는지를 따로 적는다.
   const shareCoverage =
     shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.sharesMatched}건 집계` : '';
+  // 도달 · 저장수도 인사이트 값이라 따로 센다.
+  const insightCoverage =
+    shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.insightsMatched}건 집계` : '';
 
   if (loading) {
     return (
       <div className="p-4 md:p-14 w-full">
         <div className="h-8 w-40 bg-slate-100 rounded-lg animate-pulse" />
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-8">
-          {[0, 1, 2, 3, 4].map((i) => (
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mt-8">
+          {[0, 1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} className="h-24 bg-slate-100 rounded-2xl animate-pulse" />
           ))}
         </div>
@@ -402,7 +518,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className={`grid grid-cols-2 md:grid-cols-4 ${affiliate ? 'xl:grid-cols-5' : 'xl:grid-cols-7'} gap-3`}>
         <Kpi
           label={affiliate ? (filtered ? '어필리에이트 (필터)' : '진행한 어필리에이트') : (filtered ? '캠페인 (필터)' : '진행한 캠페인')}
           value={formatNumberWithCommas(shown.campaigns)}
@@ -416,6 +532,24 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           pending={shown.views === 0}
           hint={coverage || '업로드가 확인되면 여기에 쌓입니다'}
         />
+        {!affiliate && (
+          <Kpi
+            label="도달"
+            value={shown.insightsMatched > 0 ? formatNumberWithCommas(shown.reach) : '—'}
+            unit={shown.insightsMatched > 0 ? '명' : undefined}
+            pending={shown.insightsMatched === 0}
+            hint={insightCoverage || '인플루언서 인사이트 연동에서 받아옵니다'}
+          />
+        )}
+        {!affiliate && (
+          <Kpi
+            label="저장"
+            value={shown.insightsMatched > 0 ? formatNumberWithCommas(shown.saved) : '—'}
+            unit={shown.insightsMatched > 0 ? '회' : undefined}
+            pending={shown.insightsMatched === 0}
+            hint={insightCoverage || '인플루언서 인사이트 연동에서 받아옵니다'}
+          />
+        )}
         <Kpi
           label="콘텐츠 댓글"
           value={shown.matched > 0 ? formatNumberWithCommas(shown.comments) : '—'}
@@ -466,6 +600,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         <p className="text-[12px] font-black text-blue-800">게시물 지표는 인플루언서 채널 연동에서 받아옵니다</p>
         <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
           업로드된 게시물 주소를 인플루언서의 메타 계정 최근 게시물과 맞춰 조회수·댓글·공유를 가져옵니다.
+          도달·저장수와 팔로워 분포는 인플루언서가 인스타그램 인사이트를 연동한 경우에만 보입니다.
           공유 수는 인스타그램 인사이트 값이라, 인플루언서가 채널을 다시 동기화한 뒤부터 채워집니다.
           인플루언서가 직접 적은 숫자는 성과 근거로 쓰지 않기 때문에, 연동 전 게시물은 집계 전으로 남습니다.
           메타는 최근 게시물만 돌려주므로 오래된 캠페인의 게시물도 집계에서 빠질 수 있습니다.
@@ -579,6 +714,16 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                         <span className="text-[11px] font-black text-slate-900">
                           조회 {c.views > 0 ? formatNumberWithCommas(c.views) : '—'}
                         </span>
+                        {!affiliate && (
+                          <span className="text-[11px] font-bold text-slate-500">
+                            도달 {(c.insightsMatched ?? 0) > 0 ? formatNumberWithCommas(c.reach ?? 0) : '—'}
+                          </span>
+                        )}
+                        {!affiliate && (
+                          <span className="text-[11px] font-bold text-slate-500">
+                            저장 {(c.insightsMatched ?? 0) > 0 ? formatNumberWithCommas(c.saved ?? 0) : '—'}
+                          </span>
+                        )}
                         <span className="text-[11px] font-bold text-slate-500">
                           댓글 {c.matched > 0 ? formatNumberWithCommas(c.comments) : '—'}
                         </span>
@@ -687,6 +832,12 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                       ? ` · CPV ${formatNumberWithCommas(Math.round(p.fee / p.metrics.views))}원`
                                       : ''}
                                   </p>
+                                  {!affiliate && p.insights && (
+                                    <p className="text-[10px] text-slate-500 font-bold">
+                                      도달 {typeof p.insights.reach === 'number' ? formatNumberWithCommas(p.insights.reach) : '—'}
+                                      {' · '}저장 {typeof p.insights.saved === 'number' ? formatNumberWithCommas(p.insights.saved) : '—'}
+                                    </p>
+                                  )}
                                 </div>
                               ) : (
                                 <p className="mt-1.5 text-[10px] text-slate-400 font-bold leading-relaxed">
@@ -699,6 +850,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                         : '메타 최근 게시물 목록에서 밀려나 아직 맞추지 못했습니다.'}
                                 </p>
                               )}
+
+                              {!affiliate && !p.cancelled && <AudienceSummary audience={audiences[p.creatorUsername]} />}
 
                               {(p.metrics?.permalink || p.uploadUrl) && (
                                 <a
