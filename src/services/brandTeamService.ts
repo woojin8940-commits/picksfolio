@@ -1,13 +1,11 @@
 import { authHeaders } from './apiService';
 import type { MembershipBillingHistoryEntry } from '../types';
 
-export type TeamRole = 'admin' | 'member';
 
 export interface TeamMember {
   id: number;
   memberUsername: string;
   displayName: string;
-  teamRole: TeamRole;
   joinedAt: string;
   seated: boolean;
 }
@@ -15,13 +13,12 @@ export interface TeamMember {
 export interface SeatInvite {
   id: number;
   label: string;
-  teamRole: TeamRole;
   createdAt: string;
   expiresAt: string;
 }
 
 export interface TeamOverview {
-  viewer: { teamRole: 'owner' | 'admin' | 'member'; memberUsername: string | null };
+  viewer: { teamRole: 'owner' | 'member'; memberUsername: string | null };
   plan: {
     planActive: boolean;
     extraSeats: number;
@@ -63,21 +60,20 @@ async function call<T>(action: string, payload: Record<string, unknown> = {}, si
 
 export const brandTeamService = {
   overview: () => call<TeamOverview>('overview'),
-  createInvite: (label: string, teamRole: TeamRole) =>
-    call<{ invite: SeatInvite; url: string }>('create_invite', { label, teamRole }),
+  createInvite: (label: string) =>
+    call<{ invite: SeatInvite; url: string }>('create_invite', { label }),
   revokeInvite: (inviteId: number) => call<{}>('revoke_invite', { inviteId }),
   removeMember: (memberId: number) => call<{}>('remove_member', { memberId }),
-  changeRole: (memberId: number, teamRole: TeamRole) => call<{}>('change_role', { memberId, teamRole }),
   addSeats: (count: number) => call<TeamOverview & { chargedKrw?: number }>('add_seats', { count }),
   scheduleSeats: (seats: number) => call<TeamOverview>('schedule_seats', { seats }),
   inviteInfo: (token: string) =>
-    call<{ invite: { companyName: string; label: string; teamRole: TeamRole; expiresAt: string } }>('invite_info', { token }, false),
+    call<{ invite: { companyName: string; label: string; expiresAt: string } }>('invite_info', { token }, false),
   join: (input: { token: string; username: string; password: string; name: string }) =>
     call<{
       username: string;
       company_name: string;
       role: string;
-      team_role: TeamRole;
+      team_role: 'member';
       member_username: string;
       member_name: string;
       access_token: string;

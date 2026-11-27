@@ -24,9 +24,9 @@ let _client: SupabaseClient | null = null;
 
 /**
  * 브랜드 회사 계정에서의 역할. 회사 관리자 계정 자신은 'owner', 초대받아 들어온 직원은
- * 'admin'(팀원 관리 가능) 또는 'member'. 브랜드 계정이 아니면 없다.
+ * 'member'. 브랜드 계정이 아니면 없다.
  */
-export type BrandTeamRole = "owner" | "admin" | "member";
+export type BrandTeamRole = "owner" | "member";
 
 type PositiveAuthResult = {
   ok: true;
@@ -151,7 +151,7 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
       const team = await resolveTeamMembership(user.id);
       if (team.kind === "member") {
         result.memberUsername = result.username;
-        result.teamRole = team.teamRole;
+        result.teamRole = "member";
         result.username = team.seated ? normalizeName(team.company) : "";
       } else {
         result.teamRole = "owner";

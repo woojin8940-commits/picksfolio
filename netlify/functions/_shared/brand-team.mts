@@ -7,8 +7,8 @@
  *
  * 직원 계정도 Supabase 사용자다(biz_<직원 아이디>@picks.me, role = 'operator'). 로그인하면
  * user-auth 가 이 표를 보고 "회사 아이디"로 바꿔 읽는다 — 직원은 회사 워크스페이스(캠페인 ·
- * 이력 · 자동 디엠 등)를 함께 쓰고, 결제 · 팀원 관리는 회사 관리자 계정만 한다(팀 관리자
- * 역할의 직원은 팀원 관리까지).
+ * 이력 · 자동 디엠 등)를 함께 쓰고, 결제 · 좌석 · 팀원 관리는 회사 관리자 계정만 한다.
+ * 역할은 회사 관리자 / 직원 두 가지뿐이다.
  *
  * 직원이 쓸 수 있는 좌석은 결제된 직원 좌석 수까지다. 정액제가 끝났거나 좌석보다 직원이
  * 많으면(먼저 들어온 순서로 좌석을 채운다) 남는 직원은 회사 워크스페이스에 들어오지 못한다.
@@ -16,7 +16,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { paidExtraSeats, readSeatRecord } from "./brand-seats.mts";
 
-export type TeamRole = "admin" | "member";
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const db = async () => (await import("@picks/netlify-database")).getDatabase();
@@ -29,13 +28,11 @@ export const hashInviteToken = (token: string): string =>
 
 export const newInviteToken = (): string => randomBytes(32).toString("base64url");
 
-const asRole = (value: unknown): TeamRole => (value === "admin" ? "admin" : "member");
 
 export interface TeamMemberRow {
   id: number;
   memberUsername: string;
   displayName: string;
-  teamRole: TeamRole;
   joinedAt: string;
   /** 좌석 안에 들어 있는지(좌석보다 직원이 많으면 나중에 들어온 직원부터 false). */
   seated: boolean;
@@ -44,7 +41,6 @@ export interface TeamMemberRow {
 export interface SeatInviteRow {
   id: number;
   label: string;
-  teamRole: TeamRole;
   createdAt: string;
   expiresAt: string;
 }
@@ -54,13 +50,13 @@ const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v || "
 export const listTeam = async (company: string, extraSeats: number) => {
   const sql = (await db()).sql;
   const members = (await sql`
-    SELECT id, member_username, display_name, team_role, joined_at
+    SELECT id, member_username, display_name, joined_at
     FROM brand_team_members
     WHERE company_username = ${company} AND removed_at IS NULL
     ORDER BY joined_at ASC, id ASC
   `) as any[];
   const invites = (await sql`
-    SELECT id, label, team_role, created_at, expires_at
+    SELECT id, label, created_at, expires_at
     FROM brand_seat_invites
     WHERE company_username = ${company} AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW()
     ORDER BY created_at ASC, id ASC
@@ -70,14 +66,12 @@ export const listTeam = async (company: string, extraSeats: number) => {
       id: Number(r.id),
       memberUsername: String(r.member_username || ""),
       displayName: String(r.display_name || ""),
-      teamRole: asRole(r.team_role),
       joinedAt: iso(r.joined_at),
       seated: i < extraSeats,
     })),
     invites: invites.map((r): SeatInviteRow => ({
       id: Number(r.id),
       label: String(r.label || ""),
-      teamRole: asRole(r.team_role),
       createdAt: iso(r.created_at),
       expiresAt: iso(r.expires_at),
     })),
@@ -103,28 +97,27 @@ export const usedSeats = async (company: string): Promise<number> => {
 export const createInvite = async (
   company: string,
   extraSeats: number,
-  input: { label?: string; teamRole?: TeamRole; createdBy: string },
+  input: { label?: string; createdBy: string },
 ): Promise<{ token: string; invite: SeatInviteRow } | null> => {
   const sql = (await db()).sql;
   const token = newInviteToken();
   const label = String(input.label || "").trim().slice(0, 40);
-  const role = asRole(input.teamRole);
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS).toISOString();
   const rows = (await sql`
-    INSERT INTO brand_seat_invites (company_username, token_hash, team_role, label, created_by, expires_at)
-    SELECT ${company}, ${hashInviteToken(token)}, ${role}, ${label}, ${input.createdBy}, ${expiresAt}
+    INSERT INTO brand_seat_invites (company_username, token_hash, label, created_by, expires_at)
+    SELECT ${company}, ${hashInviteToken(token)}, ${label}, ${input.createdBy}, ${expiresAt}
     WHERE (
       (SELECT COUNT(*) FROM brand_team_members WHERE company_username = ${company} AND removed_at IS NULL) +
       (SELECT COUNT(*) FROM brand_seat_invites WHERE company_username = ${company}
          AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW())
     ) < ${extraSeats}
-    RETURNING id, label, team_role, created_at, expires_at
+    RETURNING id, label, created_at, expires_at
   `) as any[];
   const r = rows[0];
   if (!r) return null;
   return {
     token,
-    invite: { id: Number(r.id), label: String(r.label || ""), teamRole: asRole(r.team_role), createdAt: iso(r.created_at), expiresAt: iso(r.expires_at) },
+    invite: { id: Number(r.id), label: String(r.label || ""), createdAt: iso(r.created_at), expiresAt: iso(r.expires_at) },
   };
 };
 
@@ -148,22 +141,12 @@ export const removeMember = async (company: string, memberId: number, by: string
   return rows.length > 0;
 };
 
-export const changeMemberRole = async (company: string, memberId: number, role: TeamRole): Promise<boolean> => {
-  const sql = (await db()).sql;
-  const rows = (await sql`
-    UPDATE brand_team_members SET team_role = ${asRole(role)}
-    WHERE id = ${memberId} AND company_username = ${company} AND removed_at IS NULL
-    RETURNING id
-  `) as any[];
-  return rows.length > 0;
-};
-
 /** 초대 링크로 들어온 사람에게 보여 줄 정보. 쓸 수 없는 링크면 null. */
 export const findOpenInvite = async (token: string) => {
   if (!token || token.length < 20 || token.length > 100) return null;
   const sql = (await db()).sql;
   const rows = (await sql`
-    SELECT id, company_username, team_role, label, expires_at
+    SELECT id, company_username, label, expires_at
     FROM brand_seat_invites
     WHERE token_hash = ${hashInviteToken(token)} AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW()
     LIMIT 1
@@ -173,7 +156,6 @@ export const findOpenInvite = async (token: string) => {
   return {
     id: Number(r.id),
     company: String(r.company_username || ""),
-    teamRole: asRole(r.team_role),
     label: String(r.label || ""),
     expiresAt: iso(r.expires_at),
   };
@@ -185,10 +167,10 @@ export const claimInvite = async (token: string, userId: string) => {
   const rows = (await sql`
     UPDATE brand_seat_invites SET used_at = NOW(), used_by_user_id = ${userId}
     WHERE token_hash = ${hashInviteToken(token)} AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW()
-    RETURNING id, company_username, team_role
+    RETURNING id, company_username
   `) as any[];
   const r = rows[0];
-  return r ? { id: Number(r.id), company: String(r.company_username || ""), teamRole: asRole(r.team_role) } : null;
+  return r ? { id: Number(r.id), company: String(r.company_username || "") } : null;
 };
 
 export const releaseInvite = async (inviteId: number) => {
@@ -197,18 +179,18 @@ export const releaseInvite = async (inviteId: number) => {
 };
 
 export const insertMember = async (input: {
-  company: string; userId: string; username: string; displayName: string; teamRole: TeamRole; inviteId: number;
+  company: string; userId: string; username: string; displayName: string; inviteId: number;
 }) => {
   const sql = (await db()).sql;
   await sql`
-    INSERT INTO brand_team_members (company_username, member_user_id, member_username, display_name, team_role, invite_id)
-    VALUES (${input.company}, ${input.userId}, ${input.username}, ${input.displayName.slice(0, 40)}, ${input.teamRole}, ${input.inviteId})
+    INSERT INTO brand_team_members (company_username, member_user_id, member_username, display_name, invite_id)
+    VALUES (${input.company}, ${input.userId}, ${input.username}, ${input.displayName.slice(0, 40)}, ${input.inviteId})
   `;
 };
 
 export type TeamMembership =
   | { kind: "none" }
-  | { kind: "member"; company: string; memberUsername: string; teamRole: TeamRole; seated: boolean };
+  | { kind: "member"; company: string; memberUsername: string; seated: boolean };
 
 /**
  * 이 Supabase 사용자가 어느 회사의 직원인지. 좌석 안에 들어 있는지(정액제 활성 · 좌석 순서)까지
@@ -220,7 +202,7 @@ export const resolveTeamMembership = async (userId: string): Promise<TeamMembers
   try {
     const sql = (await db()).sql;
     rows = (await sql`
-      SELECT m.company_username, m.member_username, m.team_role,
+      SELECT m.company_username, m.member_username,
         (SELECT COUNT(*) FROM brand_team_members o
           WHERE o.company_username = m.company_username AND o.removed_at IS NULL
             AND (o.joined_at < m.joined_at OR (o.joined_at = m.joined_at AND o.id < m.id)))::int AS ahead
@@ -240,7 +222,6 @@ export const resolveTeamMembership = async (userId: string): Promise<TeamMembers
     kind: "member",
     company,
     memberUsername: String(r.member_username || ""),
-    teamRole: asRole(r.team_role),
     seated: Number(r.ahead || 0) < paidExtraSeats(record),
   };
 };

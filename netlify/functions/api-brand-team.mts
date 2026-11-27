@@ -15,7 +15,6 @@ import {
   settleStaleSeatCharge,
 } from "./_shared/brand-seats.mts";
 import {
-  changeMemberRole,
   claimInvite,
   createInvite,
   findOpenInvite,
@@ -25,23 +24,22 @@ import {
   removeMember,
   revokeInvite,
   usedSeats,
-  type TeamRole,
 } from "./_shared/brand-team.mts";
 
 /**
  * 브랜드 팀원(직원 좌석) 관리.
  *
- *   · overview        좌석 · 직원 · 대기 중인 초대 (회사 계정 누구나)
- *   · create_invite   빈 좌석에 1회용 초대 링크 만들기 (관리자 · 팀 관리자)
- *   · revoke_invite   초대 취소 → 좌석이 다시 빈다 (관리자 · 팀 관리자)
- *   · remove_member   직원 내보내기 → 좌석이 다시 빈다, 추가 비용 없음 (관리자 · 팀 관리자)
- *   · change_role     직원 ↔ 팀 관리자 (관리자)
+ *   · overview        좌석 · 직원 · 대기 중인 초대 (회사 계정 누구나 — 직원은 보기만)
+ *   · create_invite   빈 좌석에 1회용 초대 링크 만들기 (관리자)
+ *   · revoke_invite   초대 취소 → 좌석이 다시 빈다 (관리자)
+ *   · remove_member   직원 내보내기 → 좌석이 다시 빈다, 추가 비용 없음 (관리자)
  *   · add_seats       직원 좌석 추가 결제(남은 기간 일할) (관리자)
  *   · schedule_seats  다음 결제일부터 좌석 줄이기 · 예약 취소 (관리자)
  *   · invite_info     초대 링크 확인 (로그인 없이)
  *   · join            초대 링크로 직원 계정 만들기 (로그인 없이)
  *
- * 관리자 = 회사 아이디로 로그인한 계정(결제한 계정). 결제는 관리자만 한다.
+ * 역할은 회사 관리자(회사 아이디로 로그인한 계정 = 결제한 계정) / 직원 두 가지다.
+ * 초대 · 내보내기 · 좌석 결제는 모두 회사 관리자만 한다.
  */
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -172,7 +170,6 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
       userId,
       username,
       displayName: name,
-      teamRole: claimed.teamRole,
       inviteId: claimed.id,
     });
   } catch (e) {
@@ -188,7 +185,7 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
     username: claimed.company,
     company_name: await companyName(claimed.company),
     role: "operator",
-    team_role: claimed.teamRole,
+    team_role: "member",
     member_username: username,
     member_name: name,
     access_token: session?.session?.access_token || "",
@@ -215,7 +212,6 @@ export default async (req: Request) => {
         invite: {
           companyName: (await companyName(invite.company)) || invite.company,
           label: invite.label,
-          teamRole: invite.teamRole,
           expiresAt: invite.expiresAt,
         },
       });
@@ -229,7 +225,6 @@ export default async (req: Request) => {
     }
     const company = auth.username;
     const isOwner = auth.teamRole === "owner";
-    const canManage = isOwner || auth.teamRole === "admin";
     const by = auth.memberUsername || company;
 
     if (action === "overview") {
@@ -243,15 +238,13 @@ export default async (req: Request) => {
       });
     }
 
-    if (!canManage) return fail(403, "팀원 관리는 회사 관리자만 할 수 있어요.");
+    if (!isOwner) return fail(403, "팀원 관리와 좌석 결제는 회사 관리자 계정에서만 할 수 있어요.");
 
     if (action === "create_invite") {
       const record = await readSeatRecord(company);
       if (!hasActiveBrandPlan(record)) return fail(403, "정액제를 구독한 뒤에 직원을 초대할 수 있어요.");
-      const role: TeamRole = isOwner && body?.teamRole === "admin" ? "admin" : "member";
       const created = await createInvite(company, paidExtraSeats(record), {
         label: body?.label,
-        teamRole: role,
         createdBy: by,
       });
       if (!created) return fail(409, "빈 좌석이 없어요. 좌석을 추가하거나 직원 · 초대를 정리해 주세요.");
@@ -273,19 +266,7 @@ export default async (req: Request) => {
       const team = await listTeam(company, 0);
       const target = team.members.find((m) => m.id === memberId);
       if (!target) return fail(404, "이미 내보낸 직원이에요.");
-      if (auth.memberUsername && target.memberUsername === auth.memberUsername) {
-        return fail(400, "자기 자신은 내보낼 수 없어요.");
-      }
-      if (!isOwner && target.teamRole === "admin") return fail(403, "팀 관리자는 회사 관리자만 내보낼 수 있어요.");
       await removeMember(company, memberId, by);
-      return Response.json({ success: true });
-    }
-
-    if (!isOwner) return fail(403, "좌석 결제와 역할 변경은 회사 관리자 계정에서만 할 수 있어요.");
-
-    if (action === "change_role") {
-      const ok = await changeMemberRole(company, Number(body?.memberId), body?.teamRole === "admin" ? "admin" : "member");
-      if (!ok) return fail(404, "직원을 찾지 못했어요.");
       return Response.json({ success: true });
     }
 

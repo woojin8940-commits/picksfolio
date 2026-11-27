@@ -25,7 +25,7 @@ const inviteTokenFromUrl = (): string => {
 const BusinessJoinPage: React.FC<BusinessJoinPageProps> = ({ onNavigateHome, onNavigateLogin, onJoined }) => {
   const { language } = useLanguage();
   const [token] = useState(inviteTokenFromUrl);
-  const [invite, setInvite] = useState<{ companyName: string; label: string; teamRole: string; expiresAt: string } | null>(null);
+  const [invite, setInvite] = useState<{ companyName: string; label: string; expiresAt: string } | null>(null);
   const [checking, setChecking] = useState(true);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', username: '', password: '', confirm: '' });
@@ -104,7 +104,7 @@ const BusinessJoinPage: React.FC<BusinessJoinPageProps> = ({ onNavigateHome, onN
           <h1 className="text-[1.6rem] sm:text-3xl font-black tracking-tighter text-[#0B0F1A] mb-2 font-display">직원 계정 만들기</h1>
           {invite && (
             <p className="text-[#4A5273] text-sm font-medium">
-              <strong className="text-[#0B0F1A]">{invite.companyName}</strong> 팀에 {invite.teamRole === 'admin' ? '팀 관리자' : '직원'}로 초대받았어요.
+              <strong className="text-[#0B0F1A]">{invite.companyName}</strong> 팀에 직원으로 초대받았어요.
             </p>
           )}
         </div>

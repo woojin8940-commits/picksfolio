@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { brandTeamService, type TeamOverview, type TeamRole } from '../services/brandTeamService';
+import { brandTeamService, type TeamOverview } from '../services/brandTeamService';
 import { BRAND_SEAT_PRICE } from '../utils/membershipTiers';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -32,9 +32,6 @@ const estimateProrated = (seats: number, nextBillingIso: string | null) => {
   return Math.max(100, Math.round((full * Math.min(1, (next - now) / cycle)) / 10) * 10);
 };
 
-const roleLabel = (role: TeamRole | 'owner') =>
-  role === 'owner' ? '회사 관리자' : role === 'admin' ? '팀 관리자' : '직원';
-
 const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembership }) => {
   const { language } = useLanguage();
   const [data, setData] = useState<TeamOverview | null>(null);
@@ -45,7 +42,6 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
   const [seatCount, setSeatCount] = useState(1);
   const [reduceTo, setReduceTo] = useState<number | null>(null);
   const [inviteLabel, setInviteLabel] = useState('');
-  const [inviteRole, setInviteRole] = useState<TeamRole>('member');
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -96,7 +92,8 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
 
   const viewerRole = data.viewer.teamRole;
   const isOwner = viewerRole === 'owner';
-  const canManage = isOwner || viewerRole === 'admin';
+  // 역할은 회사 관리자 / 직원 두 가지뿐이다. 초대 · 내보내기 · 좌석 결제는 회사 관리자만 한다.
+  const canManage = isOwner;
   const native = isNativeApp();
   const { plan, seats } = data;
   const minimumSeats = data.members.length + data.invites.length;
@@ -124,11 +121,10 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
     setError(null);
     setNotice(null);
     setCopied(false);
-    const res = await brandTeamService.createInvite(inviteLabel, isOwner ? inviteRole : 'member');
+    const res = await brandTeamService.createInvite(inviteLabel);
     if (res.success) {
       setCreatedLink(res.url);
       setInviteLabel('');
-      setInviteRole('member');
     } else {
       setError(res.error);
     }
@@ -303,17 +299,6 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                     className="flex-1 h-11 border border-slate-200 rounded-xl px-3 text-sm font-medium text-slate-800"
                     disabled={busy}
                   />
-                  {isOwner && (
-                    <select
-                      value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value === 'admin' ? 'admin' : 'member')}
-                      className="h-11 border border-slate-200 rounded-xl px-3 text-sm font-bold text-slate-800 bg-white"
-                      disabled={busy}
-                    >
-                      <option value="member">직원</option>
-                      <option value="admin">팀 관리자</option>
-                    </select>
-                  )}
                   <button
                     type="button"
                     onClick={createInvite}
@@ -348,7 +333,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       <li key={inv.id} className="flex items-center justify-between gap-3 px-4 py-3">
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-slate-800 truncate">{inv.label || '이름 없는 초대'}</p>
-                          <p className="text-[11px] text-slate-500 font-medium">{roleLabel(inv.teamRole)} · {formatDate(inv.expiresAt, language)} 만료</p>
+                          <p className="text-[11px] text-slate-500 font-medium">{formatDate(inv.expiresAt, language)} 만료</p>
                         </div>
                         <button
                           type="button"
@@ -378,7 +363,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
           <ul className="divide-y divide-slate-100">
             {data.members.map((m) => {
               const isSelf = !!data.viewer.memberUsername && data.viewer.memberUsername === m.memberUsername;
-              const canRemove = canManage && !isSelf && (isOwner || m.teamRole !== 'admin');
+              const canRemove = canManage;
               return (
                 <li key={m.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-3">
                   <div className="min-w-0">
@@ -388,24 +373,11 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       {isSelf && <span className="ml-1.5 text-[11px] font-black text-blue-500">나</span>}
                     </p>
                     <p className="text-[11px] text-slate-500 font-medium">
-                      {roleLabel(m.teamRole)} · {formatDate(m.joinedAt, language)} 합류
+                      직원 · {formatDate(m.joinedAt, language)} 합류
                       {!m.seated && <span className="ml-1.5 font-bold text-red-500">좌석 부족 — 로그인할 수 없어요</span>}
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    {isOwner && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => run(
-                          () => brandTeamService.changeRole(m.id, m.teamRole === 'admin' ? 'member' : 'admin'),
-                          m.teamRole === 'admin' ? '직원으로 바꿨어요.' : '팀 관리자로 바꿨어요.',
-                        )}
-                        className="px-3 py-2 rounded-lg text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        {m.teamRole === 'admin' ? '직원으로 바꾸기' : '팀 관리자로 바꾸기'}
-                      </button>
-                    )}
                     {canRemove && (
                       <button
                         type="button"
@@ -427,8 +399,8 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
 
       <section className="max-w-3xl mt-6">
         <ul className="list-disc pl-5 space-y-1.5 text-xs text-slate-500 marker:text-slate-400">
-          <li>회사 관리자 = 회사 아이디로 로그인한 계정이에요. 결제 · 좌석 변경 · 역할 변경은 회사 관리자만 할 수 있어요.</li>
-          <li>팀 관리자는 직원을 초대하고 내보낼 수 있어요. 직원은 캠페인 · 이력 · 자동 디엠 등 회사 워크스페이스를 함께 씁니다.</li>
+          <li>회사 관리자 = 회사 아이디로 로그인한 계정이에요. 결제 · 좌석 변경 · 직원 초대 · 내보내기는 회사 관리자만 할 수 있어요.</li>
+          <li>직원은 캠페인 · 이력 · 자동 디엠 등 회사 워크스페이스를 함께 씁니다.</li>
           <li>직원을 내보내면 좌석이 비고, 그 좌석에 추가 비용 없이 다른 직원을 초대할 수 있어요.</li>
         </ul>
       </section>
