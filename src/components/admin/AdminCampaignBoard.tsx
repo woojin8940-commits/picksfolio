@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatKRW, formatSignedKRW } from '../../utils/formatters';
+import { formatKRW } from '../../utils/formatters';
 import { REWARD_MODES, isManagerListupMode, rewardModeOf, type RewardMode } from '../../utils/campaignBrief';
 
 /**
@@ -52,9 +52,6 @@ const STATUS: Record<string, { cls: string; label: string }> = {
 
 const num = (v: unknown) => Number(v || 0);
 
-// 지급액이 제시가를 넘으면 마진은 음수가 된다. formatKRW 는 부호를 버려서 손해가
-// 이익처럼 찍히므로, 음수일 때만 부호가 남는 쪽을 쓴다.
-const money = (n: number) => (n < 0 ? formatSignedKRW(n) : formatKRW(n));
 
 const formatDate = (d: string) => {
   if (!d) return '-';
@@ -162,7 +159,7 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
       listed: 0,
       accepted: 0,
       running: 0,
-      margin: 0,
+      brandAmount: 0,
       unpriced: 0,
       // 승인은 났는데 명단이 비어 아무것도 진행되지 않은 캠페인.
       stalled: 0,
@@ -174,7 +171,7 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
       s.listed += num(c.listed_count);
       s.accepted += num(c.accepted_count);
       s.running += num(c.collab_running);
-      s.margin += num(c.margin_amount);
+      s.brandAmount += num(c.brand_amount);
       s.unpriced += Math.max(0, num(c.accepted_count) - num(c.priced_count));
       if (isStalled(c)) s.stalled++;
     }
@@ -266,11 +263,12 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
           <p className="text-[9px] font-bold text-slate-400 mt-1">명단 {summary.listed} · 수락 {summary.accepted}</p>
         </div>
 
-        <div className="bg-pink-50 rounded-2xl border border-pink-100 p-3.5">
-          <p className="text-[9px] font-black text-pink-500 uppercase tracking-widest mb-1">확정 마진</p>
-          <p className="text-xl font-black text-pink-600">{money(summary.margin)}</p>
-          <p className="text-[9px] font-bold text-pink-400 mt-1">
-            {summary.unpriced > 0 ? `단가 미입력 ${summary.unpriced}건 제외` : '단가 입력 완료'}
+        {/* 픽스폴리오는 인플루언서마다 마진을 남기지 않는다 — 마진 대신 수락된 광고비 합계를 본다. */}
+        <div className="bg-white rounded-2xl border border-slate-100 p-3.5">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">확정 광고비</p>
+          <p className="text-xl font-black text-slate-900">{formatKRW(summary.brandAmount)}</p>
+          <p className="text-[9px] font-bold text-slate-400 mt-1">
+            {summary.unpriced > 0 ? `단가 미입력 ${summary.unpriced}건 제외` : '수락된 인플루언서 기준'}
           </p>
         </div>
       </div>
@@ -359,13 +357,12 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
             <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">상태</div>
             <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">진행</div>
             <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">담당자</div>
-            <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">기간 · 마진</div>
+            <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">기간 · 광고비</div>
           </div>
 
           <div className="divide-y divide-slate-50">
             {visible.map(c => {
               const status = STATUS[c.status] || { cls: 'bg-slate-100 text-slate-500', label: c.status };
-              const margin = num(c.margin_amount);
               const brandAmount = num(c.brand_amount);
               const unpriced = Math.max(0, num(c.accepted_count) - num(c.priced_count));
               const stalled = isStalled(c);
@@ -453,8 +450,8 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
                           <span className="ml-1 text-red-500">D-{left}</span>
                         )}
                       </p>
-                      <p className={`text-[10px] font-black ${margin > 0 ? 'text-pink-600' : margin < 0 ? 'text-red-500' : 'text-slate-300'}`}>
-                        {margin !== 0 ? money(margin) : '마진 미확정'}
+                      <p className={`text-[10px] font-black ${brandAmount > 0 ? 'text-slate-700' : 'text-slate-300'}`}>
+                        {brandAmount > 0 ? formatKRW(brandAmount) : '단가 미확정'}
                       </p>
                     </div>
                   </div>
@@ -483,14 +480,12 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
                       </div>
 
                       <div className="rounded-xl border border-slate-100 bg-white p-2.5">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">마진 (제시가 − 지급가)</p>
-                        <p className={`text-[13px] font-black ${margin > 0 ? 'text-pink-600' : margin < 0 ? 'text-red-500' : 'text-slate-300'}`}>
-                          {margin !== 0 ? money(margin) : '마진 미확정'}
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">확정 광고비</p>
+                        <p className={`text-[13px] font-black ${brandAmount > 0 ? 'text-slate-900' : 'text-slate-300'}`}>
+                          {brandAmount > 0 ? formatKRW(brandAmount) : '단가 미확정'}
                         </p>
                         <p className="text-[9px] font-bold text-slate-400 mt-0.5">
-                          {brandAmount > 0
-                            ? `제시가 ${formatKRW(brandAmount)} · 지급 ${formatKRW(num(c.influencer_cost))}`
-                            : '브랜드 제시가 미입력'}
+                          수락된 인플루언서 단가 합계 · 브랜드와 인플루언서가 직접 정산
                           {unpriced > 0 ? ` · 단가 미입력 ${unpriced}건` : ''}
                         </p>
                       </div>
@@ -514,9 +509,9 @@ const AdminCampaignBoard: React.FC<Props> = ({ token }) => {
       )}
 
       <p className="text-[10px] font-bold text-slate-400">
-        줄 왼쪽 화살표를 누르면 브랜드 픽 · 제안 단계와 마진 계산 근거를 볼 수 있습니다.
+        줄 왼쪽 화살표를 누르면 브랜드 픽 · 제안 단계와 광고비 합계를 볼 수 있습니다.
         진행 단계는 지원자 수 → 리스트업 후보 → 브랜드가 진행 요청한 후보 → 담당자가 조건을 보낸 후보 → 수락한 후보 → 진행 중 협업 순입니다.
-        마진은 브랜드 제시가와 인플루언서 단가가 모두 입력된 수락 후보만 집계합니다.
+        광고비는 단가가 입력된 수락 후보만 집계합니다.
       </p>
     </div>
   );

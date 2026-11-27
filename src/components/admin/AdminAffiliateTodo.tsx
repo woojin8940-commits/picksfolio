@@ -14,17 +14,22 @@ interface Props {
   onNavigate: (tab: TodoKey) => void;
   /** 바깥에서 새로고침을 누르면 바뀌는 값. 바뀌면 다시 센다. */
   refreshKey?: number;
+  /** 보여 줄 칸만(없으면 전부). 어필리에이트 메뉴를 숨긴 동안에는 크리에이터 승인만 보인다. */
+  keys?: TodoKey[];
+  /** 머리말. 없으면 "지금 처리할 일 · 어필리에이트". */
+  title?: string;
 }
 
 const STEPS: { key: TodoKey; step: string; title: string; hint: string; unit: string }[] = [
-  { key: 'creator-applications', step: '1', title: '크리에이터 지원', hint: '승인해야 어필리에이트를 쓸 수 있어요', unit: '명 대기' },
+  { key: 'creator-applications', step: '1', title: '크리에이터 지원', hint: '승인해야 자동 DM · 캠페인을 쓸 수 있어요', unit: '명 대기' },
   { key: 'affiliate-store', step: '2', title: '브랜드 입점 신청', hint: '승인하면 상품을 올릴 수 있어요', unit: '건 대기' },
   { key: 'affiliate-selections', step: '3', title: '새 선정 · 조율', hint: '브랜드가 선정 — 양쪽에 연락해 조율해요', unit: '건 새로' },
   { key: 'affiliate-issues', step: '4', title: '미처리 취소·반품', hint: '3영업일 넘게 처리되지 않은 반품', unit: '건' },
   { key: 'affiliate-payouts', step: '5', title: '지급 신청', hint: '브랜드 · 인플루언서 정산 지급 대기', unit: '건 대기' },
 ];
 
-const AdminAffiliateTodo: React.FC<Props> = ({ token, onNavigate, refreshKey }) => {
+const AdminAffiliateTodo: React.FC<Props> = ({ token, onNavigate, refreshKey, keys, title }) => {
+  const steps = keys ? STEPS.filter((s) => keys.includes(s.key)) : STEPS;
   const [counts, setCounts] = useState<Partial<Record<TodoKey, number>>>({});
   const [loading, setLoading] = useState(true);
 
@@ -49,20 +54,20 @@ const AdminAffiliateTodo: React.FC<Props> = ({ token, onNavigate, refreshKey }) 
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  const total = Object.values(counts).reduce<number>((s, n) => s + (n || 0), 0);
+  const total = steps.reduce<number>((sum, s) => sum + (counts[s.key] || 0), 0);
 
   return (
     <div className="space-y-2.5">
       <div className="flex items-end justify-between gap-2">
         <div>
-          <h3 className="text-sm font-black text-slate-900">지금 처리할 일 · 어필리에이트</h3>
+          <h3 className="text-sm font-black text-slate-900">{title || '지금 처리할 일 · 어필리에이트'}</h3>
           <p className="text-[10px] font-bold text-slate-400 mt-0.5">
             {loading ? '건수를 세는 중...' : total > 0 ? `손이 필요한 일이 ${total}건 있어요. 카드를 누르면 바로 이동해요.` : '지금 밀린 일이 없어요.'}
           </p>
         </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        {STEPS.map((s) => {
+        {steps.map((s) => {
           const n = counts[s.key];
           const hot = !loading && (n || 0) > 0;
           return (

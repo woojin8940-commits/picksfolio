@@ -1018,7 +1018,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                       <p className="text-sm text-slate-900 font-black">{detail.terms.uploadDue || '-'}</p>
                     </div>
                     <span className={`ml-auto text-[11px] font-black ${detail.terms.lockedAt ? 'text-emerald-600' : 'text-amber-600'}`}>
-                      {detail.terms.lockedAt ? '담당자 확정 조건' : '담당자가 조건 정리 중'}
+                      {detail.terms.lockedAt ? '확정 조건' : '조건 정리 중'}
                     </span>
                   </div>
                 )}
