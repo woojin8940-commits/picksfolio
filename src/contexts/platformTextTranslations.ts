@@ -7373,4 +7373,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "예전 자동 디엠 플랜(월 5,900원)은 판매를 종료했습니다. 구독 중이던 브랜드는 다음 결제일까지 그대로 이용하고, 그날 추가 결제 없이 종료됩니다.": "The former DM Automation plan (₩5,900/month) is no longer sold. Existing subscribers keep it until their next billing date, when it ends without a charge.",
   "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't process the request. Please try again shortly.",
   "네트워크 연결을 확인한 뒤 다시 시도해 주세요.": "Check your network connection and try again.",
+  "직원 ·": "Staff ·",
+  "회사 관리자 = 회사 아이디로 로그인한 계정이에요. 결제 · 좌석 변경 · 직원 초대 · 내보내기는 회사 관리자만 할 수 있어요.": "Company admin = the account signed in with the company ID. Only the company admin can pay, change seats, invite or remove staff.",
+  "직원은 캠페인 · 이력 · 자동 디엠 등 회사 워크스페이스를 함께 씁니다.": "Staff share the company workspace — campaigns, history, DM automation and more.",
+  "팀에 직원으로 초대받았어요.": "You've been invited to this team as staff.",
 };
