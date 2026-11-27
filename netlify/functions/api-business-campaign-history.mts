@@ -3,6 +3,12 @@ import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { dateOnly, saleStateOf } from "./_shared/affiliate-sale-period.mts";
 import { SALE_STATUSES } from "./_shared/affiliate-store-orders.mts";
+import {
+  getFollowerDemographics,
+  getReelInsights,
+  resolveInsightsLink,
+  type DemographicSlice,
+} from "./_shared/creator-insights.mts";
 
 /**
  * 비즈니스 계정의 캠페인 이력 — 지난 캠페인에서 올라간 게시물의 성과.
@@ -85,6 +91,88 @@ type PostMetric = {
   /** 릴스에서 맞췄는지 피드에서 맞췄는지. 피드 항목에는 조회수가 없다. */
   from: "reels" | "feed";
 };
+
+/** 게시물 인사이트 — 도달 · 저장수. 권한이 없거나 못 받은 값은 null(0 이면 "아무도 안 봤다"로 읽힌다). */
+type PostInsight = { reach: number | null; saved: number | null };
+
+/** 협업한 인플루언서의 팔로워 분포(성별 · 연령 · 국가). 메타가 준 그대로의 인원 수다. */
+type CreatorAudience = {
+  gender: DemographicSlice[];
+  age: DemographicSlice[];
+  country: DemographicSlice[];
+  reason: string;
+  fetchedAt: string;
+};
+
+/** 인플루언서 한 명당 인사이트를 받는 데 쓸 시간. 메타가 느린 계정 하나가 화면 전체를 붙잡지 않게 한다. */
+const INSIGHT_PER_CREATOR_MS = 5_000;
+/** 인사이트를 받는 데 쓸 전체 시간. 넘으면 받은 만큼만 싣는다. */
+const INSIGHT_TOTAL_MS = 8_000;
+/** 한 번에 메타를 부르는 인플루언서 수. */
+const INSIGHT_CONCURRENCY = 4;
+/** 릴스 인사이트 캐시를 이 화면에서는 6시간까지 그대로 쓴다(인플루언서 화면은 30분). */
+const INSIGHT_TTL_MINUTES = 6 * 60;
+
+const withTimeout = <T,>(work: Promise<T>, ms: number): Promise<T | null> =>
+  Promise.race([work, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+
+/**
+ * 협업한 인플루언서들의 도달 · 저장수(게시물별)와 팔로워 분포를 받는다.
+ *
+ * 조회수 · 좋아요 · 댓글은 채널 동기화가 받아 둔 최근 미디어에서 오지만, 도달 · 저장수와
+ * 팔로워 분포는 인사이트 권한으로만 받을 수 있어 인플루언서 연동으로 따로 읽는다(인플루언서의
+ * 인사이트 화면과 같은 캐시를 쓴다). 인플루언서가 인사이트를 꺼 두었거나 연동이 없으면 비운다 —
+ * 끊은 사람의 숫자를 브랜드에게 계속 보여 주지 않는다.
+ */
+async function loadCreatorInsights(
+  creators: { username: string; followers: number | null }[],
+): Promise<{ posts: Map<string, Record<string, PostInsight>>; audiences: Record<string, CreatorAudience> }> {
+  const posts = new Map<string, Record<string, PostInsight>>();
+  const audiences: Record<string, CreatorAudience> = {};
+  const queue = [...creators];
+
+  const one = async ({ username, followers }: { username: string; followers: number | null }) => {
+    const resolved = await resolveInsightsLink(username, "insights");
+    if (!resolved.link || !resolved.scope) return;
+    const [reels, demographics] = await Promise.all([
+      getReelInsights(username, resolved.link, resolved.scope, { ttlMinutes: INSIGHT_TTL_MINUTES }),
+      getFollowerDemographics(username, resolved.link, followers),
+    ]);
+    if (reels.ok) {
+      const index: Record<string, PostInsight> = {};
+      for (const reel of reels.payload.reels) {
+        const code = shortcodeOf(reel.permalink);
+        if (code) index[code] = { reach: reel.reach, saved: reel.saved };
+      }
+      posts.set(username, index);
+    }
+    audiences[username] = {
+      gender: demographics.gender,
+      age: demographics.age,
+      country: demographics.country,
+      reason: demographics.reason,
+      fetchedAt: demographics.fetchedAt,
+    };
+  };
+
+  const worker = async () => {
+    while (queue.length) {
+      const next = queue.shift()!;
+      try {
+        await withTimeout(one(next), INSIGHT_PER_CREATOR_MS);
+      } catch (e) {
+        // 한 명의 인사이트를 못 받아도 이력 화면은 나머지 숫자로 그린다.
+        console.warn("[business-campaign-history] 인사이트 조회 실패:", (e as Error)?.message);
+      }
+    }
+  };
+  // 전체에도 상한을 둔다. 시간 안에 받은 인플루언서까지만 싣고, 나머지는 다음에 열 때
+  // (캐시가 채워진 뒤) 붙는다. 남은 인플루언서는 더 부르지 않도록 대기열을 비운다.
+  const all = Promise.all(Array.from({ length: Math.min(INSIGHT_CONCURRENCY, queue.length) }, worker));
+  const done = await withTimeout(all.then(() => true), INSIGHT_TOTAL_MS);
+  if (!done) queue.length = 0;
+  return { posts, audiences };
+}
 
 /** 채널 한 명의 최근 미디어를 shortcode → 지표 표로 바꾼다. */
 const mediaIndexOf = (row: any): Record<string, PostMetric> => {
@@ -241,6 +329,20 @@ export default async (req: Request, context: Context) => {
       mediaByUser.set(key, mediaIndexOf(row));
     }
 
+    // 도달 · 저장수 · 팔로워 분포는 게시물을 올린(취소되지 않은) 인플루언서만 읽는다.
+    const insightCreators = Array.from(
+      new Set(
+        (collabRows || [])
+          .filter((c) => c.upload_url && !c.cancelled_at && c.status !== "cancelled")
+          .map((c) => norm(c.creator_username))
+          .filter(Boolean),
+      ),
+    ).map((name) => {
+      const followers = intOf(channelByUser.get(name)?.followers);
+      return { username: name, followers: followers > 0 ? followers : null };
+    });
+    const insights = await loadCreatorInsights(insightCreators);
+
     const collabsByCampaign = new Map<string, any[]>();
     for (const c of collabRows || []) {
       const key = String(c.campaign_id);
@@ -266,6 +368,10 @@ export default async (req: Request, context: Context) => {
       let spend = 0;
       // CPV 의 분자. 지표가 맞춰진 게시물의 지급액만 들어간다.
       let measuredSpend = 0;
+      // 도달 · 저장수 합계와 그 값을 받은 게시물 수(받지 못한 게시물은 0 으로 더하지 않는다).
+      let reach = 0;
+      let saved = 0;
+      let insightsMatched = 0;
 
       const posts = list.map((collab) => {
         const creator = norm(collab.creator_username);
@@ -274,6 +380,14 @@ export default async (req: Request, context: Context) => {
         const code = shortcodeOf(uploadUrl);
         const metric = code ? mediaByUser.get(creator)?.[code] : undefined;
         const cancelled = !!collab.cancelled_at || collab.status === "cancelled";
+        const insight = code ? insights.posts.get(creator)?.[code] : undefined;
+        const postInsight =
+          insight && (insight.reach !== null || insight.saved !== null) ? insight : null;
+        if (postInsight && !cancelled) {
+          insightsMatched++;
+          reach += postInsight.reach ?? 0;
+          saved += postInsight.saved ?? 0;
+        }
 
         if (uploadUrl && !cancelled) uploaded++;
         if (!cancelled) spend += intOf(collab.fee);
@@ -317,6 +431,8 @@ export default async (req: Request, context: Context) => {
           // 지표가 없으면 왜 없는지까지 보낸다. 화면이 "아직 안 올렸다"와
           // "올렸는데 연동이 없다"를 다르게 안내해야 브랜드가 할 일을 안다.
           metrics: metric || null,
+          /** 도달 · 저장수. 인플루언서가 인사이트를 연동했고 최근 릴스에서 찾은 게시물만 값이 있다. */
+          insights: postInsight,
           reason: metric
             ? ""
             : cancelled
@@ -345,6 +461,9 @@ export default async (req: Request, context: Context) => {
         totals.sharesMatched += sharesMatched;
         totals.spend += spend;
         totals.measuredSpend += measuredSpend;
+        totals.reach += reach;
+        totals.saved += saved;
+        totals.insightsMatched += insightsMatched;
       }
 
       return {
@@ -372,6 +491,9 @@ export default async (req: Request, context: Context) => {
         spend,
         measuredSpend,
         cpv,
+        reach,
+        saved,
+        insightsMatched,
         posts,
       };
     });
@@ -385,6 +507,8 @@ export default async (req: Request, context: Context) => {
       totals,
       campaigns,
       categories: Array.from(categories).sort(),
+      /** 협업한 인플루언서별 팔로워 분포(성별 · 연령 · 국가 인원 수). */
+      audiences: insights.audiences,
     });
   } catch (err: any) {
     console.error("[business-campaign-history] 조회 실패:", err);
@@ -565,6 +689,9 @@ function emptyTotals() {
     spend: 0,
     measuredSpend: 0,
     cpv: 0,
+    reach: 0,
+    saved: 0,
+    insightsMatched: 0,
   };
 }
 

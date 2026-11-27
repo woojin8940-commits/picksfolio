@@ -42,7 +42,7 @@ const OpenScheduleManagement = lazyWithRetry(() => import('./components/OpenSche
 const UserCampaignBrowse = lazyWithRetry(() => import('./components/UserCampaignBrowse'));
 const CreatorCampaignCollabs = lazyWithRetry(() => import('./components/CreatorCampaignCollabs'));
 // 어필리에이트 스토어(ZVZO 방식) 인플루언서 화면. 공개 여부는 utils/featureFlags.ts 에서 정한다.
-import { canSeeAffiliateStore } from './utils/featureFlags';
+import { AFFILIATE_MENUS_VISIBLE, canSeeAffiliateStore } from './utils/featureFlags';
 const CreatorAffiliateStore = lazyWithRetry(() => import('./components/affiliateStore/CreatorAffiliateStore'));
 const MembershipPlan = lazyWithRetry(() => import('./components/MembershipPlan'));
 const OperatorLogin = lazyWithRetry(() => import('./components/OperatorLogin'));
@@ -333,6 +333,12 @@ const App: React.FC = () => {
     subViewRef.current = next;
     setSubViewState(next);
   }, []);
+  // 어필리에이트 메뉴를 숨긴 동안에는 예전에 저장된 탭 · 알림 링크로도 그 화면에 머물지 않는다.
+  useEffect(() => {
+    if ((subView === 'affiliate-store' || subView === 'my-affiliate') && !canSeeAffiliateStore(userNameRef.current)) {
+      applySubView('dashboard');
+    }
+  }, [subView, applySubView]);
   /** 협업 현황에서 눌러 들어온 캠페인 협업 id. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabFocusId, setCollabFocusId] = useState<string | null>(null);
   const [targetUser, setTargetUser] = useState(initialPublicUserRef.current);
@@ -2334,9 +2340,12 @@ const App: React.FC = () => {
             <LazyRoute fallback={null}>
               <DataBoardSection />
             </LazyRoute>
-            <LazyRoute fallback={null}>
-              <CampaignShowcase onSignup={() => navigate('signup')} />
-            </LazyRoute>
+            {/* 어필리에이트 소개. 어필리에이트 메뉴를 숨긴 동안에는 함께 숨긴다. */}
+            {AFFILIATE_MENUS_VISIBLE && (
+              <LazyRoute fallback={null}>
+                <CampaignShowcase onSignup={() => navigate('signup')} />
+              </LazyRoute>
+            )}
           </>
         ) : (
           // 'signup' 도 같은 화면이다 — 인플루언서 가입은 카카오 간편로그인으로만 한다.

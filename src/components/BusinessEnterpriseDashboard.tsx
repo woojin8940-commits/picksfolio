@@ -156,8 +156,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         .catch(() => undefined);
     });
     later(1700, () => {
-      // 캠페인 협업 메뉴는 없어졌다(어필리에이트가 그 자리). 어필리에이트 화면 코드를 먼저 받아 둔다.
-      import('./affiliateStore/BrandAffiliateStore').catch(() => {});
+      // 어필리에이트 메뉴를 보이는 계정만 그 화면 코드를 먼저 받아 둔다.
+      if (showAffiliateStore) import('./affiliateStore/BrandAffiliateStore').catch(() => {});
       import('./BusinessCampaignHistory').catch(() => {});
       import('./BusinessAdStatus').catch(() => {});
       apiService.getCreatorInsights(cleanUsername).catch(() => undefined);
@@ -421,7 +421,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <BusinessCampaignHistory
             businessUsername={businessUsername}
             companyName={companyName}
-            source="affiliate"
+            source="campaign"
             onViewAdStatus={() => setCurrentSubView('ad-status')}
           />
         </LazyRoute>
@@ -561,7 +561,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           </div>
 
           {/* Business management cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
+          <div className={`grid grid-cols-1 ${showAffiliateStore ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-3 md:gap-6 mb-6 md:mb-8`}>
             <div className="bg-gradient-to-br from-violet-600 to-fuchsia-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
                 <h3 className="text-sm md:text-2xl font-black mb-1 flex items-center gap-2">
@@ -574,6 +574,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               </div>
               <button onClick={() => setCurrentSubView('campaign-collab')} className="bg-white text-violet-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캠페인 관리</button>
             </div>
+            {showAffiliateStore && (
             <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
                 <h3 className="text-sm md:text-2xl font-black mb-1 flex items-center gap-2">🏬 어필리에이트</h3>
@@ -581,6 +582,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               </div>
               <button onClick={() => setCurrentSubView('affiliate-store')} className="bg-white text-blue-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">어필리에이트 관리</button>
             </div>
+            )}
             <div className="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
                 <h3 className="text-sm md:text-2xl font-black mb-1">📨 비즈니스 제안 현황</h3>

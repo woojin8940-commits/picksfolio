@@ -3,7 +3,7 @@ import { Share2 } from 'lucide-react';
 import { DesignSettings } from '../types';
 import { themeIsDark } from '../utils/themeColor';
 import { shareOrCopy } from '../utils/clipboard';
-import { canSeeAffiliateStore } from '../utils/featureFlags';
+import { canSeeAffiliateOrders } from '../utils/featureFlags';
 
 /**
  * 개인페이지 맨 아래 — 공유 버튼과 약관 링크.
@@ -69,7 +69,7 @@ const PublicPageFooter: React.FC<PublicPageFooterProps> = ({ design, shareTitle,
         </div>
         {/* 어필리에이트 스토어 구매자용 주문 내역. 로그인이 안 돼 있으면 마이페이지가 카카오 로그인 후
             /my/orders 로 돌아오게 한다(구매 경로 로그인이라 아이디 설정 화면으로 가지 않는다). */}
-        {canSeeAffiliateStore(ownerUsername) && (
+        {canSeeAffiliateOrders(ownerUsername) && (
           <div className="pt-1">
             <a href="/my/orders" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
               주문 내역 확인

@@ -7246,4 +7246,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "쓰레드": "Threads",
   "threads.net/@아이디": "threads.net/@username",
   "메일": "Mail",
+  "국가": "Country",
+  "인스타그램이 아직 분포를 집계하지 않았습니다.": "Instagram hasn't compiled this breakdown yet.",
+  "인플루언서 인사이트 연동에서 받아옵니다": "Pulled from the influencer's linked Instagram insights",
+  "업로드된 게시물 주소를 인플루언서의 메타 계정 최근 게시물과 맞춰 조회수·댓글·공유를 가져옵니다. 도달·저장수와 팔로워 분포는 인플루언서가 인스타그램 인사이트를 연동한 경우에만 보입니다. 공유 수는 인스타그램 인사이트 값이라, 인플루언서가 채널을 다시 동기화한 뒤부터 채워집니다. 인플루언서가 직접 적은 숫자는 성과 근거로 쓰지 않기 때문에, 연동 전 게시물은 집계 전으로 남습니다. 메타는 최근 게시물만 돌려주므로 오래된 캠페인의 게시물도 집계에서 빠질 수 있습니다.": "We match each uploaded post URL with the influencer's recent posts on their Meta account to pull views, comments and shares. Reach, saves and follower breakdown appear only when the influencer has linked Instagram insights. Shares are an Instagram insights value, so they fill in after the influencer re-syncs their channel. Numbers the influencer types in themselves aren't used as performance evidence, so posts from before linking stay pending. Meta only returns recent posts, so posts from older campaigns may also be left out.",
 };
