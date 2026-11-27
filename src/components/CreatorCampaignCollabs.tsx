@@ -4,8 +4,6 @@ import { formatKoreanWon } from '../utils/formatters';
 import { rewardModeOf } from '../utils/campaignBrief';
 import { CollabStepTurn, nextCollabAction } from '../utils/collabNextAction';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
-import CampaignInsightPanel from './collab/CampaignInsightPanel';
-import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
 import CampaignAiAssistant from './collab/CampaignAiAssistant';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -45,7 +43,7 @@ interface CreatorCampaignCollabsProps {
   initialCollabId?: string;
 }
 
-type DetailTab = 'progress' | 'insight' | 'settlement' | 'ai';
+type DetailTab = 'progress' | 'ai';
 
 /**
  * 목록 탭.
@@ -93,6 +91,8 @@ const APPLY_STATUS: Record<string, { label: string; cls: string; note: string }>
 type CreatorCollabCache = {
   collabs: any[];
   applications: any[];
+  /** MY 캠페인에서 지운 캠페인. 선정 기록이 "진행 준비"에 다시 뜨지 않게 함께 둔다. */
+  hiddenCampaignIds?: string[];
   /**
    * 마지막으로 확인한 인스타그램 연동 여부.
    *
@@ -192,6 +192,8 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
 
   const [collabs, setCollabs] = useState<any[]>(() => initialCache?.collabs || []);
   const [applications, setApplications] = useState<any[]>(() => initialCache?.applications || []);
+  /** MY 캠페인에서 지운 캠페인(서버가 협업 목록과 함께 보낸다). */
+  const [hiddenCampaignIds, setHiddenCampaignIds] = useState<string[]>(() => initialCache?.hiddenCampaignIds || []);
   const [loading, setLoading] = useState(() => !initialCache);
   const [loadError, setLoadError] = useState('');
 
@@ -268,14 +270,19 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
       // 진행이 확정된 협업이 조회에 실패하면 이 화면이 빈 목록으로 보였다 — 인플루언서
       // 입장에서는 확정된 협업이 사라진 것처럼 보이고, 원인을 알 단서가 없었다.
       setLoadError(collabRes.error || '');
+      const nextHidden: string[] = Array.isArray((collabRes as any).hiddenCampaignIds)
+        ? (collabRes as any).hiddenCampaignIds.map(String)
+        : cached?.hiddenCampaignIds || [];
       setCollabs(nextCollabs);
       setApplications(nextApplications);
+      setHiddenCampaignIds(nextHidden);
       igLinkedRef.current = nextLinked;
       setIgLinked(nextLinked);
       if (!collabRes.error) {
         writeCreatorCollabCache(userName, {
           collabs: nextCollabs,
           applications: nextApplications,
+          hiddenCampaignIds: nextHidden,
           metaLinked: nextLinked === null ? undefined : nextLinked,
           savedAt: Date.now(),
         });
@@ -402,6 +409,37 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     return res;
   };
 
+  /** MY 캠페인에서 지우는 중인 협업. */
+  const [hidingId, setHidingId] = useState('');
+  /**
+   * MY 캠페인에서 캠페인을 지운다. 협업을 취소하지 않고 내 목록에서만 내린다 — 브랜드 쪽
+   * 진행 기록은 그대로 남는다. 진행 · 정산을 브랜드와 직접 조율하므로, 진행하지 않기로 했거나
+   * 끝난 캠페인은 인플루언서가 스스로 정리한다.
+   */
+  const hideCollab = async (collabId: string, title: string) => {
+    const label = title || (isEn ? 'this campaign' : '이 캠페인');
+    const ok = window.confirm(
+      isEn
+        ? `Delete "${label}" from My Campaigns?\nIt can't be restored. The brand's records stay as they are.`
+        : `'${label}'을(를) MY 캠페인에서 삭제할까요?\n삭제하면 되돌릴 수 없어요. 브랜드 쪽 기록은 그대로 남아요.`,
+    );
+    if (!ok) return;
+    setHidingId(collabId);
+    const res = await apiService.collabAction(collabId, 'hide_for_creator', {}, undefined, 'influencer');
+    setHidingId('');
+    if (res.error) {
+      notify(res.error, 'error');
+      return;
+    }
+    const campaignId = String(collabs.find(c => c.id === collabId)?.campaignId || '');
+    if (campaignId) setHiddenCampaignIds(prev => (prev.includes(campaignId) ? prev : [...prev, campaignId]));
+    setCollabs(prev => prev.filter(c => c.id !== collabId));
+    setSelectedId('');
+    setDetail(null);
+    notify(isEn ? 'Deleted from My Campaigns.' : 'MY 캠페인에서 삭제했어요.');
+    void load();
+  };
+
   const openCollab = async (collabId: string) => {
     setSelectedId(collabId);
     setDetail(null);
@@ -425,8 +463,10 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   // 보게 된다. 선정됐지만 아직 진행 단계가 열리지 않은 캠페인만 '진행 준비'로 함께 깐다.
   const waiting = useMemo(() => {
     const started = new Set(collabs.map(c => String(c.campaignId || '')).filter(Boolean));
+    // 내가 지운 캠페인은 선정 기록이 남아 있어도 다시 띄우지 않는다.
+    for (const id of hiddenCampaignIds) started.add(id);
     return applications.filter(a => String(a.status) === 'accepted' && !started.has(String(a.campaign_id)));
-  }, [collabs, applications]);
+  }, [collabs, applications, hiddenCampaignIds]);
 
   /**
    * 탭에 따라 보여 줄 것들.
@@ -573,26 +613,33 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
      * 탭을 남겨 두면 오지 않을 입금을 기다리게 된다. 조건에 보수가 잡혀 있으면
      * 진행 방식과 무관하게 열어 둔다(예전 방식으로 시작된 협업).
      */
+    // 인사이트 · 정산 탭은 없앴다. 인사이트는 인플루언서 메뉴의 인사이트에서 보고, 정산은
+    // 이제 브랜드와 인플루언서가 직접 조율한다(담당자를 거치지 않는다).
     const TABS: { key: DetailTab; label: string }[] = [
       { key: 'progress', label: isEn ? 'Progress' : '진행사항' },
-      { key: 'insight', label: isEn ? 'Insights' : '인사이트' },
-      ...(mode.hasWorkroom || fee > 0 ? [{ key: 'settlement' as const, label: isEn ? 'Settlement' : '정산' }] : []),
-      // AI 는 정산 옆에 항상 둔다. 정산 탭처럼 조건을 걸지 않는 이유: 이 어시스턴트가
-      // 하는 일(기획안, 마감 정리, 담당자 문의 초안)은 보수가 없는 제품 협찬형에서도
-      // 그대로 필요하다.
       { key: 'ai' as const, label: 'AI' },
     ];
     const activeTab = TABS.some(t => t.key === detailTab) ? detailTab : 'progress';
 
     return (
       <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
-        <button
-          onClick={() => { setSelectedId(''); setDetail(null); }}
-          className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-          {isEn ? 'Campaign list' : '캠페인 목록'}
-        </button>
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <button
+            onClick={() => { setSelectedId(''); setDetail(null); }}
+            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+            {isEn ? 'Campaign list' : '캠페인 목록'}
+          </button>
+          <button
+            type="button"
+            disabled={hidingId === selected.id}
+            onClick={() => hideCollab(selected.id, selected.campaignTitle)}
+            className="px-3 py-1.5 rounded-lg border border-red-200 text-[11px] font-black text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
+          >
+            {hidingId === selected.id ? (isEn ? 'Deleting…' : '삭제 중…') : isEn ? 'Delete campaign' : '캠페인 삭제'}
+          </button>
+        </div>
 
         {/* 머리말. 지금 어느 단계이고 언제까지인지, 보수는 얼마인지 — 진행 중에 계속
             확인하는 값만 남긴다. */}
@@ -752,26 +799,6 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                   </button>
                 </div>
               </div>
-            )}
-
-            {/* -------------------------------------------------- 인사이트 */}
-            {activeTab === 'insight' && (
-              <CampaignInsightPanel
-                viewer="influencer"
-                campaignId={selected.campaignId}
-                budgetKrw={0}
-                uploadedCount={detail.collab?.uploadConfirmedAt ? 1 : 0}
-                totalCollabs={1}
-              />
-            )}
-
-            {/* -------------------------------------------------- 정산 */}
-            {activeTab === 'settlement' && (
-              <CampaignSettlementPanel
-                influencerUsername={userName}
-                campaignId={selected.campaignId}
-                feeKrw={fee}
-              />
             )}
 
             {/* -------------------------------------------------- AI

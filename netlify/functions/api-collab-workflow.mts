@@ -677,6 +677,8 @@ export default async (req: Request, context: Context) => {
 
     try {
       let rows: any[] = [];
+      /** 인플루언서가 MY 캠페인에서 지운 캠페인. 화면이 "선정 · 진행 준비"에 다시 띄우지 않게 함께 보낸다. */
+      let hiddenCampaignIds: string[] = [];
       if (role === "manager") {
         if (!caller.isManager) return jsonError("담당자만 조회할 수 있습니다.", 403);
         const mine = url.searchParams.get("mine") === "1";
@@ -715,10 +717,16 @@ export default async (req: Request, context: Context) => {
         if (!caller.isManager && requested && requested !== caller.username) {
           return jsonError("다른 계정의 협업은 조회할 수 없습니다.", 403);
         }
+        // 인플루언서가 MY 캠페인에서 지운 협업은 빼고 읽는다(기록은 그대로 남는다).
         rows = (await db.sql`
-          SELECT * FROM campaign_collabs WHERE creator_username = ${target}
+          SELECT * FROM campaign_collabs WHERE creator_username = ${target} AND creator_hidden_at IS NULL
           ORDER BY created_at DESC
         `) as any[];
+        const hiddenRows = (await db.sql`
+          SELECT DISTINCT campaign_id FROM campaign_collabs
+          WHERE creator_username = ${target} AND creator_hidden_at IS NOT NULL AND campaign_id IS NOT NULL
+        `) as any[];
+        hiddenCampaignIds = hiddenRows.map((r) => String(r.campaign_id));
       }
 
       const ids = rows.map((r) => r.id);
@@ -753,7 +761,7 @@ export default async (req: Request, context: Context) => {
         return Response.json({ unreadTotal, byCampaign, byCollab });
       }
 
-      if (rows.length === 0) return Response.json({ collabs: [] });
+      if (rows.length === 0) return Response.json({ collabs: [], hiddenCampaignIds });
 
       const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
       const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
@@ -1152,7 +1160,7 @@ export default async (req: Request, context: Context) => {
         };
       });
 
-      return Response.json({ collabs });
+      return Response.json({ collabs, hiddenCampaignIds });
     } catch (err: any) {
       return jsonError(err?.message || "협업 목록을 불러오지 못했습니다.", 500);
     }
@@ -1483,12 +1491,34 @@ export default async (req: Request, context: Context) => {
     return jsonError("Method not allowed", 405);
   }
 
+  const body = await req.json().catch(() => ({}));
+  const action = String((body as any)?.action || "");
+
+  /**
+   * 인플루언서가 MY 캠페인에서 이 캠페인을 지운다.
+   *
+   * 협업을 취소하지 않는다 — 브랜드 쪽 진행 상황과 기록은 그대로 남고, 인플루언서 목록에서만
+   * 내린다. 이제 진행 · 정산은 브랜드와 인플루언서가 직접 조율하므로, 끝났거나 진행하지 않기로
+   * 한 캠페인을 인플루언서가 스스로 정리할 수 있어야 한다. 취소된 협업도 지울 수 있게 아래
+   * 취소 확인보다 먼저 처리한다.
+   */
+  if (action === "hide_for_creator") {
+    if (role !== "influencer") return jsonError("인플루언서만 MY 캠페인에서 삭제할 수 있습니다.", 403);
+    try {
+      await db.sql`
+        UPDATE campaign_collabs SET creator_hidden_at = COALESCE(creator_hidden_at, NOW())
+        WHERE id = ${collabId}
+      `;
+      return Response.json({ success: true });
+    } catch (err: any) {
+      console.error("[collab-workflow] MY 캠페인 삭제 실패:", err);
+      return jsonError("삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.", 500);
+    }
+  }
+
   if (collab.status === "cancelled" ) {
     return jsonError("취소된 협업입니다.", 409);
   }
-
-  const body = await req.json().catch(() => ({}));
-  const action = String((body as any)?.action || "");
   const actor = { actorRole: role, actorUsername: caller.username };
 
   const stageByKey = async (key: string) => {
