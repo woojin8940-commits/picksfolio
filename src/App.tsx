@@ -52,6 +52,7 @@ const TermsOfService = lazyWithRetry(() => import('./components/TermsOfService')
 const PrivacyPolicy = lazyWithRetry(() => import('./components/PrivacyPolicy'));
 const BusinessSignupPage = lazyWithRetry(() => import('./components/BusinessSignupPage'));
 const BusinessLoginPage = lazyWithRetry(() => import('./components/BusinessLoginPage'));
+const BusinessJoinPage = lazyWithRetry(() => import('./components/BusinessJoinPage'));
 const BusinessEnterpriseDashboard = lazyWithRetry(() => import('./components/BusinessEnterpriseDashboard'));
 const UserSettlement = lazyWithRetry(() => import('./components/UserSettlement'));
 // 담당자 대시보드. 운영자가 배정한 일반 계정만 들어온다.
@@ -100,7 +101,7 @@ const clearAllLinkCacheLazy = () => {
     .catch(error => console.warn('[Prefetch] Failed to clear cache:', error));
 };
 
-type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
+type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'business-join' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'campaigns' | 'my-collabs' | 'affiliate-store' | 'my-affiliate';
 
 /** 다시 뜬 페이지가 되살려도 되는 탭(utils/resumeTab). */
@@ -130,13 +131,15 @@ const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
 };
 
 /** 주소 첫 칸이 그대로 화면 이름이 되는 경로. */
-const TOP_LEVEL_VIEWS: View[] = ['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin', 'manager'];
+const TOP_LEVEL_VIEWS: View[] = ['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin', 'business-join', 'manager'];
 
 /** 같은 화면을 가리키는 슬래시 표기(sitemap.xml · 외부 링크가 쓰는 형태). */
 const SLASH_ALIASES: Record<string, View> = {
   'business/login': 'business-login',
   'business/signup': 'business-signup',
   'business/admin': 'business-admin',
+  // 회사 관리자가 보낸 직원 좌석 초대 링크(/business/join?invite=…).
+  'business/join': 'business-join',
 };
 
 /**
@@ -182,6 +185,8 @@ const BUSINESS_SESSION_KEYS = [
   'picks_business_access_token',
   'picks_business_refresh_token',
   'picks_business_last_activity',
+  'picks_business_team_role',
+  'picks_business_member',
 ];
 
 function markHomeIntent(): void {
@@ -445,7 +450,8 @@ const App: React.FC = () => {
       // 않는다(SetupLink 는 바깥 틀 밖에서 그려져 스스로 종이색을 깐다).
       view === 'setup-link' ||
       view === 'business-login' ||
-      view === 'business-signup';
+      view === 'business-signup' ||
+      view === 'business-join';
     document.body.classList.toggle('home-paper', isPaper);
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     themeMeta?.setAttribute('content', isPaper ? '#F4F5FA' : '#2563EB');
@@ -1281,7 +1287,7 @@ const App: React.FC = () => {
       updateActivity();
     }
 
-    const publicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'business-login'];
+    const publicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'business-login', 'business-join'];
 
     const silentLogout = async () => {
       setIsLoggedIn(false);
@@ -1417,7 +1423,7 @@ const App: React.FC = () => {
       BUSINESS_SESSION_KEYS.forEach(key => localStorage.removeItem(key));
     };
 
-    const businessPublicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'login'];
+    const businessPublicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'business-join', 'login'];
 
     const checkInactivity = () => {
       if (loggedOut) return;
@@ -2028,6 +2034,22 @@ const App: React.FC = () => {
             }
           }}
           onAdminLoginSuccess={handleOperatorLoginSuccess}
+        />
+      </LazyRoute>
+    );
+  }
+  if (view === 'business-join') {
+    return (
+      <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
+        <BusinessJoinPage
+          onNavigateHome={() => navigate('home')}
+          onNavigateLogin={() => navigate('business-login')}
+          onJoined={(bizUsername, compName) => {
+            setBusinessUsername(bizUsername);
+            setBusinessCompanyName(compName);
+            setIsBusinessLoggedIn(true);
+            navigate('business-admin');
+          }}
         />
       </LazyRoute>
     );

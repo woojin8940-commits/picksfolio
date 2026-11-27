@@ -1,0 +1,86 @@
+import { authHeaders } from './apiService';
+import type { MembershipBillingHistoryEntry } from '../types';
+
+export type TeamRole = 'admin' | 'member';
+
+export interface TeamMember {
+  id: number;
+  memberUsername: string;
+  displayName: string;
+  teamRole: TeamRole;
+  joinedAt: string;
+  seated: boolean;
+}
+
+export interface SeatInvite {
+  id: number;
+  label: string;
+  teamRole: TeamRole;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface TeamOverview {
+  viewer: { teamRole: 'owner' | 'admin' | 'member'; memberUsername: string | null };
+  plan: {
+    planActive: boolean;
+    extraSeats: number;
+    scheduledSeats: number | null;
+    seatPriceKrw: number;
+    baseMonthlyKrw: number;
+    nextMonthlyKrw: number;
+    nextBillingDate: string | null;
+    cancelAtPeriodEnd: boolean;
+    chargePending: boolean;
+  };
+  seats: { total: number; extra: number; used: number; available: number };
+  members: TeamMember[];
+  invites: SeatInvite[];
+  billingHistory: MembershipBillingHistoryEntry[];
+}
+
+type Result<T> = ({ success: true } & T) | { success: false; error: string };
+
+async function call<T>(action: string, payload: Record<string, unknown> = {}, signedIn = true): Promise<Result<T>> {
+  try {
+    const headers = signedIn
+      ? await authHeaders({ 'Content-Type': 'application/json' })
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/brand-team', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action, ...payload }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.success) {
+      return { success: false, error: String(json?.error || '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.') };
+    }
+    return json as Result<T>;
+  } catch {
+    return { success: false, error: '네트워크 연결을 확인한 뒤 다시 시도해 주세요.' };
+  }
+}
+
+export const brandTeamService = {
+  overview: () => call<TeamOverview>('overview'),
+  createInvite: (label: string, teamRole: TeamRole) =>
+    call<{ invite: SeatInvite; url: string }>('create_invite', { label, teamRole }),
+  revokeInvite: (inviteId: number) => call<{}>('revoke_invite', { inviteId }),
+  removeMember: (memberId: number) => call<{}>('remove_member', { memberId }),
+  changeRole: (memberId: number, teamRole: TeamRole) => call<{}>('change_role', { memberId, teamRole }),
+  addSeats: (count: number) => call<TeamOverview & { chargedKrw?: number }>('add_seats', { count }),
+  scheduleSeats: (seats: number) => call<TeamOverview>('schedule_seats', { seats }),
+  inviteInfo: (token: string) =>
+    call<{ invite: { companyName: string; label: string; teamRole: TeamRole; expiresAt: string } }>('invite_info', { token }, false),
+  join: (input: { token: string; username: string; password: string; name: string }) =>
+    call<{
+      username: string;
+      company_name: string;
+      role: string;
+      team_role: TeamRole;
+      member_username: string;
+      member_name: string;
+      access_token: string;
+      refresh_token: string;
+    }>('join', input, false),
+};

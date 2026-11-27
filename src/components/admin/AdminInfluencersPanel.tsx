@@ -652,6 +652,7 @@ const PLAN_STYLE: Record<MembershipTier, { label: string; chip: string; text: st
   commerce: { label: '커머스', chip: 'bg-pink-100 text-pink-700', text: 'text-pink-600' },
   pro: { label: '프로', chip: 'bg-emerald-100 text-emerald-700', text: 'text-emerald-600' },
   brand_dm: { label: '자동 디엠', chip: 'bg-amber-100 text-amber-700', text: 'text-amber-600' },
+  brand_campaign: { label: '정액제', chip: 'bg-blue-100 text-blue-700', text: 'text-blue-600' },
 };
 
 /**

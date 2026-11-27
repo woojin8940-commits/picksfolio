@@ -48,6 +48,14 @@ export default async (req: Request) => {
     // (= 이후 자동결제가 내 카드로 나간다).
     const auth = await requireAccountOwner(req, String(username));
     if (!auth.ok) return auth.response;
+    // 회사 계정에 초대받아 들어온 직원은 결제 수단을 바꾸거나 구독할 수 없다 — 결제는
+    // 회사 관리자 계정만 한다.
+    if (auth.teamRole && auth.teamRole !== "owner") {
+      return Response.json(
+        { success: false, error: "결제와 구독은 회사 관리자 계정에서만 할 수 있어요." },
+        { status: 403 },
+      );
+    }
 
     const normalizedTier = normalizeTier(tier);
     if (!normalizedTier) {
@@ -57,9 +65,9 @@ export default async (req: Request) => {
       );
     }
 
-    // 지금 새로 구독할 수 있는 플랜은 브랜드 전용 자동 디엠 플랜(월 5,900원)뿐이다.
-    // 멤버십으로 잠겨 있던 다른 기능은 모두 무료가 됐고, 인플루언서의 자동 디엠은 결제가
-    // 아니라 브랜드 매칭받기 등록으로 열린다 — 인플루언서가 결제할 일은 없다.
+    // 지금 새로 구독할 수 있는 플랜은 브랜드 전용 정액제(월 249,000원)뿐이다. 자동 디엠은
+    // 정액제에 포함되고, 인플루언서의 자동 디엠은 결제가 아니라 크리에이터 승인(기존 회원은
+    // 브랜드 매칭받기 등록)으로 열린다 — 인플루언서가 결제할 일은 없다.
     if (!isSellableTier(normalizedTier)) {
       return Response.json(
         { success: false, error: "판매가 종료된 플랜입니다. 모든 기능은 무료로 이용할 수 있어요." },
@@ -79,7 +87,7 @@ export default async (req: Request) => {
       return Response.json(
         {
           success: false,
-          error: "자동 디엠 플랜은 브랜드 계정 전용이에요. 인플루언서는 크리에이터 승인(기존 회원은 브랜드 매칭받기 등록)을 받으면 자동 디엠을 무료로 쓸 수 있습니다.",
+          error: "정액제는 브랜드 계정 전용이에요. 인플루언서는 크리에이터 승인(기존 회원은 브랜드 매칭받기 등록)을 받으면 자동 디엠을 무료로 쓸 수 있습니다.",
         },
         { status: 403 },
       );
@@ -223,6 +231,11 @@ export default async (req: Request) => {
           membership_plan: pending.tier,
           membership_started_at: current?.membership_started_at || at,
           membership_amount_krw: amountKrw,
+          // 정액제는 관리자 좌석만 들어 있는 상태로 시작한다. 직원 좌석은 팀원 관리에서 따로
+          // 결제해 늘린다 — 예전 구독에 남아 있던 좌석 수를 이어받지 않는다.
+          ...(pending.tier === "brand_campaign"
+            ? { membership_extra_seats: 0, membership_extra_seats_scheduled: null }
+            : {}),
           // 어떤 수단으로 등록한 정기결제인지(화면 안내용).
           // card = 카드 수기(키인) 빌링키, easypay = 간편결제(카카오페이) 빌링키.
           membership_payment_method: pending.method || paymentMethod,

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
+import { rememberBusinessTeam } from '../utils/businessTeam';
 
 interface BusinessLoginPageProps {
   onNavigateHome: () => void;
@@ -45,6 +46,7 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
         // 관리자 계정은 비즈니스 세션을 남기지 않고 운영 콘솔(관리자 대시보드)로 들어간다.
         onAdminLoginSuccess({ username: result.username, token: result.access_token });
       } else if (result.success) {
+        rememberBusinessTeam(result);
         localStorage.setItem('picks_business_session', result.username);
         localStorage.setItem('picks_business_company', result.company_name);
         if (result.access_token) {

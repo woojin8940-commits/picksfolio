@@ -15,15 +15,27 @@
  * Money lives in ₩ (the membership price); there are no credits here.
  */
 
-// 'brand_dm' 은 브랜드(기업) 계정 전용 자동 디엠 플랜(월 5,900원)이다. 지금 새로 판매하는
-// 플랜은 이것 하나뿐이다 — 멤버십으로 잠겨 있던 다른 기능은 모두 무료로 열렸고,
-// 인플루언서의 자동 디엠은 결제가 아니라 "브랜드 매칭받기" 등록으로 열린다
-// (dm-automation-access). 스탠다드 · AI 협업 · 커머스 · 프로는 예전 구독 기록을 읽기
-// 위해서만 남는다(신규 판매 없음, 다음 결제일에 청구 없이 종료).
-export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm'
+// 'brand_campaign' 은 브랜드(기업) 계정 전용 정액제(월 249,000원)다. 지금 새로 판매하는
+// 플랜은 이것 하나뿐이다. 정액제에는 회사 관리자 좌석 1석과 자동 디엠이 포함되고, 직원
+// 좌석은 1석당 월 129,000원으로 결제한 만큼 늘린다(brand-seats).
+//
+// 'brand_dm'(자동 디엠 플랜, 월 5,900원)은 판매를 종료했다 — 정액제에 자동 디엠이 포함되기
+// 때문이다. 예전 구독자는 다음 결제일까지 그대로 쓰고, 그날 청구 없이 끝난다. 스탠다드 ·
+// AI 협업 · 커머스 · 프로도 예전 구독 기록을 읽기 위해서만 남는다.
+export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'brand_campaign'
 
 /** 지금 새로 구독할 수 있는 티어. */
-export const SELLABLE_TIERS: readonly MembershipTier[] = ['brand_dm']
+export const SELLABLE_TIERS: readonly MembershipTier[] = ['brand_campaign']
+
+/** 정액제 기본 금액(회사 관리자 좌석 1석 포함)과 직원 좌석 1석 금액. 부가세 포함. */
+export const BRAND_CAMPAIGN_BASE_KRW = 249000
+export const BRAND_SEAT_PRICE_KRW = 129000
+/** 한 번에 늘릴 수 있는 직원 좌석 수(오입력 방지용). 여러 번 나눠 사면 제한 없이 늘어난다. */
+export const MAX_SEATS_PER_PURCHASE = 50
+
+/** 정액제 월 청구액 = 기본 + 직원 좌석 수 × 좌석 금액. */
+export const brandCampaignMonthlyKrw = (extraSeats: number): number =>
+  BRAND_CAMPAIGN_BASE_KRW + Math.max(0, Math.trunc(extraSeats || 0)) * BRAND_SEAT_PRICE_KRW
 
 /** 정기결제를 계속 이어 가는 티어. 그 밖의 예전 티어는 다음 결제일에 청구 없이 끝난다. */
 export const isSellableTier = (tier: unknown): boolean =>
@@ -43,6 +55,7 @@ export const TIER_PRICE_KRW: Record<MembershipTier, number> = {
   commerce: 13900,
   pro: 18700,
   brand_dm: 5900,
+  brand_campaign: BRAND_CAMPAIGN_BASE_KRW,
 }
 
 export const TIER_LABEL: Record<MembershipTier, string> = {
@@ -51,6 +64,7 @@ export const TIER_LABEL: Record<MembershipTier, string> = {
   commerce: '커머스 멤버십',
   pro: '프로 플랜',
   brand_dm: '자동 디엠 플랜',
+  brand_campaign: '브랜드 정액제',
 }
 
 /** Normalise a stored plan value to a billable tier, or null if it isn't one.
@@ -58,7 +72,7 @@ export const TIER_LABEL: Record<MembershipTier, string> = {
 export const normalizeTier = (plan: unknown): MembershipTier | null => {
   if (
     plan === 'standard' || plan === 'standard_ai' || plan === 'commerce' || plan === 'pro' ||
-    plan === 'brand_dm'
+    plan === 'brand_dm' || plan === 'brand_campaign'
   ) {
     return plan
   }
@@ -101,6 +115,8 @@ export const TIER_RANK: Record<MembershipTier, number> = {
   // (api-billing-issue 는 같거나 낮은 티어로의 재구독을 막는다). 기능을 여닫는 데는
   // 등급을 쓰지 않는다 — 자동 디엠 판정은 dm-automation-access 가 플랜 이름으로 한다.
   brand_dm: 5,
+  // 자동 디엠 플랜 구독자도 정액제로 옮겨 갈 수 있어야 하므로 그 위에 둔다.
+  brand_campaign: 6,
 }
 
 /** `plan` 이 `required` 티어 이상인지(= 해당 기능을 쓸 수 있는지). */
@@ -175,11 +191,22 @@ export type MembershipChargePending = {
   paymentId: string
   billingKey: string
   tier: MembershipTier
-  kind: 'initial' | 'recurring'
+  // 'seats' 는 결제 주기 중간에 직원 좌석을 늘릴 때의 일할 청구다.
+  kind: 'initial' | 'recurring' | 'seats'
   startedAt: string
   scheduledDate?: string
   method?: 'card' | 'easypay'
+  /** 이번 청구 금액. 없으면 티어 정가(예전 기록). */
+  amountKrw?: number
+  /** 정액제: recurring 은 이번 달 직원 좌석 수, seats 는 새로 늘리는 좌석 수. */
+  seats?: number
 }
+
+/** 청구 기록에 적힌 금액(없으면 티어 정가). */
+export const pendingChargeAmount = (pending: MembershipChargePending): number =>
+  Number.isInteger(pending.amountKrw) && (pending.amountKrw as number) > 0
+    ? (pending.amountKrw as number)
+    : TIER_PRICE_KRW[pending.tier]
 
 export const verifyMembershipBillingKey = async (username: string, billingKey: string): Promise<boolean | null> => {
   const apiSecret = process.env.PORTONE_V2_API_SECRET
@@ -239,7 +266,7 @@ export const readMembershipCharge = async (
     pending.paymentId,
     username,
     pending.billingKey,
-    TIER_PRICE_KRW[pending.tier],
+    pendingChargeAmount(pending),
   )
 }
 
@@ -254,9 +281,12 @@ export const chargeMembershipBillingKey = async (
   billingKey: string,
   tier: MembershipTier,
   paymentId: string,
+  options: { amountKrw?: number; orderName?: string } = {},
 ): Promise<ChargeResult> => {
   const apiSecret = process.env.PORTONE_V2_API_SECRET
-  const amountKrw = TIER_PRICE_KRW[tier]
+  const amountKrw = Number.isInteger(options.amountKrw) && (options.amountKrw as number) > 0
+    ? (options.amountKrw as number)
+    : TIER_PRICE_KRW[tier]
   if (!apiSecret) return { success: false, paymentId, amountKrw, error: '결제 설정이 완료되지 않았습니다.' }
   const before = await readCharge(apiSecret, paymentId, username, billingKey, amountKrw)
   if (before === 'paid') return { success: true, paymentId, amountKrw }
@@ -274,7 +304,7 @@ export const chargeMembershipBillingKey = async (
         body: JSON.stringify({
           billingKey,
           storeId: PORTONE_STORE_ID,
-          orderName: `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
+          orderName: options.orderName || `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
           customer: { id: asciiSafe(username) },
           amount: { total: amountKrw },
           currency: 'KRW',
@@ -375,8 +405,11 @@ export interface MembershipBillingEntry {
   amountKrw: number
   // 'promo' 는 출시 혜택 코드로 시작한 구독의 첫 기록이다 — 청구가 없었으므로
   // amountKrw 는 0 이고, 무료 기간이 끝나는 날부터 'recurring' 이 이어진다.
-  kind: 'initial' | 'recurring' | 'promo'
+  // 'seats' 는 결제 주기 중간에 직원 좌석을 늘린 일할 청구다.
+  kind: 'initial' | 'recurring' | 'promo' | 'seats'
   success: boolean
+  /** 정액제: 이 청구에 포함된(또는 새로 늘린) 직원 좌석 수. */
+  seats?: number
   paymentId?: string
   error?: string
 }

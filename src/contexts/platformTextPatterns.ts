@@ -2384,4 +2384,36 @@ export const platformTextPatterns = [
     "source": "^'(.+?)'을\\(를\\) MY 캠페인에서 삭제할까요\\? 삭제하면 되돌릴 수 없어요\\. 브랜드 쪽 기록은 그대로 남아요\\.$",
     "replacement": "Delete \"$1\" from My Campaigns? It can't be restored. The brand's records stay as they are."
   },
+  {
+    "source": "^직원 좌석 (.+?)석을 추가합니다\\. 지금 결제: 약 (.+?) \\(다음 결제일까지 남은 기간만큼\\) 다음 달부터: 월 (.+?) 등록된 결제 수단으로 바로 결제됩니다\\. 진행할까요\\?$",
+    "replacement": "Add $1 staff seat(s)? Charged now: about $2 (for the rest of this billing period). From next month: $3/month. This is charged to your registered payment method right away."
+  },
+  {
+    "source": "^직원 좌석 (.+?)석을 추가했어요\\.$",
+    "replacement": "Added $1 staff seat(s)."
+  },
+  {
+    "source": "^다음 결제일부터 직원 좌석이 (.+?)석으로 줄어들어요\\.$",
+    "replacement": "From the next billing date, you'll have $1 staff seat(s)."
+  },
+  {
+    "source": "^관리자 1 \\+ 직원 (.+?)$",
+    "replacement": "1 admin + $1 staff"
+  },
+  {
+    "source": "^직원 (.+?) · 초대 (.+?)$",
+    "replacement": "$1 staff · $2 invites"
+  },
+  {
+    "source": "^(.+?)님을 팀에서 내보낼까요\\? 이 계정으로는 더 이상 회사 워크스페이스에 들어올 수 없고, 좌석은 추가 비용 없이 다시 비어요\\.$",
+    "replacement": "Remove $1 from the team? This account will no longer be able to enter the company workspace, and the seat becomes free at no extra cost."
+  },
+  {
+    "source": "^관리자 좌석 1석 포함 · 직원 좌석 1석당 월 (.+?)원 추가$",
+    "replacement": "Includes 1 admin seat · extra staff seats ₩$1 each / mo"
+  },
+  {
+    "source": "^(\\d[\\d,]*)석$",
+    "replacement": "$1 seats"
+  },
 ] as const;

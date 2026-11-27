@@ -48,7 +48,7 @@ export interface PortOneIntent {
   returnPath: string;
   orderName: string;
   // membership subscription tier
-  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm';
+  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'brand_campaign';
   promoCode?: string;
   savedAt?: number;
 }

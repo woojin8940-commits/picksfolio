@@ -10,6 +10,7 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { checkUsernameRules } from "./_shared/username-rules.mts";
 import { usernameHasBlobLeftovers } from "./_shared/username-leftovers.mts";
 import { attachAuthPhone } from "./_shared/auth-phone.mts";
+import { resolveTeamMembership } from "./_shared/brand-team.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -102,11 +103,58 @@ export default async (req: Request) => {
         return Response.json({ success: false, error: "비즈니스 계정을 찾을 수 없습니다." });
       }
 
+      // 초대로 들어온 직원 계정은 회사 워크스페이스로 들어간다(아이디 · 회사 이름을 회사 것으로
+      // 돌려준다). 서버의 모든 확인은 user-auth 가 같은 표로 회사 계정으로 바꿔 읽는다.
+      if (profileRole === "operator") {
+        const signedInUser = authData.user!;
+        const isTeamAccount = signedInUser.user_metadata?.brand_team_member === true;
+        let team: Awaited<ReturnType<typeof resolveTeamMembership>> | null = null;
+        try {
+          team = await resolveTeamMembership(signedInUser.id);
+        } catch (e) {
+          console.error("[business-auth] team lookup failed:", (e as Error)?.message);
+          if (isTeamAccount) {
+            return Response.json({ success: false, error: "직원 계정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+          }
+        }
+        if (team?.kind === "member") {
+          if (!team.seated) {
+            return Response.json({
+              success: false,
+              error: "회사의 정액제 좌석이 없어 지금은 로그인할 수 없어요. 회사 관리자에게 좌석을 확인해 달라고 요청해 주세요.",
+            });
+          }
+          const { data: companyProfile } = await supabase
+            .from("profiles")
+            .select("username, full_name")
+            .eq("username", team.company)
+            .maybeSingle();
+          return Response.json({
+            success: true,
+            username: companyProfile?.username || team.company,
+            company_name: companyProfile?.full_name || "",
+            role: "operator",
+            team_role: team.teamRole,
+            member_username: team.memberUsername,
+            member_name: profile.full_name || "",
+            access_token: authData.session?.access_token || "",
+            refresh_token: authData.session?.refresh_token || "",
+          });
+        }
+        if (isTeamAccount) {
+          return Response.json({
+            success: false,
+            error: "회사 팀에서 나간 직원 계정이에요. 다시 들어가려면 회사 관리자에게 새 초대 링크를 받아 주세요.",
+          });
+        }
+      }
+
       return Response.json({
         success: true,
         username: profile.username,
         company_name: profile.full_name || "",
         role: profileRole,
+        ...(profileRole === "operator" ? { team_role: "owner" } : {}),
         access_token: authData.session?.access_token || "",
         refresh_token: authData.session?.refresh_token || "",
       });
