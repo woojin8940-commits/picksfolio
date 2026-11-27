@@ -41,7 +41,14 @@ import {
   release,
 } from "./_shared/dm-send-registry.mts";
 import { createScheduledJob, queueRemainingDmMessages } from "./_shared/dm-schedule-store.mts";
-import { backupCommentEvents, backupMessageEvents, enqueueCommentEvents, enqueueMessageEvents } from "./_shared/dm-jobs.mts";
+import {
+  backupCommentEvents,
+  backupMessageEvents,
+  enqueueCommentEvents,
+  enqueueDelayedMessageEvents,
+  enqueueMessageEvents,
+  FOLLOW_CHECK_MARKER,
+} from "./_shared/dm-jobs.mts";
 import type { QueuedComment, QueuedMessage } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, getDmContact, noteDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
@@ -379,6 +386,8 @@ interface DmTriggerContext {
   username: string;
   settings: DmSettings;
   igId: string;
+  /** 웹훅 entry.id — 나중에 처리할 이벤트를 대기열에 넣을 때 계정을 찾는 데 쓴다. */
+  entryId: string;
   accessToken: string;
   /** 계정 자신의 ID 모음 — 우리가 보낸 메시지를 트리거로 삼지 않기 위해 쓴다. */
   ownIds: Set<string>;
@@ -670,7 +679,47 @@ async function handleFaqPostback(ctx: DmTriggerContext, event: any): Promise<voi
  *  3) 본 메시지 계획과 클릭 시각을 대기열에 저장한다.
  *     발송 결과와 미발송 내용은 작업자가 같은 댓글의 발송 기록에 이어서 남긴다.
  */
-async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<WebhookProcessResult | void> {
+/**
+ * 팔로우 안내를 보낸 뒤 서버가 직접 팔로우를 다시 확인하는 시점(안내 발송 기준).
+ *
+ * 본 메시지는 '팔로우했어요' 클릭 신호가 와야 나가는데, 인스타그램이 그 신호를 보내지
+ * 않는 경우가 드물게 있다(상대 화면에는 누른 기록이 남는다). 그래서 이 시점마다 팔로우
+ * 여부를 확인하고, 팔로워면 클릭 신호가 없어도 본 메시지를 보낸다. 클릭 신호가 먼저
+ * 와서 이미 보냈다면 확인은 아무것도 하지 않는다(댓글당 1회).
+ */
+const FOLLOW_GATE_CHECK_DELAYS_MS = [15_000, 3 * 60_000, 10 * 60_000];
+
+async function scheduleFollowGateChecks(ctx: DmTriggerContext, senderId: string, commentId: string): Promise<void> {
+  const now = Date.now();
+  try {
+    await enqueueDelayedMessageEvents(FOLLOW_GATE_CHECK_DELAYS_MS.map((delay, i) => {
+      const key = `followcheck_${commentId}_${senderId}_${i}`;
+      return {
+        key,
+        igAccountId: ctx.entryId,
+        jobAccountId: ctx.igId,
+        username: ctx.username,
+        dueAt: new Date(now + delay),
+        event: {
+          sender: { id: senderId },
+          recipient: { id: ctx.entryId },
+          timestamp: now,
+          postback: { payload: baitPayload(commentId), mid: key, title: "" },
+          [FOLLOW_CHECK_MARKER]: true,
+        },
+      };
+    }));
+  } catch (e) {
+    // 재확인은 보완 장치다. 못 넣어도 '팔로우했어요' 버튼은 그대로 동작한다.
+    console.warn("[ig-webhook] follow-gate check enqueue failed:", (e as Error)?.message);
+  }
+}
+
+async function handleBaitPostback(
+  ctx: DmTriggerContext,
+  event: any,
+  opts: { followCheck?: boolean } = {},
+): Promise<WebhookProcessResult | void> {
   const postback = event?.postback;
   if (!postback) return;
   const senderId = String(event?.sender?.id || "");
@@ -683,25 +732,35 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
   const skip = (reason: string, extra: Record<string, unknown> = {}) =>
     appendLog(username, { kind: "dm", status: "skipped", trigger: "bait_click", reason, recipientId: senderId, commentId, ...extra });
 
+  // 서버의 팔로우 재확인은 상대가 보낸 것이 아니다 — 명단을 남기지 않고, 보내지 않을
+  // 때는 기록도 남기지 않는다(정상적으로 버튼 신호가 온 경우가 대부분이다).
+  const followCheck = opts.followCheck === true;
   const [pending] = await Promise.all([
     getBaitPending(username, commentId),
-    noteDmContact({ username, igsid: senderId, text: postback?.title, kind: "postback" }).catch(() => undefined),
+    followCheck
+      ? undefined
+      : noteDmContact({ username, igsid: senderId, text: postback?.title, kind: "postback" }).catch(() => undefined),
   ]);
-  if (!pending) return skip("대기 중인 1단계 메시지를 찾지 못했습니다(오래된 버튼일 수 있습니다).");
-  if (pending.fromId && pending.fromId !== senderId) return skip("댓글 작성자가 아닌 사람이 누른 버튼입니다.");
+  if (!pending) return followCheck ? undefined : skip("대기 중인 1단계 메시지를 찾지 못했습니다(오래된 버튼일 수 있습니다).");
+  if (pending.fromId && pending.fromId !== senderId) return followCheck ? undefined : skip("댓글 작성자가 아닌 사람이 누른 버튼입니다.");
 
   const blocked = await ctx.blocked();
-  if (blocked) return skip(blocked);
+  if (blocked) return followCheck ? undefined : skip(blocked);
 
   const candidates = pending.automationIds
     .map((id) => (settings.automations || []).find((a) => a.id === id))
     .filter((a): a is DmAutomationItem => Boolean(a && a.enabled && hasContent(a)));
-  if (candidates.length === 0) return skip("연결된 자동화가 삭제되었거나 꺼져 있습니다.");
+  if (candidates.length === 0) return followCheck ? undefined : skip("연결된 자동화가 삭제되었거나 꺼져 있습니다.");
 
   let follows: boolean | null = null;
   if (candidates.some((a) => a.followFilter === "followers" || a.followFilter === "non_followers")) {
     follows = await fetchFollowsBusiness({ host: graphHost(settings), igsid: senderId, accessToken });
-    if (follows === null) console.warn("[ig-webhook] follow state unknown at bait click — sending without follow filter");
+    if (follows === null) {
+      // 버튼을 누른 사람은 막지 않는다(판정 불가면 보낸다). 서버 재확인은 상대가 아무것도
+      // 누르지 않았을 수 있으니, 팔로우가 확인될 때만 보낸다.
+      if (followCheck) return;
+      console.warn("[ig-webhook] follow state unknown at bait click — sending without follow filter");
+    }
   }
   const automation = candidates.find((a) => passesFollowFilter(a, follows));
   const eventId = String(postback?.mid || `${senderId}_${event?.timestamp || ""}`);
@@ -720,7 +779,10 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
 
   // 팔로우 조건에 맞지 않음 → 안내 + 재확인 버튼(같은 payload).
   if (!automation) {
+    // 서버 재확인에서 아직 팔로워가 아니면 아무것도 보내지 않는다(다음 확인을 기다린다).
+    if (followCheck) return;
     const gateRule = candidates[0];
+    const scheduleChecks = gateRule.followFilter === "followers";
     const gateKey = baitGateKey(eventId);
     if (!(await claimIfNew(username, gateKey, true))) return;
     const text = (gateRule.followGateMessage || "").trim() || DEFAULT_FOLLOW_GATE_MESSAGE;
@@ -751,9 +813,13 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
         kind: "dm", status: "scheduled", trigger: "bait_follow_gate", recipientId: senderId,
         commentId, ruleId: gateRule.id, ruleName: gateRule.name,
       });
+      if (scheduleChecks) await scheduleFollowGateChecks(ctx, senderId, commentId);
       return { retryable: false, queued: true };
     }
     if (!result.ok && result.errorKind !== "uncertain") await release(username, gateKey, true);
+    if (scheduleChecks && (result.ok || result.errorKind === "uncertain")) {
+      await scheduleFollowGateChecks(ctx, senderId, commentId);
+    }
     await appendLog(username, {
       kind: "dm",
       status: result.ok ? "sent" : "failed",
@@ -782,6 +848,8 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
   const jobId = `bait_${commentId}_${attemptTag}`;
   const claim = await claimOrRetake(username, mainKey, BAIT_MAIN_RETAKE_MS);
   if (!claim.claimed && !(claim.state === "queued" && claim.queuedJobId === jobId)) {
+    // 서버 재확인: 버튼 신호로 이미 보냈거나 보내는 중이다. 할 일이 없다.
+    if (followCheck) return;
     const reason = claim.state === "confirmed"
       ? "이미 본 메시지를 보낸 댓글입니다(같은 버튼을 다시 누름)."
       : claim.state === "queued"
@@ -829,6 +897,7 @@ async function handleBaitPostback(ctx: DmTriggerContext, event: any): Promise<We
   await appendLog(username, {
     kind: "dm", status: "scheduled", trigger: "bait_main", stage: "main",
     recipientId: senderId, commentId, ruleId: automation.id, ruleName: automation.name,
+    ...(followCheck ? { reason: "'팔로우했어요' 클릭 신호가 오지 않아 서버가 팔로우를 확인하고 보냈습니다." } : {}),
   });
   return { retryable: false, queued: true };
 }
@@ -1064,6 +1133,8 @@ export default async (req: Request, _context: Context) => {
     const entryTime = Number(entry.time) || undefined;
     const echoes: any[] = [];
     for (const event of events) {
+      // 서버가 직접 넣는 팔로우 재확인 표시는 바깥에서 들어온 이벤트에 있으면 안 된다.
+      if (event && typeof event === "object") delete event[FOLLOW_CHECK_MARKER];
       if (isConversationEvent(event)) queuedMessages.push({ igAccountId: String(entry.id), entryTime, event });
       else echoes.push(event);
     }
@@ -1222,6 +1293,7 @@ export async function processWebhookPayload(
         username,
         settings,
         igId,
+        entryId: igAccountId,
         accessToken,
         ownIds,
         blocked: sendBlockedReason,
@@ -1284,7 +1356,8 @@ export async function processWebhookPayload(
         });
         if (consult) continue;
         await runTrigger("faq postback", () => handleFaqPostback(triggerCtx, event));
-        await runTrigger("bait postback", () => handleBaitPostback(triggerCtx, event));
+        await runTrigger("bait postback", () =>
+          handleBaitPostback(triggerCtx, event, { followCheck: event?.[FOLLOW_CHECK_MARKER] === true }));
         await runTrigger("inbound DM trigger", () => handleInboundMessage(triggerCtx, event));
       }
 
