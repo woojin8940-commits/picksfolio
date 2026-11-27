@@ -22,7 +22,21 @@ const FALLBACK_SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
 let _client: SupabaseClient | null = null;
 
-type PositiveAuthResult = { ok: true; username: string; userId: string; isAdmin: boolean };
+/**
+ * 브랜드 회사 계정에서의 역할. 회사 관리자 계정 자신은 'owner', 초대받아 들어온 직원은
+ * 'member'. 브랜드 계정이 아니면 없다.
+ */
+export type BrandTeamRole = "owner" | "member";
+
+type PositiveAuthResult = {
+  ok: true;
+  username: string;
+  userId: string;
+  isAdmin: boolean;
+  teamRole?: BrandTeamRole;
+  /** 직원 계정이면 직원 자신의 아이디(username 은 회사 아이디로 바뀐다). */
+  memberUsername?: string;
+};
 
 const AUTH_CACHE_TTL_MS = 60_000;
 const AUTH_CACHE_MAX = 200;
@@ -70,7 +84,7 @@ export function bearerToken(req: Request): string {
 }
 
 export type AuthResult =
-  | { ok: true; username: string; userId: string; isAdmin: boolean }
+  | PositiveAuthResult
   | { ok: false; response: Response };
 
 /**
@@ -126,6 +140,26 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
     userId: user.id,
     isAdmin: (profile?.role || "").toLowerCase() === "admin",
   };
+
+  // 브랜드 직원 계정은 회사 워크스페이스를 함께 쓴다. 초대로 들어온 직원이면 username 을
+  // 회사 아이디로 바꿔, 이후의 모든 소유자 확인이 회사 계정 기준으로 이뤄지게 한다.
+  // 좌석 밖(정액제 종료 · 좌석보다 직원이 많음)이면 어느 계정에도 접근하지 못하게 비운다.
+  // 조회가 실패하면 자기 계정으로만 둔다 — 남의(회사) 계정이 열리는 쪽으로는 실패하지 않는다.
+  if ((profile?.role || "").toLowerCase() === "operator") {
+    try {
+      const { resolveTeamMembership } = await import("./brand-team.mts");
+      const team = await resolveTeamMembership(user.id);
+      if (team.kind === "member") {
+        result.memberUsername = result.username;
+        result.teamRole = "member";
+        result.username = team.seated ? normalizeName(team.company) : "";
+      } else {
+        result.teamRole = "owner";
+      }
+    } catch (e) {
+      console.error("[user-auth] team lookup failed:", (e as Error)?.message);
+    }
+  }
   // 아이디가 아직 없는 사람은 캐시하지 않는다.
   //
   // 가입 직후 "나만의 링크" 를 정하기 전에 나간 요청이 이 자리에 빈 username 을
@@ -219,7 +253,14 @@ export async function requireAccountOwner(req: Request, username: string): Promi
     return forbidden();
   }
 
-  return { ok: true, username: target, userId: caller.userId, isAdmin: caller.isAdmin };
+  return {
+    ok: true,
+    username: target,
+    userId: caller.userId,
+    isAdmin: caller.isAdmin,
+    ...(caller.teamRole ? { teamRole: caller.teamRole } : {}),
+    ...(caller.memberUsername ? { memberUsername: caller.memberUsername } : {}),
+  };
 }
 
 /**

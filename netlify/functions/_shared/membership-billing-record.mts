@@ -2,9 +2,10 @@ import { getStore } from "@netlify/blobs";
 import { randomUUID } from "node:crypto";
 import { mutateBlobJSON } from "./blob-write.mts";
 import { migrateSellerMembership } from "./seller-membership-store.mts";
+import { nextCycleSeats, settleStaleSeatCharge } from "./brand-seats.mts";
 import {
-  addOneMonth, chargeMembershipBillingKey, isDue, isSellableTier, MAX_BILLING_FAILURES,
-  normalizeTier, verifyMembershipBillingKey,
+  addOneMonth, brandCampaignMonthlyKrw, chargeMembershipBillingKey, isDue, isSellableTier, MAX_BILLING_FAILURES,
+  normalizeTier, pendingChargeAmount, verifyMembershipBillingKey,
   type MembershipBillingEntry, type MembershipChargePending,
 } from "./membership-billing.mts";
 
@@ -52,6 +53,12 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
     return result(ended ? "canceled" : "skipped");
   }
   if (!record.billing_key) return result("skipped");
+  // 결제 주기 중간의 좌석 추가 청구가 결과를 모른 채 남아 있으면 먼저 정리한다 — 남아 있는
+  // 동안에는 월 청구를 잡을 수 없다.
+  if (record.membership_charge_pending?.kind === "seats") {
+    const settled = await settleStaleSeatCharge(username);
+    if (settled !== "settled") return result("skipped", CLAIM_WAIT_MS);
+  }
   const keyOwned = await verifyMembershipBillingKey(username, record.billing_key);
   if (keyOwned === null) return result("skipped");
   if (!keyOwned) {
@@ -85,8 +92,11 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
       claim.pending = { ...existing, startedAt: at };
     } else {
       if (!isDue(latest.next_billing_date, now)) return null;
+      // 정액제는 이번 달 직원 좌석 수만큼 더해 청구한다. 줄이기로 예약한 좌석은 이 청구부터 빠진다.
+      const seats = tier === "brand_campaign" ? nextCycleSeats(latest) : undefined;
       claim.pending = { paymentId: `membership-${randomUUID()}`, billingKey: latest.billing_key!, tier,
-        kind: "recurring", scheduledDate: latest.next_billing_date || at, startedAt: at };
+        kind: "recurring", scheduledDate: latest.next_billing_date || at, startedAt: at,
+        ...(seats !== undefined ? { seats, amountKrw: brandCampaignMonthlyKrw(seats) } : {}) };
     }
     return { ...latest, next_billing_date: addOneMonth(claim.pending.scheduledDate!),
       membership_charge_pending: claim.pending, updated_at: at };
@@ -94,7 +104,8 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
   const pending: MembershipChargePending | null = claim.pending;
   if (!pending) return result("skipped", claim.wait);
   // Retain the payment ID across worker restarts and uncertain provider responses.
-  const charge = await chargeMembershipBillingKey(username, pending.billingKey, pending.tier, pending.paymentId);
+  const charge = await chargeMembershipBillingKey(username, pending.billingKey, pending.tier, pending.paymentId,
+    { amountKrw: pendingChargeAmount(pending) });
   const at = new Date().toISOString();
   let recorded = false;
   await mutateBlobJSON<SellerRecord>(STORE, key, (latest) => {
@@ -104,8 +115,12 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
     if (charge.uncertain) return { ...latest, next_billing_date: pending.scheduledDate, updated_at: at };
     const failures = charge.success ? 0 : Number(latest.billing_failures || 0) + 1;
     const entry: MembershipBillingEntry = { at, tier: pending.tier, amountKrw: charge.amountKrw || 0,
-      kind: "recurring", success: charge.success, ...(charge.success ? { paymentId: charge.paymentId } : { error: charge.error }) };
-    return { ...latest, last_billing_at: charge.success ? at : latest.last_billing_at,
+      kind: "recurring", success: charge.success, ...(pending.seats !== undefined ? { seats: pending.seats } : {}),
+      ...(charge.success ? { paymentId: charge.paymentId } : { error: charge.error }) };
+    const seatUpdate = charge.success && pending.seats !== undefined
+      ? { membership_extra_seats: pending.seats, membership_extra_seats_scheduled: null, membership_amount_krw: charge.amountKrw }
+      : {};
+    return { ...latest, ...seatUpdate, last_billing_at: charge.success ? at : latest.last_billing_at,
       next_billing_date: charge.success ? addOneMonth(pending.scheduledDate!) : pending.scheduledDate,
       membership_active: !charge.success && failures >= MAX_BILLING_FAILURES ? false : latest.membership_active,
       billing_failures: failures, billing_history: [entry, ...(Array.isArray(latest.billing_history) ? latest.billing_history : [])].slice(0, 50),

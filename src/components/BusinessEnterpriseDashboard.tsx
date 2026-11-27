@@ -22,6 +22,7 @@ const AITrendAnalysis = lazyWithRetry(() => import('./AITrendAnalysis'));
 const DmAutomation = lazyWithRetry(() => import('./DmAutomation'));
 const OpenScheduleManagement = lazyWithRetry(() => import('./OpenScheduleManagement'));
 const MembershipPlan = lazyWithRetry(() => import('./MembershipPlan'));
+const BrandTeamManagement = lazyWithRetry(() => import('./BrandTeamManagement'));
 const CampaignCollabManagement = lazyWithRetry(() => import('./CampaignCollabManagement'));
 const BusinessCampaignHistory = lazyWithRetry(() => import('./BusinessCampaignHistory'));
 // 광고 현황 — 이력에서 고른 콘텐츠를 광고로 돌린 결과를 보는 화면. 목록·상태·지표는
@@ -40,8 +41,8 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status' | 'affiliate-store';
-const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', 'affiliate-store'];
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status' | 'affiliate-store' | 'team';
+const BIZ_SUBVIEWS: BizSubView[] = ['dashboard', 'links', 'trend', 'dm-automation', 'inbox', 'calendar', 'open-schedule', 'membership', 'campaign-collab', 'tagged-insights', 'campaign-history', 'ad-status', 'affiliate-store', 'team'];
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   // 새로고침 · 앱이 페이지를 새로 띄운 경우에는 보던 탭으로 돌아간다(utils/resumeTab).
@@ -88,6 +89,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       calendar: 'calendar',
       schedule: 'open-schedule',
       membership: 'membership',
+      team: 'team',
       // 협업 타임라인은 없어졌다. 예전 알림톡에 남은 ?tab=timeline 링크는 제안함으로
       // 받는다 — 수락한 인플루언서의 연락처가 거기 있다.
       timeline: 'inbox',
@@ -387,7 +389,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       subComponent = <LazyRoute><OpenScheduleManagement userName={businessUsername} /></LazyRoute>;
       break;
     case 'membership':
-      subComponent = <LazyRoute><MembershipPlan userName={businessUsername} accountType="brand" /></LazyRoute>;
+      subComponent = <LazyRoute><MembershipPlan userName={businessUsername} accountType="brand" onOpenTeam={() => setCurrentSubView('team')} /></LazyRoute>;
+      break;
+    case 'team':
+      subComponent = <LazyRoute><BrandTeamManagement onOpenMembership={() => setCurrentSubView('membership')} /></LazyRoute>;
       break;
     case 'inbox':
       subComponent = (
@@ -644,6 +649,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
+          <NavItem icon="👥" label="팀원 관리" active={currentSubView === 'team'} onClick={() => setCurrentSubView('team')} />
           {!isNativeApp() && (
             <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
           )}
@@ -672,6 +678,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📣" label="광고현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
+          <MobileNavItem icon="👥" label="팀원" active={currentSubView === 'team'} onClick={() => setCurrentSubView('team')} />
           {!isNativeApp() && (
             <MobileNavItem icon="💎" label="멤버십" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
           )}
@@ -702,6 +709,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
+              <NavItem icon="👥" label="팀원 관리" active={currentSubView === 'team'} onClick={() => { setCurrentSubView('team'); setIsMobileMenuOpen(false); }} />
               {!isNativeApp() && (
                 <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { setCurrentSubView('membership'); setIsMobileMenuOpen(false); }} />
               )}

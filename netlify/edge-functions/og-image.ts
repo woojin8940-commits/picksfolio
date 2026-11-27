@@ -17,7 +17,7 @@ const STATIC_ROOT = /<div id="root"><h1 id="static-home-title"[\s\S]*?<\/h1><\/d
 const RESERVED_PATHS = new Set([
   'signup', 'login', 'admin', 'operator', 'operator-login',
   'terms', 'privacy', 'setup-link', 'api', '.netlify',
-  'business', 'business-login', 'business-signup', 'business-admin',
+  'business', 'business-login', 'business-signup', 'business-admin', 'business-join',
   'manager', 'membership', 'settings',
   'checkout', 'success', 'fail', 'toss', 'portone', 'profile',
   'assets', 'vendor', 'robots.txt', 'sitemap.xml',

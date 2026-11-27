@@ -40,6 +40,13 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "POST") {
+    // 회사 계정에 초대받아 들어온 직원은 구독을 해지하거나 되살릴 수 없다(결제는 관리자 몫).
+    if (auth.teamRole && auth.teamRole !== "owner") {
+      return Response.json(
+        { success: false, error: "구독 변경은 회사 관리자 계정에서만 할 수 있어요." },
+        { status: 403 },
+      );
+    }
     const body = await req.json();
 
     await migrateSellerMembership(store, username);

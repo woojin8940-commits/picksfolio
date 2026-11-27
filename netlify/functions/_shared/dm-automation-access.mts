@@ -6,9 +6,9 @@
  *
  *   · 인플루언서(일반 유저): **브랜드 매칭받기 등록**. 결제는 없다. 등록서를 내면 바로
  *     열리고, 담당자가 관리 화면에서 중단하면 멈춘다(dm-access-control).
- *   · 브랜드(기업 · profiles.role = 'operator'): **자동 디엠 플랜(월 5,900원)** 구독.
- *     브랜드는 매칭 등록을 하지 않으므로 결제로 연다. 예전 프로 플랜을 남은 기간 동안
- *     쓰고 있는 브랜드도 통과한다.
+ *   · 브랜드(기업 · profiles.role = 'operator'): **정액제(월 249,000원)** 구독. 자동 디엠은
+ *     정액제에 포함된다(따로 결제하지 않는다). 판매를 종료한 자동 디엠 플랜(5,900원)과 예전
+ *     프로 플랜을 남은 기간 동안 쓰고 있는 브랜드도 통과한다.
  *   · 운영자(role = 'admin'): 브랜드 워크스페이스로도 쓰이므로 두 조건 중 하나만
  *     맞으면 통과한다.
  *
@@ -25,14 +25,17 @@ import { readCreatorAccess, type CreatorStatus } from './creator-access.mts'
 import { findProfileByUsername } from './user-auth.mts'
 import type { MembershipTier } from './membership-billing.mts'
 
-/** 브랜드가 구독하는 자동 디엠 플랜. 화면이 결제 안내를 띄울 때 쓴다. */
-export const DM_AUTOMATION_TIER: MembershipTier = 'brand_dm'
+/** 브랜드가 구독하면 자동 디엠이 열리는 플랜(정액제). 화면이 결제 안내를 띄울 때 쓴다. */
+export const DM_AUTOMATION_TIER: MembershipTier = 'brand_campaign'
 
-/** 브랜드 자동 디엠을 여는 플랜. 프로는 예전 구독자가 남은 기간 동안 쓰도록 둔다. */
-export const BRAND_DM_PLANS: readonly MembershipTier[] = ['brand_dm', 'pro']
+/**
+ * 브랜드 자동 디엠을 여는 플랜. 정액제에 자동 디엠이 포함된다. 자동 디엠 플랜 · 프로는
+ * 판매를 종료했고, 예전 구독자가 남은 기간 동안 쓰도록 둔다.
+ */
+export const BRAND_DM_PLANS: readonly MembershipTier[] = ['brand_campaign', 'brand_dm', 'pro']
 
 export const DM_AUTOMATION_REQUIRED_MESSAGE =
-  '자동 디엠은 크리에이터 승인을 받으면 무료로 사용할 수 있어요(기존 회원은 브랜드 매칭받기 등록). 브랜드 계정은 자동 디엠 플랜(월 5,900원)을 구독하면 바로 사용할 수 있습니다.'
+  '자동 디엠은 크리에이터 승인을 받으면 무료로 사용할 수 있어요(기존 회원은 브랜드 매칭받기 등록). 브랜드 계정은 정액제를 구독하면 자동 디엠을 추가 비용 없이 사용할 수 있습니다.'
 
 export type DmAutomationStatus = {
   allowed: boolean
