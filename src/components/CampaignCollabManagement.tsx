@@ -5,6 +5,7 @@ import { useDragScroll } from '../hooks/useDragScroll';
 import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { authHeaders, apiService } from '../services/apiService';
+import { COLLAB_SETTLEMENT_STEP_ENABLED } from '../utils/collabNextAction';
 import { externalLinkProps } from '../utils/externalLink';
 import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor, { parseGuidelineFiles } from './collab/CampaignGuidelineEditor';
@@ -944,7 +945,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         ? [
             { key: 'progress' as const, label: '진행사항' },
             { key: 'insight' as const, label: '인사이트' },
-            { key: 'settlement' as const, label: '정산' },
+            // 정산은 브랜드와 인플루언서가 직접 조율한다 — 픽스폴리오 정산 요약 탭은 닫아 둔다.
+            ...(COLLAB_SETTLEMENT_STEP_ENABLED ? [{ key: 'settlement' as const, label: '정산' }] : []),
           ]
         : []),
     ];

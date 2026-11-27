@@ -87,6 +87,15 @@ export type CollabStepTurn = {
   managerOnly?: boolean;
 };
 
+/**
+ * 진행사항의 정산 단계(신분증 사본 · 계좌 제출 → 담당자 지급일 → 지급)를 쓸지.
+ *
+ * 서비스가 바뀌어 정산은 담당자를 거치지 않고 브랜드와 인플루언서가 직접 조율한다. 그래서
+ * 진행사항은 업로드에서 끝나고, 정산 칸 · 정산 서류 요청은 어느 화면에도 뜨지 않는다.
+ * 다시 담당자 정산을 열 때 이 값만 true 로 바꾼다.
+ */
+export const COLLAB_SETTLEMENT_STEP_ENABLED = false;
+
 export const COLLAB_STEP_ORDER: CollabStepKey[] = ['guide', 'shipping', 'plan', 'video', 'upload', 'settlement'];
 
 export const COLLAB_STEP_TITLES: Record<CollabStepKey, string> = {
@@ -297,7 +306,11 @@ export const collabStepTurns = (
   // 정산은 브랜드의 칸이 아니다. 브랜드는 픽스폴리오에 회차마다 한 번 보내고, 서류를
   // 받고 지급일을 잡고 입금하는 것은 담당자가 한다. 브랜드 화면에 이 칸이 열리면
   // 손댈 수 없는 남의 일정이 "기다리는 중"으로 남는다.
-  const hiddenFor = (step: CollabStepKey) => role === 'brand' && step === 'settlement';
+  //
+  // 지금은 정산 단계를 모든 화면에서 닫아 둔다(COLLAB_SETTLEMENT_STEP_ENABLED). 정산은
+  // 브랜드와 인플루언서가 직접 조율한다.
+  const hiddenFor = (step: CollabStepKey) =>
+    step === 'settlement' && (!COLLAB_SETTLEMENT_STEP_ENABLED || role === 'brand');
   const out = {} as Record<CollabStepKey, CollabStepTurn | null>;
   for (const step of COLLAB_STEP_ORDER) {
     const pending = closedFor(step) || hiddenFor(step) ? null : pendingOf(input, step);

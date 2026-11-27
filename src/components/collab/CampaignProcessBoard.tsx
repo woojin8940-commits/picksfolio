@@ -19,6 +19,7 @@ import {
   CollabStepTurn,
   collabStepTurns,
   nextCollabAction,
+  COLLAB_SETTLEMENT_STEP_ENABLED,
   waitingCollabStep,
 } from '../../utils/collabNextAction';
 
@@ -226,7 +227,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   /** 정산 칸에 적는 금액. 브랜드는 자기가 보낼 광고비, 나머지는 인플루언서 보수. */
   const settlementAmount = role === 'brand' ? brandBillAmount : settlementFee;
   /** 정산 칸을 그릴 수 있는가. 업로드 확인 전에는 무엇에 쓰는 서류인지 알 수 없다. */
-  const settlementOpen = settlementAmount > 0 && Boolean(collab.uploadConfirmedAt);
+  // 정산 단계를 닫아 둔 동안(COLLAB_SETTLEMENT_STEP_ENABLED)에는 어느 역할에게도 그리지 않는다.
+  const settlementOpen =
+    COLLAB_SETTLEMENT_STEP_ENABLED && settlementAmount > 0 && Boolean(collab.uploadConfirmedAt);
   /**
    * 인플루언서가 열어 볼 가이드가 실제로 있는가.
    *

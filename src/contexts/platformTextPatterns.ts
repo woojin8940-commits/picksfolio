@@ -2380,4 +2380,8 @@ export const platformTextPatterns = [
     "source": "^(.+?)초$",
     "replacement": "$1 s"
   },
+  {
+    "source": "^'(.+?)'을\\(를\\) MY 캠페인에서 삭제할까요\\? 삭제하면 되돌릴 수 없어요\\. 브랜드 쪽 기록은 그대로 남아요\\.$",
+    "replacement": "Delete \"$1\" from My Campaigns? It can't be restored. The brand's records stay as they are."
+  },
 ] as const;
