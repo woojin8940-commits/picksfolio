@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { AD_STATUS_LABEL, AdResult, AdStatus, resultValue } from '../utils/adResults';
@@ -47,7 +47,10 @@ export type OverviewAd = {
   source: MetaAdWithLive;
 };
 
-export type OverviewView = 'ads' | 'creator' | 'objective';
+export type OverviewView = 'ads' | 'campaign' | 'creator' | 'objective';
+
+/** 한 쪽에 보이는 광고(묶어 보기면 묶음) 수. */
+const PAGE_SIZE = 20;
 
 type SortKey = 'recent' | 'spend' | 'result' | 'costPer' | 'impressions' | 'linkClicks' | 'ctr' | 'cpc' | 'purchases' | 'roas';
 
@@ -245,7 +248,12 @@ const AdOverview: React.FC<AdOverviewProps> = ({ ads, view, renderDetail }) => {
           ? ad.creatorHandle
             ? `@${ad.creatorHandle}`
             : '자체 소재'
-          : ad.objectiveLabel;
+          : view === 'campaign'
+            // 부스팅 광고는 이력의 캠페인 이름으로 묶는다. 직접 올린 소재는 캠페인이 없어 한 묶음이다.
+            ? ad.own
+              ? '직접 올린 소재'
+              : ad.campaignTitle || '제목 없음'
+            : ad.objectiveLabel;
       map.set(key, [...(map.get(key) || []), ad]);
     }
     // 묶음은 돈을 많이 쓴 순서로 — 먼저 봐야 할 묶음이 위에 온다.
@@ -255,6 +263,23 @@ const AdOverview: React.FC<AdOverviewProps> = ({ ads, view, renderDetail }) => {
   }, [sorted, view]);
 
   const allTotals = useMemo(() => sumAds(ads), [ads]);
+
+  // 광고가 많으면 20개(묶어 보기면 20묶음)씩 나눠 본다. 합계 줄은 전체 기준이다.
+  const [page, setPage] = useState(1);
+  // 목록은 1분마다 다시 읽힌다. 같은 광고 목록이면 보던 쪽을 그대로 둔다(광고가 바뀔 때만 첫 쪽으로).
+  const adsKey = useMemo(() => ads.map((a) => a.id).join(','), [ads]);
+  useEffect(() => { setPage(1); }, [adsKey, view, sort]);
+  const unitCount = view === 'ads' ? sorted.length : groups.length;
+  const pageCount = Math.max(1, Math.ceil(unitCount / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedGroups = useMemo(() => {
+    const from = (currentPage - 1) * PAGE_SIZE;
+    if (view === 'ads') {
+      const list = sorted.slice(from, from + PAGE_SIZE);
+      return [{ key: 'all', label: '', ads: list, totals: sumAds(list) }];
+    }
+    return groups.slice(from, from + PAGE_SIZE);
+  }, [groups, sorted, view, currentPage]);
 
   const clickSort = (key: SortKey) =>
     setSort((prev) =>
@@ -324,7 +349,7 @@ const AdOverview: React.FC<AdOverviewProps> = ({ ads, view, renderDetail }) => {
             </tr>
           </thead>
           <tbody>
-            {groups.map((g) =>
+            {pagedGroups.map((g) =>
               view === 'ads' ? (
                 <React.Fragment key={g.key}>{rows(g.ads)}</React.Fragment>
               ) : (
@@ -388,7 +413,7 @@ const AdOverview: React.FC<AdOverviewProps> = ({ ads, view, renderDetail }) => {
             </button>
           ))}
         </div>
-        {groups.map((g) => (
+        {pagedGroups.map((g) => (
           <div key={g.key} className="space-y-2">
             {view !== 'ads' && (
               <button
@@ -442,6 +467,33 @@ const AdOverview: React.FC<AdOverviewProps> = ({ ads, view, renderDetail }) => {
           </p>
         )}
       </div>
+
+      {pageCount > 1 && (
+        <nav className="mt-4 flex items-center justify-center gap-2" aria-label="쪽 이동">
+          <button
+            type="button"
+            disabled={currentPage <= 1}
+            onClick={() => setPage(currentPage - 1)}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-black text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+          >
+            이전
+          </button>
+          <span className="text-[11px] font-black text-slate-600">
+            {currentPage} / {pageCount}
+            <span className="text-slate-400 font-bold ml-1.5">
+              · {view === 'ads' ? `광고 ${unitCount}개` : `${unitCount}묶음`}
+            </span>
+          </span>
+          <button
+            type="button"
+            disabled={currentPage >= pageCount}
+            onClick={() => setPage(currentPage + 1)}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-black text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+          >
+            다음
+          </button>
+        </nav>
+      )}
     </>
   );
 };

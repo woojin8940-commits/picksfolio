@@ -2432,4 +2432,8 @@ export const platformTextPatternsJa = [
     "source": "^(\\d[\\d,]*)석$",
     "replacement": "$1席"
   },
+  {
+    "source": "^(\\d[\\d,]*)묶음$",
+    "replacement": "$1グループ"
+  },
 ] as const;

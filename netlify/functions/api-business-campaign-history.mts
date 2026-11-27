@@ -52,7 +52,10 @@ import {
  * 실제로 나가는 돈이 실제보다 적게 보인다.
  *
  *   GET /api/business/campaign-history/:username
- *   GET /api/business/campaign-history/:username?source=affiliate
+ *       ?from=YYYY-MM-DD&to=YYYY-MM-DD   캠페인 기간이 겹치는 것만(없으면 전체)
+ *       &status=open|closed  &category=  &q=캠페인명  &creator=인플루언서 아이디 · 핸들
+ *       &sort=recent|views|reach|comments|shares|cpv  &page=1&pageSize=20
+ *   GET /api/business/campaign-history/:username?source=affiliate   (같은 조건을 받는다, sort=sales 추가)
  *       어필리에이트 이력 — 상품 하나가 캠페인 한 건, 선정된 인플루언서 한 명이 게시물 한 건이다.
  *       게시물 주소는 인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크, 코드는 파트너십 코드다.
  *       광고비 대신 그 인플루언서의 전용 링크 판매액(취소 · 환불 제외)을 함께 보낸다.
@@ -198,6 +201,150 @@ const mediaIndexOf = (row: any): Record<string, PostMetric> => {
   return index;
 };
 
+// ── 기간 · 검색 · 정렬 · 페이지 ────────────────────────────────────────────────
+// 캠페인이 많아지면 한 번에 다 보내는 방식은 화면도 응답도 무거워진다(게시물 · 인사이트까지
+// 실리므로). 그래서 조건으로 먼저 추리고, 정렬한 뒤 한 쪽(기본 20건)만 보낸다. 위쪽 합계는
+// 페이지가 아니라 "조건에 맞는 전체" 기준이다.
+
+export type HistorySort = "recent" | "views" | "reach" | "comments" | "shares" | "cpv" | "sales";
+const SORTS: HistorySort[] = ["recent", "views", "reach", "comments", "shares", "cpv", "sales"];
+const DEFAULT_PAGE_SIZE = 20;
+
+export interface HistoryQuery {
+  from: string;
+  to: string;
+  status: "" | "open" | "closed";
+  q: string;
+  creator: string;
+  category: string;
+  sort: HistorySort;
+  page: number;
+  pageSize: number;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export const parseHistoryQuery = (params: URLSearchParams): HistoryQuery => {
+  const date = (v: string | null) => (v && DATE_RE.test(v) ? v : "");
+  const status = params.get("status");
+  const sort = params.get("sort") as HistorySort;
+  const page = Math.max(1, Math.floor(Number(params.get("page")) || 1));
+  const size = Math.floor(Number(params.get("pageSize")) || DEFAULT_PAGE_SIZE);
+  return {
+    from: date(params.get("from")),
+    to: date(params.get("to")),
+    status: status === "open" || status === "closed" ? status : "",
+    q: norm(params.get("q")).slice(0, 80),
+    creator: norm(params.get("creator")).replace(/^@/, "").slice(0, 60),
+    category: String(params.get("category") || "").trim().slice(0, 60),
+    sort: SORTS.includes(sort) ? sort : "recent",
+    page,
+    pageSize: Math.min(50, Math.max(10, size)),
+  };
+};
+
+const dayOf = (v: unknown): string => {
+  if (!v) return "";
+  const s = String(v);
+  if (DATE_RE.test(s.slice(0, 10))) return s.slice(0, 10);
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+};
+
+/** 캠페인 기간(시작~종료, 없으면 등록일)이 고른 기간과 겹치는지. */
+export const overlapsPeriod = (
+  c: { start?: unknown; end?: unknown; created?: unknown },
+  from: string,
+  to: string,
+): boolean => {
+  if (!from && !to) return true;
+  const start = dayOf(c.start) || dayOf(c.created);
+  const end = dayOf(c.end) || start;
+  if (!start) return false;
+  if (to && start > to) return false;
+  if (from && end < from) return false;
+  return true;
+};
+
+const statusMatches = (status: string, filter: HistoryQuery["status"]) =>
+  !filter ||
+  (filter === "open" ? status === "active" : ["closed", "completed", "inactive"].includes(status));
+
+/** 정렬 값. 0(집계 전)은 성과순에서 아래로 내린다 — CPV 0 이 가장 싼 것처럼 위에 오면 안 된다. */
+const sortValueOf = (c: any, sort: HistorySort): number => {
+  switch (sort) {
+    case "views": return c.views || 0;
+    case "reach": return c.reach || 0;
+    case "comments": return c.comments || 0;
+    case "shares": return c.shares || 0;
+    case "cpv": return c.cpv || 0;
+    case "sales": return c.sales || 0;
+    default: return 0;
+  }
+};
+
+export const sortHistory = <T,>(list: T[], sort: HistorySort): T[] => {
+  if (sort === "recent") return list;
+  return [...list].sort((a, b) => {
+    const av = sortValueOf(a, sort);
+    const bv = sortValueOf(b, sort);
+    if (av === 0 || bv === 0) return av === bv ? 0 : av === 0 ? 1 : -1;
+    return sort === "cpv" ? av - bv : bv - av;
+  });
+};
+
+const COUNTED_STATUSES = ["active", "closed", "completed", "inactive"];
+
+/** 화면에 보낸 캠페인 목록으로 합계를 낸다(조건에 맞는 전체). */
+const sumHistory = (list: any[], affiliate: boolean) => {
+  const t: any = affiliate ? { ...emptyTotals(), sales: 0, orders: 0 } : emptyTotals();
+  for (const c of list) {
+    if (!affiliate && !COUNTED_STATUSES.includes(String(c.status))) continue;
+    t.campaigns++;
+    t.collabs += c.collabs || 0;
+    t.uploaded += c.uploaded || 0;
+    t.matched += c.matched || 0;
+    t.views += c.views || 0;
+    t.reactions += (c.likes || 0) + (c.comments || 0);
+    t.comments += c.comments || 0;
+    t.shares += c.shares || 0;
+    t.sharesMatched += c.sharesMatched || 0;
+    t.spend += c.spend || 0;
+    t.measuredSpend += c.measuredSpend || 0;
+    t.reach += c.reach || 0;
+    t.saved += c.saved || 0;
+    t.insightsMatched += c.insightsMatched || 0;
+    if (affiliate) {
+      t.sales += c.sales || 0;
+      t.orders += c.orders || 0;
+    }
+  }
+  t.cpv = t.views > 0 && t.measuredSpend > 0 ? Math.round(t.measuredSpend / t.views) : 0;
+  return t;
+};
+
+const pageOf = <T,>(list: T[], query: HistoryQuery) => {
+  const totalCount = list.length;
+  const pageCount = Math.max(1, Math.ceil(totalCount / query.pageSize));
+  const page = Math.min(query.page, pageCount);
+  return {
+    items: list.slice((page - 1) * query.pageSize, page * query.pageSize),
+    pagination: { page, pageSize: query.pageSize, totalCount, pageCount },
+  };
+};
+
+/** 어필리에이트 이력은 상품 수가 적어 다 만든 뒤 같은 조건으로 추린다. */
+const filterBuilt = (list: any[], query: HistoryQuery) =>
+  list.filter((c) => {
+    if (!overlapsPeriod({ start: c.startDate, end: c.endDate, created: c.createdAt }, query.from, query.to)) return false;
+    if (!statusMatches(String(c.status), query.status)) return false;
+    if (query.category && c.category !== query.category) return false;
+    if (query.q && !norm(c.title).includes(query.q)) return false;
+    if (query.creator && !(c.posts || []).some((p: any) =>
+      norm(p.creatorUsername).includes(query.creator) || norm(p.instagramHandle).includes(query.creator))) return false;
+    return true;
+  });
+
 export default async (req: Request, context: Context) => {
   const raw = context.params.username || "";
   const username = norm(raw).replace(/^biz\//, "");
@@ -244,9 +391,21 @@ export default async (req: Request, context: Context) => {
     }
   }
 
-  if (new URL(req.url).searchParams.get("source") === "affiliate") {
+  const searchParams = new URL(req.url).searchParams;
+  const query = parseHistoryQuery(searchParams);
+
+  if (searchParams.get("source") === "affiliate") {
     try {
-      return Response.json(await affiliateHistory(db, username));
+      const all = await affiliateHistory(db, username);
+      const filtered = sortHistory(filterBuilt(all.campaigns, query), query.sort);
+      const { items, pagination } = pageOf(filtered, query);
+      return Response.json({
+        totals: sumHistory(filtered, true),
+        accountTotals: { campaigns: all.totals.campaigns, views: all.totals.views },
+        campaigns: items,
+        categories: all.categories,
+        pagination,
+      });
     } catch (err: any) {
       console.error("[business-campaign-history] 어필리에이트 이력 조회 실패:", err);
       return Response.json({ error: "어필리에이트 이력을 불러오지 못했습니다." }, { status: 500 });
@@ -272,8 +431,10 @@ export default async (req: Request, context: Context) => {
     if (campaignIds.length === 0) {
       return Response.json({
         totals: emptyTotals(),
+        accountTotals: { campaigns: 0, views: 0 },
         campaigns: [],
         categories: [],
+        pagination: { page: 1, pageSize: query.pageSize, totalCount: 0, pageCount: 1 },
       });
     }
 
@@ -329,10 +490,50 @@ export default async (req: Request, context: Context) => {
       mediaByUser.set(key, mediaIndexOf(row));
     }
 
+    const collabsByCampaign = new Map<string, any[]>();
+    for (const c of collabRows || []) {
+      const key = String(c.campaign_id);
+      if (!collabsByCampaign.has(key)) collabsByCampaign.set(key, []);
+      collabsByCampaign.get(key)!.push(c);
+    }
+
+    // 계정 전체 기준(조건과 무관) — 캠페인 수와 조회수만. 인사이트를 부르지 않는 값이라 가볍다.
+    const accountTotals = { campaigns: 0, views: 0 };
+    for (const c of campaignRows || []) {
+      if (!COUNTED_STATUSES.includes(String(c.status))) continue;
+      accountTotals.campaigns++;
+      for (const collab of collabsByCampaign.get(String(c.id)) || []) {
+        if (collab.cancelled_at || collab.status === "cancelled") continue;
+        const code = shortcodeOf(collab.upload_url);
+        const metric = code ? mediaByUser.get(norm(collab.creator_username))?.[code] : undefined;
+        if (metric?.from === "reels") accountTotals.views += metric.views;
+      }
+    }
+
+    // 조건(기간 · 상태 · 카테고리 · 캠페인명 · 인플루언서)으로 먼저 추린다. 인사이트는 남은
+    // 캠페인의 인플루언서만 부른다 — 기간을 좁히면 메타 호출도 그만큼 준다.
+    const filteredRows = (campaignRows || []).filter((c) => {
+      if (!overlapsPeriod({ start: c.start_date, end: c.end_date, created: c.created_at }, query.from, query.to)) return false;
+      if (!statusMatches(String(c.status || ""), query.status)) return false;
+      if (query.category && String(c.category || "") !== query.category) return false;
+      if (query.q && !norm(c.title).includes(query.q)) return false;
+      if (query.creator) {
+        const hit = (collabsByCampaign.get(String(c.id)) || []).some((collab) => {
+          const name = norm(collab.creator_username);
+          return name.includes(query.creator) ||
+            norm(channelByUser.get(name)?.instagram_handle).includes(query.creator);
+        });
+        if (!hit) return false;
+      }
+      return true;
+    });
+    const filteredIds = new Set(filteredRows.map((c) => String(c.id)));
+
     // 도달 · 저장수 · 팔로워 분포는 게시물을 올린(취소되지 않은) 인플루언서만 읽는다.
     const insightCreators = Array.from(
       new Set(
         (collabRows || [])
+          .filter((c) => filteredIds.has(String(c.campaign_id)))
           .filter((c) => c.upload_url && !c.cancelled_at && c.status !== "cancelled")
           .map((c) => norm(c.creator_username))
           .filter(Boolean),
@@ -343,19 +544,11 @@ export default async (req: Request, context: Context) => {
     });
     const insights = await loadCreatorInsights(insightCreators);
 
-    const collabsByCampaign = new Map<string, any[]>();
-    for (const c of collabRows || []) {
-      const key = String(c.campaign_id);
-      if (!collabsByCampaign.has(key)) collabsByCampaign.set(key, []);
-      collabsByCampaign.get(key)!.push(c);
-    }
-
-    const totals = emptyTotals();
     const categories = new Set<string>();
+    for (const c of campaignRows || []) if (c.category) categories.add(String(c.category));
 
-    const campaigns = (campaignRows || []).map((c) => {
+    const campaigns = filteredRows.map((c) => {
       const list = collabsByCampaign.get(String(c.id)) || [];
-      if (c.category) categories.add(String(c.category));
 
       let views = 0;
       let likes = 0;
@@ -449,22 +642,6 @@ export default async (req: Request, context: Context) => {
         views > 0 && measuredSpend > 0 ? Math.round(measuredSpend / views) : 0;
 
       const collabs = list.filter(collab => !collab.cancelled_at && collab.status !== 'cancelled').length;
-      if (['active', 'closed', 'completed', 'inactive'].includes(String(c.status))) {
-        totals.campaigns++;
-        totals.collabs += collabs;
-        totals.uploaded += uploaded;
-        totals.matched += matched;
-        totals.views += views;
-        totals.reactions += likes + comments;
-        totals.comments += comments;
-        totals.shares += shares;
-        totals.sharesMatched += sharesMatched;
-        totals.spend += spend;
-        totals.measuredSpend += measuredSpend;
-        totals.reach += reach;
-        totals.saved += saved;
-        totals.insightsMatched += insightsMatched;
-      }
 
       return {
         id: String(c.id),
@@ -498,17 +675,24 @@ export default async (req: Request, context: Context) => {
       };
     });
 
-    totals.cpv =
-      totals.views > 0 && totals.measuredSpend > 0
-        ? Math.round(totals.measuredSpend / totals.views)
-        : 0;
+    const sorted = sortHistory(campaigns, query.sort);
+    const { items, pagination } = pageOf(sorted, query);
+    // 팔로워 분포는 이 쪽에 보이는 게시물의 인플루언서 것만 보낸다.
+    const pageCreators = new Set(items.flatMap((c) => c.posts.map((p) => p.creatorUsername)));
+    const audiences = Object.fromEntries(
+      Object.entries(insights.audiences).filter(([name]) => pageCreators.has(name)),
+    );
 
     return Response.json({
-      totals,
-      campaigns,
+      /** 조건에 맞는 캠페인 전체의 합계(이 쪽만이 아니다). */
+      totals: sumHistory(campaigns, false),
+      /** 조건과 무관한 계정 전체 기준. */
+      accountTotals,
+      campaigns: items,
       categories: Array.from(categories).sort(),
+      pagination,
       /** 협업한 인플루언서별 팔로워 분포(성별 · 연령 · 국가 인원 수). */
-      audiences: insights.audiences,
+      audiences,
     });
   } catch (err: any) {
     console.error("[business-campaign-history] 조회 실패:", err);

@@ -2416,4 +2416,8 @@ export const platformTextPatterns = [
     "source": "^(\\d[\\d,]*)석$",
     "replacement": "$1 seats"
   },
+  {
+    "source": "^(\\d[\\d,]*)묶음$",
+    "replacement": "$1 groups"
+  },
 ] as const;
