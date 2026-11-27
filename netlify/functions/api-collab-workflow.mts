@@ -1108,7 +1108,9 @@ export default async (req: Request, context: Context) => {
            * 좁혀져 있고 상세 화면은 이미 같은 값을 보여 준다.
            */
           fee: role === "brand" ? brandFeeOf(row.id) : feeOf(row.id),
-          feeLocked: Boolean(termMap.get(row.id)?.locked_at),
+          // 브랜드가 고른 협업은 조건이 확정된 것으로 본다. 예전에 담당자 확정 없이 만들어진
+          // 협업도 지금 서비스에서는 브랜드 선택으로 시작됐으므로 확정으로 보여 준다.
+          feeLocked: Boolean(termMap.get(row.id)),
           /**
            * 담당자가 명단에 올려 시작된 협업인가.
            *
@@ -1443,7 +1445,8 @@ export default async (req: Request, context: Context) => {
                 : terms.deliverable_spec || {},
               guideUrl: terms.guide_url || "",
               guideNote: terms.guide_note || "",
-              lockedAt: terms.locked_at,
+              // 담당자 확정이 없던 예전 협업은 협업이 만들어진 때(= 브랜드가 고른 때)를 확정 시각으로 쓴다.
+              lockedAt: terms.locked_at || collab.created_at || null,
             }
           : null,
         /**

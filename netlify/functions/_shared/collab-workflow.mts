@@ -555,7 +555,7 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
   await db.sql`
     INSERT INTO collab_terms (
       collab_id, fee, reward_type, script_due, content_due, upload_due,
-      deliverable_spec, guide_url, guide_note
+      deliverable_spec, guide_url, guide_note, locked_at, locked_by
     )
     VALUES (
       ${collabId},
@@ -566,7 +566,11 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
       ${uploadDue},
       ${JSON.stringify(deliverableSpec)},
       ${String(brief.guideUrl || "")},
-      ${String(brief.guideNote || "")}
+      ${String(brief.guideNote || "")},
+      -- 브랜드가 리스트업 · 지원자에서 고른 순간이 조건 확정이다. 담당자가 따로 확정하지
+      -- 않는다(진행 · 정산은 브랜드와 인플루언서가 직접 조율한다).
+      NOW(),
+      ${input.selectedBy === "brand" ? businessUsername : managerUsername || businessUsername}
     )
     ON CONFLICT (collab_id) DO NOTHING
   `;

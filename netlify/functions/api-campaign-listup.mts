@@ -514,10 +514,18 @@ export default async (req: Request, context: Context) => {
         // 담당자가 브랜드에게 제시할 금액만 적으면 되도록 여기서 채운다.
         const draftOffer = offerFromCampaign(campaign);
         const requested = payoutByUser[username] || payoutDefaults;
-        const payout =
+        // 픽스폴리오는 인플루언서마다 마진을 붙이지 않는다 — 브랜드에게 보이는 단가와
+        // 인플루언서에게 가는 단가가 같다. 담당자가 단가를 적었으면 그 값, 아니면
+        // 지급 단가(없으면 등록 단가)를 양쪽에 똑같이 넣는다.
+        const basePayout =
           requested.fee > 0
             ? requested
             : { ...requested, fee: registeredPayoutFee(snapshot, draftOffer.contentFormat) };
+        const unified = {
+          fee: quote.fee > 0 ? quote.fee : basePayout.fee,
+          secondUseFee: quote.secondUseFee > 0 ? quote.secondUseFee : basePayout.secondUseFee,
+        };
+        const payout = { ...basePayout, ...unified };
         const offerDraft = mergePayoutIntoOffer(draftOffer, payout);
         const res = await db.sql`
           INSERT INTO campaign_listups (
@@ -528,7 +536,7 @@ export default async (req: Request, context: Context) => {
           ) VALUES (
             ${newId("lst")}, ${campaignId}, ${username}, ${source},
             ${JSON.stringify(snapshot)}, NOW(), ${note}, ${manager.managerUsername},
-            ${quote.fee}, ${quote.secondUseFee}, ${guaranteedViews},
+            ${unified.fee}, ${unified.secondUseFee}, ${guaranteedViews},
             ${JSON.stringify(offerDraft)}
           )
           ON CONFLICT (campaign_id, influencer_username) DO NOTHING
@@ -720,6 +728,8 @@ export default async (req: Request, context: Context) => {
       if (action === "quote") {
         if (!isManager) return managerRequired();
         const quote = normalizeQuote(body.quote ?? body);
+        // 마진 없이 운영한다 — 인플루언서 지급 단가도 같은 금액으로 맞춘다(아직 안 보낸 제안만).
+        if (body.payout === undefined) body.payout = { fee: quote.fee, secondUseFee: quote.secondUseFee };
         const snapshot =
           listup.snapshot && typeof listup.snapshot === "object" ? (listup.snapshot as any) : {};
         // 견적을 고칠 때도 보장 조회수는 담당자 입력이 아니라 채널 평균이다.

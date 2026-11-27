@@ -1,5 +1,5 @@
 import React from 'react';
-import { compactCountEn, formatKRW, formatSignedKRW } from '../../utils/formatters';
+import { compactCountEn, formatKRW } from '../../utils/formatters';
 
 /**
  * 전체 현황 — 운영자가 대시보드를 열자마자 답이 필요한 세 가지만 위에 둔다.
@@ -33,14 +33,6 @@ const compact = (n: number) => {
   return v.toLocaleString();
 };
 
-/**
- * 마진 자리에 쓰는 금액. 지급액이 제시가를 넘으면 음수가 나오는데 formatKRW 는
- * 부호를 버려서 손해가 이익으로 읽힌다. 예산처럼 음수가 없는 값에는 쓰지 않는다.
- */
-const money = (n: unknown) => {
-  const v = Number(n || 0);
-  return v < 0 ? formatSignedKRW(v) : formatKRW(v);
-};
 
 const Card: React.FC<{
   label: string;
@@ -124,8 +116,6 @@ const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate, acc
   const collabs = data.collabs || {};
   const profit = data.campaignProfit || {};
   const confirmed = profit.confirmed || {};
-  const pipeline = profit.pipeline || {};
-  const unknown = profit.marginUnknown || {};
   const recent = Array.isArray(data.directory?.recent) ? data.directory.recent : [];
 
   return (
@@ -202,8 +192,8 @@ const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate, acc
 
       {/* 3. 캠페인 예산 · 수익 */}
       <Section
-        title="캠페인 예산 · 수익"
-        hint="광고비가 들어오는 캠페인의 예산과, 브랜드 제시가에서 인플루언서 단가를 뺀 우리 순수익입니다."
+        title="캠페인 예산"
+        hint="광고비가 들어오는 캠페인의 예산과 수락된 광고비입니다. 정산은 브랜드와 인플루언서가 직접 진행합니다."
         action={onNavigate && (
           <button onClick={() => onNavigate('collabs')} className="text-[10px] font-black text-blue-600 hover:underline shrink-0">
             캠페인 관리 →
@@ -221,52 +211,13 @@ const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate, acc
             onClick={onNavigate ? () => onNavigate('campaigns') : undefined}
           />
           <Card
-            tone="pink"
-            label="확정 순수익"
-            value={money(confirmed.margin)}
-            sub={`수락 ${confirmed.count || 0}건 중 단가 확정 ${confirmed.pricedCount || 0}건`}
-          />
-          <Card
             tone="blue"
-            label="예상 순수익"
-            value={money(pipeline.margin)}
-            sub={`제안 발송 ${pipeline.count || 0}건 응답 대기`}
+            label="수락된 광고비"
+            value={formatKRW(confirmed.brandAmount || 0)}
+            sub={`수락 ${confirmed.count || 0}건 중 단가 확정 ${confirmed.pricedCount || 0}건`}
           />
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-100 p-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">브랜드 제시가 합계</p>
-              <p className="text-base font-black text-slate-900">{formatKRW(confirmed.brandAmount || 0)}</p>
-              <p className="text-[9px] font-bold text-slate-400">수락된 후보 기준</p>
-            </div>
-            <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">인플루언서 지급액</p>
-              <p className="text-base font-black text-slate-600">{formatKRW(confirmed.influencerCost || 0)}</p>
-              <p className="text-[9px] font-bold text-slate-400">우리가 인플루언서에게 줄 금액</p>
-            </div>
-            <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">차액(순수익)</p>
-              <p className="text-base font-black text-pink-600">{money(confirmed.margin)}</p>
-              <p className="text-[9px] font-bold text-slate-400">
-                {confirmed.brandAmount > 0
-                  ? `마진율 ${Math.round(((confirmed.margin || 0) / confirmed.brandAmount) * 100)}%`
-                  : '제시가 입력 후 계산'}
-              </p>
-            </div>
-            <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">단가 미입력</p>
-              <p className="text-base font-black text-amber-600">{(unknown.confirmed || 0) + (unknown.pipeline || 0)}건</p>
-              <p className="text-[9px] font-bold text-slate-400">브랜드 제시가나 인플루언서 단가가 비어 집계 제외</p>
-            </div>
-          </div>
-          {((unknown.confirmed || 0) + (unknown.pipeline || 0)) > 0 && (
-            <p className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mt-3">
-              단가가 비어 있는 후보가 있어 순수익은 부분 집계입니다. 리스트업에서 브랜드 제시가를 입력하면 반영됩니다.
-            </p>
-          )}
-        </div>
       </Section>
 
       {/* 4. 진행 퍼널 */}

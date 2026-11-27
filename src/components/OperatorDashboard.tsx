@@ -32,20 +32,29 @@ import AdminAffiliateTodo from './admin/AdminAffiliateTodo';
 import { isTestProposal } from '../utils/testData';
 
 /**
- * 운영자 대시보드 — 지금 돌아가는 서비스(어필리에이트) 중심으로 탭을 묶는다.
+ * 운영자 대시보드 — 지금 돌아가는 서비스(캠페인) 중심으로 탭을 묶는다.
  *
- *   홈          — 지금 처리할 일(어필리에이트 단계별 대기 건수) · 가입 현황 · 1:1 제안
- *   어필리에이트 — 크리에이터 지원 → 입점 신청 → 협업 조율 → 취소·반품 → 정산 (일이 흐르는 순서)
- *   모집        — 인플루언서 DB, 광고로 들어온 인플루언서 · 브랜드 신청자
- *   운영        — 회원 관리, 담당자 계정, DM 발송
+ *   홈     — 지금 처리할 일(크리에이터 승인) · 가입 현황 · 캠페인 예산 · 진행 퍼널 · 1:1 제안
+ *   캠페인 — 캠페인 승인 → 인플루언서 리스트업 → 캠페인 관리 (일이 흐르는 순서)
+ *   모집   — 크리에이터 승인, 인플루언서 DB, 브랜드 매칭 지원자, 광고로 들어온 신청자, 영업 링크
+ *   운영   — 회원 관리, 담당자 계정, DM 발송
  *
- * 캠페인(승인 · 배정 · 관리 · 커머스)과 캠페인 정산 · 브랜드 매칭 · 영업 링크는 인플루언서 ·
- * 브랜드 화면에서 내려간 서비스라 메뉴에서 숨겼다. 화면 코드는 남겨 두었으므로
- * CAMPAIGN_MENUS_HIDDEN 을 false 로 바꾸면 그대로 다시 보인다.
+ * 지금 서비스는 브랜드가 캠페인 · 예산을 등록하면 픽스폴리오가 인플루언서를 리스트업하고,
+ * 브랜드가 골라 인플루언서와 직접 진행 · 정산한다. 픽스폴리오는 인플루언서마다 마진을
+ * 남기지 않으므로 정산·매출(마진) 화면과, 내려간 어필리에이트 · 커머스 메뉴는 숨긴다.
+ * 화면 코드는 남겨 두었으므로 HIDDEN_TABS 에서 빼면 그대로 다시 보인다.
  */
-const CAMPAIGN_MENUS_HIDDEN = true;
-// 브랜드 영업 링크(saleslinks)는 브랜드 영업에 다시 쓰기 위해 숨김 목록에서 뺐다.
-const HIDDEN_TABS = new Set<string>(['campaigns', 'listup', 'collabs', 'commerce', 'directory', 'settlement']);
+const CAMPAIGN_MENUS_HIDDEN = false;
+/** 마진 기반 순수익 카드(멤버십 / 캠페인 마진 / AI). 마진이 없는 동안 숨긴다. */
+const REVENUE_CARDS_VISIBLE = false;
+const HIDDEN_TABS = new Set<string>([
+  'commerce',
+  'settlement',
+  'affiliate-store',
+  'affiliate-selections',
+  'affiliate-issues',
+  'affiliate-payouts',
+]);
 
 type OperatorTab =
   | 'overview'
@@ -226,7 +235,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   // 그 뒤로는 하루 한 번 점심(한국 시간 12시)에 다시 센다. 브랜드 선정은 하루에 몇 건이라
   // 자주 물어볼 이유가 없다. 탭을 열면 그 화면이 직접 세어 배지를 맞춘다.
   useEffect(() => {
-    if (!adminToken || CAMPAIGN_MENUS_HIDDEN) return;
+    if (!adminToken || CAMPAIGN_MENUS_HIDDEN || HIDDEN_TABS.has('commerce')) return;
     let alive = true;
     let timer = 0;
     const load = async () => {
@@ -345,9 +354,9 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     { group: '홈', tabs: [{ key: 'overview', label: '홈 · 할 일' }] },
     {
       // 일이 흐르는 순서: 인플루언서 · 브랜드 승인 → 선정되면 담당자 조율 → 주문 사고 처리 → 지급.
+      // 어필리에이트를 숨긴 동안에는 이 묶음이 통째로 빠진다(크리에이터 승인은 모집으로 옮겼다).
       group: '어필리에이트',
       tabs: [
-        { key: 'creator-applications', label: '1. 크리에이터 명단' },
         { key: 'affiliate-store', label: '2. 브랜드 입점 신청' },
         { key: 'affiliate-selections', label: '3. 협업 조율', badge: newAffiliateSelections },
         { key: 'affiliate-issues', label: '4. 취소·반품' },
@@ -358,7 +367,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       group: '캠페인',
       tabs: [
         { key: 'campaigns', label: '1. 캠페인 승인', badge: pendingCampaigns },
-        { key: 'listup', label: '2. 인플루언서 배정 · 진행' },
+        { key: 'listup', label: '2. 인플루언서 리스트업' },
         { key: 'collabs', label: '3. 캠페인 관리' },
         { key: 'commerce', label: '커머스 캠페인', badge: newCommerceSelections },
       ],
@@ -366,6 +375,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     {
       group: '모집',
       tabs: [
+        { key: 'creator-applications', label: '크리에이터 승인' },
         { key: 'influencerdb', label: '인플루언서 DB' },
         { key: 'applicants', label: '인플루언서 지원자' },
         { key: 'brandleads', label: '브랜드 신청자' },
@@ -384,7 +394,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     },
   ];
   const navGroups = allNavGroups
-    .map((g) => ({ ...g, tabs: g.tabs.filter((t) => !CAMPAIGN_MENUS_HIDDEN || !HIDDEN_TABS.has(t.key)) }))
+    .map((g) => ({ ...g, tabs: g.tabs.filter((t) => !HIDDEN_TABS.has(t.key)) }))
     .filter((g) => g.tabs.length > 0);
 
   if (loading) {
@@ -546,9 +556,15 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {activeTab === 'dmqueue' && adminToken && <AdminDmQueue token={adminToken} />}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* 지금 처리할 일 — 어필리에이트 단계별 대기 건수. 누르면 그 탭으로 간다. */}
+            {/* 지금 처리할 일 — 크리에이터 승인 대기. 누르면 그 탭으로 간다. 어필리에이트 칸은 숨긴다. */}
             {adminToken && (
-              <AdminAffiliateTodo token={adminToken} refreshKey={refreshKey} onNavigate={(tab) => setActiveTab(tab)} />
+              <AdminAffiliateTodo
+                token={adminToken}
+                refreshKey={refreshKey}
+                keys={['creator-applications']}
+                title="지금 처리할 일"
+                onNavigate={(tab) => setActiveTab(tab)}
+              />
             )}
 
             <AdminOperatorOverview
@@ -559,7 +575,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             />
 
             {/* 순수익 — 멤버십 / 캠페인 마진 / AI (캠페인이 내려간 동안은 숨긴다) */}
-            {adminToken && !CAMPAIGN_MENUS_HIDDEN && (
+            {adminToken && REVENUE_CARDS_VISIBLE && (
               <AdminRevenueCards token={adminToken} settlementSummary={settlementSummary} overview={overview} />
             )}
 
