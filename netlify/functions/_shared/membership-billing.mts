@@ -17,7 +17,7 @@
 
 // 'brand_campaign' 은 브랜드(기업) 계정 전용 정액제(월 179,000원)다. 지금 새로 판매하는
 // 플랜은 이것 하나뿐이다. 정액제에는 회사 관리자 좌석 1석과 자동 디엠이 포함되고, 직원
-// 좌석은 1석당 월 99,000원으로 결제한 만큼 늘린다(brand-seats).
+// 좌석은 1석당 월 49,000원으로 결제한 만큼 늘린다(brand-seats).
 //
 // 'brand_dm'(자동 디엠 플랜, 월 5,900원)은 판매를 종료했다 — 정액제에 자동 디엠이 포함되기
 // 때문이다. 예전 구독자는 다음 결제일까지 그대로 쓰고, 그날 청구 없이 끝난다. 스탠다드 ·
@@ -29,7 +29,7 @@ export const SELLABLE_TIERS: readonly MembershipTier[] = ['brand_campaign']
 
 /** 정액제 기본 금액(회사 관리자 좌석 1석 포함)과 직원 좌석 1석 금액. 부가세 포함. */
 export const BRAND_CAMPAIGN_BASE_KRW = 179000
-export const BRAND_SEAT_PRICE_KRW = 99000
+export const BRAND_SEAT_PRICE_KRW = 49000
 /** 한 번에 늘릴 수 있는 직원 좌석 수(오입력 방지용). 여러 번 나눠 사면 제한 없이 늘어난다. */
 export const MAX_SEATS_PER_PURCHASE = 50
 

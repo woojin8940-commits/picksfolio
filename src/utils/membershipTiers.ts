@@ -5,7 +5,7 @@
  * 값을 유지한다.
  *
  * 지금 새로 판매하는 플랜은 브랜드(기업) 계정 전용 정액제(179,000) 하나뿐이다. 정액제에는
- * 회사 관리자 좌석 1석과 자동 디엠이 포함되고, 직원 좌석은 1석당 99,000원으로 결제한 만큼
+ * 회사 관리자 좌석 1석과 자동 디엠이 포함되고, 직원 좌석은 1석당 49,000원으로 결제한 만큼
  * 늘린다. 자동 디엠 플랜(5,900)은 판매를 종료했다(예전 구독자는 다음 결제일까지 이용).
  * 스탠다드(4,900) · AI 협업(6,900) · 프로(18,700)도 예전 구독 기록을 읽기 위해서만 남는다.
  *
@@ -33,7 +33,7 @@ export const BRAND_DM_PRICE = 5900;
 /** 브랜드 정액제 기본 금액(회사 관리자 좌석 1석 · 자동 디엠 포함). 지금 판매하는 유일한 플랜이다. */
 export const BRAND_CAMPAIGN_PRICE = 179000;
 /** 직원 좌석 1석의 월 금액. */
-export const BRAND_SEAT_PRICE = 99000;
+export const BRAND_SEAT_PRICE = 49000;
 
 export const TIER_PRICE: Record<MembershipTier, number> = {
   standard: STANDARD_PRICE,
