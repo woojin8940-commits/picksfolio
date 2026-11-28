@@ -14,7 +14,7 @@
  * 많으면(먼저 들어온 순서로 좌석을 채운다) 남는 직원은 회사 워크스페이스에 들어오지 못한다.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { paidExtraSeats, readSeatRecord } from "./brand-seats.mts";
+import { readSeatRecord, staffSeatCapacity } from "./brand-seats.mts";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -222,6 +222,6 @@ export const resolveTeamMembership = async (userId: string): Promise<TeamMembers
     kind: "member",
     company,
     memberUsername: String(r.member_username || ""),
-    seated: Number(r.ahead || 0) < paidExtraSeats(record),
+    seated: Number(r.ahead || 0) < staffSeatCapacity(record),
   };
 };

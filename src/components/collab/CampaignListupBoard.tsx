@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import SharedContactCard from './SharedContactCard';
-import BrandQuotaBanner, { type BrandQuota } from './BrandQuotaBanner';
+import { ADDON_SELECTED_PRICE, ADDON_SELECTED_UNIT } from '../../utils/membershipTiers';
+import BrandQuotaBanner, { selectionOverQuota, type BrandQuota } from './BrandQuotaBanner';
 import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
@@ -61,6 +62,11 @@ const formatRemaining = (ms: number) => {
  * 예전에 적어 둔 값이 있는 후보는 그것을 그대로 쓰고, 나머지는 등록 카테고리를 쓴다.
  */
 const profileLine = (c: any) => String(c?.profileLine || c?.snapshot?.categories || '').trim();
+
+const overQuotaText = (o: { over: number; fresh: number; elsewhere: number; remaining: number }) =>
+  o.elsewhere > 0
+    ? `이번 달 남은 선정 한도는 ${o.remaining}명인데, 이 캠페인에서 ${o.fresh}명, 다른 캠페인에서 ${o.elsewhere}명을 골라 두셨어요. 모두 진행이 확정되면 ${o.over}명은 한도를 넘어 확정할 수 없습니다. 선정 인원을 추가 구매(${ADDON_SELECTED_UNIT}명 ${ADDON_SELECTED_PRICE.toLocaleString()}원)하거나 등급을 올려 주세요.`
+    : `이번 달 남은 선정 한도는 ${o.remaining}명인데 ${o.fresh}명을 골랐어요. 모두 진행이 확정되면 ${o.over}명은 한도를 넘어 확정할 수 없습니다. 선정 인원을 추가 구매(${ADDON_SELECTED_UNIT}명 ${ADDON_SELECTED_PRICE.toLocaleString()}원)하거나 등급을 올려 주세요.`;
 
 const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, onNotify, onConfirmed }) => {
   const [candidates, setCandidates] = useState<any[]>([]);
@@ -158,6 +164,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
       notify('담은 인플루언서가 없습니다.', 'error');
       return;
     }
+    if (overQuota && !window.confirm(overQuotaText(overQuota) + '\n\n그대로 선택을 완료할까요?')) return;
     setConfirming(true);
     const res = await apiService.confirmListupSelection(campaignId, Array.from(selected));
     setConfirming(false);
@@ -191,6 +198,12 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
     [candidates, selected],
   );
 
+  // 이미 진행이 확정된(수락 · 연락처 공개) 후보는 한도 계산에서 뺀다.
+  const overQuota = useMemo(() => {
+    const done = new Set(candidates.filter((c) => c.outreachStatus === 'accepted' || c.contactSharedAt).map((c) => String(c.id)));
+    return selectionOverQuota(brandQuota, Array.from(selected).filter((id) => !done.has(id)));
+  }, [brandQuota, selected, candidates]);
+
   const remaining = due ? due - now : 0;
   const expired = due > 0 && remaining <= 0;
 
@@ -215,7 +228,19 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
           리스트에 담아 주시면 담당자가 일정·가이드·단가를 들고 직접 제안합니다.
         </p>
         <div className="mt-3">
-          <BrandQuotaBanner quota={brandQuota} viewer="brand" />
+          <BrandQuotaBanner quota={brandQuota} viewer="brand" onOpenMembership={() => window.dispatchEvent(new CustomEvent('navigate-membership'))} />
+          {overQuota && (
+            <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[11px] font-bold text-amber-800 flex items-center justify-between gap-2 flex-wrap">
+              <span>{overQuotaText(overQuota)}</span>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-[11px] font-black text-amber-800"
+              >
+                추가 구매하기
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -575,6 +600,11 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                   선택한 인플루언서{' '}
                   <span className="text-white font-black">{selected.size}명</span>
                 </p>
+                {overQuota && (
+                  <p className="text-[11px] text-amber-300 font-bold">
+                    {`남은 선정 한도보다 ${overQuota.over}명 많이 골랐어요`}
+                  </p>
+                )}
                 <p className="text-[11px] text-white/60 font-bold">
                   총 금액{' '}
                   <span className="text-white font-black">

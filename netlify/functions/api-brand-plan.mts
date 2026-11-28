@@ -6,6 +6,7 @@ import {
   ADDON_CAMPAIGN_PRICE_KRW,
   ADDON_SELECTED_PRICE_KRW,
   ADDON_SELECTED_UNIT,
+  BRAND_PLAN_INCLUDED_SEATS,
   BRAND_PLAN_LIMITS,
   BRAND_PLAN_PRICE_KRW,
   BRAND_SEAT_PRICE_KRW,
@@ -21,6 +22,7 @@ import {
   upgradeBrandPlan,
 } from "./_shared/brand-seats.mts";
 import { brandQuotaStatus } from "./_shared/brand-quota.mts";
+import { usedSeats } from "./_shared/brand-team.mts";
 
 /**
  * 브랜드 멤버십 등급 · 이번 달 한도.
@@ -37,6 +39,7 @@ const catalog = () => ({
   tiers: (["brand_campaign", "brand_growth"] as const).map((tier) => ({
     tier,
     priceKrw: BRAND_PLAN_PRICE_KRW[tier],
+    includedSeats: BRAND_PLAN_INCLUDED_SEATS[tier],
     campaigns: BRAND_PLAN_LIMITS[tier].campaigns,
     selected: BRAND_PLAN_LIMITS[tier].selected,
   })),
@@ -109,7 +112,7 @@ export default async (req: Request) => {
     if (action === "schedule") {
       const tier = body?.tier;
       if (!isBrandPlanTier(tier)) return fail(400, "등급을 확인해 주세요.");
-      const result = await scheduleBrandPlan(company, tier);
+      const result = await scheduleBrandPlan(company, tier, await usedSeats(company));
       if (!result.ok) return fail(result.status, result.error);
       return Response.json({ success: true, record: redactSellerRecord(result.record), ...(await overview(company)) });
     }

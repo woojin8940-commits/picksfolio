@@ -166,6 +166,89 @@ async function record(company: string, kind: Kind, refId: string): Promise<void>
   }
 }
 
+/**
+ * 캠페인 등록은 멤버십 회원만 한다. 미구독 · 미납이면 막고, 이번 달 캠페인 한도가 남지 않았으면
+ * 등록해도 리스트업이 시작될 수 없으니 등록 단계에서 먼저 알린다(추가 구매 · 업그레이드 안내).
+ * 등록 자체는 한도를 쓰지 않는다 — 차감은 담당자가 첫 리스트업을 올릴 때 한 번.
+ */
+export async function checkCampaignRegistration(company: string): Promise<ReserveResult> {
+  const clean = cleanCompany(company);
+  if (!clean) return { ok: true };
+  const status = await brandQuotaStatus(clean);
+  if (!status.enforced) return { ok: true };
+  if (!status.tier) {
+    return {
+      ok: false,
+      status: 402,
+      code: "BRAND_PLAN_REQUIRED",
+      error: "캠페인 등록은 멤버십 회원만 할 수 있어요. 멤버십을 구독한 뒤에 다시 등록해 주세요.",
+    };
+  }
+  if (status.pastDue) {
+    return {
+      ok: false,
+      status: 402,
+      code: "BRAND_PAYMENT_PAST_DUE",
+      error: "멤버십 정기결제가 실패한 상태예요. 결제 수단을 확인해 결제가 다시 되면 캠페인을 등록할 수 있습니다.",
+    };
+  }
+  if (status.remaining.campaigns <= 0) {
+    return {
+      ok: false,
+      status: 402,
+      code: "CAMPAIGN_QUOTA_EXCEEDED",
+      error: "이번 달 캠페인 한도를 다 썼어요. 캠페인을 추가 구매하거나 등급을 올린 뒤에 등록해 주세요.",
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * 브랜드가 골라 두었지만 아직 선정 한도에 잡히지 않은(진행 확정 전) 후보 수. 이 캠페인은 뺀다 —
+ * 화면이 지금 고르고 있는 수를 따로 더한다. 진행 중인 캠페인의, 거절 · 만료 · 이미 수락(확정)되지 않은 후보만 센다.
+ */
+export async function pendingPicksElsewhere(company: string, excludeCampaignId: string): Promise<number> {
+  const clean = cleanCompany(company);
+  if (!clean) return 0;
+  try {
+    const rows = (await getDatabase().sql`
+      SELECT COUNT(*)::int AS n
+      FROM campaign_listups l
+      JOIN campaigns c ON c.id = l.campaign_id
+      WHERE LOWER(c.business_username) = ${clean}
+        AND c.id <> ${excludeCampaignId}
+        AND c.deleted_at IS NULL
+        AND c.status IN ('active', 'inactive')
+        AND l.brand_decision = 'pick'
+        AND l.outreach_status NOT IN ('declined', 'expired', 'accepted')
+        AND NOT EXISTS (
+          SELECT 1 FROM brand_quota_usage u
+          WHERE u.company_username = ${clean} AND u.kind = 'selected' AND u.ref_id = l.id
+        )
+    `) as any[];
+    return Number(rows[0]?.n || 0);
+  } catch (e) {
+    if ((e as { code?: string })?.code === "42P01") return 0;
+    throw e;
+  }
+}
+
+/** 주어진 후보 중 이미 선정 한도에 잡힌 것. */
+export async function countedSelectedIds(company: string, ids: string[]): Promise<string[]> {
+  const clean = cleanCompany(company);
+  if (!clean || !ids.length) return [];
+  try {
+    const rows = (await getDatabase().sql`
+      SELECT ref_id FROM brand_quota_usage
+      WHERE company_username = ${clean} AND kind = 'selected' AND ref_id = ANY(${ids})
+    `) as any[];
+    return rows.map((r) => String(r.ref_id));
+  } catch (e) {
+    if ((e as { code?: string })?.code === "42P01") return [];
+    throw e;
+  }
+}
+
 /** 캠페인 리스트업을 처음 올릴 때(캠페인 1건). */
 export const checkCampaignQuota = (company: string, campaignId: string) => check(company, "campaign", campaignId);
 export const recordCampaignQuota = (company: string, campaignId: string) => record(company, "campaign", campaignId);

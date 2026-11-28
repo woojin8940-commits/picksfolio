@@ -42,6 +42,11 @@ export const BRAND_PLAN_LIMITS: Record<BrandPlanTier, { campaigns: number; selec
   brand_campaign: { campaigns: 2, selected: 20 },
   brand_growth: { campaigns: 5, selected: 50 },
 };
+/** 등급에 처음부터 들어 있는 직원 좌석. 서버 BRAND_PLAN_INCLUDED_SEATS 와 같다. */
+export const BRAND_PLAN_INCLUDED_SEATS: Record<BrandPlanTier, number> = {
+  brand_campaign: 0,
+  brand_growth: 1,
+};
 /** 추가 구매(이번 결제 주기만). */
 export const ADDON_CAMPAIGN_PRICE = 59000;
 export const ADDON_SELECTED_UNIT = 10;

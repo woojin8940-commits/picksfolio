@@ -28,6 +28,7 @@ import {
   ADDON_CAMPAIGN_PRICE_KRW,
   ADDON_SELECTED_PRICE_KRW,
   ADDON_SELECTED_UNIT,
+  BRAND_PLAN_INCLUDED_SEATS,
   BRAND_PLAN_PRICE_KRW,
   BRAND_SEAT_PRICE_KRW,
   brandMonthlyKrw,
@@ -76,6 +77,27 @@ export const nextCycleTier = (record: Rec | null | undefined): BrandPlanTier | n
 export const paidExtraSeats = (record: Rec | null | undefined): number =>
   hasActiveBrandPlan(record) ? seatCount(record?.membership_extra_seats) : 0;
 
+/** 등급에 들어 있는 직원 좌석(그로스 1석). 멤버십이 없으면 0. */
+export const includedSeats = (record: Rec | null | undefined): number => {
+  const tier = activeBrandTier(record);
+  return tier ? BRAND_PLAN_INCLUDED_SEATS[tier] : 0;
+};
+
+/** 지금 직원이 쓸 수 있는 좌석 = 등급 포함 좌석 + 결제한 좌석. */
+export const staffSeatCapacity = (record: Rec | null | undefined): number =>
+  includedSeats(record) + paidExtraSeats(record);
+
+/**
+ * 새로 초대할 때 기준이 되는 좌석 수. 다음 결제일에 줄어들 예정(좌석 줄이기 · 라이트로 내리기)이면
+ * 그 적은 쪽을 기준으로 해, 예약이 적용되는 날 좌석 밖으로 밀려나는 직원이 생기지 않게 한다.
+ */
+export const inviteSeatCapacity = (record: Rec | null | undefined): number => {
+  const nextTier = nextCycleTier(record);
+  if (!hasActiveBrandPlan(record) || !nextTier) return 0;
+  const next = BRAND_PLAN_INCLUDED_SEATS[nextTier] + nextCycleSeats(record);
+  return Math.min(staffSeatCapacity(record), next);
+};
+
 /** 다음 결제일에 청구할 직원 좌석 수(줄이기 예약이 있으면 그 값). */
 export const nextCycleSeats = (record: Rec | null | undefined): number => {
   const scheduled = record?.membership_extra_seats_scheduled;
@@ -89,6 +111,9 @@ export interface SeatPlanSummary {
   planActive: boolean;
   tier: BrandPlanTier | null;
   scheduledTier: BrandPlanTier | null;
+  /** 등급에 들어 있는 직원 좌석(그로스 1석). */
+  includedSeats: number;
+  /** 결제한 직원 좌석. */
   extraSeats: number;
   scheduledSeats: number | null;
   seatPriceKrw: number;
@@ -110,6 +135,7 @@ export const seatPlanSummary = (record: Rec | null | undefined): SeatPlanSummary
     planActive,
     tier,
     scheduledTier: planActive && isBrandPlanTier(record?.membership_plan_scheduled) ? record!.membership_plan_scheduled : null,
+    includedSeats: includedSeats(record),
     extraSeats: paidExtraSeats(record),
     scheduledSeats: planActive && scheduled !== null && scheduled !== undefined ? seatCount(scheduled) : null,
     seatPriceKrw: BRAND_SEAT_PRICE_KRW,
@@ -356,35 +382,47 @@ export const purchaseAddon = async (company: string, kind: BrandAddonKind, units
  * 다음 결제일부터 쓸 등급을 정한다(그로스 → 라이트 내리기 예약 · 예약 취소).
  * `seatsInUse` 는 지금 쓰는 직원 좌석 — 좌석은 등급과 따로 결제되므로 그대로 이어진다.
  */
-export const scheduleBrandPlan = async (company: string, toTier: BrandPlanTier): Promise<SeatChangeResult> => {
+export const scheduleBrandPlan = async (company: string, toTier: BrandPlanTier, seatsInUse = 0): Promise<SeatChangeResult> => {
   let reason = "";
   const saved = await mutateBlobJSON<Rec>(STORE, `seller_${company}`, (current) => {
     reason = "";
     const tier = activeBrandTier(current);
     if (!tier) { reason = "plan"; return null; }
     if (BRAND_PLAN_PRICE_KRW[toTier] > BRAND_PLAN_PRICE_KRW[tier]) { reason = "up"; return null; }
+    // 내리면 등급 포함 좌석이 줄어든다(그로스 1석 → 라이트 0석). 쓰는 좌석이 더 많으면 막는다.
+    if (toTier !== tier && seatsInUse > BRAND_PLAN_INCLUDED_SEATS[toTier] + nextCycleSeats(current)) { reason = "seats"; return null; }
     const at = new Date().toISOString();
     return { ...(current as Rec), membership_plan_scheduled: toTier === tier ? null : toTier, updated_at: at };
   });
   if (reason === "plan" || !saved) return { ok: false, status: 403, error: "멤버십을 이용 중일 때만 등급을 바꿀 수 있어요." };
   if (reason === "up") return { ok: false, status: 400, error: "올리기는 바로 적용돼요. 업그레이드를 이용해 주세요." };
+  if (reason === "seats") {
+    return {
+      ok: false,
+      status: 409,
+      error: "라이트에는 직원 좌석이 포함되어 있지 않아요. 직원 좌석을 1석 추가 결제하거나 직원 · 초대를 정리한 뒤 내려 주세요.",
+    };
+  }
   return { ok: true, record: saved };
 };
 
 /**
- * 다음 결제일부터 쓸 직원 좌석 수를 정한다(줄이기 예약 · 예약 취소).
- * `minimum` 은 지금 쓰고 있는 좌석(직원 + 대기 중인 초대) — 그보다 적게는 줄일 수 없다.
+ * 다음 결제일부터 쓸 결제 좌석 수를 정한다(줄이기 예약 · 예약 취소).
+ * `inUse` 는 지금 쓰고 있는 좌석(직원 + 대기 중인 초대) — 다음 주기의 포함 좌석 + 결제 좌석보다
+ * 많으면 줄일 수 없다.
  */
-export const scheduleSeatCount = async (company: string, target: number, minimum: number): Promise<SeatChangeResult> => {
+export const scheduleSeatCount = async (company: string, target: number, inUse: number): Promise<SeatChangeResult> => {
   const seats = Math.trunc(Number(target));
   if (!Number.isFinite(seats) || seats < 0) {
     return { ok: false, status: 400, error: "좌석 수를 확인해 주세요." };
   }
+  const nextTier = nextCycleTier(await readSeatRecord(company));
+  const minimum = Math.max(0, inUse - (nextTier ? BRAND_PLAN_INCLUDED_SEATS[nextTier] : 0));
   if (seats < minimum) {
     return {
       ok: false,
       status: 409,
-      error: `지금 직원과 대기 중인 초대가 ${minimum}석을 쓰고 있어요. 직원을 내보내거나 초대를 취소한 뒤 줄여 주세요.`,
+      error: `지금 직원과 대기 중인 초대가 ${inUse}석을 쓰고 있어요. 직원을 내보내거나 초대를 취소한 뒤 줄여 주세요.`,
     };
   }
   let reason = "";

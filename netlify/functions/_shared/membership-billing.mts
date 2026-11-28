@@ -45,6 +45,11 @@ export const BRAND_PLAN_PRICE_KRW: Record<BrandPlanTier, number> = {
   brand_growth: BRAND_GROWTH_BASE_KRW,
 }
 export const BRAND_SEAT_PRICE_KRW = 49000
+/** 등급에 처음부터 들어 있는 직원 좌석(결제하지 않는다). 그로스는 1석. */
+export const BRAND_PLAN_INCLUDED_SEATS: Record<BrandPlanTier, number> = {
+  brand_campaign: 0,
+  brand_growth: 1,
+}
 
 /**
  * 등급별 월 한도. 캠페인 = 리스트업을 처음 받은 캠페인 수, 선정 = 진행이 확정되어 연락처가

@@ -7,7 +7,10 @@ import { usernameHasBlobLeftovers } from "./_shared/username-leftovers.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
 import {
   hasActiveBrandPlan,
+  includedSeats,
+  inviteSeatCapacity,
   paidExtraSeats,
+  staffSeatCapacity,
   purchaseSeats,
   readSeatRecord,
   scheduleSeatCount,
@@ -84,16 +87,20 @@ async function overview(company: string) {
   await settleStaleSeatCharge(company).catch(() => "busy");
   const record = await readSeatRecord(company);
   const extra = paidExtraSeats(record);
-  const team = await listTeam(company, extra);
+  const included = includedSeats(record);
+  const capacity = staffSeatCapacity(record);
+  const team = await listTeam(company, capacity);
   const used = team.members.length + team.invites.length;
   return {
     plan: seatPlanSummary(record),
     seats: {
-      // 관리자 좌석 1석은 정액제에 들어 있다.
-      total: (hasActiveBrandPlan(record) ? 1 : 0) + extra,
+      // 관리자 계정 1개는 멤버십에 들어 있다. 직원 좌석 = 등급 포함(그로스 1석) + 결제한 좌석.
+      total: (hasActiveBrandPlan(record) ? 1 : 0) + capacity,
+      included,
       extra,
+      capacity,
       used,
-      available: Math.max(0, extra - used),
+      available: Math.max(0, inviteSeatCapacity(record) - used),
     },
     members: team.members,
     invites: team.invites,
@@ -243,7 +250,7 @@ export default async (req: Request) => {
     if (action === "create_invite") {
       const record = await readSeatRecord(company);
       if (!hasActiveBrandPlan(record)) return fail(403, "멤버십을 구독한 뒤에 직원을 초대할 수 있어요.");
-      const created = await createInvite(company, paidExtraSeats(record), {
+      const created = await createInvite(company, inviteSeatCapacity(record), {
         label: body?.label,
         createdBy: by,
       });

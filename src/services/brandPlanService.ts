@@ -7,6 +7,7 @@ export interface BrandPlanOverview {
     planActive: boolean;
     tier: BrandPlanTier | null;
     scheduledTier: BrandPlanTier | null;
+    includedSeats: number;
     extraSeats: number;
     scheduledSeats: number | null;
     seatPriceKrw: number;
@@ -27,7 +28,7 @@ export interface BrandPlanOverview {
     remaining: { campaigns: number; selected: number };
   } | null;
   catalog: {
-    tiers: { tier: BrandPlanTier; priceKrw: number; campaigns: number; selected: number }[];
+    tiers: { tier: BrandPlanTier; priceKrw: number; includedSeats: number; campaigns: number; selected: number }[];
     seatPriceKrw: number;
     addons: { campaign: { unit: number; priceKrw: number }; selected: { unit: number; priceKrw: number } };
   };
