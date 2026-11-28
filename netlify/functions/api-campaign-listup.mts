@@ -9,6 +9,7 @@ import {
 import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { newId, norm } from "./_shared/collab-workflow.mts";
 import { withCampaignLock } from "./_shared/campaign-recruit.mts";
+import { ownsCampaign } from "./_shared/campaign-owner.mts";
 import { isManagerListupMode } from "./_shared/reward-mode.mts";
 import { influencerAccountsOf } from "./_shared/influencer-accounts.mts";
 import { refreshStaleChannelImages, resyncStaleChannels } from "./_shared/instagram-metrics.mts";
@@ -63,6 +64,8 @@ async function loadCampaign(db: any, campaignId: string) {
            upload_from, upload_to,
            -- 브랜드가 내린 캠페인인지. 내린 캠페인에는 새 제안 · 수락을 받지 않는다.
            deleted_at,
+           -- 회사 안의 담당자(빈 값 = 관리자). 브랜드 화면 · 연락처는 담당자에게만.
+           owner_member,
            -- 진행 방식이 협업 단계를 정한다(제품 협찬형에는 검수·정산 단계가 없다).
            -- package_tier 는 진행 방식이 없던 시절 캠페인의 대체값으로만 쓴다.
            -- 희망 인플루언서 조건은 담당자가 후보를 고를 때 읽는 값이다.
@@ -181,6 +184,10 @@ export default async (req: Request, context: Context) => {
       if (manager && (wantsManagerView || !isOwner)) {
         viewerRole = "manager";
       } else if (isOwner) {
+        // 같은 회사라도 이 캠페인 담당자가 아니면 명단(연락처 포함)을 열지 않는다.
+        if (!ownsCampaign(account!, campaign.owner_member)) {
+          return Response.json({ error: "다른 담당자가 맡은 캠페인이에요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+        }
         viewerRole = "brand";
       } else {
         return accountError || forbiddenResponse();
@@ -648,6 +655,9 @@ export default async (req: Request, context: Context) => {
         if (!bulkManager.ok) {
           const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
           if (!auth.ok) return auth.response;
+          if (!ownsCampaign(auth, campaign.owner_member)) {
+            return Response.json({ error: "이 캠페인 담당자만 할 수 있어요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+          }
           viewer = "brand";
         }
         // 고른 사람은 pick, 나머지는 pass. 이미 수락된 후보는 건드리지 않는다 —
@@ -732,6 +742,9 @@ export default async (req: Request, context: Context) => {
         if (!isManager) {
           const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
           if (!auth.ok) return auth.response;
+          if (!ownsCampaign(auth, campaign.owner_member)) {
+            return Response.json({ error: "이 캠페인 담당자만 할 수 있어요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+          }
           viewer = "brand";
         }
         // 이미 제안이 나갔거나 수락된 후보의 선택을 되돌리면 인플루언서가 받은
@@ -840,6 +853,9 @@ export default async (req: Request, context: Context) => {
         if (!isManager) {
           const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
           if (!auth.ok) return auth.response;
+          if (!ownsCampaign(auth, campaign.owner_member)) {
+            return Response.json({ error: "이 캠페인 담당자만 할 수 있어요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+          }
           viewer = "brand";
         }
         await db.sql`

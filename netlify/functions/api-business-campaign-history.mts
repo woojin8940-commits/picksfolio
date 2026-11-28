@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { memberNames, ownerLabel, ownsCampaign } from "./_shared/campaign-owner.mts";
 import { dateOnly, saleStateOf } from "./_shared/affiliate-sale-period.mts";
 import { SALE_STATUSES } from "./_shared/affiliate-store-orders.mts";
 import {
@@ -220,6 +221,8 @@ export interface HistoryQuery {
   category: string;
   /** 캠페인 하나만 볼 때 그 캠페인 id. */
   campaignId: string;
+  /** mine: 내가 맡은 캠페인만, company: 회사 전체. */
+  scope: "mine" | "company";
   sort: HistorySort;
   page: number;
   pageSize: number;
@@ -241,6 +244,7 @@ export const parseHistoryQuery = (params: URLSearchParams): HistoryQuery => {
     creator: norm(params.get("creator")).replace(/^@/, "").slice(0, 60),
     category: String(params.get("category") || "").trim().slice(0, 60),
     campaignId: String(params.get("campaignId") || "").trim().slice(0, 80),
+    scope: params.get("scope") === "company" ? "company" : "mine",
     sort: SORTS.includes(sort) ? sort : "recent",
     page,
     pageSize: Math.min(50, Math.max(10, size)),
@@ -554,13 +558,18 @@ export default async (req: Request, context: Context) => {
     // 기록"이다. 둘을 같은 조건으로 묶어 두면 끝난 캠페인을 정리한 브랜드가 자기
     // 광고비와 성과를 다시 볼 방법이 없어진다. 내려간 캠페인이라는 사실만 함께
     // 보내서 화면이 배지로 구분한다.
-    const campaignRows = (await db.sql`
+    const allCampaignRows = (await db.sql`
       SELECT id, title, category, type, status, reward_mode, thumbnail_url,
-             start_date, end_date, budget_krw, created_at, deleted_at
+             start_date, end_date, budget_krw, created_at, deleted_at, owner_member
       FROM campaigns
       WHERE LOWER(REPLACE(business_username, 'biz/', '')) = ${username}
       ORDER BY created_at DESC, id DESC
     `) as any[];
+    // 내 캠페인(내가 맡은 것) / 회사 전체. 회사 전체는 관리자 · 직원 모두 볼 수 있다(성과만 — 연락처는 없다).
+    const campaignRows = query.scope === "company"
+      ? allCampaignRows
+      : allCampaignRows.filter((c) => ownsCampaign(auth, c.owner_member));
+    const ownerNames = auth.teamRole ? await memberNames(username) : new Map<string, string>();
 
     const campaignIds = (campaignRows || []).map((c) => String(c.id));
     if (campaignIds.length === 0) {
@@ -793,6 +802,8 @@ export default async (req: Request, context: Context) => {
         endDate: String(c.end_date || ""),
         budgetKrw: intOf(c.budget_krw),
         createdAt: c.created_at || null,
+        /** 회사 안의 담당자(관리자 또는 직원 이름). */
+        ownerName: ownerLabel(c.owner_member, ownerNames),
         collabs,
         uploaded,
         matched,

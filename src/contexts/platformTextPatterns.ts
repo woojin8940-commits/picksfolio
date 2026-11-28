@@ -2576,4 +2576,28 @@ export const platformTextPatterns = [
     "source": "^회사 계정: (.+?)$",
     "replacement": "Company account: $1"
   },
+  {
+    "source": "^(.+?)님\\((.+?)\\) 계정을 삭제할까요\\?[\\s\\S]*$",
+    "replacement": "Delete the account of $1 ($2)? It can't be undone; their campaigns move to the admin and the seat frees up."
+  },
+  {
+    "source": "^담당자: (.+?)$",
+    "replacement": "Owner: $1"
+  },
+  {
+    "source": "^담당자를 (.+?)\\(으\\)로 바꿨어요\\.$",
+    "replacement": "Owner changed to $1."
+  },
+  {
+    "source": "^전체 (\\d+)$",
+    "replacement": "All $1"
+  },
+  {
+    "source": "^업로드 기간 (.+?) · 진행 예정 (\\d+)명$",
+    "replacement": "Upload period $1 · $2 upcoming"
+  },
+  {
+    "source": "^(\\d{2}\\.\\d{2}) 업로드 예정$",
+    "replacement": "Upload due $1"
+  },
 ] as const;

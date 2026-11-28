@@ -35,7 +35,7 @@ import {
  *   · overview        좌석 · 직원 · 대기 중인 초대 (회사 계정 누구나 — 직원은 보기만)
  *   · create_invite   빈 좌석에 1회용 초대 링크 만들기 (관리자)
  *   · revoke_invite   초대 취소 → 좌석이 다시 빈다 (관리자)
- *   · remove_member   직원 내보내기 → 좌석이 다시 빈다, 추가 비용 없음 (관리자)
+ *   · remove_member   퇴사한 직원 삭제 → 좌석이 다시 빈다, 맡던 캠페인은 관리자에게, 계정은 삭제 (관리자)
  *   · add_seats       직원 좌석 추가 결제(남은 기간 일할) (관리자)
  *   · schedule_seats  다음 결제일부터 좌석 줄이기 · 예약 취소 (관리자)
  *   · invite_info     초대 링크 확인 (로그인 없이)
@@ -273,8 +273,39 @@ export default async (req: Request) => {
       const team = await listTeam(company, 0);
       const target = team.members.find((m) => m.id === memberId);
       if (!target) return fail(404, "이미 내보낸 직원이에요.");
+      // 퇴사한 직원: 좌석에서 빼고(기록은 남긴다), 맡던 캠페인은 관리자에게 넘기고, 계정은 지운다.
+      // 새로 오는 직원은 초대 링크로 새 계정을 만들고, 관리자가 캠페인 담당자를 바꿔 이어 간다.
+      const { getDatabase } = await import("@picks/netlify-database");
+      const sql = getDatabase().sql;
+      const rows = (await sql`
+        SELECT member_user_id, member_username FROM brand_team_members
+        WHERE id = ${memberId} AND company_username = ${company}
+      `) as any[];
+      const userId = String(rows[0]?.member_user_id || "");
+      const memberName = String(rows[0]?.member_username || "").toLowerCase();
       await removeMember(company, memberId, by);
-      return Response.json({ success: true });
+      let movedCampaigns = 0;
+      if (memberName) {
+        const moved = (await sql`
+          UPDATE campaigns SET owner_member = '', updated_at = NOW()
+          WHERE LOWER(REPLACE(business_username, 'biz/', '')) = ${company} AND LOWER(owner_member) = ${memberName}
+          RETURNING id
+        `) as any[];
+        movedCampaigns = moved.length;
+      }
+      let accountDeleted = false;
+      if (userId) {
+        try {
+          const supabase = admin();
+          await supabase.from("profiles").delete().eq("id", userId);
+          const { error } = await supabase.auth.admin.deleteUser(userId);
+          accountDeleted = !error;
+          if (error) console.error("[api-brand-team] member account delete failed");
+        } catch {
+          console.error("[api-brand-team] member account delete failed");
+        }
+      }
+      return Response.json({ success: true, movedCampaigns, accountDeleted });
     }
 
     if (action === "add_seats") {

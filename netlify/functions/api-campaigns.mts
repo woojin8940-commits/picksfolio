@@ -4,6 +4,7 @@ import { isRecruitClosed, todayInSeoul, withCampaignLock } from "./_shared/campa
 import { isOpenApplyMode, isRetiredRewardMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { checkCampaignRegistration } from "./_shared/brand-quota.mts";
+import { activeMembers, memberNames, ownerLabel, ownsCampaign, seatOf } from "./_shared/campaign-owner.mts";
 
 /**
  * 조회 결과에 모집 마감 여부(recruit_closed)를 붙인다.
@@ -136,11 +137,81 @@ const stripContact = (rows: any[]) =>
  * 되는 곳이라, 토큰이 없거나 남의 계정이면 조용히 false 를 돌려주고 연락처만 가린다
  * (401 로 막으면 로그인 안 한 사람의 캠페인 탐색이 통째로 멈춘다).
  */
-const viewerOwnsAccount = async (req: Request, businessUsername: string): Promise<boolean> => {
-  if (!businessUsername) return false;
-  const auth = await requireAccountOwner(req, businessUsername);
-  return auth.ok;
-};
+/**
+ * 회사 전체의 진행 예정 캠페인 요약(관리자 캠페인 메뉴의 "회사 전체" 탭).
+ *
+ * 관리자는 직원이 맡은 캠페인도 한눈에 봐야 하지만, 상세 · 연락처는 담당자의 일이다. 그래서
+ * 캠페인명 · 담당자 · 업로드 기간과, 진행이 확정된 인플루언서(인스타그램 아이디 · 업로드 예정일 ·
+ * 업로드 여부)만 보낸다. 연락처와 금액은 싣지 않는다.
+ */
+async function companyUpcoming(db: any, business: string) {
+  const company = String(business || "").trim().toLowerCase().replace(/^biz\//, "");
+  const today = todayInSeoul();
+  const rows = (await db.sql`
+    SELECT id, title, status, owner_member, start_date, end_date, upload_from, upload_to, created_at
+    FROM campaigns
+    WHERE LOWER(REPLACE(business_username, 'biz/', '')) = ${company}
+      AND deleted_at IS NULL
+      AND status IN ('active', 'inactive', 'pending_approval')
+    ORDER BY created_at DESC
+    LIMIT 200
+  `) as any[];
+  const ids = rows.map((r) => String(r.id));
+  const collabs = ids.length
+    ? ((await db.sql`
+        SELECT cc.id, cc.campaign_id, cc.creator_username, cc.status, cc.upload_url, cc.cancelled_at,
+               ct.upload_due, ch.instagram_handle
+        FROM campaign_collabs cc
+        LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+        LEFT JOIN creator_channels ch ON ch.username = LOWER(cc.creator_username)
+        WHERE cc.campaign_id = ANY(${ids})
+          AND cc.cancelled_at IS NULL AND cc.status <> 'cancelled'
+        ORDER BY cc.created_at ASC
+      `) as any[])
+    : [];
+  const byCampaign = new Map<string, any[]>();
+  for (const c of collabs) {
+    const key = String(c.campaign_id);
+    if (!byCampaign.has(key)) byCampaign.set(key, []);
+    byCampaign.get(key)!.push(c);
+  }
+  const names = await memberNames(company);
+  const day = (v: unknown) => String(v || "").split("T")[0];
+  const campaigns = rows
+    .map((r) => {
+      const list = byCampaign.get(String(r.id)) || [];
+      const influencers = list.map((c) => ({
+        username: String(c.creator_username || ""),
+        instagramHandle: String(c.instagram_handle || ""),
+        uploadDue: day(c.upload_due),
+        uploaded: Boolean(c.upload_url) || c.status === "completed",
+      }));
+      return {
+        id: String(r.id),
+        title: String(r.title || ""),
+        status: String(r.status || ""),
+        ownerMember: String(r.owner_member || ""),
+        ownerName: ownerLabel(r.owner_member, names),
+        uploadFrom: day(r.upload_from),
+        uploadTo: day(r.upload_to),
+        influencers,
+      };
+    })
+    // 끝난 캠페인(업로드 기간이 지났고 남은 업로드가 없는 것)은 빼고 진행 예정 · 진행 중만 남긴다.
+    .filter((c) => {
+      const pending = c.influencers.some((i) => !i.uploaded);
+      const periodOpen = !c.uploadTo || c.uploadTo >= today;
+      return pending || periodOpen;
+    })
+    .sort((a, b) => {
+      const next = (c: typeof a) =>
+        c.influencers.filter((i) => !i.uploaded && i.uploadDue).map((i) => i.uploadDue).sort()[0] || c.uploadFrom || "9999-12-31";
+      return next(a).localeCompare(next(b));
+    });
+  const members = await activeMembers(company).catch(() => []);
+  return { campaigns, members };
+}
+
 
 /**
  * 목록 페이지 나누기. 캠페인이 쌓이면 한 번에 다 내려보내는 것이 무의미해진다
@@ -186,7 +257,12 @@ export default async (req: Request) => {
         const owner = String((result[0] as any).business_username || "");
         const forOwner = url.searchParams.get("business") === owner;
         // 담당자 연락처는 파라미터가 아니라 토큰으로 확인된 주인에게만 남긴다.
-        const verified = forOwner && (await viewerOwnsAccount(req, owner));
+        const ownerAuth = forOwner ? await requireAccountOwner(req, owner) : null;
+        // 같은 회사여도 다른 담당자가 맡은 캠페인은 열지 않는다(캠페인 메뉴는 각자 맡은 것만).
+        if (ownerAuth?.ok && !ownsCampaign(ownerAuth, (result[0] as any).owner_member)) {
+          return Response.json({ error: "다른 담당자가 맡은 캠페인이에요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+        }
+        const verified = !!ownerAuth?.ok;
         const shaped = verified ? one[0] : stripPrivateFields(one)[0];
         // 삭제한 캠페인은 이력으로만 남는다(DELETE 주석 참고). 브랜드 자신은 이력에서
         // 열어 볼 수 있어야 하지만, 남에게는 없는 캠페인이다 — 목록에서 내렸는데
@@ -217,10 +293,20 @@ export default async (req: Request) => {
       const pattern = search ? `%${search}%` : "";
 
       let verifiedBusiness = false;
+      let businessAuth: Awaited<ReturnType<typeof requireAccountOwner>> | null = null;
       if (business) {
         const auth = await requireAccountOwner(req, business);
         if (!auth.ok) return auth.response;
         verifiedBusiness = true;
+        businessAuth = auth;
+      }
+
+      // 관리자 전용: 회사 전체의 진행 예정 캠페인 요약(업로드 예정일 · 진행 예정 인플루언서만).
+      if (business && url.searchParams.get("view") === "company_upcoming") {
+        if (!businessAuth?.ok || (businessAuth.teamRole !== "owner" && !businessAuth.isAdmin)) {
+          return Response.json({ error: "회사 전체 현황은 관리자 계정에서만 볼 수 있어요." }, { status: 403 });
+        }
+        return Response.json(await companyUpcoming(db, business), { headers: { "Cache-Control": "no-store" } });
       }
 
       // 조건별로 쿼리를 복사하지 않고, 넘어오지 않은 조건은 빈 문자열로 비활성화한다.
@@ -239,7 +325,11 @@ export default async (req: Request) => {
         ORDER BY c.created_at DESC
       `;
 
-      const campaigns = withRecruitState(result as any[]);
+      // 브랜드 관리 화면은 각자 맡은 캠페인만(관리자는 관리자 담당, 직원은 자기 담당).
+      const scoped = businessAuth?.ok
+        ? (result as any[]).filter((c) => ownsCampaign(businessAuth as any, c.owner_member))
+        : (result as any[]);
+      const campaigns = withRecruitState(scoped);
       const pageParam = url.searchParams.get("page") || "";
       const limitParam = url.searchParams.get("limit") || "";
 
@@ -332,7 +422,7 @@ export default async (req: Request) => {
           groupbuy_product_price, groupbuy_sale_price, fast_track,
           influencer_gender, influencer_ages, sns_category, follower_tiers, min_views,
           influencer_styles, exclude_keywords, target_audience,
-          contact_person, contact_phone, contact_email
+          contact_person, contact_phone, contact_email, owner_member
         )
         VALUES (
           ${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""},
@@ -355,7 +445,7 @@ export default async (req: Request) => {
           ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
           ${csv(body.influencer_styles)}, ${csv(body.exclude_keywords)},
           ${body.target_audience || ""},
-          ${person}, ${phone}, ${email}
+          ${person}, ${phone}, ${email}, ${seatOf(auth)}
         )
       `;
 
@@ -393,6 +483,26 @@ export default async (req: Request) => {
       // 수정할 수 있도록 확인한다.
       const auth = await requireAccountOwner(req, String(c.business_username || ""));
       if (!auth.ok) return auth.response;
+
+      // 담당자 변경(관리자만). 직원이 퇴사했거나 업무를 나눌 때 캠페인을 다른 사람에게 넘긴다.
+      if (updates.action === "assign_owner") {
+        if (auth.teamRole !== "owner" && !auth.isAdmin) {
+          return Response.json({ error: "담당자 변경은 회사 관리자 계정에서만 할 수 있어요." }, { status: 403 });
+        }
+        const target = String(updates.owner_member ?? "").trim().toLowerCase();
+        if (target) {
+          const members = await activeMembers(String(c.business_username || ""));
+          if (!members.some((m) => m.username === target)) {
+            return Response.json({ error: "지금 회사에 있는 직원에게만 맡길 수 있어요." }, { status: 400 });
+          }
+        }
+        await db.sql`UPDATE campaigns SET owner_member = ${target}, updated_at = NOW() WHERE id = ${id}`;
+        return Response.json({ success: true, owner_member: target });
+      }
+
+      if (!ownsCampaign(auth, c.owner_member)) {
+        return Response.json({ error: "다른 담당자가 맡은 캠페인은 고칠 수 없어요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+      }
       const productUrl = updates.product_url === undefined
         ? String(c.product_url || "")
         : optionalHttpUrl(updates.product_url);
@@ -543,7 +653,7 @@ export default async (req: Request) => {
       }
 
       return await withCampaignLock(db, String(id), async (db) => {
-      const existing = await db.sql`SELECT id, business_username, status, end_date, deleted_at FROM campaigns WHERE id = ${id}`;
+      const existing = await db.sql`SELECT id, business_username, status, end_date, deleted_at, owner_member FROM campaigns WHERE id = ${id}`;
       if (existing.length === 0) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
@@ -552,6 +662,9 @@ export default async (req: Request) => {
       // 빼면 누구나 남의 캠페인을 지울 수 있었다. 이제 토큰으로 확인한다.
       const auth = await requireAccountOwner(req, String((existing[0] as any).business_username || ""));
       if (!auth.ok) return auth.response;
+      if (!ownsCampaign(auth, (existing[0] as any).owner_member)) {
+        return Response.json({ error: "다른 담당자가 맡은 캠페인은 삭제할 수 없어요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+      }
 
       const campaign = existing[0] as any;
       if (!campaign.deleted_at && campaign.status !== 'inactive' && campaign.status !== 'admin_rejected' &&

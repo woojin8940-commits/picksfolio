@@ -15,6 +15,8 @@ import {
   parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor, contentFormatLabel,
 } from '../utils/campaignBrief';
 import Toast from './Toast';
+import { isBusinessTeamMember } from '../utils/businessTeam';
+import CompanyUpcomingCampaigns from './collab/CompanyUpcomingCampaigns';
 
 /** 커머스 캠페인에서 브랜드가 지원자를 선정했을 때 안내하는 문구. 선정 카드 · 확인 창 · 알림이 같은 문장을 쓴다. */
 const COMMERCE_SELECTED_NOTICE = '담당 픽스폴리오 매니저가 인플루언서와 조율하여 연결드릴 예정입니다';
@@ -258,6 +260,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const campaignRequest = React.useRef(0);
   const applicantRequest = React.useRef(0);
   const [showForm, setShowForm] = useState(false);
+  /**
+   * 캠페인 메뉴는 각자 맡은 캠페인만 보인다. 관리자만 "회사 전체" 탭에서 직원 담당 캠페인까지
+   * 진행 예정 요약(업로드 예정일 · 진행 인플루언서)으로 보고 담당자를 바꾼다.
+   */
+  const isCompanyAdmin = !isBusinessTeamMember();
+  const [listScope, setListScope] = useState<'mine' | 'company'>('mine');
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [applicants, setApplicants] = useState<Applicant[]>([]);
@@ -1844,6 +1852,24 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         </div>
       </header>
 
+      {isCompanyAdmin && (
+        <div className="inline-flex p-1 bg-slate-100 rounded-xl mb-4">
+          {([['mine', '내 캠페인'], ['company', '회사 전체 진행 예정']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setListScope(key)}
+              className={`px-4 py-2 rounded-lg text-sm font-black transition-all ${listScope === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isCompanyAdmin && listScope === 'company' ? (
+        <CompanyUpcomingCampaigns businessUsername={businessUsername} onNotify={notify} />
+      ) : (<>
       {/* Type Filter Tabs */}
       <div
         ref={typeRowRef}
@@ -2073,6 +2099,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           })}
         </div>
       )}
+      </>)}
       {toastEl}
     </main>
   );

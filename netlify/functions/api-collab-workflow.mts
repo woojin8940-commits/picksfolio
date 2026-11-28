@@ -13,6 +13,7 @@ import { refreshStaleChannelImages } from "./_shared/instagram-metrics.mts";
 import { isUploadedFileUrl } from "./_shared/upload-media.mts";
 import { resolveBrandAmount } from "./_shared/brand-billing.mts";
 import { brandContactOf, loadManagerContacts } from "./_shared/campaign-listup.mts";
+import { ownsCampaign } from "./_shared/campaign-owner.mts";
 import {
   canTransitionStage,
   daysUntil,
@@ -80,6 +81,9 @@ const specDate = (spec: unknown, key: string): string => {
 };
 
 type CallerContext = {
+  /** 브랜드 회사 계정이면 관리자/직원 구분. 캠페인 담당자 판단(_shared/campaign-owner)에 쓴다. */
+  teamRole?: "owner" | "member";
+  memberUsername?: string;
   /**
    * 자원을 찾을 때 쓰는 아이디. **서비스 계정이 있으면 항상 그 아이디**이고,
    * 담당자 자격만으로 들어온 경우(운영 콘솔)에만 담당자 아이디가 들어온다.
@@ -106,6 +110,8 @@ async function resolveCaller(req: Request): Promise<CallerContext | { error: Res
     username: account?.username || manager?.username || "",
     isManager: !!manager,
     managerUsername: manager?.username || "",
+    ...(account?.teamRole ? { teamRole: account.teamRole } : {}),
+    ...(account?.memberUsername ? { memberUsername: account.memberUsername } : {}),
   };
 }
 
@@ -707,12 +713,15 @@ export default async (req: Request, context: Context) => {
         // 있거나 다른 표기로 들어간 건이 있어도, 그 캠페인을 등록한 브랜드라면
         // 자기 진행사항에서 봐야 한다.
         rows = (await db.sql`
-          SELECT cc.* FROM campaign_collabs cc
+          SELECT cc.*, COALESCE(c.owner_member, '') AS campaign_owner_member FROM campaign_collabs cc
           LEFT JOIN campaigns c ON c.id = cc.campaign_id
           WHERE LOWER(REPLACE(COALESCE(cc.business_username, ''), 'biz/', '')) = ${target}
              OR LOWER(REPLACE(COALESCE(c.business_username, ''), 'biz/', '')) = ${target}
           ORDER BY cc.created_at DESC
         `) as any[];
+        // 회사 계정은 각자 맡은 캠페인의 협업만 본다(관리자 = 관리자 담당, 직원 = 자기 담당).
+        // 캠페인 없이 생긴 협업(비즈니스 제안 등)은 회사가 함께 본다.
+        if (!caller.isManager) rows = rows.filter((r) => !r.campaign_id || ownsCampaign(caller, r.campaign_owner_member));
       } else {
         const target = caller.isManager && requested ? requested : caller.username;
         if (!caller.isManager && requested && requested !== caller.username) {
@@ -1191,6 +1200,16 @@ export default async (req: Request, context: Context) => {
     roleWith(collab.business_username || collab.campaign_owner_username) ||
     roleWith(collab.campaign_owner_username);
   if (!role) return jsonError("이 협업에 접근할 수 없습니다.", 403);
+
+  // 같은 회사라도 이 캠페인 담당자가 아니면 협업(연락처 · 진행 단계)을 열지 않는다.
+  if (role === "brand" && caller.teamRole && collab.campaign_id) {
+    const ownerRows = (await db.sql`
+      SELECT COALESCE(owner_member, '') AS owner_member FROM campaigns WHERE id = ${collab.campaign_id || ""}
+    `) as any[];
+    if (!ownsCampaign(caller, ownerRows[0]?.owner_member ?? "")) {
+      return Response.json({ error: "다른 담당자가 맡은 캠페인의 협업이에요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });
+    }
+  }
 
   // ------------------------------------------------------------------ 상세
   if (req.method === "GET") {
