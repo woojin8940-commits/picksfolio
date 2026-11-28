@@ -48,7 +48,8 @@ export async function memberNames(company: string): Promise<Map<string, string>>
       const key = clean(r.member_username);
       const base = String(r.display_name || "").trim() || key;
       const dept = String(r.department || "").trim();
-      const name = dept ? `${base} (${dept})` : base;
+      // 회사 안에서 알아보기 쉽게 "부서 / 이름"(예: 인플루언서 마케터 1팀 / 신우진).
+      const name = dept ? `${dept} / ${base}` : base;
       map.set(key, r.removed_at ? `${name} · 퇴사` : name);
     }
   } catch (e) {

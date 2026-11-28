@@ -372,12 +372,13 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                 <li key={m.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-3">
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-800">
-                      {m.displayName || m.memberUsername}
+                      {m.department
+                        ? `${m.department} / ${m.displayName || m.memberUsername}`
+                        : m.displayName || m.memberUsername}
                       <span className="text-slate-400 font-medium ml-1.5">@{m.memberUsername}</span>
                       {isSelf && <span className="ml-1.5 text-[11px] font-black text-blue-500">나</span>}
                     </p>
                     <p className="text-[11px] text-slate-500 font-medium">
-                      {m.department ? `${m.department} · ` : ''}
                       {m.isAdmin ? <span className="font-black text-violet-600">관리자</span> : '직원'}
                       {!m.seated && <span className="ml-1.5 font-bold text-red-500">좌석 부족 — 로그인할 수 없어요</span>}
                     </p>
