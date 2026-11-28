@@ -708,6 +708,8 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                 {briefTile('희망 연령', open.influencerAges || '')}
                 {briefTile('희망 스타일', open.influencerStyles || '')}
                 {briefTile('제외 키워드', open.excludeKeywords || '')}
+                {/* 브랜드가 직접 고른 인플루언서. 담당자가 연락해 리스트업에 올린다. */}
+                {briefTile('브랜드 요청 인플루언서', open.wantedInfluencers || '')}
                 {/* 규모별 인원 배분. 브랜드가 직접 정하는 방식(광고비 지급형)에만 있고,
                     담당자가 후보를 몇 명씩 찾아야 하는지가 여기서 나온다. */}
                 {briefTile('희망 인플루언서', tierCountsLabel(open.tierCounts))}

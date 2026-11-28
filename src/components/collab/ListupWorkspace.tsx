@@ -1159,6 +1159,21 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                             브랜드 찜
                           </span>
                         )}
+                        {/* 브랜드가 직접 요청한 인플루언서. 캠페인당 2명까지 선정 한도에서 빠진다.
+                            확정 전에는 눌러서 켜고 끌 수 있다(요청 목록과 아이디가 맞으면 자동으로 켜진다). */}
+                        <button
+                          type="button"
+                          disabled={busy || !!c.contactSharedAt}
+                          onClick={() => act(c.id, 'brand_request', { requested: !c.brandRequested })}
+                          title="브랜드가 직접 요청한 인플루언서는 캠페인당 2명까지 선정 한도에서 빠집니다"
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-black border disabled:cursor-default ${
+                            c.brandRequested
+                              ? 'bg-violet-50 text-violet-600 border-violet-200'
+                              : 'bg-white text-slate-400 border-slate-200 hover:text-violet-600'
+                          }`}
+                        >
+                          {c.brandRequested ? '브랜드 요청' : '+ 브랜드 요청'}
+                        </button>
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${decision.cls}`}>
                           {decision.label}
                         </span>

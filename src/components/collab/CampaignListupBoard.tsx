@@ -201,7 +201,8 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
   // 이미 진행이 확정된(수락 · 연락처 공개) 후보는 한도 계산에서 뺀다.
   const overQuota = useMemo(() => {
     const done = new Set(candidates.filter((c) => c.outreachStatus === 'accepted' || c.contactSharedAt).map((c) => String(c.id)));
-    return selectionOverQuota(brandQuota, Array.from(selected).filter((id) => !done.has(id)));
+    const requested = new Set(candidates.filter((c) => c.brandRequested).map((c) => String(c.id)));
+    return selectionOverQuota(brandQuota, Array.from(selected).filter((id) => !done.has(id)), requested);
   }, [brandQuota, selected, candidates]);
 
   const remaining = due ? due - now : 0;
@@ -309,6 +310,11 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                         <span className="text-sm font-black text-slate-900 truncate">
                           {snap.instagramHandle ? `@${snap.instagramHandle}` : '비공개'}
                         </span>
+                        {c.brandRequested && (
+                          <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 text-[10px] font-black whitespace-nowrap">
+                            요청하신 인플루언서
+                          </span>
+                        )}
                       </div>
                       {line && (
                         <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">{line}</p>

@@ -10,8 +10,10 @@ export type BrandQuota = {
   cycleEnd: string;
   /** 다른 캠페인에서 골라 두고 아직 진행 확정 전인 인원. */
   pendingPicksElsewhere?: number;
-  /** 이 캠페인에서 이미 선정 한도에 잡힌 후보 id. */
+  /** 이 캠페인에서 이미 선정 한도에 잡힌 후보 id(브랜드 요청 무료로 처리된 후보 포함). */
   countedIds?: string[];
+  /** 이 캠페인에서 남은 브랜드 요청 무료 자리(캠페인당 2명). */
+  freeBrandRemaining?: number;
 };
 
 /**
@@ -19,11 +21,22 @@ export type BrandQuota = {
  * 고른 사람이 모두 수락하면 한도를 넘는 인원은 확정할 수 없다 — 그걸 고르는 자리에서 미리 알린다.
  * 이미 한도에 잡힌 후보는 다시 세지 않는다.
  */
-export const selectionOverQuota = (quota: BrandQuota | null | undefined, selectedIds: Iterable<string>) => {
+export const selectionOverQuota = (
+  quota: BrandQuota | null | undefined,
+  selectedIds: Iterable<string>,
+  brandRequestedIds: Set<string> = new Set(),
+) => {
   if (!quota || !quota.enforced || !quota.tier || quota.pastDue) return null;
   const counted = new Set(quota.countedIds || []);
   let fresh = 0;
-  for (const id of selectedIds) if (!counted.has(id)) fresh += 1;
+  let requested = 0;
+  for (const id of selectedIds) {
+    if (counted.has(id)) continue;
+    if (brandRequestedIds.has(id)) requested += 1;
+    else fresh += 1;
+  }
+  // 브랜드가 요청한 후보는 캠페인당 2명까지 한도를 쓰지 않는다. 남은 무료 자리를 넘는 만큼만 센다.
+  fresh += Math.max(0, requested - Math.max(0, Number(quota.freeBrandRemaining || 0)));
   const elsewhere = Math.max(0, Number(quota.pendingPicksElsewhere || 0));
   const over = fresh + elsewhere - quota.remaining.selected;
   return over > 0 ? { over, fresh, elsewhere, remaining: quota.remaining.selected } : null;
@@ -55,7 +68,12 @@ const BrandQuotaBanner: React.FC<{ quota?: BrandQuota | null; viewer: 'manager' 
   }
   return (
     <div className={`rounded-xl border px-3.5 py-2.5 text-[11px] font-bold flex items-center justify-between gap-2 flex-wrap ${tone}`}>
-      <span>{text}</span>
+      <span>
+        <span>{text}</span>
+        {quota.tier && !quota.pastDue && typeof quota.freeBrandRemaining === 'number' && (
+          <span className="ml-1.5 text-violet-600">{`· 이 캠페인 브랜드 요청 무료 ${quota.freeBrandRemaining}/2명 남음`}</span>
+        )}
+      </span>
       {viewer === 'brand' && onOpenMembership && (blocked || quota.remaining.campaigns <= 0) && (
         <button type="button" onClick={onOpenMembership} className="px-2.5 py-1 rounded-lg bg-white border border-current text-[11px] font-black">
           멤버십 보기

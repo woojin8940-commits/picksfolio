@@ -1,5 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
-import { brandQuotaStatus, countedSelectedIds, pendingPicksElsewhere, checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
+import { brandQuotaStatus, countedSelectedIds, freeBrandRemaining, pendingPicksElsewhere, checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
 import type { Config, Context } from "@netlify/functions";
 import {
   forbiddenResponse,
@@ -55,6 +55,22 @@ import {
  * 캠페인 한 건. 브리프 컬럼까지 함께 읽는다 — 제안 초안이 브리프에서 출발해야
  * 담당자가 같은 값을 두 번 적지 않는다.
  */
+/**
+ * 브랜드가 적은 "함께하고 싶은 인플루언서"에서 아이디를 뽑는다. @아이디, 인스타그램 프로필 링크,
+ * 쉼표 · 줄바꿈 · 공백으로 나눈 아이디를 모두 받는다.
+ */
+function wantedHandles(raw: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const token of String(raw || "").split(/[\s,，、;]+/)) {
+    const t = token.trim();
+    if (!t) continue;
+    const link = t.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+    const handle = (link ? link[1] : t).replace(/^@/, "").replace(/[/?#].*$/, "").toLowerCase();
+    if (/^[a-z0-9._]{1,30}$/.test(handle)) out.add(handle);
+  }
+  return out;
+}
+
 async function loadCampaign(db: any, campaignId: string) {
   const rows = await db.sql`
     SELECT id, title, brand_name, business_username, manager_username, type,
@@ -72,7 +88,7 @@ async function loadCampaign(db: any, campaignId: string) {
            reward_mode, tier_counts, package_tier,
            ad_objective, influencer_gender, influencer_ages,
            sns_category, follower_tiers, min_views, influencer_styles,
-           exclude_keywords, target_audience,
+           exclude_keywords, target_audience, wanted_influencers,
            -- 명단 확정 기한. 브랜드 화면의 남은 시간 표시가 이 값을 읽는다.
            listup_confirm_due, listup_published_at
     FROM campaigns WHERE id = ${campaignId}
@@ -116,6 +132,7 @@ const shapeCampaign = (c: any) => ({
   influencerStyles: c.influencer_styles || "",
   excludeKeywords: c.exclude_keywords || "",
   targetAudience: c.target_audience || "",
+  wantedInfluencers: c.wanted_influencers || "",
   listupConfirmDue: c.listup_confirm_due || null,
   listupPublishedAt: c.listup_published_at || null,
 });
@@ -442,6 +459,8 @@ export default async (req: Request, context: Context) => {
             },
             used: q.used,
             cycleEnd: q.cycle.end,
+            // 이 캠페인에서 남은 브랜드 요청 무료 자리(캠페인당 2명).
+            freeBrandRemaining: await freeBrandRemaining(norm(campaign.business_username), String(campaign.id)).catch(() => 0),
             // 다른 캠페인에서 골라 두고 아직 확정 전인 인원. 브랜드 화면이 지금 고르는 인원과 더해
             // 남은 선정 한도를 넘는지 미리 알린다.
             pendingPicksElsewhere: await pendingPicksElsewhere(norm(campaign.business_username), String(campaign.id)).catch(() => 0),
@@ -551,6 +570,7 @@ export default async (req: Request, context: Context) => {
       `;
       const applicantSet = new Set((applicants as any[]).map((a) => norm(a.applicant_username)));
 
+      const wanted = wantedHandles(campaign.wanted_influencers);
       let added = 0;
       for (const username of usernames) {
         const snapshot = await buildSnapshot(db, username);
@@ -587,17 +607,22 @@ export default async (req: Request, context: Context) => {
         };
         const payout = { ...basePayout, ...unified };
         const offerDraft = mergePayoutIntoOffer(draftOffer, payout);
+        // 브랜드가 등록 때 적은 "함께하고 싶은 인플루언서"와 아이디가 맞으면 브랜드 요청으로 표시한다.
+        const brandRequested =
+          body.brandRequested === true ||
+          wanted.has(username) ||
+          wanted.has(norm(String((snapshot as any).instagramHandle || "")).replace(/^@/, ""));
         const res = await db.sql`
           INSERT INTO campaign_listups (
             id, campaign_id, influencer_username, source, snapshot, snapshot_at,
             manager_note, listed_by,
             quoted_fee, quoted_second_use_fee, guaranteed_views,
-            offer
+            offer, brand_requested
           ) VALUES (
             ${newId("lst")}, ${campaignId}, ${username}, ${source},
             ${JSON.stringify(snapshot)}, NOW(), ${note}, ${manager.managerUsername},
             ${unified.fee}, ${unified.secondUseFee}, ${guaranteedViews},
-            ${JSON.stringify(offerDraft)}
+            ${JSON.stringify(offerDraft)}, ${brandRequested}
           )
           ON CONFLICT (campaign_id, influencer_username) DO NOTHING
           RETURNING id
@@ -722,6 +747,9 @@ export default async (req: Request, context: Context) => {
               { status: 403 },
             )
           : manager.response;
+
+      // 브랜드가 직접 요청한 후보는 캠페인당 2명까지 선정 한도에서 빼 준다(_shared/brand-quota).
+      const brandFreeOpts = { campaignId: String(listup.campaign_id || ""), brandRequested: Boolean(listup.brand_requested) };
 
       const reload = async (viewer: "manager" | "brand" | "influencer") => {
         const next = await db.sql`SELECT * FROM campaign_listups WHERE id = ${id}`;
@@ -935,7 +963,7 @@ export default async (req: Request, context: Context) => {
         }
         // 브랜드 멤버십 한도: 진행 확정(연락처 공개) = 선정 인플루언서 1명.
         if (!listup.contact_shared_at) {
-          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id);
+          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id, brandFreeOpts);
           if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
         }
 
@@ -1024,7 +1052,7 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE id = ${id}
         `;
-        await recordSelectedQuota(String(campaign?.business_username || ""), id);
+        await recordSelectedQuota(String(campaign?.business_username || ""), id, brandFreeOpts);
 
         return Response.json({
           success: true,
@@ -1087,7 +1115,7 @@ export default async (req: Request, context: Context) => {
         }
 
         if (accept && isManager && !listup.contact_shared_at) {
-          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id);
+          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id, brandFreeOpts);
           if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
         }
 
@@ -1194,7 +1222,7 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE id = ${id}
         `;
-        if (isManager) await recordSelectedQuota(String(campaign?.business_username || ""), id);
+        if (isManager) await recordSelectedQuota(String(campaign?.business_username || ""), id, brandFreeOpts);
 
         return Response.json({
           success: true,
@@ -1213,7 +1241,7 @@ export default async (req: Request, context: Context) => {
           return Response.json({ error: "진행이 확정된 후보만 연락처를 공개할 수 있습니다." }, { status: 409 });
         }
         if (!listup.contact_shared_at) {
-          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id);
+          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id, brandFreeOpts);
           if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
         }
         await db.sql`
@@ -1223,11 +1251,26 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE id = ${id} AND outreach_status = 'accepted'
         `;
-        await recordSelectedQuota(String(campaign?.business_username || ""), id);
+        await recordSelectedQuota(String(campaign?.business_username || ""), id, brandFreeOpts);
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
       // --- 명단에서 빼기 ---------------------------------------------------
+      // --- 브랜드 요청 표시 (담당자) ------------------------------------------
+      // 브랜드가 "함께하고 싶은 인플루언서"로 요청한 사람인지. 캠페인당 2명까지 선정 한도에서 빠진다.
+      // 이미 진행이 확정돼 한도에 반영된 후보는 바꾸지 않는다(이미 센 것을 되돌리지 않는다).
+      if (action === "brand_request") {
+        if (!isManager) return managerRequired();
+        if (listup.contact_shared_at) {
+          return Response.json({ error: "진행이 확정된 후보는 바꿀 수 없습니다." }, { status: 409 });
+        }
+        await db.sql`
+          UPDATE campaign_listups SET brand_requested = ${body.requested === true}, updated_at = NOW()
+          WHERE id = ${id}
+        `;
+        return Response.json({ success: true, listup: await reload("manager") });
+      }
+
       if (action === "remove") {
         if (!isManager) return managerRequired();
         if (listup.collab_id || listup.outreach_status === "accepted") {
