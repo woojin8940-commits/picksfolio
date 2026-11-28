@@ -55,7 +55,7 @@ import {
  *       ?from=YYYY-MM-DD&to=YYYY-MM-DD   캠페인 기간이 겹치는 것만(없으면 전체)
  *       &status=open|closed  &category=  &q=캠페인명  &creator=인플루언서 아이디 · 핸들
  *       &campaignId=  (캠페인 하나만)
- *       &sort=recent|views|reach|comments|shares|cpv  &page=1&pageSize=20
+ *       &sort=recent|overall|views|reach|comments|shares|cpv  &page=1&pageSize=20
  *   GET /api/business/campaign-history/:username?source=affiliate   (같은 조건을 받는다, sort=sales 추가)
  *       어필리에이트 이력 — 상품 하나가 캠페인 한 건, 선정된 인플루언서 한 명이 게시물 한 건이다.
  *       게시물 주소는 인플루언서가 MY 어필리에이트에 올린 콘텐츠 링크, 코드는 파트너십 코드다.
@@ -207,8 +207,8 @@ const mediaIndexOf = (row: any): Record<string, PostMetric> => {
 // 실리므로). 그래서 조건으로 먼저 추리고, 정렬한 뒤 한 쪽(기본 20건)만 보낸다. 위쪽 합계는
 // 페이지가 아니라 "조건에 맞는 전체" 기준이다.
 
-export type HistorySort = "recent" | "views" | "reach" | "comments" | "shares" | "cpv" | "sales";
-const SORTS: HistorySort[] = ["recent", "views", "reach", "comments", "shares", "cpv", "sales"];
+export type HistorySort = "recent" | "overall" | "views" | "reach" | "comments" | "shares" | "cpv" | "sales";
+const SORTS: HistorySort[] = ["recent", "overall", "views", "reach", "comments", "shares", "cpv", "sales"];
 const DEFAULT_PAGE_SIZE = 20;
 
 export interface HistoryQuery {
@@ -283,6 +283,7 @@ const sortValueOf = (c: any, sort: HistorySort): number => {
     case "shares": return c.shares || 0;
     case "cpv": return c.cpv || 0;
     case "sales": return c.sales || 0;
+    case "overall": return c.score || 0;
     default: return 0;
   }
 };
@@ -350,6 +351,131 @@ const filterBuilt = (list: any[], query: HistoryQuery) =>
     return true;
   });
 
+// ── 종합 점수 ──────────────────────────────────────────────────────────────
+// "결국 누가 제일 잘했나"를 한 숫자로 본다. 조회 · 도달 · 저장 · 댓글 · 공유 · CPV(낮을수록
+// 좋음)를 같은 조건 안의 다른 게시물(또는 캠페인)과 비교해 백분위(0~1)로 바꾸고, 값이 있는
+// 지표만 평균 내 100점 만점으로 만든다. 단위가 다른 숫자(조회 10만 · 댓글 30)를 그대로 더하면
+// 조회수만 남으므로 순위로 바꿔 더한다. 캠페인은 인원이 많을수록 합계가 커지므로 게시물당
+// 평균으로 비교한다. 값이 하나도 없으면 점수도 없다(null).
+
+type ScoreMetrics = Partial<Record<"views" | "reach" | "saved" | "comments" | "shares" | "cpv" | "sales", number | null>>;
+const LOWER_IS_BETTER = new Set(["cpv"]);
+
+const percentileOf = (values: number[], v: number): number => {
+  if (values.length <= 1) return 1;
+  let below = 0, equal = 0;
+  for (const x of values) { if (x < v) below++; else if (x === v) equal++; }
+  // 같은 값은 가운데 순위를 준다.
+  return (below + (equal - 1) / 2) / (values.length - 1);
+};
+
+/** 항목마다 종합 점수(0~100, 정수)를 매긴다. 지표가 하나도 없으면 null. */
+export const compositeScores = (rows: ScoreMetrics[]): (number | null)[] => {
+  const keys = new Set<string>();
+  rows.forEach((r) => Object.keys(r).forEach((k) => keys.add(k)));
+  const pools = new Map<string, number[]>();
+  for (const k of keys) {
+    pools.set(k, rows.map((r) => (r as any)[k]).filter((v): v is number => typeof v === "number" && Number.isFinite(v)));
+  }
+  return rows.map((r) => {
+    const parts: number[] = [];
+    for (const k of keys) {
+      const v = (r as any)[k];
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      const pool = pools.get(k)!;
+      const pct = percentileOf(pool, v);
+      parts.push(LOWER_IS_BETTER.has(k) ? 1 - pct : pct);
+    }
+    if (!parts.length) return null;
+    return Math.round((parts.reduce((a, b) => a + b, 0) / parts.length) * 100);
+  });
+};
+
+/** 게시물 하나의 지표. 집계가 없으면 null 로 두어 점수 계산에서 빠지게 한다. */
+const postScoreMetrics = (p: any, affiliate: boolean): ScoreMetrics => {
+  if (p.cancelled) return {};
+  const m = p.metrics;
+  const views = m?.from === "reels" && m.views > 0 ? m.views : null;
+  const out: ScoreMetrics = {
+    views,
+    comments: m ? m.comments : null,
+    shares: m && m.shares !== null && m.shares !== undefined ? m.shares : null,
+  };
+  if (affiliate) {
+    out.sales = p.sales > 0 ? p.sales : null;
+  } else {
+    out.reach = p.insights?.reach ?? null;
+    out.saved = p.insights?.saved ?? null;
+    out.cpv = views && p.fee > 0 ? Math.round(p.fee / views) : null;
+  }
+  return out;
+};
+
+/** 캠페인의 게시물당 평균 지표. */
+const campaignScoreMetrics = (c: any, affiliate: boolean): ScoreMetrics => {
+  const avg = (sum: number, n: number) => (n > 0 ? sum / n : null);
+  const out: ScoreMetrics = {
+    views: avg(c.views, c.matched),
+    comments: avg(c.comments, c.matched),
+    shares: avg(c.shares, c.sharesMatched),
+  };
+  if (affiliate) {
+    out.sales = c.collabs > 0 && c.sales > 0 ? c.sales / c.collabs : null;
+  } else {
+    out.reach = avg(c.reach, c.insightsMatched);
+    out.saved = avg(c.saved, c.insightsMatched);
+    out.cpv = c.cpv > 0 ? c.cpv : null;
+  }
+  return out;
+};
+
+/**
+ * 조건에 맞는 캠페인 전체에 점수를 매긴다(캠페인 · 게시물). 그리고 인플루언서별 평균 점수로
+ * 종합 순위를 만든다 — "평균적으로 누가 제일 좋았나".
+ */
+const applyScores = (campaigns: any[], affiliate: boolean) => {
+  const cScores = compositeScores(campaigns.map((c) => campaignScoreMetrics(c, affiliate)));
+  campaigns.forEach((c, i) => { c.score = cScores[i]; });
+
+  const allPosts = campaigns.flatMap((c) => (c.posts || []).map((p: any) => ({ p, c })));
+  const pScores = compositeScores(allPosts.map(({ p }) => postScoreMetrics(p, affiliate)));
+  allPosts.forEach(({ p }, i) => { p.score = pScores[i]; });
+
+  const byCreator = new Map<string, any>();
+  for (const { p, c } of allPosts) {
+    if (p.score === null || p.score === undefined || p.cancelled) continue;
+    const key = p.creatorUsername;
+    const row = byCreator.get(key) || {
+      creatorUsername: key, instagramHandle: p.instagramHandle || "", posts: 0, campaigns: new Set<string>(),
+      scoreSum: 0, views: 0, viewsN: 0, reach: 0, reachN: 0, fee: 0, feeViews: 0, sales: 0,
+    };
+    row.posts++;
+    row.campaigns.add(String(c.id));
+    row.scoreSum += p.score;
+    if (p.metrics?.from === "reels" && p.metrics.views > 0) {
+      row.views += p.metrics.views; row.viewsN++;
+      if (p.fee > 0) { row.fee += p.fee; row.feeViews += p.metrics.views; }
+    }
+    if (typeof p.insights?.reach === "number") { row.reach += p.insights.reach; row.reachN++; }
+    row.sales += p.sales || 0;
+    byCreator.set(key, row);
+  }
+  return Array.from(byCreator.values())
+    .map((r) => ({
+      creatorUsername: r.creatorUsername,
+      instagramHandle: r.instagramHandle,
+      posts: r.posts,
+      campaigns: r.campaigns.size,
+      score: Math.round(r.scoreSum / r.posts),
+      avgViews: r.viewsN ? Math.round(r.views / r.viewsN) : 0,
+      avgReach: r.reachN ? Math.round(r.reach / r.reachN) : 0,
+      cpv: r.feeViews > 0 ? Math.round(r.fee / r.feeViews) : 0,
+      sales: r.sales,
+    }))
+    .sort((a, b) => b.score - a.score || b.posts - a.posts || b.avgViews - a.avgViews)
+    .slice(0, 10);
+};
+
 export default async (req: Request, context: Context) => {
   const raw = context.params.username || "";
   const username = norm(raw).replace(/^biz\//, "");
@@ -402,11 +528,14 @@ export default async (req: Request, context: Context) => {
   if (searchParams.get("source") === "affiliate") {
     try {
       const all = await affiliateHistory(db, username);
-      const filtered = sortHistory(filterBuilt(all.campaigns, query), query.sort);
+      const matchedList = filterBuilt(all.campaigns, query);
+      const creatorRanking = applyScores(matchedList, true);
+      const filtered = sortHistory(matchedList, query.sort);
       const { items, pagination } = pageOf(filtered, query);
       return Response.json({
         totals: sumHistory(filtered, true),
         accountTotals: { campaigns: all.totals.campaigns, views: all.totals.views },
+        creatorRanking,
         campaigns: items,
         categories: all.categories,
         campaignOptions: all.campaigns.map((c: any) => ({ id: String(c.id), title: String(c.title || ""), startDate: c.startDate || null })),
@@ -682,6 +811,8 @@ export default async (req: Request, context: Context) => {
       };
     });
 
+    // 점수는 조건에 맞는 전체에서 매긴다 — 쪽마다 기준이 달라지면 안 된다.
+    const creatorRanking = applyScores(campaigns, false);
     const sorted = sortHistory(campaigns, query.sort);
     const { items, pagination } = pageOf(sorted, query);
     // 팔로워 분포는 이 쪽에 보이는 게시물의 인플루언서 것만 보낸다.
@@ -695,6 +826,8 @@ export default async (req: Request, context: Context) => {
       totals: sumHistory(campaigns, false),
       /** 조건과 무관한 계정 전체 기준. */
       accountTotals,
+      /** 인플루언서 종합 순위(게시물 종합 점수 평균, 상위 10명). */
+      creatorRanking,
       campaigns: items,
       categories: Array.from(categories).sort(),
       /** 캠페인별로 볼 때 고르는 목록(최신순, 조건과 무관). */
