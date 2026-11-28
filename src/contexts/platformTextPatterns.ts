@@ -2440,4 +2440,28 @@ export const platformTextPatterns = [
     "source": "^@(.+?) 수락으로 처리하면 협업이 바로 생성되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다\\(되돌릴 수 없음\\)\\. 인플루언서에게 연락처 공개 동의를 받았나요\\?$",
     "replacement": "Recording @$1 as accepted creates the collaboration right away and shares the influencer's name and contact with the brand (cannot be undone). Have you received the influencer's consent?"
   },
+  {
+    "source": "^지금 조건 기준 · 상위 (\\d+)명$",
+    "replacement": "Current filters · top $1"
+  },
+  {
+    "source": "^종합 (\\d+)점$",
+    "replacement": "Overall $1"
+  },
+  {
+    "source": "^(\\d+)점$",
+    "replacement": "$1 pts"
+  },
+  {
+    "source": "^· 평균 조회 (.+)$",
+    "replacement": "· avg views $1"
+  },
+  {
+    "source": "^· 평균 도달 (.+)$",
+    "replacement": "· avg reach $1"
+  },
+  {
+    "source": "^· 판매 (.+)$",
+    "replacement": "· sales $1"
+  },
 ] as const;

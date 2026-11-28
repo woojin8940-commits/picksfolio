@@ -88,6 +88,21 @@ type HistoryPost = {
   /** 어필리에이트: 이 인플루언서 전용 링크의 판매액 · 주문 수(취소 · 환불 제외). */
   sales?: number;
   orders?: number;
+  /** 종합 점수(0~100). 같은 조건의 게시물끼리 비교한 백분위 평균. 집계가 없으면 null. */
+  score?: number | null;
+};
+
+/** 인플루언서 종합 순위 한 줄(조건에 맞는 게시물의 종합 점수 평균). */
+type CreatorRank = {
+  creatorUsername: string;
+  instagramHandle: string;
+  posts: number;
+  campaigns: number;
+  score: number;
+  avgViews: number;
+  avgReach: number;
+  cpv: number;
+  sales: number;
 };
 
 type HistoryCampaign = {
@@ -126,6 +141,8 @@ type HistoryCampaign = {
   orders?: number;
   /** 어필리에이트: 상품의 지금 판매 상태(on_sale · paused · ended · deleted …). */
   saleState?: string;
+  /** 종합 점수(0~100). 게시물당 평균 지표를 다른 캠페인과 비교한 백분위 평균. */
+  score?: number | null;
   posts: HistoryPost[];
 };
 
@@ -293,10 +310,11 @@ type StatusFilter = '' | 'open' | 'closed';
  * 좋아요를 댓글과 묶어 보던 축은 댓글과 공유로 나눴다. 좋아요는 스쳐 가며 누르는
  * 반응이라 콘텐츠가 대화를 만들었는지(댓글), 남에게 퍼졌는지(공유)를 가려 주지 못한다.
  */
-type SortKey = 'recent' | 'views' | 'reach' | 'comments' | 'shares' | 'cpv' | 'sales';
+type SortKey = 'recent' | 'overall' | 'views' | 'reach' | 'comments' | 'shares' | 'cpv' | 'sales';
 
 const SORT_TABS: [SortKey, string][] = [
   ['recent', '최신순'],
+  ['overall', '종합순'],
   ['views', '조회수순'],
   ['reach', '도달순'],
   ['comments', '댓글순'],
@@ -366,6 +384,7 @@ const pageNumbers = (page: number, count: number): (number | '…')[] => {
 /** 어필리에이트 이력은 광고비가 없어 CPV 대신 판매액순으로 본다. */
 const AFFILIATE_SORT_TABS: [SortKey, string][] = [
   ['recent', '최신순'],
+  ['overall', '종합순'],
   ['sales', '판매액순'],
   ['views', '조회수순'],
   ['comments', '댓글순'],
@@ -423,6 +442,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   );
   const [page, setPage] = useState(1);
   const [categories, setCategories] = useState<string[]>(cached?.categories || []);
+  const [creatorRanking, setCreatorRanking] = useState<CreatorRank[]>(cached?.creatorRanking || []);
   const [accountTotals, setAccountTotals] = useState<{ campaigns: number; views: number }>(
     cached?.accountTotals || { campaigns: 0, views: 0 },
   );
@@ -482,6 +502,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       setTotals({ ...EMPTY_TOTALS, ...(data.totals || {}) });
       setAccountTotals(data.accountTotals || { campaigns: 0, views: 0 });
       setCategories(Array.isArray(data.categories) ? data.categories : []);
+      setCreatorRanking(Array.isArray(data.creatorRanking) ? data.creatorRanking : []);
       setCampaignOptions(Array.isArray(data.campaignOptions) ? data.campaignOptions : []);
       // 캠페인 하나를 골랐으면 그 캠페인을 바로 펼쳐 인플루언서별 성과를 보여 준다.
       if (campaignId && Array.isArray(data.campaigns) && data.campaigns.length === 1) {
@@ -545,6 +566,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const metricCells = (c: HistoryCampaign): { key: string; label: string; value: string }[] => {
     const n = (v: number, ok: boolean, unit = '') => (ok && v > 0 ? `${formatNumberWithCommas(v)}${unit}` : ok ? `0${unit}` : '—');
     const cells = [
+      { key: 'overall', label: '종합', value: typeof c.score === 'number' ? `${c.score}점` : '—' },
       { key: 'views', label: '조회', value: c.views > 0 ? formatNumberWithCommas(c.views) : '—' },
       ...(!affiliate
         ? [
@@ -809,6 +831,43 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         </div>
       </div>
 
+      {/* 인플루언서 종합 순위 — 지표를 하나씩 고르지 않고 "평균적으로 누가 제일 좋았나"를 본다. */}
+      {creatorRanking.length > 0 && (
+        <section className="mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <h3 className="text-[13px] font-black text-slate-900">인플루언서 종합 순위</h3>
+            <span className="text-[10px] font-bold text-slate-400">{`지금 조건 기준 · 상위 ${creatorRanking.length}명`}</span>
+          </div>
+          <ol className="divide-y divide-slate-100">
+            {creatorRanking.map((r, i) => (
+              <li key={r.creatorUsername} className="flex items-center gap-3 py-2">
+                <span className={`w-6 text-center text-[12px] font-black flex-shrink-0 ${i < 3 ? 'text-blue-600' : 'text-slate-400'}`}>{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-black text-slate-900 truncate">
+                    @{r.instagramHandle || r.creatorUsername}
+                  </p>
+                  <p className="text-[10px] font-bold text-slate-400 truncate">
+                    {`게시물 ${r.posts}건 · 캠페인 ${r.campaigns}개`}
+                    {r.avgViews > 0 ? ` · 평균 조회 ${formatNumberWithCommas(r.avgViews)}` : ''}
+                    {!affiliate && r.avgReach > 0 ? ` · 평균 도달 ${formatNumberWithCommas(r.avgReach)}` : ''}
+                    {!affiliate && r.cpv > 0 ? ` · CPV ${formatNumberWithCommas(r.cpv)}원` : ''}
+                    {affiliate && r.sales > 0 ? ` · 판매 ${formatKoreanWon(r.sales)}` : ''}
+                  </p>
+                </div>
+                <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-600 text-[12px] font-black flex-shrink-0">
+                  {`${r.score}점`}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-[10px] text-slate-400 font-medium mt-2 leading-relaxed">
+            {affiliate
+              ? '종합 점수는 조회 · 댓글 · 공유 · 판매액을 같은 조건의 다른 게시물과 비교한 순위를 평균 낸 100점 만점 점수예요. 집계된 지표만 반영합니다.'
+              : '종합 점수는 조회 · 도달 · 저장 · 댓글 · 공유 · CPV(낮을수록 좋음)를 같은 조건의 다른 게시물과 비교한 순위를 평균 낸 100점 만점 점수예요. 집계된 지표만 반영합니다.'}
+          </p>
+        </section>
+      )}
+
       {/* 정렬 · 건수 */}
       <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <p className="text-[12px] font-black text-slate-700">
@@ -915,7 +974,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                     </div>
 
                     {/* 넓은 화면: 지표를 열로 맞춰 캠페인끼리 바로 비교한다. 지금 정렬 기준 열을 강조한다. */}
-                    <div className={`hidden md:grid ${affiliate ? 'grid-cols-5 w-[400px]' : 'grid-cols-6 w-[480px]'} gap-2 flex-shrink-0`}>
+                    <div className={`hidden md:grid ${affiliate ? 'grid-cols-6 w-[460px]' : 'grid-cols-7 w-[540px]'} gap-2 flex-shrink-0`}>
                       {metricCells(c).map((m) => (
                         <div key={m.key} className="text-right">
                           <p className={`text-[9px] font-black ${m.key === sort ? 'text-blue-500' : 'text-slate-400'}`}>{m.label}</p>
@@ -953,7 +1012,10 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                       </p>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                        {c.posts.map((p) => (
+                        {(sort === 'overall'
+                          ? [...c.posts].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+                          : c.posts
+                        ).map((p) => (
                           <div
                             key={p.collabId}
                             className={`bg-white rounded-xl border p-3 flex gap-3 ${
@@ -980,8 +1042,13 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                             )}
 
                             <div className="min-w-0 flex-1">
-                              <p className="text-[12px] font-black text-slate-900 truncate">
-                                {p.instagramHandle ? `@${p.instagramHandle}` : `@${p.creatorUsername}`}
+                              <p className="text-[12px] font-black text-slate-900 truncate flex items-center gap-1.5">
+                                <span className="truncate">{p.instagramHandle ? `@${p.instagramHandle}` : `@${p.creatorUsername}`}</span>
+                                {typeof p.score === 'number' && (
+                                  <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[10px] font-black flex-shrink-0">
+                                    {`종합 ${p.score}점`}
+                                  </span>
+                                )}
                               </p>
                               <p className="text-[10px] text-slate-400 font-bold">
                                 {p.followers > 0 ? `팔로워 ${formatNumberWithCommas(p.followers)}` : '팔로워 미등록'}
