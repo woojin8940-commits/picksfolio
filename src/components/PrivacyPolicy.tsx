@@ -40,7 +40,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
         <h1 className="text-3xl md:text-4xl font-black mb-4 tracking-tight">
           픽스폴리오(Picksfolio) 개인정보처리방침
         </h1>
-        <p className="text-slate-500 text-sm font-bold mb-12">시행일: 2026년 10월 14일 (개정)</p>
+        <p className="text-slate-500 text-sm font-bold mb-12">시행일: 2026년 11월 28일 (개정)</p>
 
         {/* 1. 개인정보처리방침이란? */}
         <section className="mb-12">
@@ -53,7 +53,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
               회사는 아래와 같이 개인정보처리방침을 명시하여 회원이 제공한 개인정보가 어떠한 용도와 방식으로 이용되고 있는지 알려드립니다. 본 방침은 정부의 지침이나 회사의 내부 정책에 따라 변경될 수 있으며, 개정 시 즉시 서비스 화면에 게시합니다.
             </p>
             <p>
-              회사가 제공하는 서비스는 크리에이터의 개인 페이지(멀티링크) 운영과 브랜드·크리에이터 간 협업의 중개 및 정산입니다. 본 방침에서 "크리에이터 회원"은 개인 페이지를 운영하고 협업에 참여하는 회원을, "브랜드 회원"은 협업 제안이나 캠페인을 등록하는 사업자 회원을 의미합니다.
+              회사가 제공하는 서비스는 크리에이터의 개인 페이지(멀티링크) 운영과 브랜드·크리에이터 간 협업의 중개입니다. 본 방침에서 "크리에이터 회원"은 개인 페이지를 운영하고 협업에 참여하는 회원을, "브랜드 회원"은 협업 제안이나 캠페인을 등록하는 사업자 회원을 의미합니다.
             </p>
           </div>
         </section>
@@ -90,6 +90,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
               <li><span className="text-slate-300 font-bold">필수 (카카오 로그인):</span> 카카오 계정 고유 식별값, 이름(닉네임), 휴대폰 번호(알림톡 발송용), 프로필 사진</li>
               <li><span className="text-slate-300 font-bold">필수 (아이디·비밀번호 가입):</span> 이메일 주소, 비밀번호(단방향 암호화하여 저장), 이름(닉네임), 휴대폰 번호</li>
               <li><span className="text-slate-300 font-bold">브랜드 회원 추가 항목:</span> 회사명(브랜드명), 담당자 이름, 담당자 연락처 및 이메일 주소</li>
+              <li><span className="text-slate-300 font-bold">브랜드 직원 계정:</span> 직원 이름, 아이디, 비밀번호(암호화하여 저장), 소속 회사 및 가입·내보내기 기록</li>
             </ul>
           </div>
 
@@ -171,6 +172,15 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
               <li><span className="text-slate-300 font-bold">제공 항목:</span> 수령인 이름, 휴대폰 번호, 배송지 주소</li>
               <li><span className="text-slate-300 font-bold">보유 기간:</span> 해당 협업의 종료 및 관련 법령에 따른 보존 기간 종료 시까지</li>
               <li><span className="text-slate-300 font-bold">제공하지 않는 항목:</span> 정산을 위해 수집한 신분증 사본, 주민등록번호, 계좌 정보는 브랜드 회원에게 제공되지 않습니다.</li>
+            </ul>
+            <p className="text-slate-400 text-sm leading-relaxed mt-4 mb-3">
+              유가시딩 캠페인에서 브랜드 회원이 선택한 크리에이터 회원과 담당자가 진행을 협의하여 협업이 확정되는 경우, 담당자가 크리에이터 회원의 동의를 받아 다음과 같이 해당 브랜드 회원에게 연락처를 제공합니다.
+            </p>
+            <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
+              <li><span className="text-slate-300 font-bold">제공받는 자:</span> 해당 캠페인의 브랜드 회원(그 직원 계정을 포함)</li>
+              <li><span className="text-slate-300 font-bold">제공 목적:</span> 확정된 협업의 진행, 조건 협의 및 협업 대가의 지급을 위한 연락</li>
+              <li><span className="text-slate-300 font-bold">제공 항목:</span> 크리에이터 회원의 이름, 브랜드 매칭받기 등록서 또는 캠페인 지원서에 적은 연락처(휴대폰 번호, 카카오톡 아이디 등), 개인 페이지에 등록한 전화번호</li>
+              <li><span className="text-slate-300 font-bold">보유 기간:</span> 해당 협업의 종료 및 관련 법령에 따른 보존 기간 종료 시까지</li>
             </ul>
             <p className="text-slate-400 text-sm leading-relaxed mt-4 mb-3">
               크리에이터 회원이 비즈니스 제안을 수락하는 경우, 수락 화면에서 동의를 받아 다음과 같이 제안을 보낸 브랜드 회원에게 연락처를 제공합니다.
@@ -274,10 +284,11 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
         <section className="mb-12">
           <h2 className="text-xl font-black text-blue-400 mb-6">부칙</h2>
           <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
-            <li>① 본 개인정보처리방침은 2026년 10월 14일부터 적용되며, 2026년 9월 15일자 방침을 대체합니다.</li>
+            <li>① 본 개인정보처리방침은 2026년 11월 28일부터 적용되며, 2026년 10월 14일자 방침을 대체합니다.</li>
             <li>② 라이브 커머스 서비스의 종료에 따라 시청자(구매자)의 이름·휴대폰 번호·배송지 주소·장바구니 및 주문·결제 기록의 수집, 해당 정보를 판매자에게 제공하는 제3자 제공, 라이브 방송 송출 인프라의 위탁에 관한 사항은 삭제되었습니다.</li>
             <li>③ 브랜드 협업의 진행 및 정산, 인스타그램 계정 연동, AI 어시스턴트 이용에 관한 수집·이용·제공·국외 이전 사항이 추가되었습니다.</li>
             <li>④ 협업 타임라인(회원 간 대화 및 담당자 대화), 협업 타임라인 AI 어시스턴트 및 클로드 플랜의 종료에 따라 협업 대화 내용의 수집과 앤스로픽(Anthropic)으로의 국외 이전을 중단하였고, AI 어시스턴트 처리 위탁사를 구글(Google)로 바로잡았으며, 비즈니스 제안 수락 시 브랜드 회원에게 연락처를 제공하는 사항을 추가하였습니다. 종료 전에 수집된 대화 기록은 분쟁 조정과 관련 법령에 따른 보존을 위해 보유 기간 동안 보관한 뒤 파기합니다.</li>
+            <li>⑤ 2026년 11월 28일 개정: 유가시딩 캠페인의 협업 확정 시 브랜드 회원에게 크리에이터 회원의 연락처를 제공하는 사항과 브랜드 직원 계정의 수집 항목을 추가하였습니다.</li>
           </ul>
         </section>
 

@@ -2828,6 +2828,7 @@ export const apiService = {
       | 'send_offer'
       | 'withdraw_offer'
       | 'start_collab'
+      | 'share_contact'
       | 'respond'
       | 'note'
       | 'quote'

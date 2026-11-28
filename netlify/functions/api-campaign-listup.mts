@@ -20,6 +20,7 @@ import {
   normalizeQuote,
   offerFromCampaign,
   loadManagerContacts,
+  brandContactOf,
   refreshListupSnapshots,
   registeredPayoutFee,
   shapeChannel,
@@ -42,6 +43,10 @@ import {
  *
  * 권한을 한 줄로 요약하면 이렇다. 명단을 만드는 것은 담당자, 고르는 것은 브랜드,
  * 답하는 것은 인플루언서. 세 가지를 한 사람이 다 할 수 있으면 중개가 아니다.
+ *
+ * 연락처 공개: 브랜드가 고른 후보와 담당자가 이야기를 마쳐 진행이 확정되면(협업 시작 ·
+ * 담당자가 대신 기록한 수락) 그 인플루언서의 이름 · 연락처가 브랜드에 공개된다
+ * (contact_shared_at). 그 뒤의 진행 · 대가 지급은 브랜드와 인플루언서가 직접 한다.
  */
 
 /**
@@ -404,6 +409,15 @@ export default async (req: Request, context: Context) => {
       //
       // 브랜드 화면에는 절대 실리지 않는다 — viewerRole 이 manager 일 때만 붙이고,
       // 이유는 loadManagerContacts 주석에 있다.
+      // 브랜드에게는 진행이 확정되어 연락처를 공개한 후보의 것만 싣는다.
+      if (viewerRole === "brand") {
+        const shared = (candidates as any[]).filter((c) => c.contactSharedAt && c.influencerUsername);
+        if (shared.length) {
+          const contacts = await loadManagerContacts(db, shared.map((c) => c.influencerUsername), campaignId);
+          for (const c of shared) c.contact = brandContactOf(contacts.get(norm(c.influencerUsername)));
+        }
+      }
+
       if (viewerRole === "manager") {
         const poolItems = (payload.pool as any[]) || [];
         const contacts = await loadManagerContacts(
@@ -937,10 +951,13 @@ export default async (req: Request, context: Context) => {
           throw error;
         }
 
+        // 진행 확정 = 연락처 공개. 담당자가 인플루언서와 이야기를 마치고 시작한 협업이다.
         await db.sql`
           UPDATE campaign_listups
           SET outreach_status = 'accepted',
               collab_id = ${result.collabId},
+              contact_shared_at = COALESCE(contact_shared_at, NOW()),
+              contact_shared_by = COALESCE(contact_shared_by, ${managerUsername}),
               updated_at = NOW()
           WHERE id = ${id}
         `;
@@ -1097,10 +1114,14 @@ export default async (req: Request, context: Context) => {
           throw error;
         }
 
+        // 담당자가 대신 기록한 수락은 인플루언서와 이야기를 마친 것이므로 연락처를 공개한다.
+        // 인플루언서 본인이 누른 수락은 담당자 확인 전이라 공개하지 않는다(담당자가 공개).
         await db.sql`
           UPDATE campaign_listups
           SET outreach_status = 'accepted',
               collab_id = ${result.collabId},
+              contact_shared_at = CASE WHEN ${isManager} THEN COALESCE(contact_shared_at, NOW()) ELSE contact_shared_at END,
+              contact_shared_by = CASE WHEN ${isManager} THEN COALESCE(contact_shared_by, ${managerUsername}) ELSE contact_shared_by END,
               updated_at = NOW()
           WHERE id = ${id}
         `;
@@ -1111,6 +1132,24 @@ export default async (req: Request, context: Context) => {
           created: result.created,
           listup: await reload(viewer),
         });
+      }
+
+      // --- 연락처 공개 -----------------------------------------------------
+      // 진행이 확정된(수락된) 후보의 연락처를 브랜드에 공개한다. 이 기능 전에 시작한
+      // 협업이나 인플루언서가 직접 수락한 협업은 담당자가 확인한 뒤 이걸로 연다.
+      if (action === "share_contact") {
+        if (!isManager) return managerRequired();
+        if (listup.outreach_status !== "accepted") {
+          return Response.json({ error: "진행이 확정된 후보만 연락처를 공개할 수 있습니다." }, { status: 409 });
+        }
+        await db.sql`
+          UPDATE campaign_listups
+          SET contact_shared_at = COALESCE(contact_shared_at, NOW()),
+              contact_shared_by = COALESCE(contact_shared_by, ${managerUsername}),
+              updated_at = NOW()
+          WHERE id = ${id} AND outreach_status = 'accepted'
+        `;
+        return Response.json({ success: true, listup: await reload("manager") });
       }
 
       // --- 명단에서 빼기 ---------------------------------------------------

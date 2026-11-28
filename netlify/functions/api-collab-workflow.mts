@@ -12,6 +12,7 @@ import { seoulDayOf, todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { refreshStaleChannelImages } from "./_shared/instagram-metrics.mts";
 import { isUploadedFileUrl } from "./_shared/upload-media.mts";
 import { resolveBrandAmount } from "./_shared/brand-billing.mts";
+import { brandContactOf, loadManagerContacts } from "./_shared/campaign-listup.mts";
 import {
   canTransitionStage,
   daysUntil,
@@ -1234,7 +1235,7 @@ export default async (req: Request, context: Context) => {
         //
         // 한 캠페인에 같은 사람은 한 번만 올라가므로(UNIQUE) 줄이 늘지 않는다.
         db.sql`
-          SELECT offer, quoted_fee, quoted_second_use_fee
+          SELECT offer, quoted_fee, quoted_second_use_fee, contact_shared_at
           FROM campaign_listups
           WHERE campaign_id = ${collab.campaign_id}
             AND LOWER(influencer_username) = ${norm(collab.creator_username)}
@@ -1294,6 +1295,16 @@ export default async (req: Request, context: Context) => {
             uploadedBy: String(a.uploaded_by || ""),
           })),
       ];
+      // 리스트업으로 진행이 확정되어 연락처를 공개한 협업이면 브랜드에 인플루언서 이름 · 연락처를 싣는다.
+      // 그 뒤 진행 · 대가 지급은 브랜드와 인플루언서가 직접 한다.
+      const creatorContact =
+        (role === "brand" || role === "manager") && listupRow?.contact_shared_at && !collab.cancelled_at
+          ? brandContactOf(
+              (await loadManagerContacts(db, [norm(collab.creator_username)], String(collab.campaign_id))).get(
+                norm(collab.creator_username),
+              ),
+            )
+          : null;
       const seenGuideUrls = new Set<string>();
       const guideline = {
         note: String(terms?.guide_note || collab.campaign_guideline_note || ""),
@@ -1350,6 +1361,9 @@ export default async (req: Request, context: Context) => {
           collab.creator_username,
           avatarFromSite((siteRows as any[])?.[0]),
         ),
+        /** 진행이 확정되어 브랜드에 공개된 인플루언서 연락처. 공개 전이면 null. */
+        creatorContact,
+        contactSharedAt: (role === "brand" || role === "manager") ? listupRow?.contact_shared_at || null : null,
         shipping: shapeShipping((shippingRows as any[])?.[0]),
         settlement: shapeSettlementInfo(
           (settlementRows as any[])?.[0],

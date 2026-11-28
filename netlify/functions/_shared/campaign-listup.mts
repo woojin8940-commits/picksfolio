@@ -588,6 +588,18 @@ export async function loadManagerContacts(
   return out;
 }
 
+/**
+ * 브랜드에게 공개하는 연락처. 진행이 확정된(contact_shared_at) 후보에게만 쓴다.
+ * 출처 표시는 담당자용이라 빼고, 이름과 연락 수단만 보낸다.
+ */
+export function brandContactOf(card: ManagerContact | undefined | null) {
+  if (!card) return null;
+  return {
+    name: card.name,
+    entries: card.entries.map((e) => ({ kind: e.kind, value: e.value })),
+  };
+}
+
 /** campaign_listups 행 → 화면용. 인플루언서에게는 다른 후보 이야기가 가지 않는다. */
 export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer") {
   const snapshot = (row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {}) as any;
@@ -624,6 +636,8 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
     respondedAt: row.responded_at || null,
     responseNote: row.response_note || "",
     collabId: row.collab_id || "",
+    // 브랜드에 연락처를 공개한 시각(진행 확정). 비어 있으면 공개 전이다.
+    contactSharedAt: row.contact_shared_at || null,
     createdAt: row.created_at,
   };
 

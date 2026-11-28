@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService, authHeaders } from '../services/apiService';
 import { formatKoreanWon, formatPhone, formatCountKo } from '../utils/formatters';
+import SharedContactCard from './collab/SharedContactCard';
 import BrandContactCard from './collab/BrandContactCard';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
@@ -998,6 +999,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               <p className="text-xs text-slate-400 font-bold text-center py-6">정보를 불러오지 못했습니다.</p>
             ) : (
               <div className="space-y-3">
+                {/* 진행이 확정되어 공개된 인플루언서 연락처 — 이후 진행 · 지급은 직접 한다. */}
+                <SharedContactCard contact={detail.creatorContact} />
                 {/* 조건은 한 줄. 브랜드가 진행 중에 다시 보는 값은 보수와 업로드 마감
                     정도다. 나머지는 담당자가 정리한다. */}
                 {detail.terms && (
