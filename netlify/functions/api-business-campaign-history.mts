@@ -381,6 +381,9 @@ export const compositeScores = (rows: ScoreMetrics[]): (number | null)[] => {
   for (const k of keys) {
     pools.set(k, rows.map((r) => (r as any)[k]).filter((v): v is number => typeof v === "number" && Number.isFinite(v)));
   }
+  // 비교할 대상이 하나뿐이면 순위가 늘 1등(100점)이라 뜻이 없다. 지표가 있는 행이 2개 이상일 때만 매긴다.
+  const scorable = rows.filter((r) => Object.values(r).some((v) => typeof v === "number" && Number.isFinite(v))).length;
+  if (scorable < 2) return rows.map(() => null);
   return rows.map((r) => {
     const parts: number[] = [];
     for (const k of keys) {
@@ -400,6 +403,10 @@ const postScoreMetrics = (p: any, affiliate: boolean): ScoreMetrics => {
   if (p.cancelled) return {};
   const m = p.metrics;
   const views = m?.from === "reels" && m.views > 0 ? m.views : null;
+  // 조회수(어필리에이트는 판매액)가 잡히지 않은 게시물은 점수에서 뺀다. 댓글 0 · 공유 0 만으로
+  // 점수를 매기면 지표가 거의 없는 게시물이 순위 위로 올라온다.
+  if (!affiliate && views === null) return {};
+  if (affiliate && !(p.sales > 0) && views === null) return {};
   const out: ScoreMetrics = {
     views,
     comments: m ? m.comments : null,
@@ -418,6 +425,8 @@ const postScoreMetrics = (p: any, affiliate: boolean): ScoreMetrics => {
 /** 캠페인의 게시물당 평균 지표. */
 const campaignScoreMetrics = (c: any, affiliate: boolean): ScoreMetrics => {
   const avg = (sum: number, n: number) => (n > 0 ? sum / n : null);
+  // 조회수가 하나도 잡히지 않은 캠페인(어필리에이트는 판매도 없는 캠페인)은 점수에서 뺀다.
+  if (!(c.matched > 0) && !(affiliate && c.sales > 0)) return {};
   const out: ScoreMetrics = {
     views: avg(c.views, c.matched),
     comments: avg(c.comments, c.matched),
