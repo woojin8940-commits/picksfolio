@@ -2620,4 +2620,28 @@ export const platformTextPatterns = [
     "source": "^캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정되어 연락처가 공개될 때 1씩 차감됩니다\\. 한도는 결제일마다 다시 채워지고 남은 것은 넘어가지 않습니다\\. 캠페인 건수가 더 필요하면 등급을 올려 주세요\\(라이트 → 그로스, 그 이상은 엔터프라이즈 문의\\)\\. 선정 인플루언서는 (.+?)명\\((.+?)원\\) 단위로 추가로 살 수 있고, 추가분은 그 결제 주기 안에서만 쓸 수 있습니다\\.$",
     "replacement": "A campaign is counted when the manager sends its first list-up, and a confirmed influencer when contact details are shared. Limits refill on each billing date and don't carry over. Need more campaigns? Upgrade your tier (Lite → Growth, beyond that contact us about Enterprise). Confirmed influencers can be added in blocks of $1 (₩$2), usable only within that billing cycle."
   },
+  {
+    "source": "^(.+?) 계정에 (.+?) 멤버십을 결제 없이 (\\d+)개월 부여할까요\\?$",
+    "replacement": "Grant $2 to $1 for $3 month(s) without payment?"
+  },
+  {
+    "source": "^(.+?) 계정의 운영자 부여 멤버십을 끌까요\\?$",
+    "replacement": "Turn off the operator-granted membership for $1?"
+  },
+  {
+    "source": "^(.+?) 멤버십을 부여했어요\\.$",
+    "replacement": "Granted the $1 membership."
+  },
+  {
+    "source": "^다음 결제일\\(부여 만료일\\): (.+?)$",
+    "replacement": "Next billing date (grant ends): $1"
+  },
+  {
+    "source": "^이번 달 남은 한도: 캠페인 (\\d+)건 · 선정 (\\d+)명 \\(사용 (\\d+)건 · (\\d+)명\\)$",
+    "replacement": "Left this month: $1 campaigns · $2 confirmed (used $3 · $4)"
+  },
+  {
+    "source": "^(\\d+)개월$",
+    "replacement": "$1 mo"
+  },
 ] as const;
