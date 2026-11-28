@@ -1866,7 +1866,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       )}
 
       {listScope === 'company' ? (
-        <CompanyUpcomingCampaigns businessUsername={businessUsername} />
+        <CompanyUpcomingCampaigns
+          businessUsername={businessUsername}
+          categoryLabel={categoryLabel}
+          renderStatus={statusBadge}
+          onOpen={(id) => {
+            // 내가 맡은 캠페인이면 상세로 연다. 다른 직원의 캠페인은 목록(campaigns)에 없어 열리지 않는다.
+            const mine = campaigns.find((c) => String(c.id) === id);
+            if (!mine) return false;
+            setListScope('mine');
+            handleSelectCampaign(mine);
+            return true;
+          }}
+        />
       ) : (<>
       {/* Type Filter Tabs */}
       <div

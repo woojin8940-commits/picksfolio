@@ -726,7 +726,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 space-y-2.5">
         {!affiliate && (
           <div className="inline-flex p-1 bg-slate-100 rounded-xl">
-            {([['mine', '내 캠페인'], ['company', '회사 전체']] as const).map(([key, label]) => (
+            {([['mine', '내 캠페인'], ['company', '브랜드 전체']] as const).map(([key, label]) => (
               <button
                 key={key}
                 type="button"

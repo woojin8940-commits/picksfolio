@@ -2672,4 +2672,8 @@ export const platformTextPatterns = [
     "source": "^@(.+?) 협업을 시작합니다\\. 브랜드와 인플루언서 진행사항에 바로 표시됩니다\\(되돌릴 수 없음\\)\\. 인플루언서와 이야기를 마쳤나요\\? 연락처는 브랜드에 공개되지 않아요\\.$",
     "replacement": "Starting the collaboration with @$1. It will appear right away in both the brand's and influencer's progress (cannot be undone). Have you finished talking with the influencer? Contact details won't be shared with the brand."
   },
+  {
+    "source": "^업로드 기간 (.+?)$",
+    "replacement": "Upload period $1"
+  },
 ] as const;
