@@ -1314,10 +1314,10 @@ export default async (req: Request, context: Context) => {
             uploadedBy: String(a.uploaded_by || ""),
           })),
       ];
-      // 리스트업으로 진행이 확정되어 연락처를 공개한 협업이면 브랜드에 인플루언서 이름 · 연락처를 싣는다.
-      // 그 뒤 진행 · 대가 지급은 브랜드와 인플루언서가 직접 한다.
+      // 인플루언서 연락처는 픽스폴리오 담당자에게만 싣는다. 브랜드와 인플루언서 사이의 연락은
+      // 담당자가 중간에서 맡으므로, 진행이 확정돼도 브랜드 응답에는 넣지 않는다.
       const creatorContact =
-        (role === "brand" || role === "manager") && listupRow?.contact_shared_at && !collab.cancelled_at
+        role === "manager" && listupRow?.contact_shared_at && !collab.cancelled_at
           ? brandContactOf(
               (await loadManagerContacts(db, [norm(collab.creator_username)], String(collab.campaign_id))).get(
                 norm(collab.creator_username),
@@ -1380,7 +1380,7 @@ export default async (req: Request, context: Context) => {
           collab.creator_username,
           avatarFromSite((siteRows as any[])?.[0]),
         ),
-        /** 진행이 확정되어 브랜드에 공개된 인플루언서 연락처. 공개 전이면 null. */
+        /** 진행이 확정된 인플루언서 연락처 — 담당자에게만. 브랜드에게는 항상 null. */
         creatorContact,
         contactSharedAt: (role === "brand" || role === "manager") ? listupRow?.contact_shared_at || null : null,
         shipping: shapeShipping((shippingRows as any[])?.[0]),

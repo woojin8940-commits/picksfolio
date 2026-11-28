@@ -219,7 +219,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
             <Meter label="선정 인플루언서" used={quota.used.selected} total={quota.limits.selected + quota.addons.selected} unit="명" />
           </div>
           <p className="text-[11px] text-slate-400 font-medium mt-3 leading-relaxed">
-            캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정되어 연락처가 공개될 때 차감돼요. 남은 건수는 다음 달로 넘어가지 않아요. 캠페인이 더 필요하면 등급을 올려 주세요.
+            캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정될 때 차감돼요. 남은 건수는 다음 달로 넘어가지 않아요. 캠페인이 더 필요하면 등급을 올려 주세요.
           </p>
           {quota.pastDue && (
             <p className="text-xs font-bold text-red-600 mt-2">정기결제가 실패했어요. 결제 수단을 확인해 주세요. 결제가 다시 될 때까지 새 리스트업과 진행 확정이 멈춥니다.</p>

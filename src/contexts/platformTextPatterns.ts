@@ -2660,4 +2660,16 @@ export const platformTextPatterns = [
     "source": "^이용 종료일 (.+?)$",
     "replacement": "Ends $1"
   },
+  {
+    "source": "^캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정될 때 1씩 차감됩니다\\. 한도는 결제일마다 다시 채워지고 남은 것은 넘어가지 않습니다\\. 캠페인 건수가 더 필요하면 등급을 올려 주세요\\(라이트 → 그로스, 그 이상은 엔터프라이즈 문의\\)\\. 선정 인플루언서는 (.+?)명\\((.+?)원\\) 단위로 추가로 살 수 있고, 추가분은 그 결제 주기 안에서만 쓸 수 있습니다\\.$",
+    "replacement": "A campaign is counted when the manager sends its first list-up, and a confirmed influencer when the collaboration is confirmed. Limits refill on each billing date and don't carry over. Need more campaigns? Upgrade your tier (Lite → Growth, beyond that contact us about Enterprise). Confirmed influencers can be added in blocks of $1 (₩$2), usable only within that billing cycle."
+  },
+  {
+    "source": "^@(.+?) 수락으로 처리하면 협업이 바로 생성됩니다\\(되돌릴 수 없음\\)\\. 인플루언서 연락처는 브랜드에 공개되지 않아요\\.$",
+    "replacement": "Marking @$1 as accepted creates the collaboration right away (cannot be undone). The influencer's contact details won't be shared with the brand."
+  },
+  {
+    "source": "^@(.+?) 협업을 시작합니다\\. 브랜드와 인플루언서 진행사항에 바로 표시됩니다\\(되돌릴 수 없음\\)\\. 인플루언서와 이야기를 마쳤나요\\? 연락처는 브랜드에 공개되지 않아요\\.$",
+    "replacement": "Starting the collaboration with @$1. It will appear right away in both the brand's and influencer's progress (cannot be undone). Have you finished talking with the influencer? Contact details won't be shared with the brand."
+  },
 ] as const;

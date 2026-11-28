@@ -175,15 +175,6 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
               <li><span className="text-slate-300 font-bold">제공하지 않는 항목:</span> 정산을 위해 수집한 신분증 사본, 주민등록번호, 계좌 정보는 브랜드 회원에게 제공되지 않습니다.</li>
             </ul>
             <p className="text-slate-400 text-sm leading-relaxed mt-4 mb-3">
-              유가시딩 캠페인에서 브랜드 회원이 선택한 크리에이터 회원과 담당자가 진행을 협의하여 협업이 확정되는 경우, 담당자가 크리에이터 회원의 동의를 받아 다음과 같이 해당 브랜드 회원에게 연락처를 제공합니다.
-            </p>
-            <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
-              <li><span className="text-slate-300 font-bold">제공받는 자:</span> 해당 캠페인의 브랜드 회원(그 직원 계정을 포함)</li>
-              <li><span className="text-slate-300 font-bold">제공 목적:</span> 확정된 협업의 진행, 조건 협의 및 협업 대가의 지급을 위한 연락</li>
-              <li><span className="text-slate-300 font-bold">제공 항목:</span> 크리에이터 회원의 이름, 브랜드 매칭받기 등록서 또는 캠페인 지원서에 적은 연락처(휴대폰 번호, 카카오톡 아이디 등), 개인 페이지에 등록한 전화번호</li>
-              <li><span className="text-slate-300 font-bold">보유 기간:</span> 해당 협업의 종료 및 관련 법령에 따른 보존 기간 종료 시까지</li>
-            </ul>
-            <p className="text-slate-400 text-sm leading-relaxed mt-4 mb-3">
               크리에이터 회원이 비즈니스 제안을 수락하는 경우, 수락 화면에서 동의를 받아 다음과 같이 제안을 보낸 브랜드 회원에게 연락처를 제공합니다.
             </p>
             <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
@@ -289,7 +280,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
             <li>② 라이브 커머스 서비스의 종료에 따라 시청자(구매자)의 이름·휴대폰 번호·배송지 주소·장바구니 및 주문·결제 기록의 수집, 해당 정보를 판매자에게 제공하는 제3자 제공, 라이브 방송 송출 인프라의 위탁에 관한 사항은 삭제되었습니다.</li>
             <li>③ 브랜드 협업의 진행 및 정산, 인스타그램 계정 연동, AI 어시스턴트 이용에 관한 수집·이용·제공·국외 이전 사항이 추가되었습니다.</li>
             <li>④ 협업 타임라인(회원 간 대화 및 담당자 대화), 협업 타임라인 AI 어시스턴트 및 클로드 플랜의 종료에 따라 협업 대화 내용의 수집과 앤스로픽(Anthropic)으로의 국외 이전을 중단하였고, AI 어시스턴트 처리 위탁사를 구글(Google)로 바로잡았으며, 비즈니스 제안 수락 시 브랜드 회원에게 연락처를 제공하는 사항을 추가하였습니다. 종료 전에 수집된 대화 기록은 분쟁 조정과 관련 법령에 따른 보존을 위해 보유 기간 동안 보관한 뒤 파기합니다.</li>
-            <li>⑤ 2026년 11월 28일 개정: 유가시딩 캠페인의 협업 확정 시 브랜드 회원에게 크리에이터 회원의 연락처를 제공하는 사항과 브랜드 직원 계정의 수집 항목을 추가하였습니다.</li>
+            <li>⑤ 2026년 11월 28일 개정: 브랜드 직원 계정의 수집 항목을 추가하였습니다. 유가시딩 캠페인에서는 협업이 확정되어도 크리에이터 회원의 연락처를 브랜드 회원에게 제공하지 않습니다.</li>
           </ul>
         </section>
 
