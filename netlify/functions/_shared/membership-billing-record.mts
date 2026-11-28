@@ -4,7 +4,7 @@ import { mutateBlobJSON } from "./blob-write.mts";
 import { migrateSellerMembership } from "./seller-membership-store.mts";
 import { nextCycleSeats, settleStaleSeatCharge } from "./brand-seats.mts";
 import {
-  addOneMonth, brandCampaignMonthlyKrw, chargeMembershipBillingKey, isDue, isSellableTier, MAX_BILLING_FAILURES,
+  addOneMonth, brandMonthlyKrw, chargeMembershipBillingKey, isBrandPlanTier, isDue, isSellableTier, MAX_BILLING_FAILURES,
   normalizeTier, pendingChargeAmount, verifyMembershipBillingKey,
   type MembershipBillingEntry, type MembershipChargePending,
 } from "./membership-billing.mts";
@@ -55,7 +55,8 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
   if (!record.billing_key) return result("skipped");
   // 결제 주기 중간의 좌석 추가 청구가 결과를 모른 채 남아 있으면 먼저 정리한다 — 남아 있는
   // 동안에는 월 청구를 잡을 수 없다.
-  if (record.membership_charge_pending?.kind === "seats") {
+  const midCycle = record.membership_charge_pending?.kind;
+  if (midCycle === "seats" || midCycle === "upgrade" || midCycle === "addon") {
     const settled = await settleStaleSeatCharge(username);
     if (settled !== "settled") return result("skipped", CLAIM_WAIT_MS);
   }
@@ -81,8 +82,11 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
         latest.billing_key !== record.billing_key || normalizeTier(latest.membership_plan) !== tier) return null;
     const at = new Date().toISOString();
     const existing = latest.membership_charge_pending;
+    // 브랜드 등급을 내리기로 예약했으면 이번 정기결제부터 낮은 등급으로 청구한다.
+    const scheduledTier = (latest as any).membership_plan_scheduled;
+    const chargeTier = isBrandPlanTier(tier) && isBrandPlanTier(scheduledTier) ? scheduledTier : tier;
     if (existing) {
-      if (existing.kind !== "recurring" || !existing.scheduledDate || existing.tier !== tier ||
+      if (existing.kind !== "recurring" || !existing.scheduledDate || existing.tier !== chargeTier ||
           existing.billingKey !== latest.billing_key) return null;
       const age = Date.now() - Date.parse(existing.startedAt);
       if (!Number.isFinite(age) || age < CLAIM_WAIT_MS) {
@@ -92,11 +96,12 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
       claim.pending = { ...existing, startedAt: at };
     } else {
       if (!isDue(latest.next_billing_date, now)) return null;
-      // 정액제는 이번 달 직원 좌석 수만큼 더해 청구한다. 줄이기로 예약한 좌석은 이 청구부터 빠진다.
-      const seats = tier === "brand_campaign" ? nextCycleSeats(latest) : undefined;
-      claim.pending = { paymentId: `membership-${randomUUID()}`, billingKey: latest.billing_key!, tier,
+      // 브랜드 멤버십은 등급 이용료에 이번 달 직원 좌석 수만큼 더해 청구한다. 줄이기로 예약한
+      // 좌석은 이 청구부터 빠진다.
+      const seats = isBrandPlanTier(chargeTier) ? nextCycleSeats(latest) : undefined;
+      claim.pending = { paymentId: `membership-${randomUUID()}`, billingKey: latest.billing_key!, tier: chargeTier,
         kind: "recurring", scheduledDate: latest.next_billing_date || at, startedAt: at,
-        ...(seats !== undefined ? { seats, amountKrw: brandCampaignMonthlyKrw(seats) } : {}) };
+        ...(seats !== undefined && isBrandPlanTier(chargeTier) ? { seats, amountKrw: brandMonthlyKrw(chargeTier, seats) } : {}) };
     }
     return { ...latest, next_billing_date: addOneMonth(claim.pending.scheduledDate!),
       membership_charge_pending: claim.pending, updated_at: at };
@@ -118,7 +123,9 @@ export async function billMembershipRecord(username: string, now: Date, key = `s
       kind: "recurring", success: charge.success, ...(pending.seats !== undefined ? { seats: pending.seats } : {}),
       ...(charge.success ? { paymentId: charge.paymentId } : { error: charge.error }) };
     const seatUpdate = charge.success && pending.seats !== undefined
-      ? { membership_extra_seats: pending.seats, membership_extra_seats_scheduled: null, membership_amount_krw: charge.amountKrw }
+      ? { membership_extra_seats: pending.seats, membership_extra_seats_scheduled: null, membership_amount_krw: charge.amountKrw,
+          // 예약해 둔 등급 변경이 이 청구로 적용됐다.
+          membership_plan: pending.tier, membership_plan_scheduled: null }
       : {};
     return { ...latest, ...seatUpdate, last_billing_at: charge.success ? at : latest.last_billing_at,
       next_billing_date: charge.success ? addOneMonth(pending.scheduledDate!) : pending.scheduledDate,

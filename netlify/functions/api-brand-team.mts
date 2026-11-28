@@ -98,7 +98,7 @@ async function overview(company: string) {
     members: team.members,
     invites: team.invites,
     billingHistory: (Array.isArray(record?.billing_history) ? record!.billing_history : [])
-      .filter((e: any) => e?.tier === "brand_campaign")
+      .filter((e: any) => e?.tier === "brand_campaign" || e?.tier === "brand_growth")
       .slice(0, 12),
   };
 }
@@ -121,7 +121,7 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
   const invite = await findOpenInvite(token);
   if (!invite) return fail(410, "만료됐거나 이미 사용한 초대 링크예요. 회사 관리자에게 새 링크를 요청해 주세요.");
   if (!hasActiveBrandPlan(await readSeatRecord(invite.company))) {
-    return fail(409, "회사의 정액제가 이용 중이 아니어서 지금은 가입할 수 없어요. 회사 관리자에게 문의해 주세요.");
+    return fail(409, "회사의 멤버십이 이용 중이 아니어서 지금은 가입할 수 없어요. 회사 관리자에게 문의해 주세요.");
   }
   if (!name) return fail(400, "이름을 입력해 주세요.");
   const rules = checkUsernameRules(username);
@@ -242,7 +242,7 @@ export default async (req: Request) => {
 
     if (action === "create_invite") {
       const record = await readSeatRecord(company);
-      if (!hasActiveBrandPlan(record)) return fail(403, "정액제를 구독한 뒤에 직원을 초대할 수 있어요.");
+      if (!hasActiveBrandPlan(record)) return fail(403, "멤버십을 구독한 뒤에 직원을 초대할 수 있어요.");
       const created = await createInvite(company, paidExtraSeats(record), {
         label: body?.label,
         createdBy: by,

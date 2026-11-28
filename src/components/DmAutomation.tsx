@@ -3124,7 +3124,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     if (saveLock.current) return { ok: false as const, error: '저장 중입니다. 잠시 기다려 주세요.' };
     if (!entitled) {
       const text = isBusiness
-        ? '브랜드 계정의 자동 디엠은 정액제에 포함되어 있어요. 정액제를 구독하면 추가 비용 없이 바로 사용할 수 있습니다.'
+        ? '브랜드 계정의 자동 디엠은 멤버십에 포함되어 있어요. 멤버십을 구독하면 추가 비용 없이 바로 사용할 수 있습니다.'
         : dmAccess?.creatorRequired
           ? '자동 디엠은 크리에이터 승인 후 사용할 수 있어요. 크리에이터 지원서를 내면 담당자가 확인 후 승인해 드립니다.'
           : dmAccess?.suspended
@@ -3511,7 +3511,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
 
       {/* 자동 디엠 이용 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
           새 인플루언서는 크리에이터 승인, 기존 인플루언서는 브랜드 매칭받기 등록(둘 다 결제 없음),
-          브랜드는 정액제 구독으로 열린다(자동 디엠 포함).
+          브랜드는 멤버십 구독으로 열린다(자동 디엠 포함).
           담당자가 중단한 경우에는 사유와 다시 여는 방법을 함께 보여 준다. */}
       {/* 새로 가입한 인플루언서는 크리에이터 승인을 받아야 자동 디엠이 열린다(기존 계정은 그대로). */}
       {!entitled && !isBusiness && dmAccess?.creatorRequired && (
@@ -3529,15 +3529,15 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
             <div className="min-w-0">
               {isBusiness ? (
                 <>
-                  <h3 className="text-base md:text-lg font-black text-slate-900">브랜드 자동 디엠은 정액제에 포함되어 있어요</h3>
+                  <h3 className="text-base md:text-lg font-black text-slate-900">브랜드 자동 디엠은 멤버십에 포함되어 있어요</h3>
                   {isNativeApp() ? (
                     <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
-                      정액제는 PICKS Folio 웹사이트에서 구독할 수 있으며, 웹에서 구독하면 앱에서도 자동 디엠을 그대로 이용할 수 있습니다.
+                      멤버십은 PICKS Folio 웹사이트에서 구독할 수 있으며, 웹에서 구독하면 앱에서도 자동 디엠을 그대로 이용할 수 있습니다.
                     </p>
                   ) : (
                     <>
                       <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
-                        정액제를 구독하면 인스타그램 댓글 자동 DM 을 추가 비용 없이 바로 사용할 수 있어요.
+                        멤버십을 구독하면 인스타그램 댓글 자동 DM 을 추가 비용 없이 바로 사용할 수 있어요.
                         구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
                       </p>
                       {/* 구독 전에도 막히지 않는 것을 함께 적는다. 실제로 잠기는 것은 저장과 발송뿐이다. */}
@@ -3549,7 +3549,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                         onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
                         className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg"
                       >
-                        정액제 보기
+                        멤버십 보기
                       </button>
                     </>
                   )}

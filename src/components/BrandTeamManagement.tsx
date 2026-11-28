@@ -160,9 +160,9 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
 
       {!plan.planActive ? (
         <section className="max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 md:p-8 shadow-sm">
-          <h3 className="text-lg font-black text-slate-900 mb-2">정액제를 구독하면 직원 계정을 추가할 수 있어요</h3>
+          <h3 className="text-lg font-black text-slate-900 mb-2">멤버십을 구독하면 직원 계정을 추가할 수 있어요</h3>
           <p className="text-sm text-slate-500 leading-relaxed mb-5">
-            정액제에는 회사 관리자 좌석 1석이 들어 있고, 직원 좌석은 1석당 월 {won(BRAND_SEAT_PRICE)}으로 필요한 만큼 늘릴 수 있습니다.
+            {`멤버십에는 관리자 계정 1개가 들어 있고, 직원 좌석은 1석당 월 ${won(BRAND_SEAT_PRICE)}으로 필요한 만큼 늘릴 수 있습니다.`}
           </p>
           {isOwner && onOpenMembership && !native && (
             <button
@@ -170,7 +170,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
               onClick={onOpenMembership}
               className="px-5 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 transition-all text-sm"
             >
-              정액제 보기
+              멤버십 보기
             </button>
           )}
         </section>
@@ -202,7 +202,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                   )}
                 </p>
                 <p className="text-xs text-slate-500 font-medium mt-1">
-                  정액제 {won(plan.baseMonthlyKrw)} + 직원 좌석 {plan.scheduledSeats ?? plan.extraSeats}석 × {won(plan.seatPriceKrw)}
+                  {`멤버십 ${won(plan.baseMonthlyKrw)} + 직원 좌석 ${plan.scheduledSeats ?? plan.extraSeats}석 × ${won(plan.seatPriceKrw)}`}
                 </p>
                 {plan.scheduledSeats !== null && (
                   <p className="text-xs font-bold text-amber-600 mt-1">
