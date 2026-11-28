@@ -33,6 +33,10 @@ export interface TeamMemberRow {
   id: number;
   memberUsername: string;
   displayName: string;
+  /** 가입할 때 적은 부서. */
+  department: string;
+  /** 회사 관리자가 관리자로 바꾼 직원(직원 초대 · 계정 삭제 · 관리자 변경을 함께 한다). */
+  isAdmin: boolean;
   joinedAt: string;
   /** 좌석 안에 들어 있는지(좌석보다 직원이 많으면 나중에 들어온 직원부터 false). */
   seated: boolean;
@@ -50,7 +54,7 @@ const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v || "
 export const listTeam = async (company: string, extraSeats: number) => {
   const sql = (await db()).sql;
   const members = (await sql`
-    SELECT id, member_username, display_name, joined_at
+    SELECT id, member_username, display_name, department, is_admin, joined_at
     FROM brand_team_members
     WHERE company_username = ${company} AND removed_at IS NULL
     ORDER BY joined_at ASC, id ASC
@@ -66,6 +70,8 @@ export const listTeam = async (company: string, extraSeats: number) => {
       id: Number(r.id),
       memberUsername: String(r.member_username || ""),
       displayName: String(r.display_name || ""),
+      department: String(r.department || ""),
+      isAdmin: Boolean(r.is_admin),
       joinedAt: iso(r.joined_at),
       seated: i < extraSeats,
     })),
@@ -179,18 +185,29 @@ export const releaseInvite = async (inviteId: number) => {
 };
 
 export const insertMember = async (input: {
-  company: string; userId: string; username: string; displayName: string; inviteId: number;
+  company: string; userId: string; username: string; displayName: string; department: string; inviteId: number;
 }) => {
   const sql = (await db()).sql;
   await sql`
-    INSERT INTO brand_team_members (company_username, member_user_id, member_username, display_name, invite_id)
-    VALUES (${input.company}, ${input.userId}, ${input.username}, ${input.displayName.slice(0, 40)}, ${input.inviteId})
+    INSERT INTO brand_team_members (company_username, member_user_id, member_username, display_name, department, invite_id)
+    VALUES (${input.company}, ${input.userId}, ${input.username}, ${input.displayName.slice(0, 40)}, ${input.department.slice(0, 40)}, ${input.inviteId})
   `;
+};
+
+/** 직원을 관리자로 바꾸거나 다시 직원으로 되돌린다. */
+export const setMemberAdmin = async (company: string, memberId: number, isAdmin: boolean): Promise<boolean> => {
+  const sql = (await db()).sql;
+  const rows = (await sql`
+    UPDATE brand_team_members SET is_admin = ${isAdmin}
+    WHERE id = ${memberId} AND company_username = ${company} AND removed_at IS NULL
+    RETURNING id
+  `) as any[];
+  return rows.length > 0;
 };
 
 export type TeamMembership =
   | { kind: "none" }
-  | { kind: "member"; company: string; memberUsername: string; seated: boolean };
+  | { kind: "member"; company: string; memberUsername: string; seated: boolean; isAdmin: boolean };
 
 /**
  * 이 Supabase 사용자가 어느 회사의 직원인지. 좌석 안에 들어 있는지(정액제 활성 · 좌석 순서)까지
@@ -202,7 +219,7 @@ export const resolveTeamMembership = async (userId: string): Promise<TeamMembers
   try {
     const sql = (await db()).sql;
     rows = (await sql`
-      SELECT m.company_username, m.member_username,
+      SELECT m.company_username, m.member_username, COALESCE(m.is_admin, false) AS is_admin,
         (SELECT COUNT(*) FROM brand_team_members o
           WHERE o.company_username = m.company_username AND o.removed_at IS NULL
             AND (o.joined_at < m.joined_at OR (o.joined_at = m.joined_at AND o.id < m.id)))::int AS ahead
@@ -223,5 +240,6 @@ export const resolveTeamMembership = async (userId: string): Promise<TeamMembers
     company,
     memberUsername: String(r.member_username || ""),
     seated: Number(r.ahead || 0) < staffSeatCapacity(record),
+    isAdmin: Boolean(r.is_admin),
   };
 };

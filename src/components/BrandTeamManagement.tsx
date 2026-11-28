@@ -93,7 +93,8 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
   const viewerRole = data.viewer.teamRole;
   const isOwner = viewerRole === 'owner';
   // 역할은 회사 관리자 / 직원 두 가지뿐이다. 초대 · 내보내기 · 좌석 결제는 회사 관리자만 한다.
-  const canManage = isOwner;
+  // 팀 관리(초대 · 계정 삭제 · 관리자 변경)는 대표 계정과 관리자로 바뀐 직원이 한다. 좌석 결제는 대표 계정만.
+  const canManage = isOwner || data.viewer.teamAdmin === true;
   const native = isNativeApp();
   const { plan, seats } = data;
   // 결제 좌석은 (직원 + 대기 초대) 중 등급 포함 좌석을 뺀 만큼 아래로 줄일 수 없다.
@@ -366,7 +367,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
           <ul className="divide-y divide-slate-100">
             {data.members.map((m) => {
               const isSelf = !!data.viewer.memberUsername && data.viewer.memberUsername === m.memberUsername;
-              const canRemove = canManage;
+              const canRemove = canManage && !isSelf;
               return (
                 <li key={m.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-3">
                   <div className="min-w-0">
@@ -376,7 +377,8 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       {isSelf && <span className="ml-1.5 text-[11px] font-black text-blue-500">나</span>}
                     </p>
                     <p className="text-[11px] text-slate-500 font-medium">
-                      직원 · {formatDate(m.joinedAt, language)} 합류
+                      {m.department ? `${m.department} · ` : ''}
+                      {m.isAdmin ? <span className="font-black text-violet-600">관리자</span> : '직원'} · {formatDate(m.joinedAt, language)} 합류
                       {!m.seated && <span className="ml-1.5 font-bold text-red-500">좌석 부족 — 로그인할 수 없어요</span>}
                     </p>
                   </div>
@@ -385,8 +387,26 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => window.confirm(`${m.displayName || m.memberUsername}님(${m.memberUsername}) 계정을 삭제할까요?\n\n· 계정이 삭제되어 이 아이디로는 더 이상 로그인할 수 없어요. 되돌릴 수 없습니다.\n· 맡고 있던 캠페인은 관리자 담당으로 넘어와요.\n· 좌석은 추가 비용 없이 다시 비어요.`) &&
-                          run(() => brandTeamService.removeMember(m.id), '직원 계정을 삭제했어요. 맡던 캠페인은 관리자 담당으로 옮겼고, 좌석이 다시 비었습니다.')}
+                        onClick={() => window.confirm(
+                          m.isAdmin
+                            ? `${m.displayName || m.memberUsername}님을 직원으로 바꿀까요? 직원 초대 · 계정 삭제 · 관리자 변경을 더 이상 할 수 없어요.`
+                            : `${m.displayName || m.memberUsername}님을 관리자로 바꿀까요? 직원 초대 · 계정 삭제 · 관리자 변경을 함께 할 수 있어요. 좌석 결제와 멤버십 결제는 회사 대표 계정에서만 할 수 있어요.`,
+                        ) &&
+                          run(
+                            () => brandTeamService.setAdmin(m.id, !m.isAdmin),
+                            m.isAdmin ? '직원으로 바꿨어요.' : '관리자로 바꿨어요.',
+                          )}
+                        className="px-3 py-2 rounded-lg text-xs font-bold text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {m.isAdmin ? '직원으로 변경' : '관리자로 변경'}
+                      </button>
+                    )}
+                    {canRemove && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => window.confirm(`${m.displayName || m.memberUsername}님(${m.memberUsername}) 계정을 삭제할까요?\n\n· 계정이 삭제되어 이 아이디로는 더 이상 로그인할 수 없어요. 되돌릴 수 없습니다.\n· 맡고 있던 캠페인은 회사 대표 계정 담당으로 넘어와요.\n· 좌석은 추가 비용 없이 다시 비어요.`) &&
+                          run(() => brandTeamService.removeMember(m.id), '직원 계정을 삭제했어요. 맡던 캠페인은 회사 대표 계정 담당으로 옮겼고, 좌석이 다시 비었습니다.')}
                         className="px-3 py-2 rounded-lg text-xs font-bold text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50"
                       >
                         계정 삭제
@@ -402,10 +422,12 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
 
       <section className="max-w-3xl mt-6">
         <ul className="list-disc pl-5 space-y-1.5 text-xs text-slate-500 marker:text-slate-400">
-          <li>회사 관리자 = 회사 아이디로 로그인한 계정이에요. 결제 · 좌석 변경 · 직원 초대 · 계정 삭제는 회사 관리자만 할 수 있어요.</li>
+          <li>회사 대표 계정 = 회사 아이디로 로그인한 계정이에요. 멤버십 결제와 좌석 결제는 대표 계정만 할 수 있어요.</li>
+          <li>대표 계정은 직원을 관리자로 바꿀 수 있어요. 관리자는 직원 초대 · 계정 삭제 · 관리자 변경을 함께 할 수 있어요.</li>
+          <li>초대 링크로 가입할 때 직원이 부서와 이름을 적어요. 직원 목록에 함께 보여 누가 누구인지 알아보기 쉬워요.</li>
           <li>캠페인 메뉴에는 각자 맡은 캠페인만 보여요. 진행이 확정된 인플루언서의 연락처도 그 캠페인 담당자에게만 보입니다.</li>
-          <li>캠페인 이력에서는 내 캠페인과 회사 전체 성과를 모두 볼 수 있어요. 관리자는 캠페인 메뉴의 회사 전체 진행 예정에서 업로드 일정을 볼 수 있어요.</li>
-          <li>직원이 퇴사하면 계정을 삭제하세요. 맡던 캠페인은 관리자 담당으로 넘어오고, 좌석은 추가 비용 없이 다시 비어요. 새 직원은 초대 링크로 새로 가입해 새 캠페인부터 맡으면 됩니다.</li>
+          <li>캠페인 이력에서는 내 캠페인과 회사 전체 성과를 모두 볼 수 있어요. 캠페인 메뉴의 회사 전체 진행 예정에서는 누구나 회사 전체 업로드 일정을 볼 수 있어요.</li>
+          <li>직원이 퇴사하면 계정을 삭제하세요. 맡던 캠페인은 회사 대표 계정 담당으로 넘어오고, 좌석은 추가 비용 없이 다시 비어요. 새 직원은 초대 링크로 새로 가입해 새 캠페인부터 맡으면 됩니다.</li>
         </ul>
       </section>
     </main>

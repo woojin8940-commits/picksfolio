@@ -28,7 +28,7 @@ const BusinessJoinPage: React.FC<BusinessJoinPageProps> = ({ onNavigateHome, onN
   const [invite, setInvite] = useState<{ companyName: string; label: string; expiresAt: string } | null>(null);
   const [checking, setChecking] = useState(true);
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', username: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ department: '', name: '', username: '', password: '', confirm: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,12 +57,13 @@ const BusinessJoinPage: React.FC<BusinessJoinPageProps> = ({ onNavigateHome, onN
     e.preventDefault();
     setError(null);
     const username = form.username.trim().toLowerCase();
+    if (!form.department.trim()) return setError('부서를 입력해 주세요.');
     if (!form.name.trim()) return setError('이름을 입력해 주세요.');
     if (!/^[a-z0-9_]{3,20}$/.test(username)) return setError('아이디는 영문 소문자 · 숫자 · 밑줄로 3~20자여야 해요.');
     if (!/^(?=.*[A-Za-z])(?=.*\d).{8,64}$/.test(form.password)) return setError('비밀번호는 영문과 숫자를 섞어 8자 이상으로 만들어 주세요.');
     if (form.password !== form.confirm) return setError('비밀번호가 서로 달라요.');
     setSubmitting(true);
-    const res = await brandTeamService.join({ token, username, password: form.password, name: form.name.trim() });
+    const res = await brandTeamService.join({ token, username, password: form.password, name: form.name.trim(), department: form.department.trim() });
     setSubmitting(false);
     if (!res.success) return setError(res.error);
     try {
@@ -120,6 +121,7 @@ const BusinessJoinPage: React.FC<BusinessJoinPageProps> = ({ onNavigateHome, onN
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-5">
+            {field('department', '부서', { placeholder: '예: 마케팅팀', maxLength: 40, autoComplete: 'organization-title', required: true })}
             {field('name', '이름', { placeholder: '팀에서 보일 이름 (예: 김지은)', maxLength: 40, autoComplete: 'name', required: true })}
             {field('username', '아이디', {
               placeholder: '영문 소문자 · 숫자 · 밑줄 3~20자', autoComplete: 'username', autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false, required: true,

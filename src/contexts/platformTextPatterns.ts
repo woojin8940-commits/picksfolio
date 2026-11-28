@@ -2600,4 +2600,12 @@ export const platformTextPatterns = [
     "source": "^(\\d{2}\\.\\d{2}) 업로드 예정$",
     "replacement": "Upload due $1"
   },
+  {
+    "source": "^(.+?)님을 직원으로 바꿀까요\\? 직원 초대 · 계정 삭제 · 관리자 변경을 더 이상 할 수 없어요\\.$",
+    "replacement": "Change $1 to staff? They'll no longer be able to invite staff, delete accounts or change admin rights."
+  },
+  {
+    "source": "^(.+?)님을 관리자로 바꿀까요\\? 직원 초대 · 계정 삭제 · 관리자 변경을 함께 할 수 있어요\\. 좌석 결제와 멤버십 결제는 회사 대표 계정에서만 할 수 있어요\\.$",
+    "replacement": "Make $1 an admin? They'll be able to invite staff, delete accounts and change admin rights. Seat and membership payments stay with the company's main account."
+  },
 ] as const;

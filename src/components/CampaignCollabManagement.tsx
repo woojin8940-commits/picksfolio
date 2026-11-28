@@ -15,7 +15,6 @@ import {
   parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor, contentFormatLabel,
 } from '../utils/campaignBrief';
 import Toast from './Toast';
-import { isBusinessTeamMember } from '../utils/businessTeam';
 import CompanyUpcomingCampaigns from './collab/CompanyUpcomingCampaigns';
 
 /** 커머스 캠페인에서 브랜드가 지원자를 선정했을 때 안내하는 문구. 선정 카드 · 확인 창 · 알림이 같은 문장을 쓴다. */
@@ -261,10 +260,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const applicantRequest = React.useRef(0);
   const [showForm, setShowForm] = useState(false);
   /**
-   * 캠페인 메뉴는 각자 맡은 캠페인만 보인다. 관리자만 "회사 전체" 탭에서 직원 담당 캠페인까지
-   * 진행 예정 요약(업로드 예정일 · 진행 인플루언서)으로 본다.
+   * 캠페인 메뉴는 각자 맡은 캠페인만 보인다. "회사 전체 진행 예정" 탭에서는 관리자 · 직원 모두
+   * 다른 사람이 맡은 캠페인까지 진행 예정 요약(업로드 예정일 · 진행 인플루언서)으로 본다.
    */
-  const isCompanyAdmin = !isBusinessTeamMember();
   const [listScope, setListScope] = useState<'mine' | 'company'>('mine');
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
@@ -1852,7 +1850,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         </div>
       </header>
 
-      {isCompanyAdmin && (
+      {(
         <div className="inline-flex p-1 bg-slate-100 rounded-xl mb-4">
           {([['mine', '내 캠페인'], ['company', '회사 전체 진행 예정']] as const).map(([key, label]) => (
             <button
@@ -1867,7 +1865,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         </div>
       )}
 
-      {isCompanyAdmin && listScope === 'company' ? (
+      {listScope === 'company' ? (
         <CompanyUpcomingCampaigns businessUsername={businessUsername} />
       ) : (<>
       {/* Type Filter Tabs */}

@@ -138,9 +138,9 @@ const stripContact = (rows: any[]) =>
  * (401 로 막으면 로그인 안 한 사람의 캠페인 탐색이 통째로 멈춘다).
  */
 /**
- * 회사 전체의 진행 예정 캠페인 요약(관리자 캠페인 메뉴의 "회사 전체" 탭).
+ * 회사 전체의 진행 예정 캠페인 요약(캠페인 메뉴의 "회사 전체 진행 예정" 탭 — 관리자 · 직원 모두).
  *
- * 관리자는 직원이 맡은 캠페인도 한눈에 봐야 하지만, 상세 · 연락처는 담당자의 일이다. 그래서
+ * 다른 사람이 맡은 캠페인도 일정은 한눈에 봐야 하지만, 상세 · 연락처는 담당자의 일이다. 그래서
  * 캠페인명 · 담당자 · 업로드 기간과, 진행이 확정된 인플루언서(인스타그램 아이디 · 업로드 예정일 ·
  * 업로드 여부)만 보낸다. 연락처와 금액은 싣지 않는다.
  */
@@ -300,11 +300,9 @@ export default async (req: Request) => {
         businessAuth = auth;
       }
 
-      // 관리자 전용: 회사 전체의 진행 예정 캠페인 요약(업로드 예정일 · 진행 예정 인플루언서만).
+      // 회사 전체의 진행 예정 캠페인 요약(업로드 예정일 · 진행 예정 인플루언서만). 관리자 · 직원 모두 본다.
       if (business && url.searchParams.get("view") === "company_upcoming") {
-        if (!businessAuth?.ok || (businessAuth.teamRole !== "owner" && !businessAuth.isAdmin)) {
-          return Response.json({ error: "회사 전체 현황은 관리자 계정에서만 볼 수 있어요." }, { status: 403 });
-        }
+        if (!businessAuth?.ok) return Response.json({ error: "로그인이 필요합니다." }, { status: 401 });
         return Response.json(await companyUpcoming(db, business), { headers: { "Cache-Control": "no-store" } });
       }
 
