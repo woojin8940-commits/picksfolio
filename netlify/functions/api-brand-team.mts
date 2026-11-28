@@ -26,6 +26,7 @@ import {
   releaseInvite,
   removeMember,
   revokeInvite,
+  setMemberAdmin,
   usedSeats,
 } from "./_shared/brand-team.mts";
 
@@ -35,14 +36,16 @@ import {
  *   · overview        좌석 · 직원 · 대기 중인 초대 (회사 계정 누구나 — 직원은 보기만)
  *   · create_invite   빈 좌석에 1회용 초대 링크 만들기 (관리자)
  *   · revoke_invite   초대 취소 → 좌석이 다시 빈다 (관리자)
+ *   · set_admin       직원을 관리자로 바꾸기 · 다시 직원으로 (관리자)
  *   · remove_member   퇴사한 직원 삭제 → 좌석이 다시 빈다, 맡던 캠페인은 관리자에게, 계정은 삭제 (관리자)
  *   · add_seats       직원 좌석 추가 결제(남은 기간 일할) (관리자)
  *   · schedule_seats  다음 결제일부터 좌석 줄이기 · 예약 취소 (관리자)
  *   · invite_info     초대 링크 확인 (로그인 없이)
  *   · join            초대 링크로 직원 계정 만들기 (로그인 없이)
  *
- * 역할은 회사 관리자(회사 아이디로 로그인한 계정 = 결제한 계정) / 직원 두 가지다.
- * 초대 · 내보내기 · 좌석 결제는 모두 회사 관리자만 한다.
+ * 회사 대표 계정(회사 아이디로 로그인한 계정 = 결제한 계정)과, 대표가 관리자로 바꾼 직원이
+ * "관리자"다. 관리자는 직원 초대 · 계정 삭제 · 관리자 변경을 한다. 좌석 결제 · 결제 내역은
+ * 대표 계정만 한다(결제 수단이 대표 계정에 있다).
  */
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -124,12 +127,14 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
   const username = String(body?.username || "").trim().toLowerCase();
   const password = String(body?.password || "");
   const name = String(body?.name || "").trim().slice(0, 40);
+  const department = String(body?.department || "").trim().slice(0, 40);
 
   const invite = await findOpenInvite(token);
   if (!invite) return fail(410, "만료됐거나 이미 사용한 초대 링크예요. 회사 관리자에게 새 링크를 요청해 주세요.");
   if (!hasActiveBrandPlan(await readSeatRecord(invite.company))) {
     return fail(409, "회사의 멤버십이 이용 중이 아니어서 지금은 가입할 수 없어요. 회사 관리자에게 문의해 주세요.");
   }
+  if (!department) return fail(400, "부서를 입력해 주세요.");
   if (!name) return fail(400, "이름을 입력해 주세요.");
   const rules = checkUsernameRules(username);
   if (!rules.ok) return fail(400, rules.error);
@@ -145,7 +150,7 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
     email,
     password,
     email_confirm: true,
-    user_metadata: { brand_team_member: true, company_username: invite.company, display_name: name },
+    user_metadata: { brand_team_member: true, company_username: invite.company, display_name: name, department },
   });
   if (createError || !created?.user) {
     if (String(createError?.message || "").includes("already been registered")) return fail(409, "이미 사용 중인 아이디입니다.");
@@ -177,6 +182,7 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
       userId,
       username,
       displayName: name,
+      department,
       inviteId: claimed.id,
     });
   } catch (e) {
@@ -193,6 +199,7 @@ async function handleJoin(req: Request, body: any): Promise<Response> {
     company_name: await companyName(claimed.company),
     role: "operator",
     team_role: "member",
+    team_admin: false,
     member_username: username,
     member_name: name,
     access_token: session?.session?.access_token || "",
@@ -232,20 +239,24 @@ export default async (req: Request) => {
     }
     const company = auth.username;
     const isOwner = auth.teamRole === "owner";
+    // 팀 관리(초대 · 계정 삭제 · 관리자 변경)는 대표 계정과 관리자로 바뀐 직원이 한다.
+    const canManage = isOwner || auth.teamAdmin === true;
+    const self = String(auth.memberUsername || "").toLowerCase();
     const by = auth.memberUsername || company;
 
     if (action === "overview") {
       const view = await overview(company);
       return Response.json({
         success: true,
-        viewer: { teamRole: auth.teamRole, memberUsername: auth.memberUsername || null },
+        viewer: { teamRole: auth.teamRole, teamAdmin: canManage, memberUsername: auth.memberUsername || null },
         ...view,
         // 결제 내역은 결제한 회사 관리자에게만 보인다.
         billingHistory: isOwner ? view.billingHistory : [],
       });
     }
 
-    if (!isOwner) return fail(403, "팀원 관리와 좌석 결제는 회사 관리자 계정에서만 할 수 있어요.");
+    if (!canManage) return fail(403, "팀원 관리는 관리자만 할 수 있어요.");
+    const ownerOnly = () => fail(403, "좌석 결제는 회사 대표 계정에서만 할 수 있어요.");
 
     if (action === "create_invite") {
       const record = await readSeatRecord(company);
@@ -268,11 +279,23 @@ export default async (req: Request) => {
       return Response.json({ success: true });
     }
 
+    if (action === "set_admin") {
+      const memberId = Number(body?.memberId);
+      const team = await listTeam(company, 0);
+      const target = team.members.find((m) => m.id === memberId);
+      if (!target) return fail(404, "이미 삭제된 직원이에요.");
+      if (self && target.memberUsername.toLowerCase() === self) return fail(400, "자기 자신의 권한은 바꿀 수 없어요.");
+      await setMemberAdmin(company, memberId, body?.isAdmin === true);
+      const view = await overview(company);
+      return Response.json({ success: true, ...view, billingHistory: isOwner ? view.billingHistory : [] });
+    }
+
     if (action === "remove_member") {
       const memberId = Number(body?.memberId);
       const team = await listTeam(company, 0);
       const target = team.members.find((m) => m.id === memberId);
       if (!target) return fail(404, "이미 내보낸 직원이에요.");
+      if (self && target.memberUsername.toLowerCase() === self) return fail(400, "자기 자신의 계정은 삭제할 수 없어요.");
       // 퇴사한 직원: 좌석에서 빼고(기록은 남긴다), 맡던 캠페인은 관리자에게 넘기고, 계정은 지운다.
       // 새로 오는 직원은 초대 링크로 새 계정을 만들고, 관리자가 캠페인 담당자를 바꿔 이어 간다.
       const { getDatabase } = await import("@picks/netlify-database");
@@ -309,6 +332,7 @@ export default async (req: Request) => {
     }
 
     if (action === "add_seats") {
+      if (!isOwner) return ownerOnly();
       const limited = await checkRateLimit({
         bucket: "brand-seat-purchase",
         key: company,
@@ -328,6 +352,7 @@ export default async (req: Request) => {
     }
 
     if (action === "schedule_seats") {
+      if (!isOwner) return ownerOnly();
       const result = await scheduleSeatCount(company, Number(body?.seats), await usedSeats(company));
       if (!result.ok) return fail(result.status, result.error);
       return Response.json({ success: true, ...(await overview(company)) });

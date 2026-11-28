@@ -135,6 +135,7 @@ export default async (req: Request) => {
             company_name: companyProfile?.full_name || "",
             role: "operator",
             team_role: "member",
+            team_admin: team.isAdmin,
             member_username: team.memberUsername,
             member_name: profile.full_name || "",
             access_token: authData.session?.access_token || "",

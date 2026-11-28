@@ -6,6 +6,8 @@ export interface TeamMember {
   id: number;
   memberUsername: string;
   displayName: string;
+  department: string;
+  isAdmin: boolean;
   joinedAt: string;
   seated: boolean;
 }
@@ -18,7 +20,7 @@ export interface SeatInvite {
 }
 
 export interface TeamOverview {
-  viewer: { teamRole: 'owner' | 'member'; memberUsername: string | null };
+  viewer: { teamRole: 'owner' | 'member'; teamAdmin?: boolean; memberUsername: string | null };
   plan: {
     planActive: boolean;
     includedSeats: number;
@@ -65,11 +67,12 @@ export const brandTeamService = {
     call<{ invite: SeatInvite; url: string }>('create_invite', { label }),
   revokeInvite: (inviteId: number) => call<{}>('revoke_invite', { inviteId }),
   removeMember: (memberId: number) => call<{}>('remove_member', { memberId }),
+  setAdmin: (memberId: number, isAdmin: boolean) => call<TeamOverview>('set_admin', { memberId, isAdmin }),
   addSeats: (count: number) => call<TeamOverview & { chargedKrw?: number }>('add_seats', { count }),
   scheduleSeats: (seats: number) => call<TeamOverview>('schedule_seats', { seats }),
   inviteInfo: (token: string) =>
     call<{ invite: { companyName: string; label: string; expiresAt: string } }>('invite_info', { token }, false),
-  join: (input: { token: string; username: string; password: string; name: string }) =>
+  join: (input: { token: string; username: string; password: string; name: string; department: string }) =>
     call<{
       username: string;
       company_name: string;

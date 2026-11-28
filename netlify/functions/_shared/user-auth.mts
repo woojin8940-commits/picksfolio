@@ -36,6 +36,11 @@ type PositiveAuthResult = {
   teamRole?: BrandTeamRole;
   /** 직원 계정이면 직원 자신의 아이디(username 은 회사 아이디로 바뀐다). */
   memberUsername?: string;
+  /**
+   * 팀 관리(직원 초대 · 계정 삭제 · 관리자 변경)를 할 수 있는지. 회사 대표 계정(owner)과
+   * 관리자로 바뀐 직원이 true. 결제 · 등급 변경은 이 값이 아니라 teamRole === 'owner' 로 본다.
+   */
+  teamAdmin?: boolean;
 };
 
 const AUTH_CACHE_TTL_MS = 60_000;
@@ -152,9 +157,11 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
       if (team.kind === "member") {
         result.memberUsername = result.username;
         result.teamRole = "member";
+        result.teamAdmin = team.isAdmin;
         result.username = team.seated ? normalizeName(team.company) : "";
       } else {
         result.teamRole = "owner";
+        result.teamAdmin = true;
       }
     } catch (e) {
       console.error("[user-auth] team lookup failed:", (e as Error)?.message);
@@ -260,6 +267,7 @@ export async function requireAccountOwner(req: Request, username: string): Promi
     isAdmin: caller.isAdmin,
     ...(caller.teamRole ? { teamRole: caller.teamRole } : {}),
     ...(caller.memberUsername ? { memberUsername: caller.memberUsername } : {}),
+    ...(caller.teamAdmin !== undefined ? { teamAdmin: caller.teamAdmin } : {}),
   };
 }
 
