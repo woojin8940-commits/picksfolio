@@ -211,7 +211,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
             <p className="text-base font-black text-slate-900">{`이번 달 사용량 · ${TIER_NAME[current]}`}</p>
             <p className="text-[11px] font-bold text-slate-400">
-              {`${formatDate(quota.cycle.start)} ~ ${formatDate(quota.cycle.end)} · 다음 결제 ${won(plan?.nextMonthlyKrw || 0)}`}
+              {plan?.granted ? `${formatDate(quota.cycle.start)} ~ ${formatDate(quota.cycle.end)}` : `${formatDate(quota.cycle.start)} ~ ${formatDate(quota.cycle.end)} · 다음 결제 ${won(plan?.nextMonthlyKrw || 0)}`}
             </p>
           </div>
           <div className="grid md:grid-cols-2 gap-5">
