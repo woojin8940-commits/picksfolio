@@ -375,7 +375,6 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       {m.department
                         ? `${m.department} / ${m.displayName || m.memberUsername}`
                         : m.displayName || m.memberUsername}
-                      <span className="text-slate-400 font-medium ml-1.5">@{m.memberUsername}</span>
                       {isSelf && <span className="ml-1.5 text-[11px] font-black text-blue-500">나</span>}
                     </p>
                     <p className="text-[11px] text-slate-500 font-medium">
@@ -406,7 +405,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => window.confirm(`${m.displayName || m.memberUsername}님(${m.memberUsername}) 계정을 삭제할까요?\n\n· 계정이 삭제되어 이 아이디로는 더 이상 로그인할 수 없어요. 되돌릴 수 없습니다.\n· 맡고 있던 캠페인은 회사 대표 계정 담당으로 넘어와요.\n· 좌석은 추가 비용 없이 다시 비어요.`) &&
+                        onClick={() => window.confirm(`${m.department ? `${m.department} / ` : ''}${m.displayName || m.memberUsername}님 계정을 삭제할까요?\n\n· 계정이 삭제되어 이 아이디로는 더 이상 로그인할 수 없어요. 되돌릴 수 없습니다.\n· 맡고 있던 캠페인은 회사 대표 계정 담당으로 넘어와요.\n· 좌석은 추가 비용 없이 다시 비어요.`) &&
                           run(() => brandTeamService.removeMember(m.id), '직원 계정을 삭제했어요. 맡던 캠페인은 회사 대표 계정 담당으로 옮겼고, 좌석이 다시 비었습니다.')}
                         className="px-3 py-2 rounded-lg text-xs font-bold text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50"
                       >
