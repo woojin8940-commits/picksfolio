@@ -22,6 +22,7 @@ import AdminDmQueue from './admin/AdminDmQueue';
 import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminBrandDeckRequests from './admin/AdminBrandDeckRequests';
 import AdminEnterpriseInquiries from './admin/AdminEnterpriseInquiries';
+import AdminBrandMembershipGrant from './admin/AdminBrandMembershipGrant';
 import AdminAffiliateStoreApplications from './admin/AdminAffiliateStoreApplications';
 import AdminAffiliateStoreIssues from './admin/AdminAffiliateStoreIssues';
 import AdminAffiliatePayouts from './admin/AdminAffiliatePayouts';
@@ -68,6 +69,7 @@ type OperatorTab =
   | 'applicants'
   | 'brandleads'
   | 'enterprise'
+  | 'brand-membership'
   | 'affiliate-store'
   | 'affiliate-issues'
   | 'affiliate-payouts'
@@ -390,6 +392,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       group: '운영',
       tabs: [
         { key: 'users', label: '회원 관리' },
+        { key: 'brand-membership', label: '브랜드 멤버십 부여' },
         { key: 'managers', label: '담당자 계정' },
         { key: 'dmqueue', label: 'DM 발송' },
         { key: 'settlement', label: '정산·매출' },
@@ -932,6 +935,20 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 신청자 목록이 표시됩니다." />
+        )}
+
+        {activeTab === 'brand-membership' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="브랜드 멤버십 부여"
+                  body="결제 없이 라이트 · 그로스를 켜거나 끄고, 엔터프라이즈로 협의한 별도 한도를 넣습니다. 테스트 계정 · 엔터프라이즈 계약 · 보상에 씁니다."
+                />
+                <AdminBrandMembershipGrant token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 쓸 수 있어요." />
         )}
 
         {activeTab === 'enterprise' && (
