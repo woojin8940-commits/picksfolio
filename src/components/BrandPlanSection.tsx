@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import EnterpriseInquiryModal from './EnterpriseInquiryModal';
 import { brandPlanService, type BrandPlanOverview } from '../services/brandPlanService';
 import {
-  ADDON_CAMPAIGN_PRICE,
   ADDON_SELECTED_PRICE,
   ADDON_SELECTED_UNIT,
   BRAND_CAMPAIGN_PRICE,
@@ -123,11 +122,11 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
   const cancelSchedule = () =>
     run(() => brandPlanService.schedule(current || 'brand_growth'), () => '등급 변경 예약을 취소했어요.');
 
-  const buyAddon = (kind: 'campaign' | 'selected') => {
-    const price = kind === 'campaign' ? ADDON_CAMPAIGN_PRICE : ADDON_SELECTED_PRICE;
-    const label = kind === 'campaign' ? '캠페인 1건' : `선정 인플루언서 ${ADDON_SELECTED_UNIT}명`;
-    if (!window.confirm(`${label}을 추가합니다. 지금 ${won(price)}이 결제되고, 이번 결제 주기(${formatDate(plan?.nextBillingDate)}까지) 안에서만 쓸 수 있어요. 진행할까요?`)) return;
-    run(() => brandPlanService.addon(kind, 1), () => `${label}을 추가했어요.`);
+  // 추가로 살 수 있는 건 선정 인원뿐이다. 캠페인 건수는 등급을 올려서 늘린다.
+  const buyAddon = () => {
+    const label = `선정 인플루언서 ${ADDON_SELECTED_UNIT}명`;
+    if (!window.confirm(`${label}을 추가합니다. 지금 ${won(ADDON_SELECTED_PRICE)}이 결제되고, 이번 결제 주기(${formatDate(plan?.nextBillingDate)}까지) 안에서만 쓸 수 있어요. 진행할까요?`)) return;
+    run(() => brandPlanService.addon('selected', 1), () => `${label}을 추가했어요.`);
   };
 
   const card = (tier: BrandPlanTier, price: number, highlight: boolean) => {
@@ -216,7 +215,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
             <Meter label="선정 인플루언서" used={quota.used.selected} total={quota.limits.selected + quota.addons.selected} unit="명" />
           </div>
           <p className="text-[11px] text-slate-400 font-medium mt-3 leading-relaxed">
-            캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정되어 연락처가 공개될 때 차감돼요. 남은 건수는 다음 달로 넘어가지 않아요.
+            캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정되어 연락처가 공개될 때 차감돼요. 남은 건수는 다음 달로 넘어가지 않아요. 캠페인이 더 필요하면 등급을 올려 주세요.
           </p>
           {quota.pastDue && (
             <p className="text-xs font-bold text-red-600 mt-2">정기결제가 실패했어요. 결제 수단을 확인해 주세요. 결제가 다시 될 때까지 새 리스트업과 진행 확정이 멈춥니다.</p>
@@ -226,11 +225,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
           )}
           {isOwner && (
             <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-2">
-              <button type="button" disabled={busy || plan?.chargePending} onClick={() => buyAddon('campaign')}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-50">
-                {`캠페인 1건 추가 · ${won(ADDON_CAMPAIGN_PRICE)}`}
-              </button>
-              <button type="button" disabled={busy || plan?.chargePending} onClick={() => buyAddon('selected')}
+              <button type="button" disabled={busy || plan?.chargePending} onClick={buyAddon}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-50">
                 {`선정 인플루언서 ${ADDON_SELECTED_UNIT}명 추가 · ${won(ADDON_SELECTED_PRICE)}`}
               </button>

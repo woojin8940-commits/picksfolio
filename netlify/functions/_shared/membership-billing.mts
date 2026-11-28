@@ -61,7 +61,6 @@ export const BRAND_PLAN_LIMITS: Record<BrandPlanTier, { campaigns: number; selec
 }
 
 /** 한도 추가 구매. 그 결제 주기 안에서만 쓴다. */
-export const ADDON_CAMPAIGN_PRICE_KRW = 59000 // 캠페인 1건
 export const ADDON_SELECTED_UNIT = 10 // 선정 인플루언서 10명 묶음
 export const ADDON_SELECTED_PRICE_KRW = 49000 // 10명당
 export type BrandAddonKind = 'campaign' | 'selected'
