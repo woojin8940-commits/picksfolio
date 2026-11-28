@@ -148,7 +148,8 @@ async function companyUpcoming(db: any, business: string) {
   const company = String(business || "").trim().toLowerCase().replace(/^biz\//, "");
   const today = todayInSeoul();
   const rows = (await db.sql`
-    SELECT id, title, status, owner_member, start_date, end_date, upload_from, upload_to, created_at
+    SELECT id, title, status, owner_member, start_date, end_date, upload_from, upload_to, created_at,
+           thumbnail_url, brand_name, category, budget_krw
     FROM campaigns
     WHERE LOWER(REPLACE(business_username, 'biz/', '')) = ${company}
       AND deleted_at IS NULL
@@ -160,7 +161,7 @@ async function companyUpcoming(db: any, business: string) {
   const collabs = ids.length
     ? ((await db.sql`
         SELECT cc.id, cc.campaign_id, cc.creator_username, cc.status, cc.upload_url, cc.cancelled_at,
-               ct.upload_due, ch.instagram_handle,
+               ct.upload_due, ch.instagram_handle, ch.profile_image,
                -- 인플루언서 단가(브랜드가 내는 광고비). 캠페인 이력 · 정산 화면과 같은 규칙이다
                -- (명단에 적힌 광고비 + 2차 활용비, 명단이 없으면 확정 조건의 금액).
                CASE
@@ -199,6 +200,7 @@ async function companyUpcoming(db: any, business: string) {
       const influencers = list.map((c) => ({
         username: String(c.creator_username || ""),
         instagramHandle: String(c.instagram_handle || ""),
+        profileImage: String(c.profile_image || ""),
         uploadDue: day(c.upload_due),
         feeKrw: Math.max(0, Math.round(Number(c.fee) || 0)),
         uploaded: Boolean(c.upload_url) || c.status === "completed",
@@ -209,6 +211,10 @@ async function companyUpcoming(db: any, business: string) {
         status: String(r.status || ""),
         ownerMember: String(r.owner_member || ""),
         ownerName: ownerLabel(r.owner_member, names),
+        thumbnailUrl: String(r.thumbnail_url || ""),
+        brandName: String(r.brand_name || ""),
+        category: String(r.category || ""),
+        budgetKrw: Math.max(0, Math.round(Number(r.budget_krw) || 0)),
         uploadFrom: day(r.upload_from),
         uploadTo: day(r.upload_to),
         influencers,

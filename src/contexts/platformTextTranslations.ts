@@ -7628,4 +7628,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "인플루언서 연락은 픽스폴리오 담당자가 맡아요.": "Your Picksfolio manager handles contact with the influencer.",
   "브랜드와 인플루언서 진행사항에 바로 표시됩니다(되돌릴 수 없음).": "It will appear right away in both the brand's and influencer's progress (cannot be undone).",
   "모두 이야기를 마쳤나요? 연락처는 브랜드에 공개되지 않아요.": "Have you finished talking with all of them? Contact details won't be shared with the brand.",
+  "진행 합계": "Confirmed total",
+  "일정 미정": "Date TBD",
+  "브랜드 전체": "Whole brand",
 };
