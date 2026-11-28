@@ -30,7 +30,7 @@ export interface BrandPlanOverview {
   catalog: {
     tiers: { tier: BrandPlanTier; priceKrw: number; includedSeats: number; campaigns: number; selected: number }[];
     seatPriceKrw: number;
-    addons: { campaign: { unit: number; priceKrw: number }; selected: { unit: number; priceKrw: number } };
+    addons: { selected: { unit: number; priceKrw: number } };
   };
 }
 
@@ -57,6 +57,6 @@ export const brandPlanService = {
   overview: () => call<BrandPlanOverview>('overview'),
   upgrade: (tier: BrandPlanTier) => call<BrandPlanOverview & { chargedKrw?: number }>('upgrade', { tier }),
   schedule: (tier: BrandPlanTier) => call<BrandPlanOverview>('schedule', { tier }),
-  addon: (kind: 'campaign' | 'selected', units: number) =>
+  addon: (kind: 'selected', units: number) =>
     call<BrandPlanOverview & { chargedKrw?: number }>('addon', { kind, units }),
 };

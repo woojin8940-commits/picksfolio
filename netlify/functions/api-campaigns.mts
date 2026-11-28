@@ -142,7 +142,7 @@ const stripContact = (rows: any[]) =>
  *
  * 다른 사람이 맡은 캠페인도 일정은 한눈에 봐야 하지만, 상세 · 연락처는 담당자의 일이다. 그래서
  * 캠페인명 · 담당자 · 업로드 기간과, 진행이 확정된 인플루언서(인스타그램 아이디 · 업로드 예정일 ·
- * 업로드 여부)만 보낸다. 연락처와 금액은 싣지 않는다.
+ * 업로드 여부 · 단가)만 보낸다. 연락처는 싣지 않는다.
  */
 async function companyUpcoming(db: any, business: string) {
   const company = String(business || "").trim().toLowerCase().replace(/^biz\//, "");
@@ -160,10 +160,26 @@ async function companyUpcoming(db: any, business: string) {
   const collabs = ids.length
     ? ((await db.sql`
         SELECT cc.id, cc.campaign_id, cc.creator_username, cc.status, cc.upload_url, cc.cancelled_at,
-               ct.upload_due, ch.instagram_handle
+               ct.upload_due, ch.instagram_handle,
+               -- 인플루언서 단가(브랜드가 내는 광고비). 캠페인 이력 · 정산 화면과 같은 규칙이다
+               -- (명단에 적힌 광고비 + 2차 활용비, 명단이 없으면 확정 조건의 금액).
+               CASE
+                 WHEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0) > 0
+                   THEN COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0)
+                 WHEN cl.id IS NOT NULL THEN 0
+                 ELSE COALESCE(ct.fee, 0)
+               END AS fee
         FROM campaign_collabs cc
         LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
         LEFT JOIN creator_channels ch ON ch.username = LOWER(cc.creator_username)
+        LEFT JOIN LATERAL (
+          SELECT l.id, l.quoted_fee, l.quoted_second_use_fee
+          FROM campaign_listups l
+          WHERE l.campaign_id = cc.campaign_id
+            AND (l.collab_id = cc.id OR LOWER(l.influencer_username) = LOWER(cc.creator_username))
+          ORDER BY (l.collab_id = cc.id) DESC NULLS LAST
+          LIMIT 1
+        ) cl ON TRUE
         WHERE cc.campaign_id = ANY(${ids})
           AND cc.cancelled_at IS NULL AND cc.status <> 'cancelled'
         ORDER BY cc.created_at ASC
@@ -184,6 +200,7 @@ async function companyUpcoming(db: any, business: string) {
         username: String(c.creator_username || ""),
         instagramHandle: String(c.instagram_handle || ""),
         uploadDue: day(c.upload_due),
+        feeKrw: Math.max(0, Math.round(Number(c.fee) || 0)),
         uploaded: Boolean(c.upload_url) || c.status === "completed",
       }));
       return {

@@ -6,10 +6,10 @@ import { authHeaders } from '../../services/apiService';
  *
  * 관리자는 회사 전체 일정을 한눈에 봐야 하지만, 상세 진행과 인플루언서 연락은 각 캠페인 담당자의
  * 일이다. 그래서 캠페인명 · 담당자 · 업로드 기간과, 진행이 확정된 인플루언서(업로드 예정일 · 업로드
- * 여부)만 보여 준다. 연락처와 금액은 없다.
+ * 여부 · 단가)만 보여 준다. 연락처는 없다.
  */
 
-type Influencer = { username: string; instagramHandle: string; uploadDue: string; uploaded: boolean };
+type Influencer = { username: string; instagramHandle: string; uploadDue: string; feeKrw?: number; uploaded: boolean };
 type UpcomingCampaign = {
   id: string;
   title: string;
@@ -108,6 +108,7 @@ const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername }) => {
       ) : (
         visible.map((c) => {
           const pending = c.influencers.filter((i) => !i.uploaded).length;
+          const totalFee = c.influencers.reduce((sum, i) => sum + (i.feeKrw || 0), 0);
           return (
             <div key={c.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -115,6 +116,7 @@ const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername }) => {
                   <p className="text-[15px] font-black text-slate-900 break-words">{c.title || '제목 없는 캠페인'}</p>
                   <p className="text-xs text-slate-500 font-bold mt-0.5">
                     {`업로드 기간 ${periodText(c.uploadFrom, c.uploadTo)} · 진행 예정 ${pending}명`}
+                    {totalFee > 0 ? ` · 합계 ${totalFee.toLocaleString()}원` : ''}
                     {c.status === 'pending_approval' ? ' · 승인 대기' : ''}
                   </p>
                 </div>
@@ -132,8 +134,13 @@ const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername }) => {
                         <span className="text-[13px] font-bold text-slate-800 truncate">
                           {i.instagramHandle ? `@${i.instagramHandle.replace(/^@/, '')}` : i.username}
                         </span>
-                        <span className={`text-[11px] font-black whitespace-nowrap ${i.uploaded ? 'text-emerald-600' : 'text-slate-600'}`}>
-                          {i.uploaded ? '업로드 완료' : i.uploadDue ? `${dateText(i.uploadDue)} 업로드 예정` : '업로드일 미정'}
+                        <span className="flex items-center gap-3 shrink-0">
+                          <span className="text-[12px] font-black text-slate-900 whitespace-nowrap">
+                            {i.feeKrw && i.feeKrw > 0 ? `${i.feeKrw.toLocaleString()}원` : '단가 미정'}
+                          </span>
+                          <span className={`text-[11px] font-black whitespace-nowrap ${i.uploaded ? 'text-emerald-600' : 'text-slate-600'}`}>
+                            {i.uploaded ? '업로드 완료' : i.uploadDue ? `${dateText(i.uploadDue)} 업로드 예정` : '업로드일 미정'}
+                          </span>
                         </span>
                       </li>
                     ))}

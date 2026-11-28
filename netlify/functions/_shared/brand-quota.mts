@@ -5,7 +5,7 @@
  *   · 선정 1명: 브랜드가 고르고 담당자가 협의해 진행이 확정될 때(연락처 공개).
  *     단, 브랜드가 직접 요청한 인플루언서는 캠페인당 2명까지 빼 준다(kind = 'brand_free'). 차감
  *
- * 한도 = 등급 한도(라이트 2건 · 20명, 그로스 5건 · 50명) + 이번 결제 주기에 추가 구매한 것
+ * 한도 = 등급 한도(라이트 2건 · 20명, 그로스 5건 · 50명) + 이번 결제 주기에 추가 구매한 선정 인원(캠페인 건수는 사지 않는다)
  *        + 운영자가 레코드에 적어 둔 별도 한도(brand_quota_override, 엔터프라이즈 협의용).
  * 결제 주기(다음 결제일 한 달 전 ~ 다음 결제일)마다 다시 채워지고 남은 것은 넘어가지 않는다.
  *
@@ -151,7 +151,7 @@ async function check(company: string, kind: Kind, refId: string): Promise<Reserv
     code: kind === "campaign" ? "CAMPAIGN_QUOTA_EXCEEDED" : "SELECTED_QUOTA_EXCEEDED",
     error:
       kind === "campaign"
-        ? "이 브랜드는 이번 달 캠페인 한도를 다 썼어요. 브랜드가 캠페인을 추가 구매하거나 등급을 올린 뒤에 리스트업할 수 있습니다."
+        ? "이 브랜드는 이번 달 캠페인 한도를 다 썼어요. 브랜드가 등급을 올리거나 다음 결제일에 한도가 다시 채워진 뒤에 리스트업할 수 있습니다."
         : "이 브랜드는 이번 달 선정 인플루언서 한도를 다 썼어요. 브랜드가 인원을 추가 구매하거나 등급을 올린 뒤에 진행을 확정할 수 있습니다.",
   };
 }
@@ -201,7 +201,9 @@ export async function checkCampaignRegistration(company: string): Promise<Reserv
       ok: false,
       status: 402,
       code: "CAMPAIGN_QUOTA_EXCEEDED",
-      error: "이번 달 캠페인 한도를 다 썼어요. 캠페인을 추가 구매하거나 등급을 올린 뒤에 등록해 주세요.",
+      error: status.tier === "brand_campaign"
+        ? "이번 달 캠페인 한도를 다 썼어요. 그로스로 올리면 바로 월 5건까지 등록할 수 있어요."
+        : "이번 달 캠페인 한도를 다 썼어요. 다음 결제일에 다시 채워지고, 더 필요하면 엔터프라이즈로 문의해 주세요.",
     };
   }
   return { ok: true };
