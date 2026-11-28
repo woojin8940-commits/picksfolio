@@ -1,5 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
-import { checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
+import { brandQuotaStatus, checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
 import type { Config, Context } from "@netlify/functions";
 import {
   forbiddenResponse,
@@ -416,6 +416,28 @@ export default async (req: Request, context: Context) => {
         if (shared.length) {
           const contacts = await loadManagerContacts(db, shared.map((c) => c.influencerUsername), campaignId);
           for (const c of shared) c.contact = brandContactOf(contacts.get(norm(c.influencerUsername)));
+        }
+      }
+
+      // 이 브랜드의 이번 달 멤버십 한도. 담당자는 인플루언서와 이야기하기 전에 남은 한도를
+      // 보고, 브랜드는 진행이 멈춘 이유(한도 · 미납)를 본다. 한도 조회가 실패해도 명단은 보여 준다.
+      if ((viewerRole === "manager" || viewerRole === "brand") && campaign.business_username) {
+        try {
+          const q = await brandQuotaStatus(norm(campaign.business_username));
+          payload.brandQuota = {
+            tier: q.tier,
+            enforced: q.enforced,
+            pastDue: q.pastDue,
+            remaining: q.remaining,
+            total: {
+              campaigns: q.limits.campaigns + q.addons.campaigns,
+              selected: q.limits.selected + q.addons.selected,
+            },
+            used: q.used,
+            cycleEnd: q.cycle.end,
+          };
+        } catch (e) {
+          console.error("[campaign-listup] quota failed:", (e as Error)?.message);
         }
       }
 

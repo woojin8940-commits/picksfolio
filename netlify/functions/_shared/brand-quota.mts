@@ -40,6 +40,8 @@ export const currentCycle = (record: Record<string, any> | null, now = new Date(
 export interface BrandQuotaStatus {
   tier: BrandPlanTier | null;
   enforced: boolean;
+  /** 정기결제가 실패해 결제일이 지난 상태. 다시 결제될 때까지 새 리스트업 · 진행 확정을 막는다. */
+  pastDue: boolean;
   cycle: { start: string; end: string };
   limits: { campaigns: number; selected: number };
   addons: { campaigns: number; selected: number };
@@ -51,6 +53,9 @@ export async function brandQuotaStatus(company: string): Promise<BrandQuotaStatu
   const record = await readSeatRecord(company);
   const tier = activeBrandTier(record);
   const cycle = currentCycle(record);
+  // 결제일이 지났는데 청구가 실패해 있으면(멤버십은 재시도 동안 켜져 있다) 미납이다.
+  const nextDue = record?.next_billing_date ? Date.parse(record.next_billing_date) : NaN;
+  const pastDue = !!tier && Number(record?.billing_failures || 0) > 0 && Number.isFinite(nextDue) && nextDue <= Date.now();
   const base = tier ? BRAND_PLAN_LIMITS[tier] : { campaigns: 0, selected: 0 };
   const override = record?.brand_quota_override || {};
   const addons = { campaigns: 0, selected: 0 };
@@ -79,6 +84,7 @@ export async function brandQuotaStatus(company: string): Promise<BrandQuotaStatu
   return {
     tier,
     enforced: enforced(),
+    pastDue,
     cycle,
     limits,
     addons,
@@ -117,7 +123,16 @@ async function check(company: string, kind: Kind, refId: string): Promise<Reserv
   if (existing.length) return { ok: true };
   const status = await brandQuotaStatus(clean);
   const left = kind === "campaign" ? status.remaining.campaigns : status.remaining.selected;
-  if (left > 0 || !status.enforced) return { ok: true };
+  if (!status.enforced) return { ok: true };
+  if (status.pastDue) {
+    return {
+      ok: false,
+      status: 402,
+      code: "BRAND_PAYMENT_PAST_DUE",
+      error: "이 브랜드는 멤버십 정기결제가 실패한 상태예요. 결제 수단을 확인해 결제가 다시 되면 진행할 수 있습니다.",
+    };
+  }
+  if (left > 0) return { ok: true };
   if (!status.tier) {
     return {
       ok: false,

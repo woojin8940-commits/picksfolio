@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import BrandQuotaBanner, { type BrandQuota } from './BrandQuotaBanner';
 import { apiService } from '../../services/apiService';
 import { digitsOnly, formatCountKo, formatNumberWithCommas } from '../../utils/formatters';
 import InfluencerCandidateCard, {
@@ -392,6 +393,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
   const [candidates, setCandidates] = useState<any[]>([]);
   // 캠페인 한 건. 진행 방식에 따라 리스트업 자리 자체가 사라지므로 화면이 이 값을 읽는다.
   const [campaign, setCampaign] = useState<any>(null);
+  const [brandQuota, setBrandQuota] = useState<BrandQuota | null>(null);
   const [pool, setPool] = useState<any[]>([]);
   const [offerDraft, setOfferDraft] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -473,6 +475,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
       }
       setCandidates(res.candidates || []);
       setCampaign(res.campaign || null);
+      setBrandQuota(res.brandQuota || null);
       setPool(res.pool || []);
       setOfferDraft(res.offerDraft || null);
     },
@@ -740,6 +743,8 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
 
   return (
     <div className="space-y-4">
+      {/* 인플루언서와 이야기하기 전에 이 브랜드의 남은 선정 인원을 본다. */}
+      <BrandQuotaBanner quota={brandQuota} viewer="manager" />
       {message && (
         <div
           className={`rounded-xl px-4 py-2.5 text-[11px] font-bold ${
