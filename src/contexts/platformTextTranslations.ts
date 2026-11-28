@@ -7490,4 +7490,9 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "⑦ 2026년 11월 28일 개정: 정기 구독 상품을 브랜드 멤버십(라이트 월 179,000원 · 그로스 월 399,000원, 직원 좌석 1석당 월 49,000원, 자동 디엠 포함, 월 캠페인 · 선정 인플루언서 한도와 추가 구매)으로 변경하고 자동 디엠 플랜의 신규 판매를 종료하였으며(제2조, 제5조, 제11조, 제12조, 제14조), 유가시딩 캠페인의 진행 순서와 협업 확정 시 연락처 제공(제7조, 제18조), 협업 대가의 직접 지급(제19조, 제20조), 직원 계정(제2조, 제15조, 제22조)에 관한 조항을 변경·신설하였습니다.": "⑦ Revised November 28, 2026: Changed the subscription product to the brand membership (Lite ₩179,000/month · Growth ₩399,000/month, ₩49,000/month per staff seat, DM automation included, monthly campaign and confirmed-influencer limits with add-ons) and ended new sales of the DM Automation plan (Articles 2, 5, 11, 12, 14); amended or added provisions on the order of paid seeding campaigns and the provision of contact details upon confirmation (Articles 7, 18), direct payment of collaboration fees (Articles 19, 20), and staff accounts (Articles 2, 15, 22).",
   "라이트 멤버십": "Lite membership",
   "그로스 멤버십": "Growth membership",
+  "정기결제가 실패했어요. 결제 수단을 확인해 주세요. 결제가 다시 될 때까지 새 리스트업과 진행 확정이 멈춥니다.": "Your recurring payment failed. Please check your payment method. New list-ups and confirmations are paused until payment succeeds.",
+  "이 브랜드는 멤버십을 구독하지 않았어요. 구독 전에는 리스트업과 진행 확정이 막힙니다.": "This brand has no membership. List-ups and confirmations are blocked until they subscribe.",
+  "멤버십을 구독하면 담당자가 리스트업과 진행 확정을 이어 갈 수 있어요.": "Subscribe to a membership so your manager can continue list-ups and confirmations.",
+  "이 브랜드는 정기결제가 실패한 상태예요. 결제가 다시 될 때까지 리스트업과 진행 확정이 막힙니다.": "This brand's recurring payment failed. List-ups and confirmations are blocked until payment succeeds.",
+  "멤버십 정기결제가 실패했어요. 결제 수단을 확인해 주세요. 그동안 새 리스트업과 진행 확정이 멈춥니다.": "Your membership payment failed. Please check your payment method. New list-ups and confirmations are paused meanwhile.",
 };

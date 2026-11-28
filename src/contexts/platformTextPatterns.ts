@@ -2536,4 +2536,8 @@ export const platformTextPatterns = [
     "source": "^직원 좌석은 등급과 상관없이 1석당 월 (.+?)원입니다\\. 결제 주기 중간에 늘리면 다음 결제일까지 남은 기간만큼만 바로 결제되고, 다음 달부터는 멤버십과 함께 청구됩니다\\. 줄이면 다음 결제일부터 반영됩니다\\.$",
     "replacement": "Staff seats cost ₩$1 per seat per month on every tier. Seats added mid-cycle are charged right away only for the rest of the period, then billed with your membership from next month. Reductions apply from the next billing date."
   },
+  {
+    "source": "^(라이트|그로스) · 이번 달 남은 한도: 캠페인 (\\d+)/(\\d+)건 · 선정 인플루언서 (\\d+)/(\\d+)명$",
+    "replacement": "$1 · left this month: campaigns $2/$3 · confirmed influencers $4/$5"
+  },
 ] as const;

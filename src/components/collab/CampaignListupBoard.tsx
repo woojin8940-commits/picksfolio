@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import SharedContactCard from './SharedContactCard';
+import BrandQuotaBanner, { type BrandQuota } from './BrandQuotaBanner';
 import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
@@ -64,6 +65,7 @@ const profileLine = (c: any) => String(c?.profileLine || c?.snapshot?.categories
 const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, onNotify, onConfirmed }) => {
   const [candidates, setCandidates] = useState<any[]>([]);
   const [campaign, setCampaign] = useState<any>(null);
+  const [brandQuota, setBrandQuota] = useState<BrandQuota | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -105,6 +107,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
     const list = res.candidates || [];
     setCandidates(list);
     setCampaign(res.campaign || null);
+    setBrandQuota(res.brandQuota || null);
     if (!touched.current) {
       setSelected(
         new Set(list.filter((c: any) => c.brandDecision === 'pick').map((c: any) => c.id)),
@@ -211,6 +214,9 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
           픽스폴리오 담당자가 캠페인에 맞는 인플루언서를 찾아 올린 조합입니다. 함께하고 싶은 분을
           리스트에 담아 주시면 담당자가 일정·가이드·단가를 들고 직접 제안합니다.
         </p>
+        <div className="mt-3">
+          <BrandQuotaBanner quota={brandQuota} viewer="brand" />
+        </div>
       </div>
 
       {candidates.length === 0 ? (

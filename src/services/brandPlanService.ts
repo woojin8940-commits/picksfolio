@@ -19,6 +19,7 @@ export interface BrandPlanOverview {
   quota: {
     tier: BrandPlanTier | null;
     enforced: boolean;
+    pastDue: boolean;
     cycle: { start: string; end: string };
     limits: { campaigns: number; selected: number };
     addons: { campaigns: number; selected: number };
