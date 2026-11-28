@@ -2420,4 +2420,24 @@ export const platformTextPatterns = [
     "source": "^(\\d[\\d,]*)묶음$",
     "replacement": "$1 groups"
   },
+  {
+    "source": "^@(.+?) 협업을 시작합니다\\. 브랜드와 인플루언서 진행사항에 바로 표시되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다\\(되돌릴 수 없음\\)\\. 인플루언서와 이야기를 마치고 연락처 공개 동의를 받았나요\\?$",
+    "replacement": "Start the collaboration with @$1? It appears in both progress views right away, and the influencer's name and contact are shared with the brand (cannot be undone). Have you finished talking with the influencer and received consent to share their contact?"
+  },
+  {
+    "source": "^@(.+?)의 이름 · 연락처를 브랜드에 공개합니다\\(되돌릴 수 없음\\)\\. 인플루언서에게 연락처 공개 동의를 받았나요\\?$",
+    "replacement": "Share @$1's name and contact with the brand (cannot be undone)? Have you received the influencer's consent?"
+  },
+  {
+    "source": "^@(.+?)의 연락처를 브랜드에 공개했습니다\\.$",
+    "replacement": "Shared @$1's contact with the brand."
+  },
+  {
+    "source": "^연락처 공개 · (.+)$",
+    "replacement": "Contact shared · $1"
+  },
+  {
+    "source": "^@(.+?) 수락으로 처리하면 협업이 바로 생성되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다\\(되돌릴 수 없음\\)\\. 인플루언서에게 연락처 공개 동의를 받았나요\\?$",
+    "replacement": "Recording @$1 as accepted creates the collaboration right away and shares the influencer's name and contact with the brand (cannot be undone). Have you received the influencer's consent?"
+  },
 ] as const;

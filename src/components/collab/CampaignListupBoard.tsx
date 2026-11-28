@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import SharedContactCard from './SharedContactCard';
 import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
@@ -311,6 +312,16 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                       </svg>
                     </button>
                   </div>
+
+                  {/* 진행이 확정되면(담당자가 인플루언서와 이야기를 마침) 연락처가 열린다. */}
+                  {locked && c.contact && (
+                    <div className="mt-2.5">
+                      <SharedContactCard contact={c.contact} compact />
+                    </div>
+                  )}
+                  {locked && !c.contactSharedAt && (
+                    <p className="mt-2 text-[10px] font-bold text-slate-400">연락처는 담당자 확인 후 공개돼요.</p>
+                  )}
 
                   {/* 릴스 세 칸이 카드에서 가장 큰 자리를 차지한다.
 
