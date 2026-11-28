@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import EnterpriseInquiryModal from './EnterpriseInquiryModal';
 import { brandPlanService, type BrandPlanOverview } from '../services/brandPlanService';
 import {
   ADDON_CAMPAIGN_PRICE,
@@ -64,6 +65,8 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [inquiryOpen, setInquiryOpen] = useState(false);
+  const closeInquiry = useCallback(() => setInquiryOpen(false), []);
 
   const load = useCallback(async () => {
     const res = await brandPlanService.overview();
@@ -254,12 +257,16 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
             <li className="flex justify-between"><span>직원 좌석</span><strong className="text-slate-900">협의</strong></li>
             <li className="flex items-start gap-2"><span className="text-green-500 font-bold">✓</span>리스트업 · 이력/성과 · 자동 디엠</li>
           </ul>
-          <a href="mailto:woojin8940@inplace-ad.com?subject=%5B%ED%94%BD%EC%8A%A4%ED%8F%B4%EB%A6%AC%EC%98%A4%5D%20%EC%97%94%ED%84%B0%ED%94%84%EB%9D%BC%EC%9D%B4%EC%A6%88%20%EB%AC%B8%EC%9D%98"
-            className="mt-5 w-full py-3 rounded-xl font-bold text-center text-sm text-slate-700 border border-slate-300 hover:bg-slate-50">
+          <button
+            type="button"
+            onClick={() => setInquiryOpen(true)}
+            className="mt-5 w-full py-3 rounded-xl font-bold text-center text-sm text-slate-700 border border-slate-300 hover:bg-slate-50"
+          >
             문의하기
-          </a>
+          </button>
         </div>
       </div>
+      <EnterpriseInquiryModal open={inquiryOpen} onClose={closeInquiry} />
     </div>
   );
 };

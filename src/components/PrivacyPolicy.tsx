@@ -91,6 +91,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
               <li><span className="text-slate-300 font-bold">필수 (아이디·비밀번호 가입):</span> 이메일 주소, 비밀번호(단방향 암호화하여 저장), 이름(닉네임), 휴대폰 번호</li>
               <li><span className="text-slate-300 font-bold">브랜드 회원 추가 항목:</span> 회사명(브랜드명), 담당자 이름, 담당자 연락처 및 이메일 주소</li>
               <li><span className="text-slate-300 font-bold">브랜드 직원 계정:</span> 직원 이름, 아이디, 비밀번호(암호화하여 저장), 소속 회사 및 가입·내보내기 기록</li>
+              <li><span className="text-slate-300 font-bold">엔터프라이즈 문의 시:</span> 회사명, 담당자 성함, 연락처, 이메일 주소, 문의 내용(문의 답변과 계약 상담 목적으로만 처리하며, 상담이 끝나면 지체 없이 파기하고 계약을 맺은 경우에는 계약 관련 기록으로 보관)</li>
             </ul>
           </div>
 

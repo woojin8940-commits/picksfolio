@@ -21,6 +21,7 @@ import AdminLegacyUsernameTransfer from './admin/AdminLegacyUsernameTransfer';
 import AdminDmQueue from './admin/AdminDmQueue';
 import AdminInfluencerApplications from './admin/AdminInfluencerApplications';
 import AdminBrandDeckRequests from './admin/AdminBrandDeckRequests';
+import AdminEnterpriseInquiries from './admin/AdminEnterpriseInquiries';
 import AdminAffiliateStoreApplications from './admin/AdminAffiliateStoreApplications';
 import AdminAffiliateStoreIssues from './admin/AdminAffiliateStoreIssues';
 import AdminAffiliatePayouts from './admin/AdminAffiliatePayouts';
@@ -66,6 +67,7 @@ type OperatorTab =
   | 'directory'
   | 'applicants'
   | 'brandleads'
+  | 'enterprise'
   | 'affiliate-store'
   | 'affiliate-issues'
   | 'affiliate-payouts'
@@ -379,6 +381,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         { key: 'influencerdb', label: '인플루언서 DB' },
         { key: 'applicants', label: '인플루언서 지원자' },
         { key: 'brandleads', label: '브랜드 신청자' },
+        { key: 'enterprise', label: '엔터프라이즈 문의' },
         { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
         { key: 'saleslinks', label: '브랜드 영업 링크' },
       ],
@@ -929,6 +932,20 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 신청자 목록이 표시됩니다." />
+        )}
+
+        {activeTab === 'enterprise' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="엔터프라이즈 문의"
+                  body="브랜드 멤버십 화면의 '엔터프라이즈 문의하기'로 남겨진 회사명 · 담당자 · 연락처 · 이메일 · 문의 내용입니다. 연락한 뒤 상태를 '연락함' 또는 '완료'로 바꾸고 상담 메모를 남겨 두면, 아직 연락하지 못한 문의만 추려 볼 수 있습니다."
+                />
+                <AdminEnterpriseInquiries token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 문의 목록이 표시됩니다." />
         )}
 
         {/* 회원 관리 */}

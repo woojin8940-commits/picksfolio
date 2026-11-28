@@ -3012,6 +3012,66 @@ export const apiService = {
     }
   },
 
+  // 브랜드 멤버십 "엔터프라이즈 문의하기". 보내기는 누구나(로그인했으면 회사 아이디가 함께 남는다).
+  async submitEnterpriseInquiry(input: {
+    company: string;
+    name: string;
+    phone: string;
+    email: string;
+    message: string;
+    privacy_consent: boolean;
+    'bot-field'?: string;
+  }): Promise<{ ok?: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/enterprise-inquiries', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(input),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '문의를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+      return { ok: true };
+    } catch {
+      return { error: '네트워크 연결을 확인한 뒤 다시 시도해 주세요.' };
+    }
+  },
+
+  // 엔터프라이즈 문의 목록 · 상태 변경. 운영자 전용.
+  async getEnterpriseInquiries(token?: string): Promise<{ inquiries?: any[]; error?: string }> {
+    try {
+      const res = await fetch('/api/enterprise-inquiries', {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { inquiries: [], error: json?.error || '문의 목록을 불러오지 못했습니다.' };
+      return json;
+    } catch {
+      return { inquiries: [], error: '네트워크 오류' };
+    }
+  },
+
+  async updateEnterpriseInquiry(
+    id: number,
+    patch: { status?: string; memo?: string },
+    token?: string,
+  ): Promise<{ inquiry?: any; error?: string }> {
+    try {
+      const res = await fetch('/api/enterprise-inquiries', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ id, ...patch }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '문의를 저장하지 못했습니다.' };
+      return json;
+    } catch {
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getManagers(token?: string): Promise<{ managers?: any[]; error?: string }> {
     try {
       const res = await fetch('/api/managers', {
