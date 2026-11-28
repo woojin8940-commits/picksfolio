@@ -378,7 +378,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                     </p>
                     <p className="text-[11px] text-slate-500 font-medium">
                       {m.department ? `${m.department} · ` : ''}
-                      {m.isAdmin ? <span className="font-black text-violet-600">관리자</span> : '직원'} · {formatDate(m.joinedAt, language)} 합류
+                      {m.isAdmin ? <span className="font-black text-violet-600">관리자</span> : '직원'}
                       {!m.seated && <span className="ml-1.5 font-bold text-red-500">좌석 부족 — 로그인할 수 없어요</span>}
                     </p>
                   </div>
