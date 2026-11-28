@@ -32,6 +32,7 @@ export interface TeamOverview {
     nextBillingDate: string | null;
     cancelAtPeriodEnd: boolean;
     chargePending: boolean;
+    granted?: boolean;
   };
   seats: { total: number; included: number; extra: number; capacity: number; used: number; available: number };
   members: TeamMember[];

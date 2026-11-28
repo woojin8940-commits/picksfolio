@@ -2644,4 +2644,16 @@ export const platformTextPatterns = [
     "source": "^(\\d+)개월$",
     "replacement": "$1 mo"
   },
+  {
+    "source": "^✓ (.+?) 이용 중 · 픽스폴리오 제공$",
+    "replacement": "✓ Using $1 · provided by Picksfolio"
+  },
+  {
+    "source": "^픽스폴리오가 제공한 멤버십이에요\\. (.+?)까지 결제 없이 이용해요\\. 한도 추가는 담당자에게 문의해 주세요\\.$",
+    "replacement": "Provided by Picksfolio — free until $1. Contact your manager to add limits."
+  },
+  {
+    "source": "^픽스폴리오가 제공한 멤버십이에요\\. (.+?)까지 결제 없이 이용할 수 있어요\\.$",
+    "replacement": "This membership is provided by Picksfolio — free until $1."
+  },
 ] as const;

@@ -219,7 +219,12 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
               </div>
             </div>
 
-            {isOwner && !native && (
+            {isOwner && !native && plan.granted && (
+              <p className="mt-5 pt-5 border-t border-slate-100 text-xs font-bold text-emerald-700">
+                픽스폴리오가 제공한 멤버십이라 좌석을 결제로 늘릴 수 없어요. 좌석이 더 필요하면 담당자에게 문의해 주세요.
+              </p>
+            )}
+            {isOwner && !native && !plan.granted && (
               <div className="mt-5 pt-5 border-t border-slate-100 grid md:grid-cols-2 gap-5">
                 <div>
                   <p className="text-sm font-black text-slate-800 mb-2">직원 좌석 추가</p>

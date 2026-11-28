@@ -121,6 +121,8 @@ export interface SeatPlanSummary {
   nextBillingDate: string | null;
   cancelAtPeriodEnd: boolean;
   chargePending: boolean;
+  /** 운영자가 결제 없이 부여한 멤버십(결제 수단 없음). 추가 결제 · 등급 변경 · 해지는 담당자에게. */
+  granted: boolean;
 }
 
 export const seatPlanSummary = (record: Rec | null | undefined): SeatPlanSummary => {
@@ -143,6 +145,7 @@ export const seatPlanSummary = (record: Rec | null | undefined): SeatPlanSummary
     nextBillingDate: planActive ? record?.next_billing_date || null : null,
     cancelAtPeriodEnd: !!record?.membership_cancel_at_period_end,
     chargePending: pendingKind === "seats" || pendingKind === "upgrade" || pendingKind === "addon",
+    granted: planActive && record?.membership_source === "operator_grant" && !record?.billing_key,
   };
 };
 
