@@ -54,6 +54,7 @@ import {
  *   GET /api/business/campaign-history/:username
  *       ?from=YYYY-MM-DD&to=YYYY-MM-DD   캠페인 기간이 겹치는 것만(없으면 전체)
  *       &status=open|closed  &category=  &q=캠페인명  &creator=인플루언서 아이디 · 핸들
+ *       &campaignId=  (캠페인 하나만)
  *       &sort=recent|views|reach|comments|shares|cpv  &page=1&pageSize=20
  *   GET /api/business/campaign-history/:username?source=affiliate   (같은 조건을 받는다, sort=sales 추가)
  *       어필리에이트 이력 — 상품 하나가 캠페인 한 건, 선정된 인플루언서 한 명이 게시물 한 건이다.
@@ -217,6 +218,8 @@ export interface HistoryQuery {
   q: string;
   creator: string;
   category: string;
+  /** 캠페인 하나만 볼 때 그 캠페인 id. */
+  campaignId: string;
   sort: HistorySort;
   page: number;
   pageSize: number;
@@ -237,6 +240,7 @@ export const parseHistoryQuery = (params: URLSearchParams): HistoryQuery => {
     q: norm(params.get("q")).slice(0, 80),
     creator: norm(params.get("creator")).replace(/^@/, "").slice(0, 60),
     category: String(params.get("category") || "").trim().slice(0, 60),
+    campaignId: String(params.get("campaignId") || "").trim().slice(0, 80),
     sort: SORTS.includes(sort) ? sort : "recent",
     page,
     pageSize: Math.min(50, Math.max(10, size)),
@@ -336,6 +340,7 @@ const pageOf = <T,>(list: T[], query: HistoryQuery) => {
 /** 어필리에이트 이력은 상품 수가 적어 다 만든 뒤 같은 조건으로 추린다. */
 const filterBuilt = (list: any[], query: HistoryQuery) =>
   list.filter((c) => {
+    if (query.campaignId && String(c.id) !== query.campaignId) return false;
     if (!overlapsPeriod({ start: c.startDate, end: c.endDate, created: c.createdAt }, query.from, query.to)) return false;
     if (!statusMatches(String(c.status), query.status)) return false;
     if (query.category && c.category !== query.category) return false;
@@ -404,6 +409,7 @@ export default async (req: Request, context: Context) => {
         accountTotals: { campaigns: all.totals.campaigns, views: all.totals.views },
         campaigns: items,
         categories: all.categories,
+        campaignOptions: all.campaigns.map((c: any) => ({ id: String(c.id), title: String(c.title || ""), startDate: c.startDate || null })),
         pagination,
       });
     } catch (err: any) {
@@ -513,6 +519,7 @@ export default async (req: Request, context: Context) => {
     // 조건(기간 · 상태 · 카테고리 · 캠페인명 · 인플루언서)으로 먼저 추린다. 인사이트는 남은
     // 캠페인의 인플루언서만 부른다 — 기간을 좁히면 메타 호출도 그만큼 준다.
     const filteredRows = (campaignRows || []).filter((c) => {
+      if (query.campaignId && String(c.id) !== query.campaignId) return false;
       if (!overlapsPeriod({ start: c.start_date, end: c.end_date, created: c.created_at }, query.from, query.to)) return false;
       if (!statusMatches(String(c.status || ""), query.status)) return false;
       if (query.category && String(c.category || "") !== query.category) return false;
@@ -690,6 +697,12 @@ export default async (req: Request, context: Context) => {
       accountTotals,
       campaigns: items,
       categories: Array.from(categories).sort(),
+      /** 캠페인별로 볼 때 고르는 목록(최신순, 조건과 무관). */
+      campaignOptions: (campaignRows || []).map((c) => ({
+        id: String(c.id),
+        title: String(c.title || ""),
+        startDate: c.start_date || null,
+      })),
       pagination,
       /** 협업한 인플루언서별 팔로워 분포(성별 · 연령 · 국가 인원 수). */
       audiences,

@@ -7442,4 +7442,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "이 연락처는 이 캠페인 진행 목적으로만 써 주세요. 이후 진행과 광고비 지급은 인플루언서와 직접 하시면 됩니다.": "Please use this contact only for this campaign. From here, you run the collaboration and pay the fee directly with the influencer.",
   "브랜드와 인플루언서 진행사항에 바로 표시되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다(되돌릴 수 없음).": "It appears in both the brand's and influencer's progress right away, and the influencer's name and contact are shared with the brand (cannot be undone).",
   "모두 이야기를 마치고 연락처 공개 동의를 받았나요?": "Have you finished talking with all of them and received consent to share their contact?",
+  "상품별 보기": "View by product",
+  "캠페인별 보기": "View by campaign",
+  "모든 상품": "All products",
+  "모든 캠페인": "All campaigns",
 };

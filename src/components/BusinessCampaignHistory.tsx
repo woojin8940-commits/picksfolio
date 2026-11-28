@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { authHeaders } from '../services/apiService';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
-import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import AdBoostModal from './AdBoostModal';
-import MetaPageEngagementPanel from './MetaPageEngagement';
 import { instagramPostUrl } from '../utils/instagramPostUrl';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -25,9 +23,10 @@ import { useLanguage } from '../contexts/LanguageContext';
  * 기간 · 상태 · 카테고리 · 캠페인명 · 인플루언서 조건과 정렬을 서버에 넘기고, 한 쪽에
  * 20건씩 받는다. 위쪽 합계는 그 쪽이 아니라 "조건에 맞는 전체" 기준이다.
  *
- * 광고를 연동했으면 위쪽에 고른 페이스북 페이지의 게시물 반응(MetaPageEngagementPanel,
- * pages_read_engagement)이 붙는다. 메타 API 에서 방금 읽은 값이다. 부스팅한 광고의
- * 성과는 광고 현황에서 보므로 여기서 다시 띄우지 않는다.
+ * 이 화면은 브랜드가 인플루언서와 진행한 협업의 성과만 본다. 브랜드 자기 계정 · 페이지의
+ * 게시물 반응은 싣지 않는다. 부스팅한 광고의 성과는 광고 현황에서 본다.
+ *
+ * 캠페인별 보기: 캠페인 하나를 고르면 위 합계가 그 캠페인 기준이 되고, 그 캠페인이 바로 펼쳐진다.
  */
 
 interface BusinessCampaignHistoryProps {
@@ -417,6 +416,11 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const [titleQuery, setTitleQuery] = useState('');
   const [creatorQuery, setCreatorQuery] = useState('');
   const [category, setCategory] = useState('');
+  /** 캠페인별 보기 — 비어 있으면 모든 캠페인. */
+  const [campaignId, setCampaignId] = useState('');
+  const [campaignOptions, setCampaignOptions] = useState<{ id: string; title: string; startDate: string | null }[]>(
+    cached?.campaignOptions || [],
+  );
   const [page, setPage] = useState(1);
   const [categories, setCategories] = useState<string[]>(cached?.categories || []);
   const [accountTotals, setAccountTotals] = useState<{ campaigns: number; views: number }>(
@@ -436,12 +440,11 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   /** 부스팅 창을 연 게시물. 창이 캠페인 제목·인플루언서·썸네일을 그대로 받아 쓴다. */
   const [boostTarget, setBoostTarget] = useState<{ campaign: HistoryCampaign; post: HistoryPost } | null>(null);
   // 광고 현황에서 연동한 메타 계정·광고 계정. 연동 전이면 아래 광고·페이지 칸을 그리지 않는다.
-  const { connected: adsConnected } = useMetaAdConnection(cleanUsername);
 
   // 조건이 바뀌면 첫 쪽부터 다시 본다.
   useEffect(() => {
     setPage(1);
-  }, [sort, status, period, customFrom, customTo, debouncedTitle, debouncedCreator, category]);
+  }, [sort, status, period, customFrom, customTo, debouncedTitle, debouncedCreator, category, campaignId]);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -450,15 +453,16 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     if (range.to) params.set('to', range.to);
     if (status) params.set('status', status);
     if (category) params.set('category', category);
+    if (campaignId) params.set('campaignId', campaignId);
     if (debouncedTitle) params.set('q', debouncedTitle);
     if (debouncedCreator) params.set('creator', debouncedCreator);
     if (sort !== 'recent') params.set('sort', sort);
     params.set('page', String(page));
     params.set('pageSize', String(PAGE_SIZE));
     return params.toString();
-  }, [affiliate, range.from, range.to, status, category, debouncedTitle, debouncedCreator, sort, page]);
+  }, [affiliate, range.from, range.to, status, category, campaignId, debouncedTitle, debouncedCreator, sort, page]);
   /** 아무 조건 없이 첫 쪽을 볼 때만 기기에 남겨 둔다(다음에 열 때 바로 그린다). */
-  const isDefaultView = !range.from && !range.to && !status && !category && !debouncedTitle && !debouncedCreator && sort === 'recent' && page === 1;
+  const isDefaultView = !range.from && !range.to && !status && !category && !campaignId && !debouncedTitle && !debouncedCreator && sort === 'recent' && page === 1;
 
   const requestSeq = React.useRef(0);
   const fetchHistory = useCallback(async () => {
@@ -478,6 +482,11 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       setTotals({ ...EMPTY_TOTALS, ...(data.totals || {}) });
       setAccountTotals(data.accountTotals || { campaigns: 0, views: 0 });
       setCategories(Array.isArray(data.categories) ? data.categories : []);
+      setCampaignOptions(Array.isArray(data.campaignOptions) ? data.campaignOptions : []);
+      // 캠페인 하나를 골랐으면 그 캠페인을 바로 펼쳐 인플루언서별 성과를 보여 준다.
+      if (campaignId && Array.isArray(data.campaigns) && data.campaigns.length === 1) {
+        setOpenId(String(data.campaigns[0].id));
+      }
       setPagination(data.pagination || { page: 1, pageSize: PAGE_SIZE, totalCount: (data.campaigns || []).length, pageCount: 1 });
       setAudiences(data.audiences || {});
       setError('');
@@ -492,7 +501,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         setRefreshing(false);
       }
     }
-  }, [cleanUsername, cacheKey, queryString, isDefaultView]);
+  }, [cleanUsername, cacheKey, queryString, isDefaultView, campaignId]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
@@ -552,7 +561,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     return cells;
   };
 
-  const filtered = !!(range.from || range.to || status || category || debouncedTitle || debouncedCreator);
+  const filtered = !!(range.from || range.to || status || category || campaignId || debouncedTitle || debouncedCreator);
   const coverage = shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.matched}건 집계` : '';
   // 공유 수는 인사이트 값이라 조회수·댓글보다 덜 채워진다. 몇 건에서 받았는지를 따로 적는다.
   const shareCoverage =
@@ -686,14 +695,36 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         </p>
       </div>
 
-      {adsConnected && (
-        <div className="mt-5 space-y-3">
-          <MetaPageEngagementPanel username={cleanUsername} enabled={adsConnected} title="브랜드 페이지 게시물 반응" />
-        </div>
-      )}
-
       {/* 기간 — 위 합계와 아래 목록이 모두 이 기간을 따른다. 캠페인 기간이 겹치면 포함한다. */}
       <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 space-y-2.5">
+        {/* 캠페인별 보기 — 하나를 고르면 위 합계와 목록이 그 캠페인만 따른다. */}
+        {campaignOptions.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-black text-slate-500 flex-shrink-0">{affiliate ? '상품별 보기' : '캠페인별 보기'}</span>
+            <select
+              value={campaignId}
+              onChange={(e) => { setCampaignId(e.target.value); setOpenId(null); }}
+              aria-label={affiliate ? '상품별 보기' : '캠페인별 보기'}
+              className="flex-1 min-w-0 md:flex-none md:w-80 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-700 truncate"
+            >
+              <option value="">{affiliate ? '모든 상품' : '모든 캠페인'}</option>
+              {campaignOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.title || '제목 없음'}{o.startDate ? ` · ${String(o.startDate).slice(0, 10)}` : ''}
+                </option>
+              ))}
+            </select>
+            {campaignId && (
+              <button
+                type="button"
+                onClick={() => { setCampaignId(''); setOpenId(null); }}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-black text-slate-500 border border-slate-200 hover:bg-slate-50 flex-shrink-0"
+              >
+                전체 보기
+              </button>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-1.5 overflow-x-auto">
           {PERIOD_TABS.map(([key, label]) => (
             <button
