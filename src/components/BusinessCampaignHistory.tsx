@@ -21,9 +21,9 @@ import { useLanguage } from '../contexts/LanguageContext';
  * 브랜드는 그 CPV 를 근거로 다음 예산을 잘못 잡는다. 그래서 집계 커버리지
  * (게시물 N건 중 M건)를 숫자 옆에 항상 같이 적는다.
  *
- * 정렬·필터를 화면에서 하는 이유는 한 계정의 캠페인이 수백 건이 되지 않기 때문이다.
- * 서버가 한 번에 다 보내고 화면에서 추리는 편이, 필터를 누를 때마다 기다리는 것보다
- * 이력을 훑는 동작에 맞는다.
+ * 캠페인이 쌓이면 한 번에 다 보내는 방식은 무겁다(게시물 · 인사이트까지 실린다). 그래서
+ * 기간 · 상태 · 카테고리 · 캠페인명 · 인플루언서 조건과 정렬을 서버에 넘기고, 한 쪽에
+ * 20건씩 받는다. 위쪽 합계는 그 쪽이 아니라 "조건에 맞는 전체" 기준이다.
  *
  * 광고를 연동했으면 위쪽에 고른 페이스북 페이지의 게시물 반응(MetaPageEngagementPanel,
  * pages_read_engagement)이 붙는다. 메타 API 에서 방금 읽은 값이다. 부스팅한 광고의
@@ -294,15 +294,76 @@ type StatusFilter = '' | 'open' | 'closed';
  * 좋아요를 댓글과 묶어 보던 축은 댓글과 공유로 나눴다. 좋아요는 스쳐 가며 누르는
  * 반응이라 콘텐츠가 대화를 만들었는지(댓글), 남에게 퍼졌는지(공유)를 가려 주지 못한다.
  */
-type SortKey = 'recent' | 'views' | 'comments' | 'shares' | 'cpv' | 'sales';
+type SortKey = 'recent' | 'views' | 'reach' | 'comments' | 'shares' | 'cpv' | 'sales';
 
 const SORT_TABS: [SortKey, string][] = [
   ['recent', '최신순'],
   ['views', '조회수순'],
+  ['reach', '도달순'],
   ['comments', '댓글순'],
   ['shares', '공유순'],
   ['cpv', 'CPV순'],
 ];
+
+/** 한 쪽에 보이는 캠페인 수. */
+const PAGE_SIZE = 20;
+
+type PeriodKey = 'all' | 'month' | '3m' | '6m' | 'year' | 'custom';
+const PERIOD_TABS: [PeriodKey, string][] = [
+  ['all', '전체 기간'],
+  ['month', '이번 달'],
+  ['3m', '최근 3개월'],
+  ['6m', '최근 6개월'],
+  ['year', '올해'],
+  ['custom', '직접 선택'],
+];
+
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** 기간 버튼 → 서버에 넘길 from · to(YYYY-MM-DD). 비어 있으면 그쪽 끝은 열려 있다. */
+const periodRange = (key: PeriodKey, customFrom: string, customTo: string): { from: string; to: string } => {
+  const now = new Date();
+  const today = ymd(now);
+  switch (key) {
+    case 'month':
+      return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+    case '3m':
+      return { from: ymd(new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())), to: today };
+    case '6m':
+      return { from: ymd(new Date(now.getFullYear(), now.getMonth() - 6, now.getDate())), to: today };
+    case 'year':
+      return { from: `${now.getFullYear()}-01-01`, to: today };
+    case 'custom':
+      return { from: customFrom, to: customTo };
+    default:
+      return { from: '', to: '' };
+  }
+};
+
+type Pagination = { page: number; pageSize: number; totalCount: number; pageCount: number };
+
+/** 검색어는 치는 동안 매번 부르지 않고 잠깐 멈췄을 때 넘긴다. */
+const useDebounced = <T,>(value: T, ms = 350): T => {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = window.setTimeout(() => setV(value), ms);
+    return () => window.clearTimeout(id);
+  }, [value, ms]);
+  return v;
+};
+
+/** 페이지 번호 줄 — 지금 쪽 앞뒤 두 쪽과 처음 · 끝. */
+const pageNumbers = (page: number, count: number): (number | '…')[] => {
+  const set = new Set([1, count, page - 2, page - 1, page, page + 1, page + 2].filter((n) => n >= 1 && n <= count));
+  const sorted = [...set].sort((a, b) => a - b);
+  const out: (number | '…')[] = [];
+  sorted.forEach((n, i) => {
+    if (i > 0 && n - sorted[i - 1] > 1) out.push('…');
+    out.push(n);
+  });
+  return out;
+};
 /** 어필리에이트 이력은 광고비가 없어 CPV 대신 판매액순으로 본다. */
 const AFFILIATE_SORT_TABS: [SortKey, string][] = [
   ['recent', '최신순'],
@@ -350,6 +411,25 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const [error, setError] = useState('');
   const [status, setStatus] = useState<StatusFilter>('');
   const [sort, setSort] = useState<SortKey>('recent');
+  const [period, setPeriod] = useState<PeriodKey>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [titleQuery, setTitleQuery] = useState('');
+  const [creatorQuery, setCreatorQuery] = useState('');
+  const [category, setCategory] = useState('');
+  const [page, setPage] = useState(1);
+  const [categories, setCategories] = useState<string[]>(cached?.categories || []);
+  const [accountTotals, setAccountTotals] = useState<{ campaigns: number; views: number }>(
+    cached?.accountTotals || { campaigns: 0, views: 0 },
+  );
+  const [pagination, setPagination] = useState<Pagination>(
+    cached?.pagination || { page: 1, pageSize: PAGE_SIZE, totalCount: (cached?.campaigns || []).length, pageCount: 1 },
+  );
+  /** 조건을 바꿔 다시 읽는 중. 처음 읽을 때(loading)와 달리 지난 목록을 흐리게 남겨 둔다. */
+  const [refreshing, setRefreshing] = useState(false);
+  const debouncedTitle = useDebounced(titleQuery.trim());
+  const debouncedCreator = useDebounced(creatorQuery.trim());
+  const range = periodRange(period, customFrom, customTo);
   const [openId, setOpenId] = useState<string | null>(null);
   /** 이력에서 삭제 중인 어필리에이트 상품. */
   const [removingId, setRemovingId] = useState('');
@@ -358,27 +438,61 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   // 광고 현황에서 연동한 메타 계정·광고 계정. 연동 전이면 아래 광고·페이지 칸을 그리지 않는다.
   const { connected: adsConnected } = useMetaAdConnection(cleanUsername);
 
+  // 조건이 바뀌면 첫 쪽부터 다시 본다.
+  useEffect(() => {
+    setPage(1);
+  }, [sort, status, period, customFrom, customTo, debouncedTitle, debouncedCreator, category]);
+
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
+    if (affiliate) params.set('source', 'affiliate');
+    if (range.from) params.set('from', range.from);
+    if (range.to) params.set('to', range.to);
+    if (status) params.set('status', status);
+    if (category) params.set('category', category);
+    if (debouncedTitle) params.set('q', debouncedTitle);
+    if (debouncedCreator) params.set('creator', debouncedCreator);
+    if (sort !== 'recent') params.set('sort', sort);
+    params.set('page', String(page));
+    params.set('pageSize', String(PAGE_SIZE));
+    return params.toString();
+  }, [affiliate, range.from, range.to, status, category, debouncedTitle, debouncedCreator, sort, page]);
+  /** 아무 조건 없이 첫 쪽을 볼 때만 기기에 남겨 둔다(다음에 열 때 바로 그린다). */
+  const isDefaultView = !range.from && !range.to && !status && !category && !debouncedTitle && !debouncedCreator && sort === 'recent' && page === 1;
+
+  const requestSeq = React.useRef(0);
   const fetchHistory = useCallback(async () => {
+    const seq = ++requestSeq.current;
+    setRefreshing(true);
     try {
-      const res = await fetch(`/api/business/campaign-history/${encodeURIComponent(cleanUsername)}${affiliate ? '?source=affiliate' : ''}`, {
+      const res = await fetch(`/api/business/campaign-history/${encodeURIComponent(cleanUsername)}?${queryString}`, {
         headers: await authHeaders(),
       });
       const data = await res.json();
+      if (seq !== requestSeq.current) return;
       if (!res.ok) {
         setError(data?.error || '캠페인 이력을 불러오지 못했습니다.');
         return;
       }
       setCampaigns(data.campaigns || []);
       setTotals({ ...EMPTY_TOTALS, ...(data.totals || {}) });
+      setAccountTotals(data.accountTotals || { campaigns: 0, views: 0 });
+      setCategories(Array.isArray(data.categories) ? data.categories : []);
+      setPagination(data.pagination || { page: 1, pageSize: PAGE_SIZE, totalCount: (data.campaigns || []).length, pageCount: 1 });
       setAudiences(data.audiences || {});
       setError('');
-      try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+      if (isDefaultView) {
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+      }
     } catch {
-      setError('네트워크 상태를 확인해 주세요.');
+      if (seq === requestSeq.current) setError('네트워크 상태를 확인해 주세요.');
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [cleanUsername, cacheKey, affiliate]);
+  }, [cleanUsername, cacheKey, queryString, isDefaultView]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
@@ -414,66 +528,31 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     }
   };
 
-  const visible = useMemo(() => {
-    const rows = campaigns.filter((c) => {
-      if (status === 'open' && c.status !== 'active') return false;
-      if (status === 'closed' && !['closed', 'completed', 'inactive'].includes(c.status)) return false;
-      return true;
-    });
-    if (sort === 'recent') return rows;
-    // 집계 전(0)인 캠페인은 성과순 정렬에서 아래로 내린다. 0 을 '가장 저렴한 CPV' 로
-    // 읽히게 두면 아직 숫자가 없는 캠페인이 제일 잘한 것처럼 맨 위에 올라온다.
-    const score = (c: HistoryCampaign) =>
-      sort === 'sales'
-        ? c.sales ?? 0
-        : sort === 'views'
-        ? c.views
-        : sort === 'comments'
-          ? c.comments
-          : sort === 'shares'
-            ? c.shares ?? 0
-            : c.cpv;
-    return [...rows].sort((a, b) => {
-      const av = score(a);
-      const bv = score(b);
-      if (av === 0 || bv === 0) return av === bv ? 0 : av === 0 ? 1 : -1;
-      // CPV 는 낮을수록 좋으니 오름차순, 조회수·댓글·공유는 높을수록 좋으니 내림차순.
-      return sort === 'cpv' ? av - bv : bv - av;
-    });
-  }, [campaigns, status, sort]);
+  // 서버가 조건 · 정렬 · 쪽을 이미 적용해 보낸다. 합계도 조건에 맞는 전체 기준이다.
+  const visible = campaigns;
+  const shown = totals;
 
-  // 필터를 걸면 위쪽 합계도 같이 움직여야 한다. 전체 합계만 남으면 "지금 모집중인
-  // 건들은 얼마나 됐지"를 볼 수 없다.
-  const shown = useMemo(() => {
-    const base = { ...EMPTY_TOTALS };
-    for (const c of visible) {
-      if (!['active', 'closed', 'completed', 'inactive'].includes(c.status)) continue;
-      base.campaigns++;
-      base.collabs += c.collabs;
-      base.uploaded += c.uploaded;
-      base.matched += c.matched;
-      base.views += c.views;
-      base.reactions += c.likes + c.comments;
-      base.comments += c.comments;
-      base.shares += c.shares ?? 0;
-      base.sharesMatched += c.sharesMatched ?? 0;
-      base.spend += c.spend;
-      base.measuredSpend += c.measuredSpend ?? 0;
-      base.reach += c.reach ?? 0;
-      base.saved += c.saved ?? 0;
-      base.insightsMatched += c.insightsMatched ?? 0;
-      base.sales = (base.sales ?? 0) + (c.sales ?? 0);
-      base.orders = (base.orders ?? 0) + (c.orders ?? 0);
-    }
-    // 서버와 같은 기준으로 나눈다 — 집계된 게시물의 지급액 ÷ 그 게시물의 조회수.
-    base.cpv =
-      base.views > 0 && base.measuredSpend > 0
-        ? Math.round(base.measuredSpend / base.views)
-        : 0;
-    return base;
-  }, [visible]);
+  /** 캠페인 한 줄의 지표 칸 — 화면 폭에 따라 열 또는 한 줄로 그린다. key 는 정렬 키와 같다. */
+  const metricCells = (c: HistoryCampaign): { key: string; label: string; value: string }[] => {
+    const n = (v: number, ok: boolean, unit = '') => (ok && v > 0 ? `${formatNumberWithCommas(v)}${unit}` : ok ? `0${unit}` : '—');
+    const cells = [
+      { key: 'views', label: '조회', value: c.views > 0 ? formatNumberWithCommas(c.views) : '—' },
+      ...(!affiliate
+        ? [
+            { key: 'reach', label: '도달', value: n(c.reach ?? 0, (c.insightsMatched ?? 0) > 0) },
+            { key: 'saved', label: '저장', value: n(c.saved ?? 0, (c.insightsMatched ?? 0) > 0) },
+          ]
+        : []),
+      { key: 'comments', label: '댓글', value: n(c.comments, c.matched > 0) },
+      { key: 'shares', label: '공유', value: n(c.shares ?? 0, (c.sharesMatched ?? 0) > 0) },
+      affiliate
+        ? { key: 'sales', label: '판매', value: (c.sales ?? 0) > 0 ? formatKoreanWon(c.sales ?? 0) : '—' }
+        : { key: 'cpv', label: 'CPV', value: c.cpv > 0 ? `${formatNumberWithCommas(c.cpv)}원` : '—' },
+    ];
+    return cells;
+  };
 
-  const filtered = !!status;
+  const filtered = !!(range.from || range.to || status || category || debouncedTitle || debouncedCreator);
   const coverage = shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.matched}건 집계` : '';
   // 공유 수는 인사이트 값이라 조회수·댓글보다 덜 채워진다. 몇 건에서 받았는지를 따로 적는다.
   const shareCoverage =
@@ -591,8 +670,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           않도록 계정 전체 합계를 한 줄로 남겨 둔다. */}
       {filtered && (
         <p className="text-[10px] text-slate-400 font-bold mt-2">
-          계정 전체 기준: 캠페인 {formatNumberWithCommas(totals.campaigns)}건 · 조회수{' '}
-          {totals.views > 0 ? `${formatNumberWithCommas(totals.views)}회` : '집계 전'}
+          계정 전체 기준: 캠페인 {formatNumberWithCommas(accountTotals.campaigns)}건 · 조회수{' '}
+          {accountTotals.views > 0 ? `${formatNumberWithCommas(accountTotals.views)}회` : '집계 전'}
         </p>
       )}
 
@@ -613,56 +692,137 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         </div>
       )}
 
-      {/* 상태 · 정렬. 이력을 훑는 동작이라 한 줄에 둔다. */}
-      <div className="mt-6 flex flex-wrap items-center gap-1.5">
-        {(affiliate ? AFFILIATE_SORT_TABS : SORT_TABS).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setSort(key)}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
-              sort === key
-                ? 'bg-slate-900 text-white'
-                : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-        <span className="w-px h-5 bg-slate-200 mx-1" />
-        {([['', '전체 상태'], ['open', affiliate ? '판매중' : '모집중'], ['closed', affiliate ? '판매 종료' : '마감']] as [StatusFilter, string][]).map(
-          ([key, label]) => (
+      {/* 기간 — 위 합계와 아래 목록이 모두 이 기간을 따른다. 캠페인 기간이 겹치면 포함한다. */}
+      <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 space-y-2.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          {PERIOD_TABS.map(([key, label]) => (
             <button
-              key={key || 'any'}
-              onClick={() => setStatus(key)}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
-                status === key
-                  ? 'bg-blue-600 text-white'
+              key={key}
+              onClick={() => setPeriod(key)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition-colors ${
+                period === key ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          {period === 'custom' && (
+            <div className="flex items-center gap-1 ml-1">
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo || undefined}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label="시작일"
+                className="px-2 py-1 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-700"
+              />
+              <span className="text-[11px] text-slate-400 font-bold">~</span>
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom || undefined}
+                onChange={(e) => setCustomTo(e.target.value)}
+                aria-label="종료일"
+                className="px-2 py-1 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-700"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* 검색 · 상태 · 카테고리 */}
+        <div className="flex flex-col md:flex-row md:items-center gap-1.5">
+          <input
+            value={titleQuery}
+            onChange={(e) => setTitleQuery(e.target.value)}
+            placeholder={affiliate ? '상품명 검색' : '캠페인명 검색'}
+            aria-label={affiliate ? '상품명 검색' : '캠페인명 검색'}
+            className="md:w-52 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 focus:outline-none focus:border-blue-500"
+          />
+          <input
+            value={creatorQuery}
+            onChange={(e) => setCreatorQuery(e.target.value)}
+            placeholder="인플루언서 검색 (@아이디)"
+            aria-label="인플루언서 검색"
+            className="md:w-52 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 focus:outline-none focus:border-blue-500"
+          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            {([['', '전체 상태'], ['open', affiliate ? '판매중' : '모집중'], ['closed', affiliate ? '판매 종료' : '마감']] as [StatusFilter, string][]).map(
+              ([key, label]) => (
+                <button
+                  key={key || 'any'}
+                  onClick={() => setStatus(key)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                    status === key
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ),
+            )}
+            {categories.length > 0 && (
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                aria-label="카테고리"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-600 max-w-[160px]"
+              >
+                <option value="">모든 카테고리</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 정렬 · 건수 */}
+      <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <p className="text-[12px] font-black text-slate-700">
+          {affiliate ? '어필리에이트' : '캠페인'} {formatNumberWithCommas(pagination.totalCount)}건
+          {pagination.totalCount > 0 && (
+            <span className="text-[11px] font-bold text-slate-400 ml-1.5">
+              {`${(pagination.page - 1) * pagination.pageSize + 1}–${Math.min(pagination.page * pagination.pageSize, pagination.totalCount)}`}
+            </span>
+          )}
+          {refreshing && <span className="text-[11px] font-bold text-slate-400 ml-1.5">불러오는 중…</span>}
+        </p>
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          {(affiliate ? AFFILIATE_SORT_TABS : SORT_TABS).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setSort(key)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition-colors ${
+                sort === key
+                  ? 'bg-slate-900 text-white'
                   : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
               }`}
             >
               {label}
             </button>
-          ),
-        )}
+          ))}
+        </div>
       </div>
 
       {visible.length === 0 ? (
         <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 text-center">
           <p className="text-sm text-slate-400 font-bold">
-            {campaigns.length === 0
+            {!filtered && accountTotals.campaigns === 0
               ? (affiliate ? '아직 진행한 어필리에이트가 없습니다.' : '아직 진행한 캠페인이 없습니다.')
               : (affiliate ? '이 조건에 맞는 어필리에이트가 없습니다.' : '이 조건에 맞는 캠페인이 없습니다.')}
           </p>
           <p className="text-[11px] text-slate-400 font-medium mt-1">
-            {campaigns.length === 0
+            {!filtered && accountTotals.campaigns === 0
               ? (affiliate
                 ? '어필리에이트 › 진행관리에서 인플루언서를 선정하면 진행 이력이 이 화면에 쌓입니다.'
                 : '캠페인 협업에서 캠페인을 등록하면 진행 이력이 이 화면에 쌓입니다.')
-              : '상태 필터를 풀고 다시 확인해 보세요.'}
+              : '기간 · 검색 · 필터 조건을 바꿔 다시 확인해 보세요.'}
           </p>
         </div>
       ) : (
-        <div className="mt-4 space-y-3">
+        <div className={`mt-3 space-y-2 transition-opacity ${refreshing ? 'opacity-60' : ''}`}>
           {visible.map((c) => {
             const open = openId === c.id;
             const badge = affiliate
@@ -676,18 +836,18 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
               <div key={c.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                 <button
                   onClick={() => setOpenId(open ? null : c.id)}
-                  className="w-full text-left p-4 md:p-5 hover:bg-slate-50/60 transition-colors"
+                  className="w-full text-left px-4 py-3 md:px-5 hover:bg-slate-50/60 transition-colors"
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-3">
                     {c.thumbnailUrl ? (
                       <img
                         src={c.thumbnailUrl}
                         alt=""
                         loading="lazy"
-                        className="w-14 h-14 rounded-xl object-cover bg-slate-100 flex-shrink-0"
+                        className="w-11 h-11 rounded-xl object-cover bg-slate-100 flex-shrink-0"
                       />
                     ) : (
-                      <div className="w-14 h-14 rounded-xl bg-slate-100 flex-shrink-0" />
+                      <div className="w-11 h-11 rounded-xl bg-slate-100 flex-shrink-0" />
                     )}
 
                     <div className="min-w-0 flex-1">
@@ -710,45 +870,31 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                           : ` · 협업 ${c.collabs}명 · 업로드 ${c.uploaded}건`}
                       </p>
 
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
-                        <span className="text-[11px] font-black text-slate-900">
-                          조회 {c.views > 0 ? formatNumberWithCommas(c.views) : '—'}
-                        </span>
-                        {!affiliate && (
-                          <span className="text-[11px] font-bold text-slate-500">
-                            도달 {(c.insightsMatched ?? 0) > 0 ? formatNumberWithCommas(c.reach ?? 0) : '—'}
+                      {/* 좁은 화면: 숫자를 한 줄로. */}
+                      <div className="md:hidden flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                        {metricCells(c).map((m) => (
+                          <span key={m.key} className={`text-[11px] ${m.key === sort ? 'font-black text-blue-600' : 'font-bold text-slate-500'}`}>
+                            {m.label} {m.value}
                           </span>
-                        )}
-                        {!affiliate && (
-                          <span className="text-[11px] font-bold text-slate-500">
-                            저장 {(c.insightsMatched ?? 0) > 0 ? formatNumberWithCommas(c.saved ?? 0) : '—'}
-                          </span>
-                        )}
-                        <span className="text-[11px] font-bold text-slate-500">
-                          댓글 {c.matched > 0 ? formatNumberWithCommas(c.comments) : '—'}
-                        </span>
-                        <span className="text-[11px] font-bold text-slate-500">
-                          공유 {(c.sharesMatched ?? 0) > 0 ? formatNumberWithCommas(c.shares ?? 0) : '—'}
-                        </span>
-                        {affiliate ? (
-                          <span className="text-[11px] font-black text-blue-600">
-                            판매 {(c.sales ?? 0) > 0 ? `${formatNumberWithCommas(c.sales ?? 0)}원 · ${c.orders ?? 0}건` : '—'}
-                          </span>
-                        ) : (
-                        <span className="text-[11px] font-bold text-slate-500">
-                          CPV {c.cpv > 0 ? `${formatNumberWithCommas(c.cpv)}원` : '—'}
-                        </span>
-                        )}
-                        {c.uploaded > 0 && c.matched < c.uploaded && (
-                          <span className="text-[10px] font-black text-amber-600">
-                            {c.uploaded - c.matched}건 집계 전
-                          </span>
-                        )}
+                        ))}
                       </div>
+                      {c.uploaded > 0 && c.matched < c.uploaded && (
+                        <p className="text-[10px] font-black text-amber-600 mt-1">{c.uploaded - c.matched}건 집계 전</p>
+                      )}
                     </div>
 
-                    <span className="text-slate-300 text-[11px] font-black flex-shrink-0 mt-1">
-                      {open ? '접기' : '게시물'}
+                    {/* 넓은 화면: 지표를 열로 맞춰 캠페인끼리 바로 비교한다. 지금 정렬 기준 열을 강조한다. */}
+                    <div className={`hidden md:grid ${affiliate ? 'grid-cols-5 w-[400px]' : 'grid-cols-6 w-[480px]'} gap-2 flex-shrink-0`}>
+                      {metricCells(c).map((m) => (
+                        <div key={m.key} className="text-right">
+                          <p className={`text-[9px] font-black ${m.key === sort ? 'text-blue-500' : 'text-slate-400'}`}>{m.label}</p>
+                          <p className={`text-[12px] font-black truncate ${m.key === sort ? 'text-blue-600' : 'text-slate-900'}`}>{m.value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <span className="text-slate-300 text-[11px] font-black flex-shrink-0 w-8 text-right">
+                      {open ? '접기' : '보기'}
                     </span>
                   </div>
                 </button>
@@ -946,6 +1092,45 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
             );
           })}
         </div>
+      )}
+
+      {pagination.pageCount > 1 && (
+        <nav className="mt-5 flex items-center justify-center gap-1" aria-label="쪽 이동">
+          <button
+            type="button"
+            disabled={pagination.page <= 1 || refreshing}
+            onClick={() => { setPage(pagination.page - 1); setOpenId(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-black text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+          >
+            이전
+          </button>
+          {pageNumbers(pagination.page, pagination.pageCount).map((n, i) =>
+            n === '…' ? (
+              <span key={`gap-${i}`} className="px-1 text-[11px] font-bold text-slate-400">…</span>
+            ) : (
+              <button
+                key={n}
+                type="button"
+                disabled={refreshing}
+                onClick={() => { setPage(n); setOpenId(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                aria-current={n === pagination.page ? 'page' : undefined}
+                className={`min-w-[32px] px-2 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                  n === pagination.page ? 'bg-slate-900 text-white' : 'text-slate-500 border border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                {n}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            disabled={pagination.page >= pagination.pageCount || refreshing}
+            onClick={() => { setPage(pagination.page + 1); setOpenId(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-black text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+          >
+            다음
+          </button>
+        </nav>
       )}
 
       {boostTarget && (

@@ -1209,7 +1209,7 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             <div className="mt-2 bg-slate-50 rounded-xl p-2.5 flex flex-wrap items-center gap-1.5 animate-in fade-in duration-200">
               <span className="text-[11px] font-black text-slate-500 mr-0.5">묶어 보기</span>
               <div className="inline-flex rounded-lg bg-white border border-slate-200 p-0.5 mr-2" role="tablist" aria-label="묶어 보기">
-                {([['ads', '광고별'], ['creator', '인플루언서별'], ['objective', '목적별']] as [OverviewView, string][]).map(
+                {([['ads', '광고별'], ['campaign', '캠페인별'], ['creator', '인플루언서별'], ['objective', '목적별']] as [OverviewView, string][]).map(
                   ([key, label]) => (
                     <button
                       key={key}
