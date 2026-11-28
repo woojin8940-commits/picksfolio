@@ -34,7 +34,16 @@ const intOf = (v: unknown) => {
 export const currentCycle = (record: Record<string, any> | null, now = new Date()) => {
   const next = record?.next_billing_date ? Date.parse(record.next_billing_date) : NaN;
   if (Number.isFinite(next) && next > now.getTime()) {
-    return { start: addMonths(new Date(next).toISOString(), -1), end: new Date(next).toISOString() };
+    // 다음 결제일에서 한 달씩 거슬러 올라가 지금이 들어 있는 한 달을 찾는다. 운영자가 여러 달을
+    // 한 번에 부여하면 다음 결제일이 몇 달 뒤라, "다음 결제일 한 달 전"을 주기 시작으로 잡으면
+    // 주기가 미래에 놓여 지금 쓴 한도가 하나도 세지지 않았다.
+    let end = new Date(next).toISOString();
+    let start = addMonths(end, -1);
+    for (let i = 0; i < 36 && Date.parse(start) > now.getTime(); i++) {
+      end = start;
+      start = addMonths(end, -1);
+    }
+    return { start, end };
   }
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
