@@ -2541,24 +2541,24 @@ export const platformTextPatterns = [
     "replacement": "$1 · left this month: campaigns $2/$3 · confirmed influencers $4/$5"
   },
   {
-    "source": "^(.+?)석 포함 · 추가 1석당 월 (.+?)$",
-    "replacement": "$1 seat(s) included · $2 per extra seat/month"
+    "source": "^(.+?)석 무료 제공 · 추가 1석당 월 (.+?)$",
+    "replacement": "$1 free seat(s) · $2 per extra seat/month"
   },
   {
-    "source": "^멤버십에는 관리자 계정 1개와 직원 좌석 (.+?)석이 들어 있고, 직원 좌석은 1석당 월 (.+?)으로 더 늘릴 수 있습니다\\.$",
-    "replacement": "The membership includes 1 admin account and $1 staff seat(s); you can add more staff seats at $2 per seat per month."
+    "source": "^멤버십에는 관리자 계정 1개가 들어 있고, 직원 좌석 (.+?)석은 무료로 제공됩니다\\. 그 이상은 1석당 월 (.+?)으로 늘릴 수 있습니다\\.$",
+    "replacement": "The membership includes 1 admin account, and $1 staff seat(s) are free. Beyond that, seats are $2 per seat per month."
   },
   {
-    "source": "^관리자 1 \\+ 포함 (.+?) \\+ 추가 (.+?)$",
-    "replacement": "1 admin + $1 included + $2 extra"
+    "source": "^관리자 1 \\+ 무료 (.+?) \\+ 추가 (.+?)$",
+    "replacement": "1 admin + $1 free + $2 extra"
   },
   {
-    "source": "^브랜드 멤버십은 라이트\\(월 (.+?)원 · 캠페인 2건 · 선정 인플루언서 20명\\)와 그로스\\(월 (.+?)원 · 캠페인 5건 · 선정 인플루언서 50명 · 직원 좌석 1석 포함\\)가 있고, 둘 다 자동 디엠이 포함됩니다\\. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다\\.$",
-    "replacement": "The brand membership comes in Lite (₩$1/month · 2 campaigns · 20 confirmed influencers) and Growth (₩$2/month · 5 campaigns · 50 confirmed influencers · 1 staff seat included), both with DM automation. It renews monthly from your sign-up date and you can cancel anytime."
+    "source": "^브랜드 멤버십은 라이트\\(월 (.+?)원 · 캠페인 2건 · 선정 인플루언서 20명\\)와 그로스\\(월 (.+?)원 · 캠페인 5건 · 선정 인플루언서 50명 · 직원 좌석 1석 무료 제공\\)가 있고, 둘 다 자동 디엠이 포함됩니다\\. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다\\.$",
+    "replacement": "The brand membership comes in Lite (₩$1/month · 2 campaigns · 20 confirmed influencers) and Growth (₩$2/month · 5 campaigns · 50 confirmed influencers · 1 free staff seat), both with DM automation. It renews monthly from your sign-up date and you can cancel anytime."
   },
   {
-    "source": "^직원 좌석은 그로스에 1석이 포함되어 있고, 그 밖에 추가하는 좌석은 등급과 상관없이 1석당 월 (.+?)원입니다\\. 결제 주기 중간에 늘리면 다음 결제일까지 남은 기간만큼만 바로 결제되고, 다음 달부터는 멤버십과 함께 청구됩니다\\. 줄이면 다음 결제일부터 반영됩니다\\.$",
-    "replacement": "Growth includes 1 staff seat; any extra seats are ₩$1 per seat per month on every tier. Adding seats mid-cycle charges only the remaining days until the next billing date, then they're billed with the membership from next month. Reductions apply from the next billing date."
+    "source": "^그로스는 직원 좌석 1석을 무료로 제공하고, 그 밖에 추가하는 좌석은 등급과 상관없이 1석당 월 (.+?)원입니다\\. 결제 주기 중간에 늘리면 다음 결제일까지 남은 기간만큼만 바로 결제되고, 다음 달부터는 멤버십과 함께 청구됩니다\\. 줄이면 다음 결제일부터 반영됩니다\\.$",
+    "replacement": "Growth gives 1 staff seat free; any extra seats are ₩$1 per seat per month on every tier. Adding seats mid-cycle charges only the remaining days until the next billing date, then they're billed with the membership from next month. Reductions apply from the next billing date."
   },
   {
     "source": "^이번 달 남은 선정 한도는 (.+?)명인데, 이 캠페인에서 (.+?)명, 다른 캠페인에서 (.+?)명을 골라 두셨어요\\. 모두 진행이 확정되면 (.+?)명은 한도를 넘어 확정할 수 없습니다\\. 선정 인원을 추가 구매\\((.+?)명 (.+?)원\\)하거나 등급을 올려 주세요\\.$",

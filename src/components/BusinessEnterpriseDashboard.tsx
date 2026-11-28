@@ -145,6 +145,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     };
 
     later(600, () => {
+      // 캠페인은 브랜드가 가장 많이 여는 메뉴다. 켜 둔 사이 새 배포가 올라가도 열리도록 먼저 받아 둔다.
+      import('./CampaignCollabManagement').catch(() => {});
       import('./BusinessInbox').catch(() => {});
       import('./DmAutomation').catch(() => {});
       import('./CreatorInsights').catch(() => {});

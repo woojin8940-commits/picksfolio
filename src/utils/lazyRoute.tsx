@@ -1,6 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import ErrorBoundary from '../components/ErrorBoundary';
-import { attemptChunkReload, isChunkLoadError } from './chunkReload';
+import { isChunkLoadError, recoverFromChunkError } from './chunkReload';
 
 /**
  * 화면 단위 코드 스플리팅에서 쓰는 `React.lazy` 래퍼.
@@ -32,7 +32,8 @@ export function lazyWithRetry<T extends React.ComponentType<any>>(
         // 여기까지 왔으면 대개 배포가 갱신되어 청크가 사라진 경우다. 새 매니페스트를
         // 받아오는 새로고침을 (쿨다운 안에서) 한 번 시도한다. 새로고침이 실제로
         // 시작됐더라도 오류는 그대로 던진다 — 화면을 잡아 두지 않기 위해서다.
-        if (isChunkLoadError(second)) attemptChunkReload();
+        // 쿨다운 안이면 최신 배포인지 확인해서(최대 3초) 새 배포일 때만 한 번 더 새로고침한다.
+        if (isChunkLoadError(second)) await recoverFromChunkError();
         throw second;
       }
     }
