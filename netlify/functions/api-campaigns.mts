@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { isRecruitClosed, todayInSeoul, withCampaignLock } from "./_shared/campaign-recruit.mts";
 import { isOpenApplyMode, isRetiredRewardMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { checkCampaignRegistration } from "./_shared/brand-quota.mts";
 
 /**
  * 조회 결과에 모집 마감 여부(recruit_closed)를 붙인다.
@@ -286,6 +287,12 @@ export default async (req: Request) => {
       // 남의 브랜드 이름으로 캠페인을 올릴 수 없도록 계정 주인인지 확인한다.
       const auth = await requireAccountOwner(req, String(body.business_username));
       if (!auth.ok) return auth.response;
+
+      // 캠페인 등록은 멤버십 회원만(미구독 · 미납 · 이번 달 캠페인 한도 소진이면 막는다).
+      const membership = await checkCampaignRegistration(String(body.business_username));
+      if (!membership.ok) {
+        return Response.json({ error: membership.error, code: membership.code }, { status: membership.status });
+      }
 
       // 캠페인은 광고비 지급형만 받는다. 커머스형은 어필리에이트로 대체되었고 제품 협찬형도 새로 받지 않는다.
       if (body.type === "group_buy" || isRetiredRewardMode(body.reward_mode)) {

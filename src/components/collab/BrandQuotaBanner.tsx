@@ -8,6 +8,25 @@ export type BrandQuota = {
   total: { campaigns: number; selected: number };
   used: { campaigns: number; selected: number };
   cycleEnd: string;
+  /** 다른 캠페인에서 골라 두고 아직 진행 확정 전인 인원. */
+  pendingPicksElsewhere?: number;
+  /** 이 캠페인에서 이미 선정 한도에 잡힌 후보 id. */
+  countedIds?: string[];
+};
+
+/**
+ * 지금 고른 인원이 남은 선정 한도를 넘는지. 선택은 한도를 쓰지 않지만(차감은 진행 확정 때),
+ * 고른 사람이 모두 수락하면 한도를 넘는 인원은 확정할 수 없다 — 그걸 고르는 자리에서 미리 알린다.
+ * 이미 한도에 잡힌 후보는 다시 세지 않는다.
+ */
+export const selectionOverQuota = (quota: BrandQuota | null | undefined, selectedIds: Iterable<string>) => {
+  if (!quota || !quota.enforced || !quota.tier || quota.pastDue) return null;
+  const counted = new Set(quota.countedIds || []);
+  let fresh = 0;
+  for (const id of selectedIds) if (!counted.has(id)) fresh += 1;
+  const elsewhere = Math.max(0, Number(quota.pendingPicksElsewhere || 0));
+  const over = fresh + elsewhere - quota.remaining.selected;
+  return over > 0 ? { over, fresh, elsewhere, remaining: quota.remaining.selected } : null;
 };
 
 const TIER_NAME = { brand_campaign: '라이트', brand_growth: '그로스' } as const;

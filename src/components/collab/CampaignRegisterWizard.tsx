@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul, formatPhoneInput } from '../../utils/formatters';
 import { apiService, authHeaders } from '../../services/apiService';
+import { brandPlanService } from '../../services/brandPlanService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
 import {
@@ -165,6 +166,32 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 }) => {
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * 캠페인 등록은 멤버십 회원만 한다. 새로 등록할 때만 확인한다(수정은 막지 않는다).
+   * 확인하지 못했으면(네트워크 등) 막지 않고 서버 판단에 맡긴다 — 서버가 한 번 더 본다.
+   */
+  const [membershipGate, setMembershipGate] = useState<null | 'no_plan' | 'past_due' | 'no_campaigns'>(null);
+  useEffect(() => {
+    if (editing) return;
+    let alive = true;
+    brandPlanService.overview().then((res) => {
+      if (!alive || !res.success) return;
+      const q = res.quota;
+      if (q && !q.enforced) return;
+      if (!res.plan.planActive || !q?.tier) setMembershipGate('no_plan');
+      else if (q.pastDue) setMembershipGate('past_due');
+      else if (q.remaining.campaigns <= 0) setMembershipGate('no_campaigns');
+    });
+    return () => { alive = false; };
+  }, [editing]);
+  const gateText =
+    membershipGate === 'no_plan'
+      ? '캠페인 등록은 멤버십 회원만 할 수 있어요. 작성한 내용은 임시 저장되니, 멤버십을 구독한 뒤 이어서 등록해 주세요.'
+      : membershipGate === 'past_due'
+        ? '멤버십 정기결제가 실패한 상태예요. 결제 수단을 확인해 결제가 다시 되면 캠페인을 등록할 수 있습니다.'
+        : membershipGate === 'no_campaigns'
+          ? '이번 달 캠페인 한도를 다 썼어요. 캠페인을 추가 구매하거나 등급을 올리면 바로 등록할 수 있습니다.'
+          : '';
   const [thumbnailPreview, setThumbnailPreview] = useState(editing?.thumbnail_url || '');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
@@ -534,6 +561,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
   // ------------------------------------------------------------------ 제출
   const submit = async () => {
+    if (gateText) { onNotify(gateText, 'error'); return; }
     for (let i = 0; i < steps.length; i++) {
       const err = stepError(steps[i].key);
       if (err) { setStep(i); onNotify(err, 'error'); return; }
@@ -720,6 +748,18 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           <p className="text-xs text-slate-400 font-medium mt-1">
             {steps.length}단계만 채우면 담당자가 이어서 진행합니다. 제목과 지원 조건은 적으신 내용으로 자동 정리됩니다.
           </p>
+          {gateText && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[11px] font-bold text-amber-800 flex items-center justify-between gap-2 flex-wrap">
+              <span>{gateText}</span>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-[11px] font-black text-amber-800"
+              >
+                멤버십 보기
+              </button>
+            </div>
+          )}
 
           {/* 저장된 초안은 물어보고 되살린다. 새 캠페인을 등록하러 온 사람에게 지난
               내용이 이미 채워져 있으면 어디가 예전 값인지 몰라 한 칸씩 지워야 한다. */}

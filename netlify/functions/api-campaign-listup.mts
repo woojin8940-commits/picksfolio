@@ -1,5 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
-import { brandQuotaStatus, checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
+import { brandQuotaStatus, countedSelectedIds, pendingPicksElsewhere, checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
 import type { Config, Context } from "@netlify/functions";
 import {
   forbiddenResponse,
@@ -435,6 +435,11 @@ export default async (req: Request, context: Context) => {
             },
             used: q.used,
             cycleEnd: q.cycle.end,
+            // 다른 캠페인에서 골라 두고 아직 확정 전인 인원. 브랜드 화면이 지금 고르는 인원과 더해
+            // 남은 선정 한도를 넘는지 미리 알린다.
+            pendingPicksElsewhere: await pendingPicksElsewhere(norm(campaign.business_username), String(campaign.id)).catch(() => 0),
+            // 이 캠페인에서 이미 선정 한도에 잡힌 후보(다시 세지 않는다).
+            countedIds: await countedSelectedIds(norm(campaign.business_username), (candidates as any[]).map((c) => String(c.id))).catch(() => []),
           };
         } catch (e) {
           console.error("[campaign-listup] quota failed:", (e as Error)?.message);
