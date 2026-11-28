@@ -262,7 +262,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [showForm, setShowForm] = useState(false);
   /**
    * 캠페인 메뉴는 각자 맡은 캠페인만 보인다. 관리자만 "회사 전체" 탭에서 직원 담당 캠페인까지
-   * 진행 예정 요약(업로드 예정일 · 진행 인플루언서)으로 보고 담당자를 바꾼다.
+   * 진행 예정 요약(업로드 예정일 · 진행 인플루언서)으로 본다.
    */
   const isCompanyAdmin = !isBusinessTeamMember();
   const [listScope, setListScope] = useState<'mine' | 'company'>('mine');
@@ -1868,7 +1868,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       )}
 
       {isCompanyAdmin && listScope === 'company' ? (
-        <CompanyUpcomingCampaigns businessUsername={businessUsername} onNotify={notify} />
+        <CompanyUpcomingCampaigns businessUsername={businessUsername} />
       ) : (<>
       {/* Type Filter Tabs */}
       <div

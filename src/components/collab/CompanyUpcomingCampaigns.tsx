@@ -6,7 +6,7 @@ import { authHeaders } from '../../services/apiService';
  *
  * 관리자는 회사 전체 일정을 한눈에 봐야 하지만, 상세 진행과 인플루언서 연락은 각 캠페인 담당자의
  * 일이다. 그래서 캠페인명 · 담당자 · 업로드 기간과, 진행이 확정된 인플루언서(업로드 예정일 · 업로드
- * 여부)만 보여 준다. 연락처와 금액은 없다. 담당자 변경(퇴사 · 업무 조정)은 여기서 한다.
+ * 여부)만 보여 준다. 연락처와 금액은 없다.
  */
 
 type Influencer = { username: string; instagramHandle: string; uploadDue: string; uploaded: boolean };
@@ -23,7 +23,6 @@ type UpcomingCampaign = {
 
 interface Props {
   businessUsername: string;
-  onNotify?: (message: string, type?: 'success' | 'error') => void;
 }
 
 const dateText = (v: string) => (v ? v.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$2.$3') : '');
@@ -33,12 +32,10 @@ const periodText = (from: string, to: string) => {
   return '미정';
 };
 
-const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername, onNotify }) => {
+const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername }) => {
   const [campaigns, setCampaigns] = useState<UpcomingCampaign[]>([]);
-  const [members, setMembers] = useState<{ username: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState('');
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
 
   const load = useCallback(async () => {
@@ -51,7 +48,6 @@ const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername, onNotify 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || '');
       setCampaigns(Array.isArray(json.campaigns) ? json.campaigns : []);
-      setMembers(Array.isArray(json.members) ? json.members : []);
       setError('');
     } catch (e) {
       setError((e as Error)?.message || '회사 전체 캠페인을 불러오지 못했습니다.');
@@ -61,27 +57,6 @@ const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername, onNotify 
   }, [businessUsername]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const assign = async (campaign: UpcomingCampaign, ownerMember: string) => {
-    if (ownerMember === campaign.ownerMember) return;
-    setBusyId(campaign.id);
-    try {
-      const res = await fetch('/api/campaigns', {
-        method: 'PATCH',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: businessUsername }),
-        body: JSON.stringify({ id: campaign.id, action: 'assign_owner', owner_member: ownerMember }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || '담당자를 바꾸지 못했습니다.');
-      const name = ownerMember ? members.find((m) => m.username === ownerMember)?.name || ownerMember : '관리자';
-      setCampaigns((prev) => prev.map((c) => (c.id === campaign.id ? { ...c, ownerMember, ownerName: name } : c)));
-      onNotify?.(`담당자를 ${name}(으)로 바꿨어요.`);
-    } catch (e) {
-      onNotify?.((e as Error)?.message || '담당자를 바꾸지 못했습니다.', 'error');
-    } finally {
-      setBusyId('');
-    }
-  };
 
   const owners = Array.from(new Map(campaigns.map((c) => [c.ownerMember, c.ownerName])).entries());
   const visible = ownerFilter === 'all' ? campaigns : campaigns.filter((c) => c.ownerMember === ownerFilter);
@@ -143,23 +118,7 @@ const CompanyUpcomingCampaigns: React.FC<Props> = ({ businessUsername, onNotify 
                     {c.status === 'pending_approval' ? ' · 승인 대기' : ''}
                   </p>
                 </div>
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500">
-                  담당자
-                  <select
-                    value={c.ownerMember}
-                    disabled={busyId === c.id}
-                    onChange={(e) => void assign(c, e.target.value)}
-                    className="h-8 border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 bg-white"
-                  >
-                    <option value="">관리자</option>
-                    {members.map((m) => (
-                      <option key={m.username} value={m.username}>{m.name}</option>
-                    ))}
-                    {c.ownerMember && !members.some((m) => m.username === c.ownerMember) && (
-                      <option value={c.ownerMember} disabled>{c.ownerName}</option>
-                    )}
-                  </select>
-                </label>
+                <span className="px-2 py-1 rounded-lg bg-violet-50 text-violet-600 text-[11px] font-black whitespace-nowrap">{`담당자: ${c.ownerName}`}</span>
               </div>
 
               {c.influencers.length === 0 ? (

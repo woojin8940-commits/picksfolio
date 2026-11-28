@@ -385,7 +385,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => window.confirm(`${m.displayName || m.memberUsername}님(${m.memberUsername}) 계정을 삭제할까요?\n\n· 계정이 삭제되어 이 아이디로는 더 이상 로그인할 수 없어요. 되돌릴 수 없습니다.\n· 맡고 있던 캠페인은 관리자 담당으로 넘어와요. 새 직원이 들어오면 캠페인 메뉴 › 회사 전체 진행 예정에서 담당자를 바꿔 주세요.\n· 좌석은 추가 비용 없이 다시 비어요.`) &&
+                        onClick={() => window.confirm(`${m.displayName || m.memberUsername}님(${m.memberUsername}) 계정을 삭제할까요?\n\n· 계정이 삭제되어 이 아이디로는 더 이상 로그인할 수 없어요. 되돌릴 수 없습니다.\n· 맡고 있던 캠페인은 관리자 담당으로 넘어와요.\n· 좌석은 추가 비용 없이 다시 비어요.`) &&
                           run(() => brandTeamService.removeMember(m.id), '직원 계정을 삭제했어요. 맡던 캠페인은 관리자 담당으로 옮겼고, 좌석이 다시 비었습니다.')}
                         className="px-3 py-2 rounded-lg text-xs font-bold text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50"
                       >
@@ -404,8 +404,8 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
         <ul className="list-disc pl-5 space-y-1.5 text-xs text-slate-500 marker:text-slate-400">
           <li>회사 관리자 = 회사 아이디로 로그인한 계정이에요. 결제 · 좌석 변경 · 직원 초대 · 계정 삭제는 회사 관리자만 할 수 있어요.</li>
           <li>캠페인 메뉴에는 각자 맡은 캠페인만 보여요. 진행이 확정된 인플루언서의 연락처도 그 캠페인 담당자에게만 보입니다.</li>
-          <li>캠페인 이력에서는 내 캠페인과 회사 전체 성과를 모두 볼 수 있어요. 관리자는 캠페인 메뉴의 회사 전체 진행 예정에서 업로드 일정을 보고 담당자를 바꿀 수 있어요.</li>
-          <li>직원이 퇴사하면 계정을 삭제하세요. 맡던 캠페인은 관리자 담당으로 넘어오고, 좌석은 추가 비용 없이 다시 비어요. 새 직원은 초대 링크로 새로 가입한 뒤 담당자를 바꿔 이어 가면 됩니다.</li>
+          <li>캠페인 이력에서는 내 캠페인과 회사 전체 성과를 모두 볼 수 있어요. 관리자는 캠페인 메뉴의 회사 전체 진행 예정에서 업로드 일정을 볼 수 있어요.</li>
+          <li>직원이 퇴사하면 계정을 삭제하세요. 맡던 캠페인은 관리자 담당으로 넘어오고, 좌석은 추가 비용 없이 다시 비어요. 새 직원은 초대 링크로 새로 가입해 새 캠페인부터 맡으면 됩니다.</li>
         </ul>
       </section>
     </main>

@@ -4,7 +4,7 @@ import { isRecruitClosed, todayInSeoul, withCampaignLock } from "./_shared/campa
 import { isOpenApplyMode, isRetiredRewardMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { checkCampaignRegistration } from "./_shared/brand-quota.mts";
-import { activeMembers, memberNames, ownerLabel, ownsCampaign, seatOf } from "./_shared/campaign-owner.mts";
+import { memberNames, ownerLabel, ownsCampaign, seatOf } from "./_shared/campaign-owner.mts";
 
 /**
  * 조회 결과에 모집 마감 여부(recruit_closed)를 붙인다.
@@ -208,8 +208,7 @@ async function companyUpcoming(db: any, business: string) {
         c.influencers.filter((i) => !i.uploaded && i.uploadDue).map((i) => i.uploadDue).sort()[0] || c.uploadFrom || "9999-12-31";
       return next(a).localeCompare(next(b));
     });
-  const members = await activeMembers(company).catch(() => []);
-  return { campaigns, members };
+  return { campaigns };
 }
 
 
@@ -483,22 +482,6 @@ export default async (req: Request) => {
       // 수정할 수 있도록 확인한다.
       const auth = await requireAccountOwner(req, String(c.business_username || ""));
       if (!auth.ok) return auth.response;
-
-      // 담당자 변경(관리자만). 직원이 퇴사했거나 업무를 나눌 때 캠페인을 다른 사람에게 넘긴다.
-      if (updates.action === "assign_owner") {
-        if (auth.teamRole !== "owner" && !auth.isAdmin) {
-          return Response.json({ error: "담당자 변경은 회사 관리자 계정에서만 할 수 있어요." }, { status: 403 });
-        }
-        const target = String(updates.owner_member ?? "").trim().toLowerCase();
-        if (target) {
-          const members = await activeMembers(String(c.business_username || ""));
-          if (!members.some((m) => m.username === target)) {
-            return Response.json({ error: "지금 회사에 있는 직원에게만 맡길 수 있어요." }, { status: 400 });
-          }
-        }
-        await db.sql`UPDATE campaigns SET owner_member = ${target}, updated_at = NOW() WHERE id = ${id}`;
-        return Response.json({ success: true, owner_member: target });
-      }
 
       if (!ownsCampaign(auth, c.owner_member)) {
         return Response.json({ error: "다른 담당자가 맡은 캠페인은 고칠 수 없어요.", code: "CAMPAIGN_NOT_ASSIGNED" }, { status: 403 });

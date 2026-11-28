@@ -54,20 +54,3 @@ export async function memberNames(company: string): Promise<Map<string, string>>
   }
   return map;
 }
-
-/** 지금 회사에 있는(내보내지 않은) 직원 아이디 목록. 담당자 변경 대상 확인에 쓴다. */
-export async function activeMembers(company: string): Promise<{ username: string; name: string }[]> {
-  try {
-    const { getDatabase } = await import("@picks/netlify-database");
-    const rows = (await getDatabase().sql`
-      SELECT member_username, display_name
-      FROM brand_team_members
-      WHERE company_username = ${clean(company).replace(/^biz\//, "")} AND removed_at IS NULL
-      ORDER BY joined_at ASC
-    `) as any[];
-    return rows.map((r) => ({ username: clean(r.member_username), name: String(r.display_name || "") || clean(r.member_username) }));
-  } catch (e) {
-    if ((e as { code?: string })?.code === "42P01") return [];
-    throw e;
-  }
-}

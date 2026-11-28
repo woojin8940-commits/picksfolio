@@ -7565,4 +7565,6 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "담당자 변경은 회사 관리자 계정에서만 할 수 있어요.": "Only the company admin can change owners.",
   "지금 회사에 있는 직원에게만 맡길 수 있어요.": "You can only assign current staff.",
   "회사 전체 현황은 관리자 계정에서만 볼 수 있어요.": "Only the admin account can see the company-wide view.",
+  "직원이 퇴사하면 계정을 삭제하세요. 맡던 캠페인은 관리자 담당으로 넘어오고, 좌석은 추가 비용 없이 다시 비어요. 새 직원은 초대 링크로 새로 가입해 새 캠페인부터 맡으면 됩니다.": "When a staff member leaves, delete their account. Their campaigns move to the admin and the seat frees up at no extra cost. New staff sign up via an invite link and start with new campaigns.",
+  "캠페인 이력에서는 내 캠페인과 회사 전체 성과를 모두 볼 수 있어요. 관리자는 캠페인 메뉴의 회사 전체 진행 예정에서 업로드 일정을 볼 수 있어요.": "Campaign history shows both your campaigns and company-wide performance. The admin can see upload schedules under Campaigns › Company-wide upcoming.",
 };
