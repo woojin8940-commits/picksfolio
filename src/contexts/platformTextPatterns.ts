@@ -2612,4 +2612,8 @@ export const platformTextPatterns = [
     "source": "^(.+?)님 계정을 삭제할까요\\?[\\s\\S]*$",
     "replacement": "Delete $1's account? It can't be undone; their campaigns move to the company's main account and the seat frees up."
   },
+  {
+    "source": "^· 이 캠페인 브랜드 요청 무료 (\\d+)/2명 남음$",
+    "replacement": "· $1/2 free brand-request slots left in this campaign"
+  },
 ] as const;

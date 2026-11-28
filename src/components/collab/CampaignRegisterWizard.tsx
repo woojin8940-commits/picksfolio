@@ -1389,7 +1389,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
               <div>
                 <label className={LABEL}>함께하고 싶은 인플루언서 <span className="text-slate-400 font-bold">(선택)</span></label>
                 <p className="text-[11px] text-blue-600 font-bold mb-2 leading-relaxed">
-                  픽스폴리오 리스트업과 별개로, 진행을 원하는 인플루언서가 있다면 알려 주세요. 담당자가 직접 연락해 리스트업에 올려 드려요.
+                  픽스폴리오 리스트업과 별개로, 진행을 원하는 인플루언서가 있다면 알려 주세요. 담당자가 직접 연락해 리스트업에 올려 드리고, 캠페인당 2명까지는 선정 인원에서 빼 드려요.
                 </p>
                 <textarea
                   value={form.wanted_influencers}

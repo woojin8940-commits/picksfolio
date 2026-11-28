@@ -7589,4 +7589,11 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "픽스폴리오 리스트업과 별개로, 진행을 원하는 인플루언서가 있다면 알려 주세요. 담당자가 직접 연락해 리스트업에 올려 드려요.": "Apart from Picksfolio's list-up, let us know if there are influencers you'd like to work with. Our manager will contact them and add them to your list-up.",
   "인스타그램 아이디나 프로필 링크 (예: @picksfolio, 여러 명이면 쉼표로 구분)": "Instagram handle or profile link (e.g. @picksfolio; separate multiple with commas)",
   "브랜드 요청 인플루언서": "Influencers requested by brand",
+  "브랜드 회원이 캠페인 등록 시 진행을 원하는 크리에이터를 직접 요청한 경우, 담당자가 연락하여 리스트업에 포함하며, 그중 협업이 확정된 크리에이터는 캠페인당 2명까지 선정 인플루언서 한도를 차감하지 않습니다. 남은 무료 인원은 다른 캠페인으로 이월되지 않습니다.": "If a Brand Member directly requests creators when registering a campaign, the manager contacts them and includes them in the list-up; up to 2 of those whose collaboration is confirmed per campaign are not deducted from the confirmed-influencer limit. Unused free slots do not carry over to other campaigns.",
+  "요청하신 인플루언서": "Your requested influencer",
+  "픽스폴리오 리스트업과 별개로, 진행을 원하는 인플루언서가 있다면 알려 주세요. 담당자가 직접 연락해 리스트업에 올려 드리고, 캠페인당 2명까지는 선정 인원에서 빼 드려요.": "Apart from Picksfolio's list-up, let us know if there are influencers you'd like to work with. Our manager will contact them and add them to your list-up, and up to 2 per campaign won't count toward your confirmed-influencer limit.",
+  "브랜드가 직접 요청한 인플루언서는 캠페인당 2명까지 선정 한도에서 빠집니다": "Influencers requested by the brand don't count toward the confirmed limit, up to 2 per campaign",
+  "브랜드 요청": "Brand request",
+  "+ 브랜드 요청": "+ Brand request",
+  "진행이 확정된 후보는 바꿀 수 없습니다.": "You can't change a confirmed candidate.",
 };

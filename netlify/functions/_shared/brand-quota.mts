@@ -2,7 +2,8 @@
  * 브랜드 멤버십 월 한도 — 캠페인 건수와 선정 인플루언서 수.
  *
  *   · 캠페인 1건: 담당자가 그 캠페인의 리스트업을 처음 올릴 때 차감
- *   · 선정 1명: 브랜드가 고르고 담당자가 협의해 진행이 확정될 때(연락처 공개) 차감
+ *   · 선정 1명: 브랜드가 고르고 담당자가 협의해 진행이 확정될 때(연락처 공개).
+ *     단, 브랜드가 직접 요청한 인플루언서는 캠페인당 2명까지 빼 준다(kind = 'brand_free'). 차감
  *
  * 한도 = 등급 한도(라이트 2건 · 20명, 그로스 5건 · 50명) + 이번 결제 주기에 추가 구매한 것
  *        + 운영자가 레코드에 적어 둔 별도 한도(brand_quota_override, 엔터프라이즈 협의용).
@@ -17,7 +18,10 @@ import { getDatabase } from "@picks/netlify-database";
 import { addMonths, BRAND_PLAN_LIMITS, type BrandPlanTier } from "./membership-billing.mts";
 import { activeBrandTier, readSeatRecord } from "./brand-seats.mts";
 
-type Kind = "campaign" | "selected";
+type Kind = "campaign" | "selected" | "brand_free";
+
+/** 브랜드가 직접 요청한 인플루언서는 캠페인당 이만큼까지 선정 한도에서 빼 준다. */
+export const FREE_BRAND_REQUESTS_PER_CAMPAIGN = 2;
 
 const enforced = () => (Netlify.env.get("BRAND_QUOTA_ENFORCED") || "").toLowerCase() !== "false";
 
@@ -221,9 +225,11 @@ export async function pendingPicksElsewhere(company: string, excludeCampaignId: 
         AND c.status IN ('active', 'inactive')
         AND l.brand_decision = 'pick'
         AND l.outreach_status NOT IN ('declined', 'expired', 'accepted')
+        -- 브랜드 요청 후보는 캠페인당 2명까지 무료라 대개 한도를 쓰지 않는다. 미리 알림에서는 뺀다.
+        AND COALESCE(l.brand_requested, false) = false
         AND NOT EXISTS (
           SELECT 1 FROM brand_quota_usage u
-          WHERE u.company_username = ${clean} AND u.kind = 'selected' AND u.ref_id = l.id
+          WHERE u.company_username = ${clean} AND u.kind IN ('selected', 'brand_free') AND u.ref_id = l.id
         )
     `) as any[];
     return Number(rows[0]?.n || 0);
@@ -240,7 +246,7 @@ export async function countedSelectedIds(company: string, ids: string[]): Promis
   try {
     const rows = (await getDatabase().sql`
       SELECT ref_id FROM brand_quota_usage
-      WHERE company_username = ${clean} AND kind = 'selected' AND ref_id = ANY(${ids})
+      WHERE company_username = ${clean} AND kind IN ('selected', 'brand_free') AND ref_id = ANY(${ids})
     `) as any[];
     return rows.map((r) => String(r.ref_id));
   } catch (e) {
@@ -253,6 +259,77 @@ export async function countedSelectedIds(company: string, ids: string[]): Promis
 export const checkCampaignQuota = (company: string, campaignId: string) => check(company, "campaign", campaignId);
 export const recordCampaignQuota = (company: string, campaignId: string) => record(company, "campaign", campaignId);
 
-/** 진행 확정 · 연락처 공개 때(선정 1명). ref 는 리스트업 행 id. */
-export const checkSelectedQuota = (company: string, listupId: string) => check(company, "selected", listupId);
-export const recordSelectedQuota = (company: string, listupId: string) => record(company, "selected", listupId);
+/**
+ * 이 후보가 "브랜드 요청 무료" 자리에 들어가는지. 브랜드가 요청한 후보(brand_requested)만 해당하고,
+ * 그 캠페인에서 이미 무료로 처리된 후보가 2명 미만일 때다. 이미 선정 한도로 센 후보는 아니다.
+ * 확정은 캠페인 잠금(withCampaignLock) 안에서 일어나므로 같은 캠페인에서 3명째가 끼어들지 않는다.
+ */
+async function freeBrandSlot(company: string, campaignId: string, listupId: string): Promise<boolean> {
+  const clean = cleanCompany(company);
+  if (!clean || !campaignId || !listupId) return false;
+  try {
+    const rows = (await getDatabase().sql`
+      SELECT
+        (SELECT kind FROM brand_quota_usage
+          WHERE company_username = ${clean} AND ref_id = ${listupId} AND kind IN ('selected', 'brand_free')
+          LIMIT 1) AS existing,
+        (SELECT COUNT(*)::int FROM brand_quota_usage u
+          WHERE u.company_username = ${clean} AND u.kind = 'brand_free'
+            AND u.ref_id IN (SELECT id FROM campaign_listups WHERE campaign_id = ${campaignId})) AS used
+    `) as any[];
+    const existing = rows[0]?.existing ? String(rows[0].existing) : "";
+    if (existing === "brand_free") return true;
+    if (existing === "selected") return false;
+    return Number(rows[0]?.used || 0) < FREE_BRAND_REQUESTS_PER_CAMPAIGN;
+  } catch (e) {
+    if ((e as { code?: string })?.code === "42P01") return false;
+    throw e;
+  }
+}
+
+type SelectedOpts = { campaignId?: string; brandRequested?: boolean };
+
+/**
+ * 진행 확정 · 연락처 공개 때(선정 1명). ref 는 리스트업 행 id.
+ * 브랜드가 요청한 후보는 캠페인당 2명까지 한도를 쓰지 않는다(brand_free 로 남긴다).
+ */
+export async function checkSelectedQuota(company: string, listupId: string, opts: SelectedOpts = {}): Promise<ReserveResult> {
+  if (opts.brandRequested && opts.campaignId && (await freeBrandSlot(company, opts.campaignId, listupId))) {
+    // 무료 자리라도 멤버십이 없거나 미납이면 막는다(한도만 빼 주는 것이다).
+    const clean = cleanCompany(company);
+    if (!clean) return { ok: true };
+    const status = await brandQuotaStatus(clean);
+    if (!status.enforced) return { ok: true };
+    if (!status.tier) {
+      return { ok: false, status: 402, code: "BRAND_PLAN_REQUIRED", error: "이 브랜드는 멤버십을 구독하지 않았어요. 브랜드가 멤버십을 구독한 뒤에 진행할 수 있습니다." };
+    }
+    if (status.pastDue) {
+      return { ok: false, status: 402, code: "BRAND_PAYMENT_PAST_DUE", error: "이 브랜드는 멤버십 정기결제가 실패한 상태예요. 결제 수단을 확인해 결제가 다시 되면 진행할 수 있습니다." };
+    }
+    return { ok: true };
+  }
+  return check(company, "selected", listupId);
+}
+export async function recordSelectedQuota(company: string, listupId: string, opts: SelectedOpts = {}): Promise<void> {
+  if (opts.brandRequested && opts.campaignId && (await freeBrandSlot(company, opts.campaignId, listupId))) {
+    return record(company, "brand_free", listupId);
+  }
+  return record(company, "selected", listupId);
+}
+
+/** 이 캠페인에서 남은 브랜드 요청 무료 자리. */
+export async function freeBrandRemaining(company: string, campaignId: string): Promise<number> {
+  const clean = cleanCompany(company);
+  if (!clean || !campaignId) return 0;
+  try {
+    const rows = (await getDatabase().sql`
+      SELECT COUNT(*)::int AS n FROM brand_quota_usage u
+      WHERE u.company_username = ${clean} AND u.kind = 'brand_free'
+        AND u.ref_id IN (SELECT id FROM campaign_listups WHERE campaign_id = ${campaignId})
+    `) as any[];
+    return Math.max(0, FREE_BRAND_REQUESTS_PER_CAMPAIGN - Number(rows[0]?.n || 0));
+  } catch (e) {
+    if ((e as { code?: string })?.code === "42P01") return FREE_BRAND_REQUESTS_PER_CAMPAIGN;
+    throw e;
+  }
+}

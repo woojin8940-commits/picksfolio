@@ -638,6 +638,8 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
     collabId: row.collab_id || "",
     // 브랜드에 연락처를 공개한 시각(진행 확정). 비어 있으면 공개 전이다.
     contactSharedAt: row.contact_shared_at || null,
+    // 브랜드가 직접 요청한 인플루언서(캠페인당 2명까지 선정 한도에서 빠진다).
+    brandRequested: Boolean(row.brand_requested),
     createdAt: row.created_at,
   };
 
