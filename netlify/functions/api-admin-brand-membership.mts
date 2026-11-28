@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { requireOperator } from "./_shared/manager-auth.mts";
+import { findProfileByUsername } from "./_shared/user-auth.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { activeBrandTier, readSeatRecord } from "./_shared/brand-seats.mts";
 import { brandQuotaStatus } from "./_shared/brand-quota.mts";
@@ -67,13 +68,18 @@ export default async (req: Request) => {
     ? { campaigns: intOf(body.override.campaigns), selected: intOf(body.override.selected) }
     : null;
 
+  // 한 번도 결제하지 않은 브랜드는 멤버십 레코드가 없다. 비즈니스 계정(role = operator)이 맞으면 새로 만든다.
   const existing = await readSeatRecord(company);
   if (!existing) {
-    return Response.json({ error: "브랜드 계정을 찾을 수 없어요. 아이디를 확인해 주세요." }, { status: 404 });
+    const profile = await findProfileByUsername(company);
+    if (profile === null) return Response.json({ error: "계정을 확인하지 못했어요. 잠시 후 다시 시도해 주세요." }, { status: 503 });
+    if (!profile.found || profile.role.toLowerCase() !== "operator") {
+      return Response.json({ error: "브랜드(비즈니스) 계정을 찾을 수 없어요. 아이디를 확인해 주세요." }, { status: 404 });
+    }
   }
   let blocked = "";
-  await mutateBlobJSON<Record<string, any>>(STORE, `seller_${company}`, (latest) => {
-    if (!latest) return null;
+  await mutateBlobJSON<Record<string, any>>(STORE, `seller_${company}`, (current) => {
+    const latest: Record<string, any> = current || { username: company, created_at: new Date().toISOString() };
     blocked = "";
     const at = new Date().toISOString();
     const next: Record<string, any> = { ...latest, updated_at: at };
