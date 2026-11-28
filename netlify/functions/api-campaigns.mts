@@ -419,7 +419,7 @@ export default async (req: Request) => {
           groupbuy_product_price, groupbuy_sale_price, fast_track,
           influencer_gender, influencer_ages, sns_category, follower_tiers, min_views,
           influencer_styles, exclude_keywords, target_audience,
-          contact_person, contact_phone, contact_email, owner_member
+          contact_person, contact_phone, contact_email, owner_member, wanted_influencers
         )
         VALUES (
           ${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""},
@@ -442,7 +442,7 @@ export default async (req: Request) => {
           ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
           ${csv(body.influencer_styles)}, ${csv(body.exclude_keywords)},
           ${body.target_audience || ""},
-          ${person}, ${phone}, ${email}, ${seatOf(auth)}
+          ${person}, ${phone}, ${email}, ${seatOf(auth)}, ${String(body.wanted_influencers ?? "").trim().slice(0, 1000)}
         )
       `;
 
@@ -610,6 +610,7 @@ export default async (req: Request) => {
             influencer_styles = ${updates.influencer_styles === undefined ? (c.influencer_styles ?? "") : csv(updates.influencer_styles)},
             exclude_keywords = ${updates.exclude_keywords === undefined ? (c.exclude_keywords ?? "") : csv(updates.exclude_keywords)},
             target_audience = ${updates.target_audience ?? c.target_audience ?? ""},
+            wanted_influencers = ${updates.wanted_influencers === undefined ? (c.wanted_influencers ?? "") : String(updates.wanted_influencers ?? "").trim().slice(0, 1000)},
             contact_person = ${nextPerson},
             contact_phone = ${nextPhone},
             contact_email = ${contactEmail(updates.contact_email) || contactEmail(c.contact_email)},

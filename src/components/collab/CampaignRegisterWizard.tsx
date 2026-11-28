@@ -98,6 +98,7 @@ export interface CampaignBriefDraft {
   influencer_styles?: string;
   exclude_keywords?: string;
   target_audience?: string;
+  wanted_influencers?: string;
   contact_person?: string;
   contact_phone?: string;
   contact_email?: string;
@@ -260,6 +261,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     sns_category: editing?.sns_category || '',
     ad_objective: editing?.ad_objective || 'awareness',
     target_audience: editing?.target_audience || '',
+    wanted_influencers: editing?.wanted_influencers || '',
     influencer_styles: splitCsv(editing?.influencer_styles),
     exclude_keywords: splitCsv(editing?.exclude_keywords),
   };
@@ -645,6 +647,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         influencer_styles: picksInfluencer ? form.influencer_styles : [],
         exclude_keywords: picksInfluencer ? form.exclude_keywords : [],
         target_audience: picksInfluencer ? form.target_audience : '',
+        wanted_influencers: picksInfluencer ? form.wanted_influencers.trim() : '',
 
         // 담당자는 진행 방식과 무관하게 항상 보낸다. 어떤 방식이든 담당자가 브랜드에
         // 확인할 일이 생긴다.
@@ -1381,6 +1384,21 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className={LABEL}>함께하고 싶은 인플루언서 <span className="text-slate-400 font-bold">(선택)</span></label>
+                <p className="text-[11px] text-blue-600 font-bold mb-2 leading-relaxed">
+                  픽스폴리오 리스트업과 별개로, 진행을 원하는 인플루언서가 있다면 알려 주세요. 담당자가 직접 연락해 리스트업에 올려 드려요.
+                </p>
+                <textarea
+                  value={form.wanted_influencers}
+                  onChange={e => patch('wanted_influencers', e.target.value)}
+                  rows={2}
+                  maxLength={1000}
+                  placeholder="인스타그램 아이디나 프로필 링크 (예: @picksfolio, 여러 명이면 쉼표로 구분)"
+                  className={`${INPUT} resize-y`}
+                />
               </div>
 
               <div>

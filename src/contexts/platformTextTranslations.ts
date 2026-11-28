@@ -7585,4 +7585,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "팀원 관리는 관리자만 할 수 있어요.": "Only admins can manage the team.",
   "좌석 결제는 회사 대표 계정에서만 할 수 있어요.": "Only the company's main account can pay for seats.",
   "이미 삭제된 직원이에요.": "This staff member was already deleted.",
+  "함께하고 싶은 인플루언서": "Influencers you'd like to work with",
+  "픽스폴리오 리스트업과 별개로, 진행을 원하는 인플루언서가 있다면 알려 주세요. 담당자가 직접 연락해 리스트업에 올려 드려요.": "Apart from Picksfolio's list-up, let us know if there are influencers you'd like to work with. Our manager will contact them and add them to your list-up.",
+  "인스타그램 아이디나 프로필 링크 (예: @picksfolio, 여러 명이면 쉼표로 구분)": "Instagram handle or profile link (e.g. @picksfolio; separate multiple with commas)",
+  "브랜드 요청 인플루언서": "Influencers requested by brand",
 };

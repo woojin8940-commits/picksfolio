@@ -72,7 +72,7 @@ async function loadCampaign(db: any, campaignId: string) {
            reward_mode, tier_counts, package_tier,
            ad_objective, influencer_gender, influencer_ages,
            sns_category, follower_tiers, min_views, influencer_styles,
-           exclude_keywords, target_audience,
+           exclude_keywords, target_audience, wanted_influencers,
            -- 명단 확정 기한. 브랜드 화면의 남은 시간 표시가 이 값을 읽는다.
            listup_confirm_due, listup_published_at
     FROM campaigns WHERE id = ${campaignId}
@@ -116,6 +116,7 @@ const shapeCampaign = (c: any) => ({
   influencerStyles: c.influencer_styles || "",
   excludeKeywords: c.exclude_keywords || "",
   targetAudience: c.target_audience || "",
+  wantedInfluencers: c.wanted_influencers || "",
   listupConfirmDue: c.listup_confirm_due || null,
   listupPublishedAt: c.listup_published_at || null,
 });

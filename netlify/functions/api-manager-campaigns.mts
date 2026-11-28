@@ -71,6 +71,8 @@ const shape = (row: any) => ({
   snsCategory: row.sns_category || "",
   influencerStyles: row.influencer_styles || "",
   excludeKeywords: row.exclude_keywords || "",
+  /** 브랜드가 등록 때 적은 함께하고 싶은 인플루언서(담당자가 직접 연락해 리스트업에 올린다). */
+  wantedInfluencers: row.wanted_influencers || "",
   tierCounts: row.tier_counts || "",
   status: row.status || "",
   managerUsername: norm(row.manager_username),
