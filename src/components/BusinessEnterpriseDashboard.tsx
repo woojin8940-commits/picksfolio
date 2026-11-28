@@ -225,6 +225,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         }
       }
     } catch (e) {
+      // 화면을 옮기면 요청을 끊는다(AbortError). 오류가 아니므로 남기지 않는다.
+      if ((e as { name?: string })?.name === 'AbortError') return;
       console.error('Error fetching top trend:', e);
     }
   };
