@@ -2588,4 +2588,8 @@ export const platformTextPatternsJa = [
     "source": "^남은 선정 한도보다 (.+?)명 많이 골랐어요$",
     "replacement": "残りの確定枠より$1人多く選んでいます"
   },
+  {
+    "source": "^회사 계정: (.+?)$",
+    "replacement": "会社アカウント：$1"
+  },
 ] as const;

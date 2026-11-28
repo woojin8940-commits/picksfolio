@@ -2572,4 +2572,8 @@ export const platformTextPatterns = [
     "source": "^남은 선정 한도보다 (.+?)명 많이 골랐어요$",
     "replacement": "$1 more than your remaining confirmed-influencer limit"
   },
+  {
+    "source": "^회사 계정: (.+?)$",
+    "replacement": "Company account: $1"
+  },
 ] as const;
