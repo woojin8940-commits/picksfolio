@@ -158,7 +158,11 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
           <li className="flex items-start gap-2"><span className="text-green-500 font-bold">✓</span>자동 디엠</li>
         </ul>
         <div className="mt-5">
-          {isCurrent ? (
+          {isCurrent && plan?.granted ? (
+            <div className="py-3 rounded-xl text-center text-sm font-bold bg-green-50 text-green-700 border border-green-200">{`✓ ${TIER_NAME[tier]} 이용 중 · 픽스폴리오 제공`}</div>
+          ) : plan?.granted ? (
+            <div className="py-3 rounded-xl text-center text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200">등급 변경은 담당자에게 문의해 주세요</div>
+          ) : isCurrent ? (
             isTeamMember ? (
               <div className="py-3 rounded-xl text-center text-sm font-bold bg-green-50 text-green-700 border border-green-200">✓ 회사가 이용 중</div>
             ) : (
@@ -223,12 +227,15 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
           {plan?.scheduledTier && plan.scheduledTier !== current && (
             <p className="text-xs font-bold text-amber-600 mt-2">{`${formatDate(plan.nextBillingDate)}부터 ${TIER_NAME[plan.scheduledTier]}로 바뀌어요.`}</p>
           )}
+          {plan?.granted && (
+            <p className="text-xs font-bold text-emerald-700 mt-2">{`픽스폴리오가 제공한 멤버십이에요. ${formatDate(plan.nextBillingDate)}까지 결제 없이 이용해요. 한도 추가는 담당자에게 문의해 주세요.`}</p>
+          )}
           {isOwner && (
             <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-2">
-              <button type="button" disabled={busy || plan?.chargePending} onClick={buyAddon}
+              {!plan?.granted && <button type="button" disabled={busy || plan?.chargePending} onClick={buyAddon}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-50">
                 {`선정 인플루언서 ${ADDON_SELECTED_UNIT}명 추가 · ${won(ADDON_SELECTED_PRICE)}`}
-              </button>
+              </button>}
               {onOpenTeam && (
                 <button type="button" onClick={onOpenTeam}
                   className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">

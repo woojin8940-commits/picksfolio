@@ -162,6 +162,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
   const promoFreeUntilLabel = formatDate(promoFreeUntil);
   const promoActive =
     membershipActive && !!promoFreeUntil && new Date(promoFreeUntil).getTime() > Date.now();
+  // 운영자가 결제 없이 부여한 멤버십(결제 수단 없음). 자동결제 안내와 해지 버튼을 보이지 않는다.
+  const operatorGranted =
+    membershipActive && verification?.membership_source === 'operator_grant' && !verification?.billing_key_registered;
   const promoMonthlyPrice = currentPlanPrice(verification?.membership_plan);
 
   const flashSuccess = (msg: string) => {
@@ -621,7 +624,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
                     cancelPending ? 'text-amber-600' : promoActive ? 'text-emerald-600' : 'text-blue-500'
                   }`}
                 >
-                  {cancelPending
+                  {operatorGranted
+                    ? language === 'en'
+                      ? 'Provided by Picksfolio'
+                      : '픽스폴리오 제공'
+                    : cancelPending
                     ? language === 'en'
                       ? 'Cancellation scheduled'
                       : '해지 예약'
@@ -637,7 +644,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
                   {TIER_LABEL[currentPlan]}
                 </h3>
                 <p className="text-xs md:text-sm text-slate-600 font-medium mt-1 leading-relaxed">
-                  {cancelPending
+                  {operatorGranted
+                    ? endsAtLabel
+                      ? `픽스폴리오가 제공한 멤버십이에요. ${endsAtLabel}까지 결제 없이 이용할 수 있어요.`
+                      : '픽스폴리오가 제공한 멤버십이에요. 결제 없이 이용할 수 있어요.'
+                    : cancelPending
                     ? endsAtLabel
                       ? language === 'en'
                         ? `You keep full access until ${endsAtLabel}. After that the membership ends and no further payment is charged.`
@@ -658,7 +669,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
                           : '가입일 기준 매월 자동결제됩니다.'}
                 </p>
               </div>
-              {!isTeamMember && <div className="shrink-0 mt-4 sm:mt-0">
+              {!isTeamMember && !operatorGranted && <div className="shrink-0 mt-4 sm:mt-0">
                 <button
                   type="button"
                   onClick={cancelPending ? resumeSubscription : handleCancelSubscription}

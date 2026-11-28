@@ -7613,4 +7613,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "부여 끄기": "Turn off grant",
   "별도 한도(엔터프라이즈 협의분, 등급 한도에 더함)": "Extra limits (enterprise, added to tier limits)",
   "결제 수단이 없는 계정은 정기결제가 청구되지 않아요. 결제로 구독 중인 계정은 등급을 바꿀 수 없고 별도 한도만 넣을 수 있어요.": "Accounts without a payment method aren't charged. For paid subscriptions you can't change the tier, only add extra limits.",
+  "등급 변경은 담당자에게 문의해 주세요": "Contact your manager to change tiers",
+  "픽스폴리오가 제공한 멤버십이라 좌석을 결제로 늘릴 수 없어요. 좌석이 더 필요하면 담당자에게 문의해 주세요.": "This membership is provided by Picksfolio, so seats can't be added by payment. Contact your manager if you need more.",
+  "픽스폴리오 제공": "Provided by Picksfolio",
+  "픽스폴리오가 제공한 멤버십이에요. 결제 없이 이용할 수 있어요.": "This membership is provided by Picksfolio. You can use it without payment.",
 };

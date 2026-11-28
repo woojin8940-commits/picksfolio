@@ -16,6 +16,7 @@ export interface BrandPlanOverview {
     nextBillingDate: string | null;
     cancelAtPeriodEnd: boolean;
     chargePending: boolean;
+    granted?: boolean;
   };
   quota: {
     tier: BrandPlanTier | null;

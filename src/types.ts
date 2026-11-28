@@ -171,6 +171,10 @@ export interface BusinessAccount {
 // 접으면서 함께 없앴다(예전 제출 기록은 서버 응답에서 걸러진다).
 export interface SellerVerification {
   membership_active?: boolean;
+  /** 'operator_grant' 이면 운영자가 결제 없이 부여한 멤버십. */
+  membership_source?: string | null;
+  /** 서버가 빌링키 대신 내려 주는 "결제 수단 등록됨" 여부. */
+  billing_key_registered?: boolean;
   membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'brand_campaign' | 'brand_growth' | 'live' | null;
   membership_started_at?: string | null;
   billing_key?: string | null;
