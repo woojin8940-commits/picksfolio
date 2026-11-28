@@ -113,6 +113,8 @@ type HistoryCampaign = {
   status: string;
   /** 협업 메뉴에서 내린 캠페인. 이력에는 그대로 남는다(기록이므로). */
   removed?: boolean;
+  /** 회사 안의 담당자(관리자 또는 직원 이름). */
+  ownerName?: string;
   rewardMode: string;
   thumbnailUrl: string;
   startDate: string;
@@ -437,6 +439,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const [category, setCategory] = useState('');
   /** 캠페인별 보기 — 비어 있으면 모든 캠페인. */
   const [campaignId, setCampaignId] = useState('');
+  /** 내가 맡은 캠페인만 / 회사 전체(관리자 · 직원 모두). 성과만 보이고 연락처는 담당자 화면에만 있다. */
+  const [scope, setScope] = useState<'mine' | 'company'>('mine');
   const [campaignOptions, setCampaignOptions] = useState<{ id: string; title: string; startDate: string | null }[]>(
     cached?.campaignOptions || [],
   );
@@ -464,7 +468,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   // 조건이 바뀌면 첫 쪽부터 다시 본다.
   useEffect(() => {
     setPage(1);
-  }, [sort, status, period, customFrom, customTo, debouncedTitle, debouncedCreator, category, campaignId]);
+  }, [sort, status, period, customFrom, customTo, debouncedTitle, debouncedCreator, category, campaignId, scope]);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -474,15 +478,16 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     if (status) params.set('status', status);
     if (category) params.set('category', category);
     if (campaignId) params.set('campaignId', campaignId);
+    if (!affiliate && scope === 'company') params.set('scope', 'company');
     if (debouncedTitle) params.set('q', debouncedTitle);
     if (debouncedCreator) params.set('creator', debouncedCreator);
     if (sort !== 'recent') params.set('sort', sort);
     params.set('page', String(page));
     params.set('pageSize', String(PAGE_SIZE));
     return params.toString();
-  }, [affiliate, range.from, range.to, status, category, campaignId, debouncedTitle, debouncedCreator, sort, page]);
+  }, [affiliate, range.from, range.to, status, category, campaignId, scope, debouncedTitle, debouncedCreator, sort, page]);
   /** 아무 조건 없이 첫 쪽을 볼 때만 기기에 남겨 둔다(다음에 열 때 바로 그린다). */
-  const isDefaultView = !range.from && !range.to && !status && !category && !campaignId && !debouncedTitle && !debouncedCreator && sort === 'recent' && page === 1;
+  const isDefaultView = !range.from && !range.to && !status && !category && !campaignId && scope === 'mine' && !debouncedTitle && !debouncedCreator && sort === 'recent' && page === 1;
 
   const requestSeq = React.useRef(0);
   const fetchHistory = useCallback(async () => {
@@ -719,6 +724,20 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
       {/* 기간 — 위 합계와 아래 목록이 모두 이 기간을 따른다. 캠페인 기간이 겹치면 포함한다. */}
       <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 space-y-2.5">
+        {!affiliate && (
+          <div className="inline-flex p-1 bg-slate-100 rounded-xl">
+            {([['mine', '내 캠페인'], ['company', '회사 전체']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setScope(key); setCampaignId(''); setOpenId(null); }}
+                className={`px-3.5 py-1.5 rounded-lg text-[11px] font-black transition-all ${scope === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {/* 캠페인별 보기 — 하나를 고르면 위 합계와 목록이 그 캠페인만 따른다. */}
         {campaignOptions.length > 0 && (
           <div className="flex items-center gap-2">
@@ -944,6 +963,9 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-sm font-black text-slate-900 truncate">{c.title || '제목 없음'}</span>
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${badge.cls}`}>{badge.label}</span>
+                        {!affiliate && scope === 'company' && c.ownerName && (
+                          <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 text-[10px] font-black">{`담당자: ${c.ownerName}`}</span>
+                        )}
                         {/* 협업 메뉴에서 내린 캠페인. 이력은 기록이라 남겨 두지만,
                             "협업 메뉴에 없는데 여기 있다"가 화면에서 설명되어야 한다. */}
                         {c.removed && (

@@ -131,7 +131,7 @@ export async function resolveManager(req: Request): Promise<string | null> {
 /** resolveIdentities 가 돌려주는 두 신분. 둘 다 없을 수도, 둘 다 있을 수도 있다. */
 export type Identities = {
   /** 서비스 계정(브랜드·인플루언서)으로 로그인한 사람. 확인되지 않으면 null. */
-  account: { username: string; userId: string; isAdmin: boolean } | null;
+  account: { username: string; userId: string; isAdmin: boolean; teamRole?: "owner" | "member"; memberUsername?: string } | null;
   /** 담당자 자격. 없으면 null. */
   manager: { username: string; via: "identity" | "supabase" | "assigned"; isAdmin: boolean } | null;
   /** 서비스 계정 확인이 실패한 이유. 두 신분 모두 없을 때 그대로 반환한다. */
@@ -159,7 +159,14 @@ export type Identities = {
 export async function resolveIdentities(req: Request): Promise<Identities> {
   const supabase = await requireSignedInUser(req);
   const account = supabase.ok
-    ? { username: supabase.username, userId: supabase.userId, isAdmin: supabase.isAdmin }
+    ? {
+        username: supabase.username,
+        userId: supabase.userId,
+        isAdmin: supabase.isAdmin,
+        // 브랜드 회사 계정이면 관리자/직원 구분 — 캠페인 담당자 판단(_shared/campaign-owner)에 쓴다.
+        ...(supabase.teamRole ? { teamRole: supabase.teamRole } : {}),
+        ...(supabase.memberUsername ? { memberUsername: supabase.memberUsername } : {}),
+      }
     : null;
 
   let manager: Identities["manager"] = null;
