@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import SharedContactCard from './SharedContactCard';
 import { ADDON_SELECTED_PRICE, ADDON_SELECTED_UNIT } from '../../utils/membershipTiers';
 import BrandQuotaBanner, { selectionOverQuota, type BrandQuota } from './BrandQuotaBanner';
 import { apiService } from '../../services/apiService';
@@ -350,14 +349,9 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </button>
                   </div>
 
-                  {/* 진행이 확정되면(담당자가 인플루언서와 이야기를 마침) 연락처가 열린다. */}
-                  {locked && c.contact && (
-                    <div className="mt-2.5">
-                      <SharedContactCard contact={c.contact} compact />
-                    </div>
-                  )}
-                  {locked && !c.contactSharedAt && (
-                    <p className="mt-2 text-[10px] font-bold text-slate-400">연락처는 담당자 확인 후 공개돼요.</p>
+                  {/* 인플루언서 연락처는 브랜드에 공개하지 않는다 — 연락은 픽스폴리오 담당자가 맡는다. */}
+                  {locked && (
+                    <p className="mt-2 text-[10px] font-bold text-slate-400">인플루언서 연락은 픽스폴리오 담당자가 맡아요.</p>
                   )}
 
                   {/* 릴스 세 칸이 카드에서 가장 큰 자리를 차지한다.

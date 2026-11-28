@@ -170,7 +170,7 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
   const startCollab = async (pick: any) => {
     if (
       !window.confirm(
-        `@${pick.influencerUsername} 협업을 시작합니다. 브랜드와 인플루언서 진행사항에 바로 표시되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다(되돌릴 수 없음).\n인플루언서와 이야기를 마치고 연락처 공개 동의를 받았나요?`,
+        `@${pick.influencerUsername} 협업을 시작합니다. 브랜드와 인플루언서 진행사항에 바로 표시됩니다(되돌릴 수 없음).\n인플루언서와 이야기를 마쳤나요? 연락처는 브랜드에 공개되지 않아요.`,
       )
     ) {
       return;
@@ -202,8 +202,8 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
       !window.confirm(
         `선택한 ${targets.length}명의 협업을 시작합니다.\n` +
           `${targets.map((r) => `@${r.influencerUsername}`).join(', ')}\n\n` +
-          '브랜드와 인플루언서 진행사항에 바로 표시되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다(되돌릴 수 없음).\n' +
-          '모두 이야기를 마치고 연락처 공개 동의를 받았나요?',
+          '브랜드와 인플루언서 진행사항에 바로 표시됩니다(되돌릴 수 없음).\n' +
+          '모두 이야기를 마쳤나요? 연락처는 브랜드에 공개되지 않아요.',
       )
     ) {
       return;

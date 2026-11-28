@@ -22,7 +22,6 @@ import {
   normalizeQuote,
   offerFromCampaign,
   loadManagerContacts,
-  brandContactOf,
   refreshListupSnapshots,
   registeredPayoutFee,
   shapeChannel,
@@ -46,9 +45,8 @@ import {
  * 권한을 한 줄로 요약하면 이렇다. 명단을 만드는 것은 담당자, 고르는 것은 브랜드,
  * 답하는 것은 인플루언서. 세 가지를 한 사람이 다 할 수 있으면 중개가 아니다.
  *
- * 연락처 공개: 브랜드가 고른 후보와 담당자가 이야기를 마쳐 진행이 확정되면(협업 시작 ·
- * 담당자가 대신 기록한 수락) 그 인플루언서의 이름 · 연락처가 브랜드에 공개된다
- * (contact_shared_at). 그 뒤의 진행 · 대가 지급은 브랜드와 인플루언서가 직접 한다.
+ * 인플루언서 연락처는 브랜드에 공개하지 않는다. 진행이 확정돼도(contact_shared_at — 이름은
+ * 예전 그대로지만 지금은 "진행 확정 시각"으로만 쓴다) 연락은 픽스폴리오 담당자가 중간에서 맡는다.
  */
 
 /**
@@ -434,14 +432,7 @@ export default async (req: Request, context: Context) => {
       //
       // 브랜드 화면에는 절대 실리지 않는다 — viewerRole 이 manager 일 때만 붙이고,
       // 이유는 loadManagerContacts 주석에 있다.
-      // 브랜드에게는 진행이 확정되어 연락처를 공개한 후보의 것만 싣는다.
-      if (viewerRole === "brand") {
-        const shared = (candidates as any[]).filter((c) => c.contactSharedAt && c.influencerUsername);
-        if (shared.length) {
-          const contacts = await loadManagerContacts(db, shared.map((c) => c.influencerUsername), campaignId);
-          for (const c of shared) c.contact = brandContactOf(contacts.get(norm(c.influencerUsername)));
-        }
-      }
+      // 브랜드에게는 진행이 확정돼도 연락처를 싣지 않는다 — 연락은 픽스폴리오 담당자가 맡는다.
 
       // 이 브랜드의 이번 달 멤버십 한도. 담당자는 인플루언서와 이야기하기 전에 남은 한도를
       // 보고, 브랜드는 진행이 멈춘 이유(한도 · 미납)를 본다. 한도 조회가 실패해도 명단은 보여 준다.

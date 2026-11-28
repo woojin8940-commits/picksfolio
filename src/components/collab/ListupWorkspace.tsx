@@ -562,7 +562,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
     if (
       accept &&
       !window.confirm(
-        `@${c.influencerUsername} 수락으로 처리하면 협업이 바로 생성되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다(되돌릴 수 없음).\n인플루언서에게 연락처 공개 동의를 받았나요?`,
+        `@${c.influencerUsername} 수락으로 처리하면 협업이 바로 생성됩니다(되돌릴 수 없음).\n인플루언서 연락처는 브랜드에 공개되지 않아요.`,
       )
     ) {
       return;
@@ -584,7 +584,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
   const startCollab = async (c: any) => {
     if (
       !window.confirm(
-        `@${c.influencerUsername} 협업을 시작합니다. 브랜드와 인플루언서 진행사항에 바로 표시되고, 인플루언서 이름 · 연락처가 브랜드에 공개됩니다(되돌릴 수 없음).\n인플루언서와 이야기를 마치고 연락처 공개 동의를 받았나요?`,
+        `@${c.influencerUsername} 협업을 시작합니다. 브랜드와 인플루언서 진행사항에 바로 표시됩니다(되돌릴 수 없음).\n인플루언서와 이야기를 마쳤나요? 연락처는 브랜드에 공개되지 않아요.`,
       )
     ) {
       return;
@@ -596,20 +596,6 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
         ? '이미 진행 중인 협업입니다.'
         : `@${c.influencerUsername} 협업을 시작했습니다. 양쪽 진행사항에 표시됩니다.`,
     );
-  };
-
-  /** 진행이 확정된 후보의 연락처를 브랜드에 공개한다(이 기능 전에 시작한 협업 등). */
-  const shareContact = async (c: any) => {
-    if (
-      !window.confirm(
-        `@${c.influencerUsername}의 이름 · 연락처를 브랜드에 공개합니다(되돌릴 수 없음).\n인플루언서에게 연락처 공개 동의를 받았나요?`,
-      )
-    ) {
-      return;
-    }
-    const res = await act(c.id, 'share_contact', {});
-    if (!res) return;
-    notify(`@${c.influencerUsername}의 연락처를 브랜드에 공개했습니다.`);
   };
 
   const field = (key: keyof OfferForm, label: string, type: 'text' | 'date' | 'number' = 'text') => (
@@ -1214,17 +1200,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <p className="text-[11px] text-emerald-600 font-bold">
                           협업 생성 완료{c.collabId ? ` · ${c.collabId}` : ''}
-                          {c.contactSharedAt ? ' · 브랜드에 연락처 공개됨' : ' · 연락처 미공개'}
                         </p>
-                        {!c.contactSharedAt && (
-                          <button
-                            onClick={() => shareContact(c)}
-                            disabled={busy}
-                            className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-black hover:bg-emerald-500 disabled:opacity-40"
-                          >
-                            브랜드에 연락처 공개
-                          </button>
-                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
