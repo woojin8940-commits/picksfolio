@@ -25,7 +25,6 @@ import { randomUUID } from "node:crypto";
 import { mutateBlobJSON } from "./blob-write.mts";
 import {
   addMonths,
-  ADDON_CAMPAIGN_PRICE_KRW,
   ADDON_SELECTED_PRICE_KRW,
   ADDON_SELECTED_UNIT,
   BRAND_PLAN_INCLUDED_SEATS,
@@ -363,17 +362,23 @@ export const upgradeBrandPlan = async (company: string, toTier: BrandPlanTier): 
     };
   });
 
-/** 캠페인 · 선정 인원 추가 구매. 이번 결제 주기 안에서만 쓴다. */
+/**
+ * 선정 인원 추가 구매. 이번 결제 주기 안에서만 쓴다.
+ * 캠페인 건수는 사지 않는다 — 더 필요하면 등급을 올린다(라이트 → 그로스, 그 이상은 엔터프라이즈).
+ */
 export const purchaseAddon = async (company: string, kind: BrandAddonKind, units: number): Promise<SeatChangeResult> => {
+  if (kind !== "selected") {
+    return { ok: false, status: 400, error: "캠페인 건수는 추가로 살 수 없어요. 더 필요하면 등급을 올려 주세요." };
+  }
   const n = Math.trunc(Number(units));
   if (!Number.isFinite(n) || n < 1 || n > 20) {
     return { ok: false, status: 400, error: "한 번에 1~20개까지 추가할 수 있어요." };
   }
-  const qty = kind === "campaign" ? n : n * ADDON_SELECTED_UNIT;
-  const amountKrw = kind === "campaign" ? ADDON_CAMPAIGN_PRICE_KRW * n : ADDON_SELECTED_PRICE_KRW * n;
+  const qty = n * ADDON_SELECTED_UNIT;
+  const amountKrw = ADDON_SELECTED_PRICE_KRW * n;
   return chargeNow(company, () => ({
     amountKrw,
-    orderName: kind === "campaign" ? `픽스폴리오 캠페인 ${qty}건 추가` : `픽스폴리오 선정 인플루언서 ${qty}명 추가`,
+    orderName: `픽스폴리오 선정 인플루언서 ${qty}명 추가`,
     pending: { kind: "addon", addonKind: kind, addonQty: qty },
   }));
 };

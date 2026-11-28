@@ -3,7 +3,6 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { checkRateLimit } from "./_shared/rate-limit.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
 import {
-  ADDON_CAMPAIGN_PRICE_KRW,
   ADDON_SELECTED_PRICE_KRW,
   ADDON_SELECTED_UNIT,
   BRAND_PLAN_INCLUDED_SEATS,
@@ -45,7 +44,6 @@ const catalog = () => ({
   })),
   seatPriceKrw: BRAND_SEAT_PRICE_KRW,
   addons: {
-    campaign: { unit: 1, priceKrw: ADDON_CAMPAIGN_PRICE_KRW },
     selected: { unit: ADDON_SELECTED_UNIT, priceKrw: ADDON_SELECTED_PRICE_KRW },
   },
 });
@@ -118,8 +116,9 @@ export default async (req: Request) => {
     }
 
     if (action === "addon") {
-      const kind = body?.kind === "selected" ? "selected" : body?.kind === "campaign" ? "campaign" : null;
-      if (!kind) return fail(400, "추가할 항목을 확인해 주세요.");
+      // 추가로 살 수 있는 건 선정 인원뿐이다. 캠페인 건수는 등급을 올려서 늘린다.
+      if (body?.kind !== "selected") return fail(400, "캠페인 건수는 추가로 살 수 없어요. 더 필요하면 등급을 올려 주세요.");
+      const kind = "selected" as const;
       const result = await purchaseAddon(company, kind, Number(body?.units));
       if (!result.ok) return fail(result.status, result.error);
       return Response.json({

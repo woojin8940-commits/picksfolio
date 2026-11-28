@@ -48,7 +48,6 @@ export const BRAND_PLAN_INCLUDED_SEATS: Record<BrandPlanTier, number> = {
   brand_growth: 1,
 };
 /** 추가 구매(이번 결제 주기만). */
-export const ADDON_CAMPAIGN_PRICE = 59000;
 export const ADDON_SELECTED_UNIT = 10;
 export const ADDON_SELECTED_PRICE = 49000;
 /** 직원 좌석 1석의 월 금액. */

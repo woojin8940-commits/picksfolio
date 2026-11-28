@@ -170,7 +170,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
    * 캠페인 등록은 멤버십 회원만 한다. 새로 등록할 때만 확인한다(수정은 막지 않는다).
    * 확인하지 못했으면(네트워크 등) 막지 않고 서버 판단에 맡긴다 — 서버가 한 번 더 본다.
    */
-  const [membershipGate, setMembershipGate] = useState<null | 'no_plan' | 'past_due' | 'no_campaigns'>(null);
+  const [membershipGate, setMembershipGate] = useState<null | 'no_plan' | 'past_due' | 'no_campaigns_lite' | 'no_campaigns_growth'>(null);
   useEffect(() => {
     if (editing) return;
     let alive = true;
@@ -180,7 +180,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (q && !q.enforced) return;
       if (!res.plan.planActive || !q?.tier) setMembershipGate('no_plan');
       else if (q.pastDue) setMembershipGate('past_due');
-      else if (q.remaining.campaigns <= 0) setMembershipGate('no_campaigns');
+      else if (q.remaining.campaigns <= 0) setMembershipGate(q.tier === 'brand_campaign' ? 'no_campaigns_lite' : 'no_campaigns_growth');
     });
     return () => { alive = false; };
   }, [editing]);
@@ -189,9 +189,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       ? '캠페인 등록은 멤버십 회원만 할 수 있어요. 작성한 내용은 임시 저장되니, 멤버십을 구독한 뒤 이어서 등록해 주세요.'
       : membershipGate === 'past_due'
         ? '멤버십 정기결제가 실패한 상태예요. 결제 수단을 확인해 결제가 다시 되면 캠페인을 등록할 수 있습니다.'
-        : membershipGate === 'no_campaigns'
-          ? '이번 달 캠페인 한도를 다 썼어요. 캠페인을 추가 구매하거나 등급을 올리면 바로 등록할 수 있습니다.'
-          : '';
+        : membershipGate === 'no_campaigns_lite'
+          ? '이번 달 캠페인 한도를 다 썼어요. 그로스로 올리면 바로 월 5건까지 등록할 수 있어요.'
+          : membershipGate === 'no_campaigns_growth'
+            ? '이번 달 캠페인 한도를 다 썼어요. 다음 결제일에 다시 채워지고, 더 필요하면 엔터프라이즈로 문의해 주세요.'
+            : '';
   const [thumbnailPreview, setThumbnailPreview] = useState(editing?.thumbnail_url || '');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
