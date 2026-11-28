@@ -197,6 +197,17 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
 
           <section className="max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 md:p-6 shadow-sm mb-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              {plan.granted ? (
+              <div>
+                <p className="text-xs font-black text-emerald-600">픽스폴리오 제공</p>
+                <p className="text-lg font-black text-slate-900 mt-0.5">
+                  결제 없이 이용 중
+                  {plan.nextBillingDate && (
+                    <span className="text-sm font-bold text-slate-500 ml-2">{`이용 종료일 ${formatDate(plan.nextBillingDate, language)}`}</span>
+                  )}
+                </p>
+              </div>
+              ) : (
               <div>
                 <p className="text-xs font-black text-blue-500">다음 결제</p>
                 <p className="text-lg font-black text-slate-900 mt-0.5">
@@ -217,6 +228,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
                   <p className="text-xs font-bold text-amber-600 mt-1">해지 예약 중이라 좌석을 추가할 수 없어요.</p>
                 )}
               </div>
+              )}
             </div>
 
             {isOwner && !native && plan.granted && (

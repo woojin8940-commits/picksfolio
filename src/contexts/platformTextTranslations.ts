@@ -7617,4 +7617,5 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "픽스폴리오가 제공한 멤버십이라 좌석을 결제로 늘릴 수 없어요. 좌석이 더 필요하면 담당자에게 문의해 주세요.": "This membership is provided by Picksfolio, so seats can't be added by payment. Contact your manager if you need more.",
   "픽스폴리오 제공": "Provided by Picksfolio",
   "픽스폴리오가 제공한 멤버십이에요. 결제 없이 이용할 수 있어요.": "This membership is provided by Picksfolio. You can use it without payment.",
+  "결제 없이 이용 중": "Using without payment",
 };

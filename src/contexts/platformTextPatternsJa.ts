@@ -2672,4 +2672,8 @@ export const platformTextPatternsJa = [
     "source": "^픽스폴리오가 제공한 멤버십이에요\\. (.+?)까지 결제 없이 이용할 수 있어요\\.$",
     "replacement": "ピックスフォリオ提供のメンバーシップです。$1まで決済なしで利用できます。"
   },
+  {
+    "source": "^이용 종료일 (.+?)$",
+    "replacement": "利用終了日 $1"
+  },
 ] as const;
