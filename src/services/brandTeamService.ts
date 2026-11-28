@@ -21,6 +21,7 @@ export interface TeamOverview {
   viewer: { teamRole: 'owner' | 'member'; memberUsername: string | null };
   plan: {
     planActive: boolean;
+    includedSeats: number;
     extraSeats: number;
     scheduledSeats: number | null;
     seatPriceKrw: number;
@@ -30,7 +31,7 @@ export interface TeamOverview {
     cancelAtPeriodEnd: boolean;
     chargePending: boolean;
   };
-  seats: { total: number; extra: number; used: number; available: number };
+  seats: { total: number; included: number; extra: number; capacity: number; used: number; available: number };
   members: TeamMember[];
   invites: SeatInvite[];
   billingHistory: MembershipBillingHistoryEntry[];

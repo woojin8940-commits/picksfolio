@@ -6,6 +6,7 @@ import {
   ADDON_SELECTED_UNIT,
   BRAND_CAMPAIGN_PRICE,
   BRAND_GROWTH_PRICE,
+  BRAND_PLAN_INCLUDED_SEATS,
   BRAND_PLAN_LIMITS,
   BRAND_SEAT_PRICE,
   type BrandPlanTier,
@@ -112,7 +113,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
   };
 
   const scheduleDown = () => {
-    if (!window.confirm('다음 결제일부터 라이트로 내립니다. 그때까지는 그로스 한도를 그대로 쓸 수 있어요. 진행할까요?')) return;
+    if (!window.confirm('다음 결제일부터 라이트로 내립니다. 그때까지는 그로스 한도를 그대로 쓸 수 있어요. 라이트에는 직원 좌석이 포함되어 있지 않아 그로스에 들어 있던 1석이 빠집니다. 진행할까요?')) return;
     run(() => brandPlanService.schedule('brand_campaign'), () => '다음 결제일부터 라이트로 바뀌어요.');
   };
 
@@ -149,7 +150,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
           <li className="flex justify-between"><span>월 캠페인</span><strong className="text-slate-900">{`${limits.campaigns}건`}</strong></li>
           <li className="flex justify-between"><span>월 선정 인플루언서</span><strong className="text-slate-900">{`${limits.selected}명`}</strong></li>
           <li className="flex justify-between"><span>계정</span><strong className="text-slate-900">관리자 1개</strong></li>
-          <li className="flex justify-between"><span>직원 좌석</span><strong className="text-slate-900">{`1석당 월 ${won(BRAND_SEAT_PRICE)}`}</strong></li>
+          <li className="flex justify-between gap-2"><span>직원 좌석</span><strong className="text-slate-900 text-right">{BRAND_PLAN_INCLUDED_SEATS[tier] > 0 ? `${BRAND_PLAN_INCLUDED_SEATS[tier]}석 포함 · 추가 1석당 월 ${won(BRAND_SEAT_PRICE)}` : `1석당 월 ${won(BRAND_SEAT_PRICE)}`}</strong></li>
           <li className="flex items-start gap-2"><span className="text-green-500 font-bold">✓</span>인플루언서 리스트업</li>
           <li className="flex items-start gap-2"><span className="text-green-500 font-bold">✓</span>캠페인 이력 · 성과 데이터</li>
           <li className="flex items-start gap-2"><span className="text-green-500 font-bold">✓</span>자동 디엠</li>
@@ -233,7 +234,7 @@ const BrandPlanSection: React.FC<BrandPlanSectionProps> = ({
               {onOpenTeam && (
                 <button type="button" onClick={onOpenTeam}
                   className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">
-                  {`팀원 · 좌석 관리 (직원 ${plan?.extraSeats || 0}석)`}
+                  {`팀원 · 좌석 관리 (직원 ${(plan?.includedSeats || 0) + (plan?.extraSeats || 0)}석)`}
                 </button>
               )}
             </div>
