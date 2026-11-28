@@ -16,7 +16,11 @@ import {
 } from '../utils/portonePayments';
 import { isNativeApp } from '../utils/appEnv';
 import {
+  ADDON_CAMPAIGN_PRICE,
+  ADDON_SELECTED_PRICE,
+  ADDON_SELECTED_UNIT,
   BRAND_CAMPAIGN_PRICE,
+  BRAND_GROWTH_PRICE,
   BRAND_SEAT_PRICE,
   PROMO_CODE_LENGTH,
   TIER_LABEL,
@@ -26,6 +30,7 @@ import {
 } from '../utils/membershipTiers';
 import type { SellerVerification } from '../types';
 import { isBusinessTeamMember } from '../utils/businessTeam';
+import BrandPlanSection from './BrandPlanSection';
 
 interface MembershipPlanProps {
   userName: string;
@@ -499,13 +504,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
   // setup — normalizeTier maps it to the new 'commerce' tier so existing subscribers
   // don't lose access.
   const currentPlan: MembershipTier | null = normalizeTier(verification?.membership_plan);
-  // 정액제: 결제된 직원 좌석과 다음 결제 금액(줄이기 예약이 있으면 그 좌석 수로).
-  const extraSeats = Math.max(0, Math.trunc(Number(verification?.membership_extra_seats) || 0));
-  const scheduledSeats = verification?.membership_extra_seats_scheduled;
-  const nextSeats = scheduledSeats !== null && scheduledSeats !== undefined
-    ? Math.max(0, Math.trunc(Number(scheduledSeats) || 0))
-    : extraSeats;
-  const nextMonthlyKrw = BRAND_CAMPAIGN_PRICE + nextSeats * BRAND_SEAT_PRICE;
 
   // 구독 중인 플랜 카드의 상태 + 해지 버튼. 해지 예약이 걸린 동안에는 남은 이용
   // 기간과 "해지 취소"를 대신 보여준다(세 플랜 카드가 같은 UI 를 쓴다).
@@ -582,7 +580,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
           {isBrand
             ? language === 'en'
               ? 'One flat monthly fee covers influencer list-ups for your campaigns, campaign history and performance data, and Instagram DM automation. Add staff seats as your team grows.'
-              : '정액제 하나로 캠페인 인플루언서 리스트업, 캠페인 이력 · 성과 데이터, 인스타그램 자동 디엠까지 이용할 수 있어요. 팀이 늘면 직원 좌석을 추가하면 됩니다.'
+              : '담당자가 캠페인에 맞는 인플루언서를 리스트업해 드리고, 캠페인 이력 · 성과 데이터와 인스타그램 자동 디엠까지 이용할 수 있어요. 캠페인 수에 맞춰 라이트 · 그로스 중에 고르세요.'
             : language === 'en'
               ? 'Every feature is free — no membership needed. DM automation unlocks for free once your creator application is approved (existing members: register for brand matching).'
               : '멤버십 없이 모든 기능을 무료로 이용할 수 있어요. 자동 디엠은 크리에이터 승인을 받으면 무료로 열립니다(기존 회원은 브랜드 매칭받기 등록).'}
@@ -686,85 +684,31 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
         </section>
       )}
 
-      {/* 플랜 — 지금 판매하는 플랜은 브랜드 전용 정액제 하나뿐이다. 자동 디엠 플랜 · 예전
-          플랜(스탠다드 · AI 협업 · 프로)은 새로 구독할 수 없고, 구독 중이던 사람은 다음
-          결제일까지 그대로 쓴다. */}
+      {/* 플랜 — 지금 판매하는 플랜은 브랜드 전용 멤버십(라이트 · 그로스, 엔터프라이즈는 문의)이다.
+          자동 디엠 플랜 · 예전 플랜(스탠다드 · AI 협업 · 프로)은 새로 구독할 수 없고, 구독 중이던
+          사람은 다음 결제일까지 그대로 쓴다. */}
       <section className="mb-12">
         {isBrand ? (
-          <div className="relative rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm max-w-xl">
-            <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-indigo-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                {language === 'en' ? 'Brand flat-fee plan' : '브랜드 정액제'}
-              </span>
-            </div>
-            <div className="flex items-end gap-1 mb-1 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">{BRAND_CAMPAIGN_PRICE.toLocaleString()}</span>
-              <span className="text-slate-500 text-sm mb-1">{language === 'en' ? 'KRW / mo' : '원 / 월'}</span>
-              <span className="text-slate-400 text-xs mb-1.5 ml-1">{language === 'en' ? 'VAT incl.' : '부가세 포함'}</span>
-            </div>
-            <p className="text-xs text-slate-500 font-bold mb-4">
-              {language === 'en'
-                ? `Includes 1 admin seat · extra staff seats ₩${BRAND_SEAT_PRICE.toLocaleString()} each / mo`
-                : `관리자 좌석 1석 포함 · 직원 좌석 1석당 월 ${BRAND_SEAT_PRICE.toLocaleString()}원 추가`}
-            </p>
-            <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>캠페인을 등록하면 담당자가 조건에 맞는 <strong>인플루언서를 리스트업</strong>해 드려요</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>고른 인플루언서와 직접 진행 · 진행 상황과 연락처 확인</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>캠페인 이력 · 성과 데이터</strong>(조회 · 도달 · 저장 · 팔로워 분포)</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>인스타그램 자동 디엠</strong> 추가 비용 없이 포함</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>직원 좌석을 결제한 만큼 늘리고, 초대 링크로 직원 계정 추가</li>
-            </ul>
-
+          <div className="space-y-3">
+            {membershipActive && (currentPlan === 'brand_dm' || currentPlan === 'pro') && !isTeamMember && (
+              <div className="py-3 px-4 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 leading-relaxed">
+                {language === 'en'
+                  ? 'Your current plan is no longer sold and ends on its next billing date without a charge. Every membership includes DM automation.'
+                  : '이용 중인 플랜은 판매가 종료되어 다음 결제일에 추가 결제 없이 끝나요. 멤버십에는 자동 디엠이 포함되어 있습니다.'}
+              </div>
+            )}
             {loading ? (
               <div className="text-slate-400 text-sm font-bold">{t('common.loading', '상태 확인 중...', 'Checking status...')}</div>
-            ) : membershipActive && currentPlan === 'brand_campaign' ? (
-              <div className="space-y-3">
-                {isTeamMember ? (
-                  <div className="py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                    ✓ {language === 'en' ? 'Your company is on the flat-fee plan' : '회사가 정액제를 이용 중이에요'}
-                  </div>
-                ) : (
-                  subscribedActions(language === 'en' ? 'Flat-fee plan active' : '정액제 이용 중')
-                )}
-                <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-600 font-medium">
-                  {language === 'en'
-                    ? `Staff seats: ${extraSeats} · next monthly charge ₩${nextMonthlyKrw.toLocaleString()}`
-                    : `직원 좌석 ${extraSeats}석 · 다음 결제 금액 ${nextMonthlyKrw.toLocaleString()}원`}
-                </div>
-                {onOpenTeam && (
-                  <button
-                    type="button"
-                    onClick={onOpenTeam}
-                    className="w-full py-3 rounded-xl font-bold text-sm text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 transition-all"
-                  >
-                    {language === 'en' ? 'Manage team & seats' : '팀원 · 좌석 관리'}
-                  </button>
-                )}
-              </div>
-            ) : isTeamMember ? (
-              <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                {language === 'en'
-                  ? 'Only your company admin can subscribe.'
-                  : '구독은 회사 관리자 계정에서만 할 수 있어요.'}
-              </div>
             ) : (
-              <div className="space-y-3">
-                {membershipActive && (currentPlan === 'brand_dm' || currentPlan === 'pro') && (
-                  <div className="py-3 px-4 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 leading-relaxed">
-                    {language === 'en'
-                      ? 'Your current plan is no longer sold and ends on its next billing date without a charge. The flat-fee plan includes DM automation.'
-                      : '이용 중인 플랜은 판매가 종료되어 다음 결제일에 추가 결제 없이 끝나요. 정액제에는 자동 디엠이 포함되어 있습니다.'}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleStartSubscribe('brand_campaign')}
-                  disabled={saving}
-                  className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
-                >
-                  {language === 'en' ? `Subscribe for ₩${BRAND_CAMPAIGN_PRICE.toLocaleString()}` : `${BRAND_CAMPAIGN_PRICE.toLocaleString()}원으로 구독 시작`}
-                </button>
-              </div>
+              <BrandPlanSection
+                onSubscribe={(tier) => handleStartSubscribe(tier)}
+                subscribedActions={subscribedActions}
+                isTeamMember={isTeamMember}
+                saving={saving}
+                onOpenTeam={onOpenTeam}
+                onChanged={loadVerification}
+                refreshKey={verification?.membership_plan + String(verification?.next_billing_date || '') + String(verification?.membership_cancel_at_period_end)}
+              />
             )}
           </div>
         ) : (
@@ -790,8 +734,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName, accountType =
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
             <li>멤버십으로 잠겨 있던 기능(영상 업로드 · 캠페인 AI · 인사이트)은 모두 무료로 열렸습니다.</li>
             <li>새로 가입한 인플루언서의 자동 디엠은 <strong>크리에이터 지원서</strong>를 내고 승인을 받으면 결제 없이 이용할 수 있습니다. 기존 회원은 <strong>브랜드 매칭받기</strong>를 등록하면 바로 이용할 수 있습니다. 담당자가 리스트업한 캠페인 제안을 계속 거절하면 담당자 판단으로 이용이 중단될 수 있고, 유가시딩 캠페인 제안을 수락하면 다시 열립니다.</li>
-            <li>브랜드 계정은 <strong>정액제(월 {BRAND_CAMPAIGN_PRICE.toLocaleString()}원)</strong>를 구독하면 자동 디엠을 추가 비용 없이 이용할 수 있습니다. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다.</li>
-            <li>직원 좌석은 <strong>1석당 월 {BRAND_SEAT_PRICE.toLocaleString()}원</strong>입니다. 결제 주기 중간에 늘리면 다음 결제일까지 남은 기간만큼만 바로 결제되고, 다음 달부터는 정액제와 함께 청구됩니다. 줄이면 다음 결제일부터 반영됩니다.</li>
+            <li>{`브랜드 멤버십은 라이트(월 ${BRAND_CAMPAIGN_PRICE.toLocaleString()}원 · 캠페인 2건 · 선정 인플루언서 20명)와 그로스(월 ${BRAND_GROWTH_PRICE.toLocaleString()}원 · 캠페인 5건 · 선정 인플루언서 50명)가 있고, 둘 다 자동 디엠이 포함됩니다. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다.`}</li>
+            <li>{`캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정되어 연락처가 공개될 때 1씩 차감됩니다. 한도는 결제일마다 다시 채워지고 남은 것은 넘어가지 않습니다. 다 쓰면 캠페인 1건(${ADDON_CAMPAIGN_PRICE.toLocaleString()}원) · 선정 인플루언서 ${ADDON_SELECTED_UNIT}명(${ADDON_SELECTED_PRICE.toLocaleString()}원)을 추가로 살 수 있고, 추가분은 그 결제 주기 안에서만 쓸 수 있습니다.`}</li>
+            <li>그로스로 올리면 남은 기간만큼 차액이 바로 결제되고 한도가 즉시 늘어납니다. 라이트로 내리면 다음 결제일부터 적용됩니다.</li>
+            <li>{`직원 좌석은 등급과 상관없이 1석당 월 ${BRAND_SEAT_PRICE.toLocaleString()}원입니다. 결제 주기 중간에 늘리면 다음 결제일까지 남은 기간만큼만 바로 결제되고, 다음 달부터는 멤버십과 함께 청구됩니다. 줄이면 다음 결제일부터 반영됩니다.`}</li>
             <li>직원을 내보내면 그 좌석은 비어 추가 비용 없이 다른 직원을 초대할 수 있습니다.</li>
             <li>예전 자동 디엠 플랜(월 5,900원)은 판매를 종료했습니다. 구독 중이던 브랜드는 다음 결제일까지 그대로 이용하고, 그날 추가 결제 없이 종료됩니다.</li>
             <li><strong>해지하면 이미 결제한 이용 기간까지는 그대로 이용</strong>할 수 있고, 그 다음 달부터 자동결제가 중단됩니다. 종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.</li>

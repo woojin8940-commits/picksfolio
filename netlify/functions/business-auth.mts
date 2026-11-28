@@ -121,7 +121,7 @@ export default async (req: Request) => {
           if (!team.seated) {
             return Response.json({
               success: false,
-              error: "회사의 정액제 좌석이 없어 지금은 로그인할 수 없어요. 회사 관리자에게 좌석을 확인해 달라고 요청해 주세요.",
+              error: "회사의 멤버십 좌석이 없어 지금은 로그인할 수 없어요. 회사 관리자에게 좌석을 확인해 달라고 요청해 주세요.",
             });
           }
           const { data: companyProfile } = await supabase

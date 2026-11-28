@@ -2464,4 +2464,76 @@ export const platformTextPatterns = [
     "source": "^· 판매 (.+)$",
     "replacement": "· sales $1"
   },
+  {
+    "source": "^그로스로 올립니다\\. 지금 결제: 약 (.+?) \\(다음 결제일까지 남은 기간만큼 차액\\) 다음 달부터: 월 (.+?) 결제가 끝나면 이번 달 한도가 바로 그로스 기준으로 늘어나요\\. 진행할까요\\?$",
+    "replacement": "Upgrade to Growth? Charged now: about $1 (prorated difference until the next billing date). From next month: $2/month. Your limits increase to Growth as soon as payment completes."
+  },
+  {
+    "source": "^(.+?)을 추가합니다\\. 지금 (.+?)이 결제되고, 이번 결제 주기\\((.+?)까지\\) 안에서만 쓸 수 있어요\\. 진행할까요\\?$",
+    "replacement": "Add $1? $2 will be charged now, usable only within this billing cycle (until $3)."
+  },
+  {
+    "source": "^(.+?)을 추가했어요\\.$",
+    "replacement": "Added $1."
+  },
+  {
+    "source": "^1석당 월 (.+)$",
+    "replacement": "$1 per seat / mo"
+  },
+  {
+    "source": "^(.+?) 이용 중$",
+    "replacement": "$1 active"
+  },
+  {
+    "source": "^(.+?)부터 라이트 · 예약 취소$",
+    "replacement": "Lite from $1 · cancel"
+  },
+  {
+    "source": "^(.+?) 구독하기$",
+    "replacement": "Subscribe to $1"
+  },
+  {
+    "source": "^이번 달 사용량 · (.+)$",
+    "replacement": "This month's usage · $1"
+  },
+  {
+    "source": "^(.+?) ~ (.+?) · 다음 결제 (.+)$",
+    "replacement": "$1 – $2 · next payment $3"
+  },
+  {
+    "source": "^(.+?)부터 (.+?)로 바뀌어요\\.$",
+    "replacement": "Switches to $2 from $1."
+  },
+  {
+    "source": "^캠페인 1건 추가 · (.+)$",
+    "replacement": "Add 1 campaign · $1"
+  },
+  {
+    "source": "^선정 인플루언서 (\\d+)명 추가 · (.+)$",
+    "replacement": "Add $1 confirmed influencers · $2"
+  },
+  {
+    "source": "^팀원 · 좌석 관리 \\(직원 (\\d+)석\\)$",
+    "replacement": "Team & seats ($1 staff seats)"
+  },
+  {
+    "source": "^멤버십에는 관리자 계정 1개가 들어 있고, 직원 좌석은 1석당 월 (.+?)으로 필요한 만큼 늘릴 수 있습니다\\.$",
+    "replacement": "Every membership includes one admin account, and you can add staff seats as needed at $1 per seat per month."
+  },
+  {
+    "source": "^멤버십 (.+?) \\+ 직원 좌석 (\\d+)석 × (.+)$",
+    "replacement": "Membership $1 + $2 staff seats × $3"
+  },
+  {
+    "source": "^브랜드 멤버십은 라이트\\(월 (.+?)원 · 캠페인 2건 · 선정 인플루언서 20명\\)와 그로스\\(월 (.+?)원 · 캠페인 5건 · 선정 인플루언서 50명\\)가 있고, 둘 다 자동 디엠이 포함됩니다\\. 가입일 기준 매월 자동결제되며 언제든 해지할 수 있습니다\\.$",
+    "replacement": "Brand memberships come in Lite (₩$1/month · 2 campaigns · 20 confirmed influencers) and Growth (₩$2/month · 5 campaigns · 50 confirmed influencers), both including DM automation. They renew monthly on your signup date and can be cancelled anytime."
+  },
+  {
+    "source": "^캠페인은 담당자가 리스트업을 처음 보낼 때, 선정 인플루언서는 진행이 확정되어 연락처가 공개될 때 1씩 차감됩니다\\. 한도는 결제일마다 다시 채워지고 남은 것은 넘어가지 않습니다\\. 다 쓰면 캠페인 1건\\((.+?)원\\) · 선정 인플루언서 (\\d+)명\\((.+?)원\\)을 추가로 살 수 있고, 추가분은 그 결제 주기 안에서만 쓸 수 있습니다\\.$",
+    "replacement": "A campaign is counted when the manager first sends its list-up, and an influencer when the collaboration is confirmed and contact is shared. Limits reset each billing date and don't roll over. When used up, you can buy 1 more campaign (₩$1) or $2 more confirmed influencers (₩$3), usable only within that billing cycle."
+  },
+  {
+    "source": "^직원 좌석은 등급과 상관없이 1석당 월 (.+?)원입니다\\. 결제 주기 중간에 늘리면 다음 결제일까지 남은 기간만큼만 바로 결제되고, 다음 달부터는 멤버십과 함께 청구됩니다\\. 줄이면 다음 결제일부터 반영됩니다\\.$",
+    "replacement": "Staff seats cost ₩$1 per seat per month on every tier. Seats added mid-cycle are charged right away only for the rest of the period, then billed with your membership from next month. Reductions apply from the next billing date."
+  },
 ] as const;

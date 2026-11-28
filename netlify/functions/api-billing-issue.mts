@@ -8,6 +8,7 @@ import {
   issueNiceCardBillingKey,
   TIER_PRICE_KRW,
   TIER_RANK,
+  isBrandPlanTier,
   isSellableTier,
   readMembershipCharge,
   verifyMembershipBillingKey,
@@ -65,8 +66,8 @@ export default async (req: Request) => {
       );
     }
 
-    // 지금 새로 구독할 수 있는 플랜은 브랜드 전용 정액제(월 179,000원)뿐이다. 자동 디엠은
-    // 정액제에 포함되고, 인플루언서의 자동 디엠은 결제가 아니라 크리에이터 승인(기존 회원은
+    // 지금 새로 구독할 수 있는 플랜은 브랜드 전용 멤버십(라이트 · 그로스)뿐이다. 자동 디엠은
+    // 멤버십에 포함되고, 인플루언서의 자동 디엠은 결제가 아니라 크리에이터 승인(기존 회원은
     // 브랜드 매칭받기 등록)으로 열린다 — 인플루언서가 결제할 일은 없다.
     if (!isSellableTier(normalizedTier)) {
       return Response.json(
@@ -87,7 +88,7 @@ export default async (req: Request) => {
       return Response.json(
         {
           success: false,
-          error: "정액제는 브랜드 계정 전용이에요. 인플루언서는 크리에이터 승인(기존 회원은 브랜드 매칭받기 등록)을 받으면 자동 디엠을 무료로 쓸 수 있습니다.",
+          error: "멤버십은 브랜드 계정 전용이에요. 인플루언서는 크리에이터 승인(기존 회원은 브랜드 매칭받기 등록)을 받으면 자동 디엠을 무료로 쓸 수 있습니다.",
         },
         { status: 403 },
       );
@@ -163,6 +164,13 @@ export default async (req: Request) => {
       if (before?.membership_active && activeTier && TIER_RANK[activeTier] >= TIER_RANK[normalizedTier]) {
         return Response.json({ success: false, error: "이미 이용 중인 멤버십입니다." }, { status: 409 });
       }
+      // 라이트 ↔ 그로스는 새 구독이 아니라 등급 변경이다(남은 기간 차액 일할, 내리기는 다음 결제일).
+      if (before?.membership_active && isBrandPlanTier(activeTier) && isBrandPlanTier(normalizedTier)) {
+        return Response.json(
+          { success: false, error: "이미 멤버십을 이용 중이에요. 등급 변경은 멤버십 화면의 업그레이드를 이용해 주세요." },
+          { status: 409 },
+        );
+      }
       const pendingCharge = before?.membership_charge_pending as MembershipChargePending | null | undefined;
       if (pendingCharge && Date.now() - Date.parse(pendingCharge.startedAt) < 60_000) {
         return Response.json(
@@ -233,8 +241,8 @@ export default async (req: Request) => {
           membership_amount_krw: amountKrw,
           // 정액제는 관리자 좌석만 들어 있는 상태로 시작한다. 직원 좌석은 팀원 관리에서 따로
           // 결제해 늘린다 — 예전 구독에 남아 있던 좌석 수를 이어받지 않는다.
-          ...(pending.tier === "brand_campaign"
-            ? { membership_extra_seats: 0, membership_extra_seats_scheduled: null }
+          ...(isBrandPlanTier(pending.tier)
+            ? { membership_extra_seats: 0, membership_extra_seats_scheduled: null, membership_plan_scheduled: null }
             : {}),
           // 어떤 수단으로 등록한 정기결제인지(화면 안내용).
           // card = 카드 수기(키인) 빌링키, easypay = 간편결제(카카오페이) 빌링키.

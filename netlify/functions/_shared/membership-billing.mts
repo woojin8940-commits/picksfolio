@@ -15,27 +15,60 @@
  * Money lives in ₩ (the membership price); there are no credits here.
  */
 
-// 'brand_campaign' 은 브랜드(기업) 계정 전용 정액제(월 179,000원)다. 지금 새로 판매하는
-// 플랜은 이것 하나뿐이다. 정액제에는 회사 관리자 좌석 1석과 자동 디엠이 포함되고, 직원
-// 좌석은 1석당 월 49,000원으로 결제한 만큼 늘린다(brand-seats).
+// 브랜드(기업) 계정 전용 멤버십은 두 등급이다(엔터프라이즈는 별도 문의 · 운영자 부여).
+//   · 'brand_campaign' = 라이트(월 179,000원) — 월 캠페인 2건 · 선정 인플루언서 20명
+//   · 'brand_growth'   = 그로스(월 399,000원) — 월 캠페인 5건 · 선정 인플루언서 50명
+// 둘 다 관리자 계정 1개 · 리스트업 · 캠페인 이력/성과 · 자동 디엠이 포함되고, 직원 좌석은
+// 등급과 상관없이 1석당 월 49,000원으로 결제한 만큼 늘린다(brand-seats). 한도를 넘으면
+// 캠페인 · 선정 인원을 추가 구매한다(brand-quota). 키 이름 brand_campaign 은 예전
+// "정액제" 구독 기록을 그대로 라이트로 읽기 위해 유지한다.
 //
 // 'brand_dm'(자동 디엠 플랜, 월 5,900원)은 판매를 종료했다 — 정액제에 자동 디엠이 포함되기
 // 때문이다. 예전 구독자는 다음 결제일까지 그대로 쓰고, 그날 청구 없이 끝난다. 스탠다드 ·
 // AI 협업 · 커머스 · 프로도 예전 구독 기록을 읽기 위해서만 남는다.
-export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'brand_campaign'
+export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'brand_dm' | 'brand_campaign' | 'brand_growth'
 
 /** 지금 새로 구독할 수 있는 티어. */
-export const SELLABLE_TIERS: readonly MembershipTier[] = ['brand_campaign']
+export const SELLABLE_TIERS: readonly MembershipTier[] = ['brand_campaign', 'brand_growth']
 
-/** 정액제 기본 금액(회사 관리자 좌석 1석 포함)과 직원 좌석 1석 금액. 부가세 포함. */
+/** 브랜드 멤버십 등급. */
+export type BrandPlanTier = 'brand_campaign' | 'brand_growth'
+export const BRAND_PLAN_TIERS: readonly BrandPlanTier[] = ['brand_campaign', 'brand_growth']
+export const isBrandPlanTier = (tier: unknown): tier is BrandPlanTier =>
+  BRAND_PLAN_TIERS.includes(tier as BrandPlanTier)
+
+/** 등급별 월 이용료(관리자 계정 1개 포함)와 직원 좌석 1석 금액. 부가세 포함. */
 export const BRAND_CAMPAIGN_BASE_KRW = 179000
+export const BRAND_GROWTH_BASE_KRW = 399000
+export const BRAND_PLAN_PRICE_KRW: Record<BrandPlanTier, number> = {
+  brand_campaign: BRAND_CAMPAIGN_BASE_KRW,
+  brand_growth: BRAND_GROWTH_BASE_KRW,
+}
 export const BRAND_SEAT_PRICE_KRW = 49000
+
+/**
+ * 등급별 월 한도. 캠페인 = 리스트업을 처음 받은 캠페인 수, 선정 = 진행이 확정되어 연락처가
+ * 공개된 인플루언서 수. 결제 주기마다 다시 채워지고 남은 것은 넘어가지 않는다.
+ */
+export const BRAND_PLAN_LIMITS: Record<BrandPlanTier, { campaigns: number; selected: number }> = {
+  brand_campaign: { campaigns: 2, selected: 20 },
+  brand_growth: { campaigns: 5, selected: 50 },
+}
+
+/** 한도 추가 구매. 그 결제 주기 안에서만 쓴다. */
+export const ADDON_CAMPAIGN_PRICE_KRW = 59000 // 캠페인 1건
+export const ADDON_SELECTED_UNIT = 10 // 선정 인플루언서 10명 묶음
+export const ADDON_SELECTED_PRICE_KRW = 49000 // 10명당
+export type BrandAddonKind = 'campaign' | 'selected'
 /** 한 번에 늘릴 수 있는 직원 좌석 수(오입력 방지용). 여러 번 나눠 사면 제한 없이 늘어난다. */
 export const MAX_SEATS_PER_PURCHASE = 50
 
-/** 정액제 월 청구액 = 기본 + 직원 좌석 수 × 좌석 금액. */
-export const brandCampaignMonthlyKrw = (extraSeats: number): number =>
-  BRAND_CAMPAIGN_BASE_KRW + Math.max(0, Math.trunc(extraSeats || 0)) * BRAND_SEAT_PRICE_KRW
+/** 브랜드 멤버십 월 청구액 = 등급 이용료 + 직원 좌석 수 × 좌석 금액. */
+export const brandMonthlyKrw = (tier: BrandPlanTier, extraSeats: number): number =>
+  BRAND_PLAN_PRICE_KRW[tier] + Math.max(0, Math.trunc(extraSeats || 0)) * BRAND_SEAT_PRICE_KRW
+
+/** 라이트 기준 월 청구액(예전 호출부 호환). */
+export const brandCampaignMonthlyKrw = (extraSeats: number): number => brandMonthlyKrw('brand_campaign', extraSeats)
 
 /** 정기결제를 계속 이어 가는 티어. 그 밖의 예전 티어는 다음 결제일에 청구 없이 끝난다. */
 export const isSellableTier = (tier: unknown): boolean =>
@@ -56,6 +89,7 @@ export const TIER_PRICE_KRW: Record<MembershipTier, number> = {
   pro: 18700,
   brand_dm: 5900,
   brand_campaign: BRAND_CAMPAIGN_BASE_KRW,
+  brand_growth: BRAND_GROWTH_BASE_KRW,
 }
 
 export const TIER_LABEL: Record<MembershipTier, string> = {
@@ -64,7 +98,8 @@ export const TIER_LABEL: Record<MembershipTier, string> = {
   commerce: '커머스 멤버십',
   pro: '프로 플랜',
   brand_dm: '자동 디엠 플랜',
-  brand_campaign: '브랜드 정액제',
+  brand_campaign: '라이트 멤버십',
+  brand_growth: '그로스 멤버십',
 }
 
 /** Normalise a stored plan value to a billable tier, or null if it isn't one.
@@ -72,7 +107,7 @@ export const TIER_LABEL: Record<MembershipTier, string> = {
 export const normalizeTier = (plan: unknown): MembershipTier | null => {
   if (
     plan === 'standard' || plan === 'standard_ai' || plan === 'commerce' || plan === 'pro' ||
-    plan === 'brand_dm' || plan === 'brand_campaign'
+    plan === 'brand_dm' || plan === 'brand_campaign' || plan === 'brand_growth'
   ) {
     return plan
   }
@@ -117,6 +152,7 @@ export const TIER_RANK: Record<MembershipTier, number> = {
   brand_dm: 5,
   // 자동 디엠 플랜 구독자도 정액제로 옮겨 갈 수 있어야 하므로 그 위에 둔다.
   brand_campaign: 6,
+  brand_growth: 7,
 }
 
 /** `plan` 이 `required` 티어 이상인지(= 해당 기능을 쓸 수 있는지). */
@@ -191,8 +227,9 @@ export type MembershipChargePending = {
   paymentId: string
   billingKey: string
   tier: MembershipTier
-  // 'seats' 는 결제 주기 중간에 직원 좌석을 늘릴 때의 일할 청구다.
-  kind: 'initial' | 'recurring' | 'seats'
+  // 결제 주기 중간의 즉시 청구: 'seats' 직원 좌석 일할, 'upgrade' 등급 올리기 차액 일할,
+  // 'addon' 캠페인 · 선정 인원 추가 구매.
+  kind: 'initial' | 'recurring' | 'seats' | 'upgrade' | 'addon'
   startedAt: string
   scheduledDate?: string
   method?: 'card' | 'easypay'
@@ -200,6 +237,11 @@ export type MembershipChargePending = {
   amountKrw?: number
   /** 정액제: recurring 은 이번 달 직원 좌석 수, seats 는 새로 늘리는 좌석 수. */
   seats?: number
+  /** upgrade: 올라갈 등급. */
+  toTier?: MembershipTier
+  /** addon: 추가 구매 종류와 수량(캠페인 건수 · 선정 인원 수). */
+  addonKind?: 'campaign' | 'selected'
+  addonQty?: number
 }
 
 /** 청구 기록에 적힌 금액(없으면 티어 정가). */
@@ -406,7 +448,7 @@ export interface MembershipBillingEntry {
   // 'promo' 는 출시 혜택 코드로 시작한 구독의 첫 기록이다 — 청구가 없었으므로
   // amountKrw 는 0 이고, 무료 기간이 끝나는 날부터 'recurring' 이 이어진다.
   // 'seats' 는 결제 주기 중간에 직원 좌석을 늘린 일할 청구다.
-  kind: 'initial' | 'recurring' | 'promo' | 'seats'
+  kind: 'initial' | 'recurring' | 'promo' | 'seats' | 'upgrade' | 'addon'
   success: boolean
   /** 정액제: 이 청구에 포함된(또는 새로 늘린) 직원 좌석 수. */
   seats?: number

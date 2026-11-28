@@ -1,4 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
+import { checkCampaignQuota, checkSelectedQuota, recordCampaignQuota, recordSelectedQuota } from "./_shared/brand-quota.mts";
 import type { Config, Context } from "@netlify/functions";
 import {
   forbiddenResponse,
@@ -499,6 +500,17 @@ export default async (req: Request, context: Context) => {
         );
       }
 
+      // 브랜드 멤버십 한도: 이 캠페인에 처음 리스트업을 올리는 순간 캠페인 1건을 쓴다.
+      // 이미 후보가 있는 캠페인(이 기능 전에 시작한 것 포함)은 다시 세지 않는다.
+      const existingListups = (await db.sql`
+        SELECT 1 FROM campaign_listups WHERE campaign_id = ${campaignId} LIMIT 1
+      `) as any[];
+      const firstListup = existingListups.length === 0;
+      if (firstListup) {
+        const quota = await checkCampaignQuota(String(campaign.business_username || ""), campaignId);
+        if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
+      }
+
       const applicants = await db.sql`
         SELECT applicant_username FROM campaign_applications
         WHERE campaign_id = ${campaignId} AND COALESCE(source, 'apply') = 'apply'
@@ -557,6 +569,9 @@ export default async (req: Request, context: Context) => {
           RETURNING id
         `;
         if ((res as any[])?.length) added += 1;
+      }
+      if (firstListup && added > 0) {
+        await recordCampaignQuota(String(campaign.business_username || ""), campaignId);
       }
 
       const rows = await db.sql`
@@ -875,6 +890,11 @@ export default async (req: Request, context: Context) => {
             { status: 409 },
           );
         }
+        // 브랜드 멤버십 한도: 진행 확정(연락처 공개) = 선정 인플루언서 1명.
+        if (!listup.contact_shared_at) {
+          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id);
+          if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
+        }
 
         // 제안을 아직 보내지 않았다면 캠페인 조건을 기본값으로 쓴다. 담당자가 적어 둔
         // 지급 단가·일정이 있으면 그쪽이 이긴다.
@@ -961,6 +981,7 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE id = ${id}
         `;
+        await recordSelectedQuota(String(campaign?.business_username || ""), id);
 
         return Response.json({
           success: true,
@@ -1020,6 +1041,11 @@ export default async (req: Request, context: Context) => {
           if (listup.outreach_status !== "accepted") {
             return Response.json({ error: "응답할 제안이 없습니다." }, { status: 409 });
           }
+        }
+
+        if (accept && isManager && !listup.contact_shared_at) {
+          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id);
+          if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
         }
 
         if (!accept) {
@@ -1125,6 +1151,7 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE id = ${id}
         `;
+        if (isManager) await recordSelectedQuota(String(campaign?.business_username || ""), id);
 
         return Response.json({
           success: true,
@@ -1142,6 +1169,10 @@ export default async (req: Request, context: Context) => {
         if (listup.outreach_status !== "accepted") {
           return Response.json({ error: "진행이 확정된 후보만 연락처를 공개할 수 있습니다." }, { status: 409 });
         }
+        if (!listup.contact_shared_at) {
+          const quota = await checkSelectedQuota(String(campaign?.business_username || ""), id);
+          if (!quota.ok) return Response.json({ error: quota.error, code: quota.code }, { status: quota.status });
+        }
         await db.sql`
           UPDATE campaign_listups
           SET contact_shared_at = COALESCE(contact_shared_at, NOW()),
@@ -1149,6 +1180,7 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE id = ${id} AND outreach_status = 'accepted'
         `;
+        await recordSelectedQuota(String(campaign?.business_username || ""), id);
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
