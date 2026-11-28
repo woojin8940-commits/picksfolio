@@ -89,6 +89,70 @@ export const attemptChunkReload = (): boolean => {
 };
 
 /**
+ * 지금 화면을 띄운 빌드의 진입 파일 이름(/assets/index-해시.js). 못 찾으면 ''.
+ */
+const currentBuildId = (): string => {
+  try {
+    const el = document.querySelector('script[type="module"][src*="/assets/index-"]') as HTMLScriptElement | null;
+    const m = el?.getAttribute('src')?.match(/\/assets\/index-[^"'?#]+\.js/);
+    return m ? m[0] : '';
+  } catch {
+    return '';
+  }
+};
+
+/** 서버에 올라가 있는 최신 index.html 의 진입 파일 이름. 못 받으면 ''. */
+const latestBuildId = async (timeoutMs = 3000): Promise<string> => {
+  try {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? window.setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+    const res = await fetch(`/index.html?v=${Date.now()}`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: ctrl?.signal,
+    });
+    if (timer) window.clearTimeout(timer);
+    if (!res.ok) return '';
+    const html = await res.text();
+    const m = html.match(/\/assets\/index-[^"'?#]+\.js/);
+    return m ? m[0] : '';
+  } catch {
+    return '';
+  }
+};
+
+const BUILD_RELOAD_KEY = 'picks_chunk_reload_build';
+
+/**
+ * 청크 오류에서 회복한다 — 쿨다운 안이라도 **새 배포가 확인되면** 한 번 더 새로고침한다.
+ *
+ * 쿨다운(2분)만 보면, 짧은 사이에 배포가 두 번 올라간 날(새로고침으로 받은 버전이 곧바로
+ * 다시 바뀐 경우)에는 두 번째 실패에서 새로고침을 못 하고 "화면을 불러오지 못했습니다"에
+ * 멈췄다. 그래서 쿨다운에 걸리면 서버의 최신 index.html 을 받아 지금 빌드와 비교하고,
+ * 다르면서 아직 그 빌드로 새로고침해 본 적이 없으면 새로고침한다. 같은 빌드에서 계속
+ * 실패하면(정말 깨진 배포 · 네트워크 차단) 더 새로고침하지 않으므로 반복되지 않는다.
+ */
+export const recoverFromChunkError = async (): Promise<boolean> => {
+  if (attemptChunkReload()) return true;
+  const latest = await latestBuildId();
+  const current = currentBuildId();
+  if (!latest || !current || latest === current) return false;
+  try {
+    if (sessionStorage.getItem(BUILD_RELOAD_KEY) === latest) return false;
+    sessionStorage.setItem(BUILD_RELOAD_KEY, latest);
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return false;
+  }
+  try {
+    window.location.reload();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * 회복 기록을 지운다. 사용자가 직접 "다시 시도"를 눌렀을 때처럼, 다음 실패에서
  * 자동 회복을 한 번 더 허용하고 싶을 때만 쓴다.
  */

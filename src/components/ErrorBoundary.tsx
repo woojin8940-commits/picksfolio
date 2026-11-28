@@ -1,9 +1,9 @@
 
 import { Component, ErrorInfo, ReactNode } from 'react';
 import {
-  attemptChunkReload,
   clearChunkReloadFlag,
   isChunkLoadError,
+  recoverFromChunkError,
 } from '../utils/chunkReload';
 
 interface Props {
@@ -36,7 +36,7 @@ class ErrorBoundary extends Component<Props, State> {
     // 배포 갱신으로 청크가 사라진 경우는 새 매니페스트를 받아오면 해결된다.
     // 쿨다운 안이면(방금 새로고침했으면) 아래 안내 화면으로 떨어진다.
     if (isChunkLoadError(error)) {
-      attemptChunkReload();
+      void recoverFromChunkError();
     }
   }
 

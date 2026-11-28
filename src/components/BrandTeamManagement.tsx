@@ -164,7 +164,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
           <h3 className="text-lg font-black text-slate-900 mb-2">멤버십을 구독하면 직원 계정을 추가할 수 있어요</h3>
           <p className="text-sm text-slate-500 leading-relaxed mb-5">
             {seats.included > 0
-              ? `멤버십에는 관리자 계정 1개와 직원 좌석 ${seats.included}석이 들어 있고, 직원 좌석은 1석당 월 ${won(BRAND_SEAT_PRICE)}으로 더 늘릴 수 있습니다.`
+              ? `멤버십에는 관리자 계정 1개가 들어 있고, 직원 좌석 ${seats.included}석은 무료로 제공됩니다. 그 이상은 1석당 월 ${won(BRAND_SEAT_PRICE)}으로 늘릴 수 있습니다.`
               : `멤버십에는 관리자 계정 1개가 들어 있고, 직원 좌석은 1석당 월 ${won(BRAND_SEAT_PRICE)}으로 필요한 만큼 늘릴 수 있습니다.`}
           </p>
           {isOwner && onOpenMembership && !native && (
@@ -182,7 +182,7 @@ const BrandTeamManagement: React.FC<BrandTeamManagementProps> = ({ onOpenMembers
           {/* 좌석 현황 */}
           <section className="max-w-3xl grid grid-cols-3 gap-2 md:gap-4 mb-6">
             {[
-              { label: '전체 좌석', value: `${seats.total}석`, sub: seats.included > 0 ? `관리자 1 + 포함 ${seats.included} + 추가 ${seats.extra}` : `관리자 1 + 직원 ${seats.extra}` },
+              { label: '전체 좌석', value: `${seats.total}석`, sub: seats.included > 0 ? `관리자 1 + 무료 ${seats.included} + 추가 ${seats.extra}` : `관리자 1 + 직원 ${seats.extra}` },
               { label: '사용 중', value: `${seats.used + 1}석`, sub: `직원 ${data.members.length} · 초대 ${data.invites.length}` },
               { label: '빈 좌석', value: `${seats.available}석`, sub: seats.available > 0 ? '바로 초대할 수 있어요' : '좌석을 추가해 주세요' },
             ].map((card) => (

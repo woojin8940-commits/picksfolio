@@ -23,6 +23,28 @@ const BrandCollabProgress = lazyWithRetry(() => import('./BrandCollabProgress'))
 const CampaignRegisterWizard = lazyWithRetry(() => import('./collab/CampaignRegisterWizard'));
 const CampaignInsightPanel = lazyWithRetry(() => import('./collab/CampaignInsightPanel'));
 const BrandSettlementSummary = lazyWithRetry(() => import('./collab/BrandSettlementSummary'));
+/**
+ * 캠페인 화면 안에서 나중에 여는 화면(진행사항 · 등록 · 인사이트 · 정산 요약)의 코드를 미리 받아 둔다.
+ *
+ * 이 화면은 오래 켜 두고 쓰는데, 그사이 새 배포가 올라가면 아직 받지 않은 화면 파일은 서버에서
+ * 사라진다. 그 상태로 캠페인을 누르면 "화면을 불러오지 못했습니다"가 떴다. 화면이 뜬 직후 한가할 때
+ * 받아 두면 이후 배포와 상관없이 열린다. 실패해도 열 때 다시 받으므로 조용히 넘긴다.
+ */
+let nestedPrefetched = false;
+const prefetchNestedPanels = () => {
+  if (nestedPrefetched) return;
+  nestedPrefetched = true;
+  const run = () => {
+    import('./BrandCollabProgress').catch(() => {});
+    import('./collab/CampaignRegisterWizard').catch(() => {});
+    import('./collab/CampaignInsightPanel').catch(() => {});
+    import('./collab/BrandSettlementSummary').catch(() => {});
+  };
+  const idle = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+  if (idle) idle(run, { timeout: 4000 });
+  else window.setTimeout(run, 1500);
+};
+
 const panelFallback = <div role="status" aria-label="로딩 중" className="py-8 flex justify-center"><div className="w-8 h-8 border-2 border-slate-200 border-t-blue-600 rounded-full animate-spin" /></div>;
 
 interface Campaign {
@@ -213,6 +235,7 @@ const writeApplicantCache = (businessUsername: string, campaignId: string, data:
 };
 
 const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName, initialCampaignId }) => {
+  useEffect(() => { prefetchNestedPanels(); }, []);
   const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
 
   /* 필터 칩 줄은 한 줄로 둔다. 넘치는 만큼은 마우스로 끌어 넘긴다. */
